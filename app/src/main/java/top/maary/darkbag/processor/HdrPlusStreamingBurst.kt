@@ -61,6 +61,7 @@ class HdrPlusStreamingBurst(
     private val processedFrames = mutableListOf<StreamingBurstFrame>()
 
     private val workerJob: Job = HdrPlusAccumulationDispatcher.scope.launch {
+        timing?.accumulateStart = System.currentTimeMillis()
         try {
             if (frameCount <= 1) {
                 for (item in frameChannel) {

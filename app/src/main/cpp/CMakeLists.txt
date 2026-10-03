@@ -133,8 +133,13 @@ add_custom_command(
 )
 
 # Run the generator to produce the target object file
-# We target arm-64-android with OpenCL and Vulkan support, plus profiling.
-set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16-profile")
+# We target arm-64-android with OpenCL and Vulkan support.
+# Halide profiler instrumentation is included for Debug builds; stripped in Release builds.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16-profile")
+else()
+    set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16")
+endif()
 set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.h")
 set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.a") # Static lib output
 set(SINGLE_GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_single_pipeline.h")

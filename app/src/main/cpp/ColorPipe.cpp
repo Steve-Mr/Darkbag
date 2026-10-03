@@ -876,18 +876,36 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
     int g0 = (int)g; int g1 = std::min(g0 + 1, lut.size - 1);
     int b0 = (int)b; int b1 = std::min(b0 + 1, lut.size - 1);
     float dr = r - r0; float dg = g - g0; float db = b - b0;
-    auto idx = [&](int x, int y, int z) { return x + y * lut.size + z * lut.size * lut.size; };
-    Vec3 c000 = lut.data[idx(r0, g0, b0)], c100 = lut.data[idx(r1, g0, b0)];
-    Vec3 c010 = lut.data[idx(r0, g1, b0)], c110 = lut.data[idx(r1, g1, b0)];
-    Vec3 c001 = lut.data[idx(r0, g0, b1)], c101 = lut.data[idx(r1, g0, b1)];
-    Vec3 c011 = lut.data[idx(r0, g1, b1)], c111 = lut.data[idx(r1, g1, b1)];
-    Vec3 c00 = { c000.r * (1-dr) + c100.r * dr, c000.g * (1-dr) + c100.g * dr, c000.b * (1-dr) + c100.b * dr };
-    Vec3 c10 = { c010.r * (1-dr) + c110.r * dr, c010.g * (1-dr) + c110.g * dr, c010.b * (1-dr) + c110.b * dr };
-    Vec3 c01 = { c001.r * (1-dr) + c101.r * dr, c001.g * (1-dr) + c101.g * dr, c001.b * (1-dr) + c101.b * dr };
-    Vec3 c11 = { c011.r * (1-dr) + c111.r * dr, c011.g * (1-dr) + c111.g * dr, c011.b * (1-dr) + c111.b * dr };
-    Vec3 c0 = { c00.r * (1-dg) + c10.r * dg, c00.g * (1-dg) + c10.g * dg, c00.b * (1-dg) + c10.b * dg };
-    Vec3 c1 = { c01.r * (1-dg) + c11.r * dg, c01.g * (1-dg) + c11.g * dg, c01.b * (1-dg) + c11.b * dg };
-    return { c0.r * (1-db) + c1.r * db, c0.g * (1-db) + c1.g * db, c0.b * (1-db) + c1.b * db };
+
+    const int stride_y = lut.size;
+    const int stride_z = lut.size * lut.size;
+    const int z0_offset = b0 * stride_z;
+    const int z1_offset = b1 * stride_z;
+    const int y0_z0 = g0 * stride_y + z0_offset;
+    const int y1_z0 = g1 * stride_y + z0_offset;
+    const int y0_z1 = g0 * stride_y + z1_offset;
+    const int y1_z1 = g1 * stride_y + z1_offset;
+
+    const Vec3& c000 = lut.data[r0 + y0_z0];
+    const Vec3& c100 = lut.data[r1 + y0_z0];
+    const Vec3& c010 = lut.data[r0 + y1_z0];
+    const Vec3& c110 = lut.data[r1 + y1_z0];
+    const Vec3& c001 = lut.data[r0 + y0_z1];
+    const Vec3& c101 = lut.data[r1 + y0_z1];
+    const Vec3& c011 = lut.data[r0 + y1_z1];
+    const Vec3& c111 = lut.data[r1 + y1_z1];
+
+    const float omt_dr = 1.0f - dr;
+    const float omt_dg = 1.0f - dg;
+    const float omt_db = 1.0f - db;
+
+    Vec3 c00 = { c000.r * omt_dr + c100.r * dr, c000.g * omt_dr + c100.g * dr, c000.b * omt_dr + c100.b * dr };
+    Vec3 c10 = { c010.r * omt_dr + c110.r * dr, c010.g * omt_dr + c110.g * dr, c010.b * omt_dr + c110.b * dr };
+    Vec3 c01 = { c001.r * omt_dr + c101.r * dr, c001.g * omt_dr + c101.g * dr, c001.b * omt_dr + c101.b * dr };
+    Vec3 c11 = { c011.r * omt_dr + c111.r * dr, c011.g * omt_dr + c111.g * dr, c011.b * omt_dr + c111.b * dr };
+    Vec3 c0 = { c00.r * omt_dg + c10.r * dg, c00.g * omt_dg + c10.g * dg, c00.b * omt_dg + c10.b * dg };
+    Vec3 c1 = { c01.r * omt_dg + c11.r * dg, c01.g * omt_dg + c11.g * dg, c01.b * omt_dg + c11.b * dg };
+    return { c0.r * omt_db + c1.r * db, c0.g * omt_db + c1.g * db, c0.b * omt_db + c1.b * db };
 }
 
 namespace {
@@ -940,7 +958,7 @@ std::string build_debug_stage_path(const char* basePath, const char* stageSuffix
 }
 
 
-AdaptiveEdgeComp calculate_adaptive_edge_comp(const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int width, int height) {
+AdaptiveEdgeComp calculate_adaptive_edge_comp(const unsigned short* /*planarData*/, int /*stride_x*/, int /*stride_y*/, int /*stride_c*/, int width, int height) {
     AdaptiveEdgeComp edgeComp;
     const float cx = 0.5f * (width - 1);
     const float cy = 0.5f * (height - 1);
@@ -949,57 +967,6 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const unsigned short* planarData, 
     edgeComp.centerX = cx;
     edgeComp.centerY = cy;
     edgeComp.invMaxRadius = (maxRadius > 1e-6f) ? (1.0f / maxRadius) : 1.0f;
-
-    double c_sum0 = 0.0, c_sum1 = 0.0, c_sum2 = 0.0;
-    double e_sum0 = 0.0, e_sum1 = 0.0, e_sum2 = 0.0;
-    int centerCount = 0;
-    int edgeCount = 0;
-
-    #pragma omp parallel for reduction(+:c_sum0,c_sum1,c_sum2,e_sum0,e_sum1,e_sum2,centerCount,edgeCount)
-    for (int y = 0; y < height; y += kAnalysisStep) {
-        for (int x = 0; x < width; x += kAnalysisStep) {
-            const float nx = (x - cx) * edgeComp.invMaxRadius;
-            const float ny = (y - cy) * edgeComp.invMaxRadius;
-            const float r = std::sqrt(nx * nx + ny * ny);
-
-            size_t r_idx = x*stride_x + y*stride_y + 0*stride_c;
-            size_t g_idx = x*stride_x + y*stride_y + 1*stride_c;
-            size_t b_idx = x*stride_x + y*stride_y + 2*stride_c;
-            float rr = static_cast<float>(planarData[r_idx]);
-            float gg = static_cast<float>(planarData[g_idx]);
-            float bb = static_cast<float>(planarData[b_idx]);
-
-            if (r <= kCenterRegionRadius) {
-                c_sum0 += rr; c_sum1 += gg; c_sum2 += bb; centerCount++;
-            } else if (r >= kEdgeRegionStartRadius) {
-                e_sum0 += rr; e_sum1 += gg; e_sum2 += bb; edgeCount++;
-            }
-        }
-    }
-
-    std::array<double, 3> centerSum{c_sum0, c_sum1, c_sum2};
-    std::array<double, 3> edgeSum{e_sum0, e_sum1, e_sum2};
-
-    if (centerCount <= 0 || edgeCount <= 0) {
-        return edgeComp;
-    }
-
-    std::array<float, 3> centerMean{
-        static_cast<float>(centerSum[0] / centerCount),
-        static_cast<float>(centerSum[1] / centerCount),
-        static_cast<float>(centerSum[2] / centerCount)
-    };
-    std::array<float, 3> edgeMean{
-        static_cast<float>(edgeSum[0] / edgeCount),
-        static_cast<float>(edgeSum[1] / edgeCount),
-        static_cast<float>(edgeSum[2] / edgeCount)
-    };
-
-    float centerLuma = kRec709LinearLumaR * centerMean[0] + kRec709LinearLumaG * centerMean[1] + kRec709LinearLumaB * centerMean[2];
-    float edgeLuma = kRec709LinearLumaR * edgeMean[0] + kRec709LinearLumaG * edgeMean[1] + kRec709LinearLumaB * edgeMean[2];
-
-    float centerGvsRB = safe_div(centerMean[1], 0.5f * (centerMean[0] + centerMean[2]));
-    float edgeGvsRB = safe_div(edgeMean[1], 0.5f * (edgeMean[0] + edgeMean[2]));
 
     // Adaptive edge compensation is disabled in favor of sensor-calibrated hardware LensShadingCorrection.
     edgeComp.enabled = false;
@@ -1028,8 +995,11 @@ bool process_and_save_image(
     bool enableMemoryColor,
     int colorEngineMode,
     bool faithfulHighlights,
-    int outJpgFd
+    int outJpgFd,
+    int64_t* outColorPipeMs,
+    int64_t* outJpegEncodeMs
 ) {
+    auto colorPipeStart = std::chrono::high_resolution_clock::now();
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
          width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
@@ -1038,6 +1008,7 @@ bool process_and_save_image(
     Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
     thread_local std::vector<unsigned short> tls_processedImage; 
     thread_local std::vector<unsigned char> tls_previewRgb8;
+    thread_local std::vector<unsigned char> tls_rgb8;
 
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(planarData, stride_x, stride_y, stride_c, width, height);
 
@@ -1054,6 +1025,7 @@ bool process_and_save_image(
     
     std::vector<unsigned short>& processedImage = tls_processedImage;
     std::vector<unsigned char>& previewRgb8 = tls_previewRgb8;
+    std::vector<unsigned char>& rgb8 = tls_rgb8;
     std::vector<unsigned char>& debugA8 = tls_debugA8;
     std::vector<unsigned char>& debugB8 = tls_debugB8;
     std::vector<unsigned char>& debugC8 = tls_debugC8;
@@ -1261,32 +1233,36 @@ bool process_and_save_image(
         color.b = std::max(0.0f, luma + (color.b - luma) * (saturation + 1.0f));
 
         // 3. Highlights / Shadows / Whites / Blacks (Log Space)
-        auto apply_hswb = [&](float v) {
-            // Highlights: affecting upper range
-            if (highlights != 0.0f) {
-                float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
-                v += highlights * weight * 0.2f;
-            }
-            // Shadows: affecting lower range
-            if (shadows != 0.0f) {
-                float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
-                v += shadows * weight * 0.2f;
-            }
-            // Whites: offset upper
-            if (whites != 0.0f) {
-                float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
-                v += whites * weight * 0.2f;
-            }
-            // Blacks: offset lower
-            if (blacks != 0.0f) {
-                float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
-                v += blacks * weight * 0.2f;
-            }
-            return std::max(0.0f, v);
-        };
-        color.r = apply_hswb(color.r);
-        color.g = apply_hswb(color.g);
-        color.b = apply_hswb(color.b);
+        if (highlights != 0.0f || shadows != 0.0f || whites != 0.0f || blacks != 0.0f) {
+            auto apply_hswb = [&](float v) {
+                // Highlights: affecting upper range
+                if (highlights != 0.0f) {
+                    float cv = std::clamp(v, 0.0f, 1.0f);
+                    float weight = cv * cv;
+                    v += highlights * weight * 0.2f;
+                }
+                // Shadows: affecting lower range
+                if (shadows != 0.0f) {
+                    float sv = 1.0f - std::clamp(v, 0.0f, 1.0f);
+                    float weight = sv * sv;
+                    v += shadows * weight * 0.2f;
+                }
+                // Whites: offset upper
+                if (whites != 0.0f) {
+                    float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
+                    v += whites * weight * 0.2f;
+                }
+                // Blacks: offset lower
+                if (blacks != 0.0f) {
+                    float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
+                    v += blacks * weight * 0.2f;
+                }
+                return std::max(0.0f, v);
+            };
+            color.r = apply_hswb(color.r);
+            color.g = apply_hswb(color.g);
+            color.b = apply_hswb(color.b);
+        }
 
         if (stageC) *stageC = color;
 
@@ -1356,6 +1332,64 @@ bool process_and_save_image(
         // Update dimensions for JPEG writing if we used bitmap dimensions
         finalW_zoomed = renderW;
         finalH_zoomed = renderH;
+    } else if (!tiffPath) {
+        // High-speed single-pass path: directly render into rgb8 with spatial TPDF dither,
+        // avoiding allocating 75MB 16-bit intermediate buffer and a redundant second memory pass.
+        rgb8.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
+        #pragma omp parallel for
+        for (int py = 0; py < finalH_zoomed; py++) {
+            for (int px = 0; px < finalW_zoomed; px++) {
+                int sx, sy;
+                int opx = mirror ? (finalW_zoomed - 1 - px) : px;
+
+                float fx = (float)opx / finalW_zoomed * (swapDims ? cropH : cropW);
+                float fy = (float)py / finalH_zoomed * (swapDims ? cropW : cropH);
+
+                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
+                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
+                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
+                else { sx = (int)fx; sy = (int)fy; }
+
+                Vec3 stageA{}, stageB{}, stageC{};
+                Vec3 color = process_pixel(cropX + sx, cropY + sy,
+                                           enableStageDebug ? &stageA : nullptr,
+                                           enableStageDebug ? &stageB : nullptr,
+                                           enableStageDebug ? &stageC : nullptr);
+                size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
+                float r8_f = color.r * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 0);
+                float g8_f = color.g * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 1);
+                float b8_f = color.b * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 2);
+                unsigned char r8 = (unsigned char)std::clamp(r8_f, 0.0f, 255.0f);
+                unsigned char g8 = (unsigned char)std::clamp(g8_f, 0.0f, 255.0f);
+                unsigned char b8 = (unsigned char)std::clamp(b8_f, 0.0f, 255.0f);
+
+                rgb8[outIdx + 0] = r8;
+                rgb8[outIdx + 1] = g8;
+                rgb8[outIdx + 2] = b8;
+
+                if (enableStageDebug) {
+                    debugA8[outIdx + 0] = (unsigned char)(clamp01(stageA.r) * 255.0f);
+                    debugA8[outIdx + 1] = (unsigned char)(clamp01(stageA.g) * 255.0f);
+                    debugA8[outIdx + 2] = (unsigned char)(clamp01(stageA.b) * 255.0f);
+
+                    debugB8[outIdx + 0] = (unsigned char)(clamp01(stageB.r) * 255.0f);
+                    debugB8[outIdx + 1] = (unsigned char)(clamp01(stageB.g) * 255.0f);
+                    debugB8[outIdx + 2] = (unsigned char)(clamp01(stageB.b) * 255.0f);
+
+                    debugC8[outIdx + 0] = (unsigned char)(clamp01(stageC.r) * 255.0f);
+                    debugC8[outIdx + 1] = (unsigned char)(clamp01(stageC.g) * 255.0f);
+                    debugC8[outIdx + 2] = (unsigned char)(clamp01(stageC.b) * 255.0f);
+                }
+
+                if (out_rgb_buffer) {
+                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
+                    out_rgb_buffer[bIdx+0] = r8;
+                    out_rgb_buffer[bIdx+1] = g8;
+                    out_rgb_buffer[bIdx+2] = b8;
+                    out_rgb_buffer[bIdx+3] = 255;
+                }
+            }
+        }
     } else {
         processedImage.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
         #pragma omp parallel for
@@ -1408,6 +1442,12 @@ bool process_and_save_image(
         }
     }
 
+    if (outColorPipeMs) {
+        *outColorPipeMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - colorPipeStart
+        ).count();
+    }
+
     bool tiffOk = true;
     if (tiffPath && !isPreview) {
         tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage.data(), 3, finalW_zoomed*3, 1, metadata);
@@ -1415,30 +1455,35 @@ bool process_and_save_image(
         else LOGD("Successfully wrote TIFF: %s", tiffPath);
     }
 
+    auto jpegStart = std::chrono::high_resolution_clock::now();
     const int jpegQuality = isPreview ? 78 : 95;
     bool jpgOk = true;
     if (outJpgFd >= 0) {
         LOGD("Direct single-pass writing JPEG to FileDescriptor %d", outJpgFd);
         if (isPreview && !previewRgb8.empty()) {
             jpgOk = write_jpeg_turbo_fd(outJpgFd, finalW_zoomed, finalH_zoomed, TJSAMP_422, previewRgb8.data(), jpegQuality);
+        } else if (!tiffPath) {
+            jpgOk = write_jpeg_turbo_fd(outJpgFd, finalW_zoomed, finalH_zoomed, TJSAMP_422, rgb8.data(), jpegQuality);
         } else {
             size_t total_pixels = static_cast<size_t>(finalW_zoomed) * finalH_zoomed;
-            std::vector<unsigned char> rgb8(total_pixels * 3);
+            std::vector<unsigned char> tempRgb8(total_pixels * 3);
             #pragma omp parallel for
             for (int y = 0; y < finalH_zoomed; y++) {
                 for (int x = 0; x < finalW_zoomed; x++) {
                     size_t idx = (static_cast<size_t>(y) * finalW_zoomed + x) * 3;
-                    rgb8[idx + 0] = static_cast<unsigned char>((processedImage[idx + 0] + 128) >> 8);
-                    rgb8[idx + 1] = static_cast<unsigned char>((processedImage[idx + 1] + 128) >> 8);
-                    rgb8[idx + 2] = static_cast<unsigned char>((processedImage[idx + 2] + 128) >> 8);
+                    tempRgb8[idx + 0] = static_cast<unsigned char>((processedImage[idx + 0] + 128) >> 8);
+                    tempRgb8[idx + 1] = static_cast<unsigned char>((processedImage[idx + 1] + 128) >> 8);
+                    tempRgb8[idx + 2] = static_cast<unsigned char>((processedImage[idx + 2] + 128) >> 8);
                 }
             }
-            jpgOk = write_jpeg_turbo_fd(outJpgFd, finalW_zoomed, finalH_zoomed, TJSAMP_422, rgb8.data(), jpegQuality);
+            jpgOk = write_jpeg_turbo_fd(outJpgFd, finalW_zoomed, finalH_zoomed, TJSAMP_422, tempRgb8.data(), jpegQuality);
         }
         if (!jpgOk) LOGE("write_jpeg_turbo_fd failed for fd %d", outJpgFd);
     } else if (jpgPath) {
         if (isPreview && !previewRgb8.empty()) {
             jpgOk = write_jpeg_turbo(jpgPath, finalW_zoomed, finalH_zoomed, TJSAMP_422, previewRgb8.data(), jpegQuality);
+        } else if (!tiffPath) {
+            jpgOk = write_jpeg_turbo(jpgPath, finalW_zoomed, finalH_zoomed, TJSAMP_422, rgb8.data(), jpegQuality);
         } else {
             jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage.data(), 3, finalW_zoomed*3, 1, jpegQuality);
         }
@@ -1460,6 +1505,12 @@ bool process_and_save_image(
              debugPathA.c_str(), (int)aOk,
              debugPathB.c_str(), (int)bOk,
              debugPathC.c_str(), (int)cOk);
+    }
+
+    if (outJpegEncodeMs) {
+        *outJpegEncodeMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - jpegStart
+        ).count();
     }
 
     return jpgOk;
@@ -1607,6 +1658,7 @@ static std::vector<unsigned char> make_preview_rgb8(
 
     std::vector<unsigned char> preview;
     preview.resize(static_cast<size_t>(outWidth) * outHeight * 3);
+    #pragma omp parallel for
     for (int y = 0; y < outHeight; ++y) {
         for (int x = 0; x < outWidth; ++x) {
             int sx = x;
@@ -1724,6 +1776,7 @@ std::vector<unsigned char> make_bayer_preview_rgb8(
     std::vector<unsigned char> preview;
     preview.resize(static_cast<size_t>(outWidth) * outHeight * 3);
 
+    #pragma omp parallel for
     for (int y = 0; y < outHeight; ++y) {
         for (int x = 0; x < outWidth; ++x) {
             int sx = x;
@@ -2017,8 +2070,7 @@ bool write_dng(
         int targetLongEdge;
         const char* description;
     } previewSpecs[] = {
-        {512, "Darkbag Embedded JPEG Thumbnail"},
-        {2048, "Darkbag Embedded JPEG Preview"},
+        {1024, "Darkbag Embedded JPEG Preview"},
     };
 
     Matrix3x3 sensor_to_srgb = {0};
@@ -2038,7 +2090,7 @@ bool write_dng(
         const char* desc;
     };
     std::vector<PreEncodedPreview> encodedPreviews;
-    encodedPreviews.reserve(2);
+    encodedPreviews.reserve(1);
 
     for (const auto& spec : previewSpecs) {
         int pw = 0, ph = 0;

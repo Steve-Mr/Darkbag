@@ -158,9 +158,7 @@ class SettingsFragment : Fragment() {
 
     private fun updateDebugStats() {
         val logs = DebugLogManager.getLogs()
-        if (logs.isNotEmpty()) {
-            binding.tvDebugStats.text = logs
-        }
+        binding.tvDebugStats.text = if (logs.isNotBlank()) logs else "No logs yet."
     }
 
     private fun setupToolbar() {
@@ -653,6 +651,24 @@ class SettingsFragment : Fragment() {
                 prefs.edit().putBoolean(KEY_DEBUG_ENABLED, false).apply()
                 updateDebugVisibility()
                 aboutClickCount = 0
+            }
+        }
+
+        binding.btnClearDebugLogs.setOnClickListener {
+            DebugLogManager.clearLogs()
+            updateDebugStats()
+            Toast.makeText(requireContext(), "Debug logs cleared", Toast.LENGTH_SHORT).show()
+        }
+
+        binding.btnCopyDebugLogs.setOnClickListener {
+            val logs = DebugLogManager.getLogs()
+            if (logs.isNotBlank() && logs != "No logs yet.") {
+                val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val clip = android.content.ClipData.newPlainText("Darkbag Timing Logs", logs)
+                clipboard.setPrimaryClip(clip)
+                Toast.makeText(requireContext(), "Logs copied to clipboard", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(requireContext(), "No logs to copy", Toast.LENGTH_SHORT).show()
             }
         }
     }

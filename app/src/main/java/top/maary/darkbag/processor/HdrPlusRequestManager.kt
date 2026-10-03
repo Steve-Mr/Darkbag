@@ -73,7 +73,7 @@ data class HdrPlusRequest(
 
 object HdrPlusRequestManager {
     // Bounded capacity to enforce pipeline backpressure during high-frequency capture bursts
-    const val MAX_IN_FLIGHT_REQUESTS = 3
+    const val MAX_IN_FLIGHT_REQUESTS = 16
     internal val requestChannel = Channel<HdrPlusRequest>(capacity = MAX_IN_FLIGHT_REQUESTS)
     
     val requestFlow = requestChannel.receiveAsFlow()
