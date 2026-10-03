@@ -241,6 +241,7 @@ file(GLOB_RECURSE LIBRAW_SOURCES
 # *_ph.cpp files are usually "placeholders" or specific implementation alternatives that conflict with the standard ones
 list(FILTER LIBRAW_SOURCES EXCLUDE REGEX ".*_ph\\.cpp$")
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(rawvideo)
 include_directories(rawvideo/lz4)
 include_directories(gpu)
@@ -257,6 +258,8 @@ add_library(
         sabre/TileAligner.cpp
         gpu/GpuContext.cpp
         gpu/GpuProgram.cpp
+        gpu/GpuLutTextureManager.cpp
+        gpu/GpuInputTexture.cpp
         rawvideo/lz4/lz4.c
         rawvideo/RawVideoContainer.cpp
         rawvideo/RawVideoRecorder.cpp
