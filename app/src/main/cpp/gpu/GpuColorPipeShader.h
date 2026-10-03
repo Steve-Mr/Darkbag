@@ -282,6 +282,14 @@ void main() {
     // 3. Combined Color Matrix Transformation (Sensor -> Target Wide Gamut / Rec709)
     vec3 color = max(vec3(0.0), uColorTransform * vec3(r, g, b));
 
+    // Highlight desaturation protection to prevent magenta/pink clipping fringes
+    float maxSensorVal = max(r, max(g, b));
+    if (maxSensorVal > 0.90) {
+        float blendFactor = smoothstep(0.90, 1.0, maxSensorVal);
+        float peakLuma = max(color.r, max(color.g, color.b));
+        color = mix(color, vec3(peakLuma), blendFactor);
+    }
+
     // 4. Tone Mapping & Log / OETF Transfer
     if (uTargetLog == 0 && uHasLut == 0) {
         // Natural Multi-Engine Pipeline

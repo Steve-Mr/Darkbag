@@ -253,7 +253,7 @@ bool GpuColorPipeEngine::processAndSaveImage(
     }
     glUniformMatrix3fv(u.uColorTransform, 1, GL_FALSE, colMajorTransform);
 
-    // 7. White balance gains & digital gain
+    // 7. White balance gains & combined exposure / digital gain
     float wbR = 1.0f, wbG = 1.0f, wbB = 1.0f;
     if (wbVec) {
         wbR = wbVec[0];
@@ -261,7 +261,11 @@ bool GpuColorPipeEngine::processAndSaveImage(
         wbB = wbVec[3];
     }
     glUniform3f(u.uWbGain, wbR, wbG, wbB);
-    glUniform1f(u.uDigitalGain, digitalGain > 0.0f ? digitalGain : 1.0f);
+
+    const float expGain = std::pow(2.0f, exposure);
+    const float baseGain = (digitalGain > 0.0f) ? digitalGain : 1.0f;
+    const float totalGain = baseGain * expGain;
+    glUniform1f(u.uDigitalGain, totalGain);
 
     // 8. Color Engine & Log mode
     glUniform1i(u.uTargetLog, targetLog);
@@ -359,6 +363,7 @@ bool GpuColorPipeEngine::processAndSaveImage(
 
 void GpuColorPipeEngine::release() {
     std::lock_guard<std::mutex> lock(engineMutex_);
+    GpuLutTextureManager::instance().clearCache();
     if (ahbTarget_) {
         ahbTarget_->release();
         ahbTarget_.reset();
