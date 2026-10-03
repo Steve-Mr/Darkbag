@@ -243,6 +243,7 @@ list(FILTER LIBRAW_SOURCES EXCLUDE REGEX ".*_ph\\.cpp$")
 
 include_directories(rawvideo)
 include_directories(rawvideo/lz4)
+include_directories(gpu)
 
 add_library(
         native-lib
@@ -254,6 +255,8 @@ add_library(
         demosaic/RcdDemosaic.cpp
         sabre/SabreEngine.cpp
         sabre/TileAligner.cpp
+        gpu/GpuContext.cpp
+        gpu/GpuProgram.cpp
         rawvideo/lz4/lz4.c
         rawvideo/RawVideoContainer.cpp
         rawvideo/RawVideoRecorder.cpp
