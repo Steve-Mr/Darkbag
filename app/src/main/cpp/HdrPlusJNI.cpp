@@ -31,6 +31,7 @@
 #include "hdrplus_single_pipeline.h" // Generated header for single frame
 #include "HdrPlusStreamingSession.h"
 #include "demosaic/RcdDemosaic.h"
+#include "gpu/GpuColorPipeEngine.h"
 
 
 #define TAG "HdrPlusJNI"
@@ -650,10 +651,39 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : wbVec.data();
         int64_t measuredColorPipe = 0;
         int64_t measuredJpegEncode = 0;
-        saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
-                                        exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd,
-                                        &measuredColorPipe, &measuredJpegEncode);
+
+        bool gpuAttemptSuccess = false;
+        if (darkbag::gpu::GpuColorPipeEngine::instance().isAvailable()) {
+            std::string lutPathStr = lut_path_cstr ? lut_path_cstr : "";
+            gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImage(
+                sharedResult->rgbBuf.data(),
+                width, height,
+                1, width, width * height,
+                digitalGain, targetLog,
+                lutPathStr, &lut,
+                exposure, contrast, saturation,
+                highlights, shadows, whites, blacks,
+                jpg_path_cstr, outJpgFd,
+                ccmVec.data(), effectiveWb,
+                orientation, (bool)mirror, effectiveZoom,
+                (int)colorEngineMode, faithfulHighlights,
+                &measuredColorPipe, &measuredJpegEncode
+            );
+            if (gpuAttemptSuccess) {
+                saveOk = true;
+                LOGD("GPU ColorPipe executed successfully (render: %lld ms, jpeg: %lld ms)",
+                     (long long)measuredColorPipe, (long long)measuredJpegEncode);
+            } else {
+                LOGW("GPU ColorPipe returned false, safely falling back to CPU ColorPipe");
+            }
+        }
+
+        if (!gpuAttemptSuccess) {
+            saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
+                                            exposure, contrast, saturation, highlights, shadows, whites, blacks,
+                                            jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd,
+                                            &measuredColorPipe, &measuredJpegEncode);
+        }
         jpgMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jpgStart).count();
         colorPipeMs = (jlong)measuredColorPipe;
         jpegEncodeMs = (jlong)measuredJpegEncode;

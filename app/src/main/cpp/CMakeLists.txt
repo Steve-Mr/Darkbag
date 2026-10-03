@@ -261,6 +261,7 @@ add_library(
         gpu/GpuLutTextureManager.cpp
         gpu/GpuInputTexture.cpp
         gpu/AHardwareBufferManager.cpp
+        gpu/GpuColorPipeEngine.cpp
         rawvideo/lz4/lz4.c
         rawvideo/RawVideoContainer.cpp
         rawvideo/RawVideoRecorder.cpp
