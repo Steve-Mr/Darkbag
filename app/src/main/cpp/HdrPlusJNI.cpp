@@ -877,7 +877,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
 
     halide_report_buffer.clear(); halide_profiler_report(nullptr);
-    HalideStageStats stageStats = parseHalideReport(halide_report_buffer); halide_profiler_reset();
+    HalideStageStats stageStats = parseHalideReport(halide_report_buffer);
 
     if (halide_res != 0) {
         LOGE("Halide failed: %d", halide_res);

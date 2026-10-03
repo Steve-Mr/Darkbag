@@ -159,4 +159,16 @@ class StandardTimingTrackerTest {
         assertTrue(report.contains("JPEG 压缩:    50ms"))
         assertTrue(report.contains("MediaStore 写库/EXIF: 70ms"))
     }
+
+    @Test
+    fun testBuildSummaryReport_accumulationQueueWait() {
+        val timing = StandardTimingTracker(shutterClick = 5000L)
+        timing.recordFrameArrival(5100L)
+        timing.recordFrameArrival(5500L) // last frame captured at 5500L
+        timing.accumulateStart = 20000L  // Waited in queue until 20000L (14500ms queue wait)
+        timing.accumulateDone = 24800L   // Finished accumulation at 24800L (4800ms compute)
+
+        val report = timing.buildSummaryReport()
+        assertTrue(report.contains("流式累加完成: 19700ms (排队: 14500ms, 累加: 4800ms)"))
+    }
 }

@@ -1953,7 +1953,7 @@ class CameraFragment : Fragment() {
                     noiseProfile = noiseProfileFlat,
                     activeArray = activeArray
                 )
-                top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request, alreadyTracked = true)
                 enqueued = true
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -1979,6 +1979,7 @@ class CameraFragment : Fragment() {
                 Log.e(TAG, "Error in background processing", e)
             } finally {
                 if (!enqueued) {
+                    top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
                     HdrPlusBurst.releaseBuffer(image.data)
                 }
             }
@@ -3302,6 +3303,7 @@ class CameraFragment : Fragment() {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to save JPEG fallback", e)
             } finally {
+                top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
                 processingSemaphore.release()
                 withContext(Dispatchers.Main) {
                     cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
@@ -4473,6 +4475,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val reader = rawImageReader ?: run { processingSemaphore.release(); return }
         val handler = camera2Handler ?: run { processingSemaphore.release(); return }
 
+        top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
+        var taskStarted = true
+
         try {
             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
             request.addTarget(reader.surface)
@@ -4483,7 +4488,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             reader.setOnImageAvailableListener({ r ->
                 timing?.recordFrameArrival()
                 timing?.captureCallback = System.currentTimeMillis()
-                val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+                val image = r.acquireLatestImage() ?: run {
+                    if (taskStarted) {
+                        taskStarted = false
+                        top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
+                    }
+                    return@setOnImageAvailableListener
+                }
                 try {
                     val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
                         currentLens!!.targetZoomRatio!!
@@ -4526,6 +4537,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to process Camera2 image", e)
                     image.close()
+                    if (taskStarted) {
+                        taskStarted = false
+                        top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
+                    }
                     processingSemaphore.release()
                 }
             }, handler)
@@ -4550,6 +4565,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         } catch (e: Exception) {
             Log.e(TAG, "Camera2 capture failed", e)
+            if (taskStarted) {
+                taskStarted = false
+                top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
+            }
             processingSemaphore.release()
         }
     }
@@ -4567,6 +4586,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         isBurstActive = true
         val captureStartTime = hfMetadata?.captureTimeMillis ?: System.currentTimeMillis()
         burstStartTime = captureStartTime
+        val isTaskStarted = java.util.concurrent.atomic.AtomicBoolean(false)
 
         try {
 
@@ -4711,7 +4731,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 return
             }
 
-            val isTaskStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+            top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
+            isTaskStarted.set(true)
 
             val burstHelper = top.maary.darkbag.processor.HdrPlusStreamingBurst(
                 sessionHandle = sessionHandle,
@@ -4808,6 +4829,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         }
                         burstHelper.flush()
                     } else {
+                        if (isTaskStarted.compareAndSet(true, false)) {
+                            top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
+                        }
                         burstHelper.abort()
                         hdrPlusStreamingBurstHelper = null
                         processingSemaphore.release()
@@ -4893,6 +4917,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         } catch (e: Exception) {
             Log.e(TAG, "Camera2 burst failed", e)
+            if (isTaskStarted.compareAndSet(true, false)) {
+                top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
+            }
             isBurstActive = false
             hdrPlusStreamingBurstHelper?.abort()
             hdrPlusStreamingBurstHelper = null

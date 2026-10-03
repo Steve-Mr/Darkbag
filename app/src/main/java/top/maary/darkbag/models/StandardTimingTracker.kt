@@ -18,6 +18,7 @@ data class StandardTimingTracker(
     @Volatile var lastFrameCaptured: Long = 0,
     @Volatile var captureCallback: Long = 0,
     @Volatile var shutterReady: Long = 0,
+    @Volatile var accumulateStart: Long = 0,
     @Volatile var accumulateDone: Long = 0,
     @Volatile var enqueued: Long = 0,
     @Volatile var processingStart: Long = 0,
@@ -157,7 +158,19 @@ data class StandardTimingTracker(
         }
 
         val accumulationStr = if (accumulateDone > 0 && firstFrameCaptured > 0) {
-            "${(accumulateDone - firstFrameCaptured).coerceAtLeast(0)}ms"
+            val totalMs = (accumulateDone - firstFrameCaptured).coerceAtLeast(0)
+            if (accumulateStart > firstFrameCaptured) {
+                val baseWaitRef = if (lastFrameCaptured > 0) lastFrameCaptured else firstFrameCaptured
+                val queueWaitMs = (accumulateStart - baseWaitRef).coerceAtLeast(0)
+                val computeMs = (accumulateDone - accumulateStart).coerceAtLeast(0)
+                if (queueWaitMs > 50) {
+                    "${totalMs}ms (排队: ${queueWaitMs}ms, 累加: ${computeMs}ms)"
+                } else {
+                    "${totalMs}ms"
+                }
+            } else {
+                "${totalMs}ms"
+            }
         } else null
 
         // Stage 2 Queue
