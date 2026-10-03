@@ -91,6 +91,31 @@ public:
     int lensShadingRows() const { return m_lensShadingRows; }
     int lensShadingCols() const { return m_lensShadingCols; }
 
+    int pushCount() const {
+        std::lock_guard<std::mutex> lock(m_sessionMutex);
+        return m_pushCount;
+    }
+    int64_t pushTotalMs() const {
+        std::lock_guard<std::mutex> lock(m_sessionMutex);
+        return m_pushTotalMs;
+    }
+    int64_t pushMinMs() const {
+        std::lock_guard<std::mutex> lock(m_sessionMutex);
+        return m_pushMinMs;
+    }
+    int64_t pushMaxMs() const {
+        std::lock_guard<std::mutex> lock(m_sessionMutex);
+        return m_pushMaxMs;
+    }
+    int64_t normalizeMs() const {
+        std::lock_guard<std::mutex> lock(m_sessionMutex);
+        return m_normalizeMs;
+    }
+    int64_t fusionComputeMs() const {
+        std::lock_guard<std::mutex> lock(m_sessionMutex);
+        return m_fusionComputeMs;
+    }
+
 private:
     mutable std::mutex m_sessionMutex;
     int m_width;
@@ -128,4 +153,11 @@ private:
     std::vector<float> m_flowY;
     int m_flowWidth = 0;
     int m_flowHeight = 0;
+
+    int m_pushCount = 0;
+    int64_t m_pushTotalMs = 0;
+    int64_t m_pushMinMs = 0;
+    int64_t m_pushMaxMs = 0;
+    int64_t m_normalizeMs = 0;
+    int64_t m_fusionComputeMs = 0;
 };

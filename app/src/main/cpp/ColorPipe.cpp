@@ -1028,8 +1028,11 @@ bool process_and_save_image(
     bool enableMemoryColor,
     int colorEngineMode,
     bool faithfulHighlights,
-    int outJpgFd
+    int outJpgFd,
+    int64_t* outColorPipeMs,
+    int64_t* outJpegEncodeMs
 ) {
+    auto colorPipeStart = std::chrono::high_resolution_clock::now();
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
          width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
@@ -1408,6 +1411,12 @@ bool process_and_save_image(
         }
     }
 
+    if (outColorPipeMs) {
+        *outColorPipeMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - colorPipeStart
+        ).count();
+    }
+
     bool tiffOk = true;
     if (tiffPath && !isPreview) {
         tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage.data(), 3, finalW_zoomed*3, 1, metadata);
@@ -1415,6 +1424,7 @@ bool process_and_save_image(
         else LOGD("Successfully wrote TIFF: %s", tiffPath);
     }
 
+    auto jpegStart = std::chrono::high_resolution_clock::now();
     const int jpegQuality = isPreview ? 78 : 95;
     bool jpgOk = true;
     if (outJpgFd >= 0) {
@@ -1460,6 +1470,12 @@ bool process_and_save_image(
              debugPathA.c_str(), (int)aOk,
              debugPathB.c_str(), (int)bOk,
              debugPathC.c_str(), (int)cOk);
+    }
+
+    if (outJpegEncodeMs) {
+        *outJpegEncodeMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - jpegStart
+        ).count();
     }
 
     return jpgOk;

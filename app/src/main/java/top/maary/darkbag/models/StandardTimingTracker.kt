@@ -28,7 +28,19 @@ data class StandardTimingTracker(
     @Volatile var taskCompleted: Long = 0,
     @Volatile var nativePostProcessMs: Long = 0,
     @Volatile var nativeDngEncodeMs: Long = 0,
-    @Volatile var nativeJpegEncodeMs: Long = 0
+    @Volatile var nativeJpegEncodeMs: Long = 0,
+    @Volatile var imageWidth: Int = 0,
+    @Volatile var imageHeight: Int = 0,
+    @Volatile var iso: Int = 0,
+    @Volatile var exposureTimeNs: Long = 0,
+    @Volatile var zoomFactor: Float = 1.0f,
+    @Volatile var fusionMode: Int = 0,
+    @Volatile var streamingPushCount: Int = 0,
+    @Volatile var streamingPushAvgMs: Long = 0,
+    @Volatile var streamingPushMinMs: Long = 0,
+    @Volatile var streamingPushMaxMs: Long = 0,
+    @Volatile var stage1NormalizeMs: Long = 0,
+    @Volatile var stage1FusionMs: Long = 0
 ) {
     val frameArrivalTimes = mutableListOf<Long>()
 
@@ -54,6 +66,34 @@ data class StandardTimingTracker(
         nativeJpegEncodeMs = jpgMs
     }
 
+    fun recordEnvironment(
+        width: Int,
+        height: Int,
+        isoVal: Int = 0,
+        exposureNs: Long = 0,
+        zoom: Float = 1.0f,
+        fusion: Int = 0
+    ) {
+        imageWidth = width
+        imageHeight = height
+        iso = isoVal
+        exposureTimeNs = exposureNs
+        zoomFactor = zoom
+        fusionMode = fusion
+    }
+
+    fun recordStreamingPushStats(count: Int, avgMs: Long, minMs: Long, maxMs: Long) {
+        streamingPushCount = count
+        streamingPushAvgMs = avgMs
+        streamingPushMinMs = minMs
+        streamingPushMaxMs = maxMs
+    }
+
+    fun recordStage1ComputeBreakdown(normalizeMs: Long, fusionMs: Long) {
+        stage1NormalizeMs = normalizeMs
+        stage1FusionMs = fusionMs
+    }
+
     fun buildSummaryReport(): String {
         val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(shutterClick)
         val frameCount = synchronized(frameArrivalTimes) { frameArrivalTimes.size }
@@ -62,6 +102,27 @@ data class StandardTimingTracker(
         } else {
             captureMode.displayName
         }
+
+        val envParts = mutableListOf<String>()
+        if (imageWidth > 0 && imageHeight > 0) envParts.add("${imageWidth}x${imageHeight}")
+        if (iso > 0) envParts.add("ISO $iso")
+        if (exposureTimeNs > 0) {
+            val sec = exposureTimeNs / 1_000_000_000.0
+            val expStr = if (sec >= 1.0) String.format(Locale.US, "%.1fs", sec)
+                         else "1/${Math.round(1.0 / sec)}s"
+            envParts.add(expStr)
+        }
+        if (zoomFactor > 1.05f || zoomFactor < 0.95f) {
+            envParts.add(String.format(Locale.US, "Zoom %.1fx", zoomFactor))
+        }
+        val fusionModeStr = when (fusionMode) {
+            1 -> "Spatial+RCD"
+            2 -> "Sabre SR"
+            3 -> "Classic Wiener"
+            else -> if (zoomFactor >= 1.25f) "Auto(Sabre)" else "Auto(RCD)"
+        }
+        envParts.add("Mode: $fusionModeStr")
+        val envLine = if (envParts.isNotEmpty()) "📷 环境: ${envParts.joinToString(" | ")}\n" else ""
 
         // T1: Shutter to UI Ready (Shutter Lag / UI Recovery)
         val t1 = if (shutterReady > 0 && shutterClick > 0) {
@@ -110,6 +171,13 @@ data class StandardTimingTracker(
             "${(effectiveStage1End - processingStart).coerceAtLeast(0)}ms"
         } else "N/A"
 
+        val stage1Detail = if (stage1NormalizeMs > 0 || stage1FusionMs > 0) {
+            val sb = StringBuilder()
+            if (stage1NormalizeMs > 0) sb.append("\n      - 归一化:      ${stage1NormalizeMs}ms")
+            if (stage1FusionMs > 0) sb.append("\n      - 解算/去马赛克: ${stage1FusionMs}ms")
+            sb.toString()
+        } else ""
+
         // Stage 4 Export & Disk Save
         val exportSection = StringBuilder()
         val stage2TotalMs = if (firstOutputWritten > 0 && effectiveStage1End > 0) {
@@ -121,9 +189,9 @@ data class StandardTimingTracker(
 
         val hasNativeBreakdown = nativePostProcessMs > 0 || nativeDngEncodeMs > 0 || nativeJpegEncodeMs > 0
         if (hasNativeBreakdown) {
-            if (nativePostProcessMs > 0) exportSection.append("      - C++ ColorPipe: ${nativePostProcessMs}ms\n")
+            if (nativePostProcessMs > 0) exportSection.append("      - C++ ColorPipe (调色/LUT): ${nativePostProcessMs}ms\n")
             if (nativeDngEncodeMs > 0) exportSection.append("      - DNG 编码:     ${nativeDngEncodeMs}ms\n")
-            if (nativeJpegEncodeMs > 0) exportSection.append("      - JPEG 编码:    ${nativeJpegEncodeMs}ms\n")
+            if (nativeJpegEncodeMs > 0) exportSection.append("      - JPEG 压缩:    ${nativeJpegEncodeMs}ms\n")
             val nativeSum = nativePostProcessMs + nativeDngEncodeMs + nativeJpegEncodeMs
             val ioTime = (stage2TotalMs - nativeSum).coerceAtLeast(0)
             if (stage2TotalMs > 0 && ioTime > 0) {
@@ -147,13 +215,16 @@ data class StandardTimingTracker(
             sensorSection.append("      - 连拍分布: $cadenceStr\n")
         }
         if (accumulationStr != null) {
-            sensorSection.append("      - 流式累加完成: $accumulationStr\n")
+            val pushDetail = if (streamingPushCount > 1) {
+                " ($streamingPushCount 帧 push: avg ${streamingPushAvgMs}ms, min ${streamingPushMinMs}ms, max ${streamingPushMaxMs}ms)"
+            } else ""
+            sensorSection.append("      - 流式累加完成: $accumulationStr$pushDetail\n")
         }
 
         return """
 ========================================
 [$modeHeader] $timeStr
-========================================
+$envLine========================================
 ⚡ 核心延迟指标:
   • T1 快门就绪延迟: $t1
   • T2 首张出片耗时: $t2
@@ -161,7 +232,7 @@ data class StandardTimingTracker(
 
 📊 阶段耗时分解:
 $sensorSection  [2] 并发排队等待: $queueWait
-  [3] Stage 1 计算 (管线解算/融合): $stage1Cost
+  [3] Stage 1 计算 (管线解算/融合): $stage1Cost$stage1Detail
 $exportSection========================================
         """.trimIndent()
     }

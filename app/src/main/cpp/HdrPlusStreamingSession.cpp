@@ -116,6 +116,7 @@ HdrPlusStreamingSession::~HdrPlusStreamingSession() {
 }
 
 bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixels) {
+    auto pushStart = std::chrono::high_resolution_clock::now();
     std::lock_guard<std::mutex> lock(m_sessionMutex);
     if (!rawData) {
         LOGE("pushFrame: rawData is null");
@@ -147,7 +148,16 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
 
         m_accumIdx = 0;
         m_framesPushed = 1;
-        LOGD("pushFrame: registered reference frame 0");
+
+        auto pushElapsed = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - pushStart
+        ).count();
+        m_pushTotalMs += pushElapsed;
+        if (m_pushCount == 0 || pushElapsed < m_pushMinMs) m_pushMinMs = pushElapsed;
+        if (pushElapsed > m_pushMaxMs) m_pushMaxMs = pushElapsed;
+        m_pushCount++;
+
+        LOGD("pushFrame: registered reference frame 0 (%lld ms)", (long long)pushElapsed);
         return true;
     }
 
@@ -181,7 +191,16 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
 
     m_accumIdx = outIdx;
     m_framesPushed++;
-    LOGD("pushFrame: accumulated frame %d", m_framesPushed - 1);
+
+    auto pushElapsed = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - pushStart
+    ).count();
+    m_pushTotalMs += pushElapsed;
+    if (m_pushCount == 0 || pushElapsed < m_pushMinMs) m_pushMinMs = pushElapsed;
+    if (pushElapsed > m_pushMaxMs) m_pushMaxMs = pushElapsed;
+    m_pushCount++;
+
+    LOGD("pushFrame: accumulated frame %d (%lld ms)", m_framesPushed - 1, (long long)pushElapsed);
     return true;
 }
 
@@ -218,24 +237,29 @@ int HdrPlusStreamingSession::finish(
     if (effectiveMode == 2 && m_sabreEngine && m_framesPushed > 1) {
         LOGD("HdrPlusStreamingSession: resolving with Sabre Super-Resolution (zoom=%.2fx, frames=%d)",
              m_zoomFactor, m_framesPushed);
+        auto fusionStart = std::chrono::high_resolution_clock::now();
         bool sabreOk = m_sabreEngine->resolve(
             outSharedResult->rgbBuf.data(),
             outSharedResult->bayerBuf.data()
         );
         if (sabreOk) {
+            m_fusionComputeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::high_resolution_clock::now() - fusionStart
+            ).count();
             if (m_zoomFactor > 1.05f) {
                 outSharedResult->isZoomCropped = true;
             }
             outSharedResult->isWhiteBalanceApplied = false;
             outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
             outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
-            LOGD("HdrPlusStreamingSession: Sabre Super-Resolution resolve succeeded");
+            LOGD("HdrPlusStreamingSession: Sabre Super-Resolution resolve succeeded (%lld ms)", (long long)m_fusionComputeMs);
             return 0;
         }
         LOGW("HdrPlusStreamingSession: Sabre resolve returned false, falling back to Spatial + RCD");
     }
 
     // Normalize accumulated val / weight into m_refFrame buffer to avoid input/output aliasing
+    auto normStart = std::chrono::high_resolution_clock::now();
     const float* valData = m_accumVal[m_accumIdx].data();
     const float* weightData = m_accumWeight[m_accumIdx].data();
 
@@ -244,8 +268,13 @@ int HdrPlusStreamingSession::finish(
         float norm = valData[i] / std::max(0.001f, weightData[i]) + 0.5f;
         m_refFrame[i] = static_cast<uint16_t>(std::clamp(norm, 0.0f, 65535.0f));
     }
+    m_normalizeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - normStart
+    ).count();
 
     std::copy(m_refFrame.begin(), m_refFrame.end(), outSharedResult->bayerBuf.begin());
+
+    auto fusionStart = std::chrono::high_resolution_clock::now();
 
     Halide::Runtime::Buffer<uint16_t> inputBuf(m_refFrame.data(), m_width, m_height, 1);
     outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
@@ -306,7 +335,12 @@ int HdrPlusStreamingSession::finish(
         outSharedResult->isWhiteBalanceApplied = true;
     }
 
-    LOGD("HdrPlusStreamingSession finish successful: %d frames accumulated into %dx%d result with %s demosaicing",
-         m_framesPushed, m_width, m_height, (effectiveMode == 3) ? "Malvar" : "RCD");
+    m_fusionComputeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - fusionStart
+    ).count();
+
+    LOGD("HdrPlusStreamingSession finish successful: %d frames accumulated into %dx%d result with %s demosaicing (norm=%lld ms, compute=%lld ms)",
+         m_framesPushed, m_width, m_height, (effectiveMode == 3) ? "Malvar" : "RCD",
+         (long long)m_normalizeMs, (long long)m_fusionComputeMs);
     return 0;
 }

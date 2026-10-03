@@ -621,15 +621,25 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     }
 
     bool saveOk = true;
+    jlong colorPipeMs = 0;
+    jlong jpegEncodeMs = 0;
     if (outJpgFd >= 0 || jpg_path_cstr) {
         LOGD("Exporting JPG: JPG=%s (outJpgFd=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd);
         auto jpgStart = std::chrono::high_resolution_clock::now();
         float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
         const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : wbVec.data();
+        int64_t measuredColorPipe = 0;
+        int64_t measuredJpegEncode = 0;
         saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd);
+                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd,
+                                        &measuredColorPipe, &measuredJpegEncode);
         jpgMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jpgStart).count();
+        colorPipeMs = (jlong)measuredColorPipe;
+        jpegEncodeMs = (jlong)measuredJpegEncode;
+        if (jpegEncodeMs == 0 && jpgMs > colorPipeMs) {
+            jpegEncodeMs = jpgMs - colorPipeMs;
+        }
     }
 
     auto exportTotalMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - exportStart).count();
@@ -640,9 +650,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         if (len >= 5) {
             jlong stats[15] = {0};
             env->GetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
-            stats[2] = postMs;
+            stats[2] = colorPipeMs;
             stats[3] = dngMs;
-            stats[4] = jpgMs;
+            stats[4] = jpegEncodeMs;
             env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
         }
     }
@@ -1157,7 +1167,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
     jfloat digitalGain, jint targetLog, jstring lutPath,
     jfloat zoomFactor, jboolean mirror,
     jboolean enableMemoryColor, jint colorEngineMode,
-    jint fusionMode
+    jint fusionMode,
+    jlongArray debugStats
 ) {
     auto session = getValidSession(sessionHandle);
     if (!session) {
@@ -1181,6 +1192,27 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
     if (finishRes != 0 || !sharedResult) {
         LOGE("nativeFinishStreamingSession: finish failed with code %d", finishRes);
         return -1;
+    }
+
+    if (debugStats != nullptr) {
+        const jsize len = env->GetArrayLength(debugStats);
+        if (len > 0) {
+            jlong stats[20] = {0};
+            env->GetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 20), stats);
+            stats[0] = session->normalizeMs() + session->fusionComputeMs();
+            stats[8] = session->normalizeMs();
+            stats[9] = session->fusionComputeMs();
+            if (len >= 19) {
+                stats[15] = (jlong)session->pushCount();
+                stats[16] = (session->pushCount() > 0) ? (session->pushTotalMs() / session->pushCount()) : 0;
+                stats[17] = session->pushMinMs();
+                stats[18] = session->pushMaxMs();
+            }
+            if (len >= 20) {
+                stats[19] = session->normalizeMs();
+            }
+            env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 20), stats);
+        }
     }
 
     const char* tr_p_cstr = tempRawPath ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;

@@ -316,7 +316,8 @@ object ColorProcessor {
         mirror: Boolean = false,
         enableMemoryColor: Boolean = false,
         colorEngineMode: Int = 0,
-        fusionMode: Int = 0
+        fusionMode: Int = 0,
+        debugStats: LongArray? = null
     ): Int
 
     external fun nativeAbortStreamingSession(

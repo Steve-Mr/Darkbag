@@ -63,9 +63,47 @@ class StandardTimingTrackerTest {
         assertTrue(report.contains("首帧延迟: 40ms"))
         assertTrue(report.contains("并发排队等待: 15ms"))
         assertTrue(report.contains("Stage 1 计算 (管线解算/融合): 450ms"))
-        assertTrue(report.contains("C++ ColorPipe: 45ms"))
+        assertTrue(report.contains("C++ ColorPipe (调色/LUT): 45ms"))
         assertTrue(report.contains("DNG 编码:     110ms"))
-        assertTrue(report.contains("JPEG 编码:    80ms"))
+        assertTrue(report.contains("JPEG 压缩:    80ms"))
+    }
+
+    @Test
+    fun testBuildSummaryReport_withEnvironmentMetadata() {
+        val timing = StandardTimingTracker(
+            shutterClick = 1000L,
+            captureMode = CaptureTimingMode.HDR_BURST
+        )
+        timing.recordEnvironment(
+            width = 4032,
+            height = 3024,
+            isoVal = 100,
+            exposureNs = 33_333_333L, // ~1/30s
+            zoom = 1.0f,
+            fusion = 1
+        )
+        val report = timing.buildSummaryReport()
+        assertTrue(report.contains("📷 环境: 4032x3024 | ISO 100 | 1/30s | Mode: Spatial+RCD"))
+    }
+
+    @Test
+    fun testBuildSummaryReport_withStreamingPushAndStage1Breakdown() {
+        val timing = StandardTimingTracker(
+            shutterClick = 1000L,
+            captureMode = CaptureTimingMode.HDR_BURST
+        )
+        timing.recordFrameArrival(1020L)
+        timing.recordFrameArrival(1050L)
+        timing.accumulateDone = 1500L
+        timing.processingStart = 1510L
+        timing.stage1ComputeDone = 1800L
+        timing.recordStreamingPushStats(count = 8, avgMs = 55L, minMs = 40L, maxMs = 75L)
+        timing.recordStage1ComputeBreakdown(normalizeMs = 12L, fusionMs = 278L)
+
+        val report = timing.buildSummaryReport()
+        assertTrue(report.contains("流式累加完成: 480ms (8 帧 push: avg 55ms, min 40ms, max 75ms)"))
+        assertTrue(report.contains("归一化:      12ms"))
+        assertTrue(report.contains("解算/去马赛克: 278ms"))
     }
 
     @Test
