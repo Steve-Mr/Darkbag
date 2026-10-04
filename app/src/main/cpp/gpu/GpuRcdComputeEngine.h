@@ -66,6 +66,18 @@ private:
 
     bool ensureShaders();
     bool prepareTextures(int width, int height);
+    void releaseTextures();
+
+    bool demosaicToTexturesLocked(
+        const uint16_t* bayerData,
+        int width, int height,
+        int cfaPattern,
+        const uint16_t* blackLevel,
+        uint16_t whiteLevel,
+        const float* whiteBalance,
+        GLuint* outTexR, GLuint* outTexG, GLuint* outTexB,
+        int64_t* outComputeMs
+    );
 
     std::mutex engineMutex_;
     bool shadersBuilt_ = false;

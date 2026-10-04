@@ -50,6 +50,8 @@ public:
     PFNEglDestroySyncKHR fnDestroySyncKHR = nullptr;
     PFNEglClientWaitSyncKHR fnClientWaitSyncKHR = nullptr;
 
+    std::recursive_mutex& getMutex() { return contextMutex_; }
+
 private:
     GpuContext() = default;
     ~GpuContext();
@@ -58,7 +60,7 @@ private:
 
     bool initExtensions();
 
-    std::mutex contextMutex_;
+    std::recursive_mutex contextMutex_;
     bool initialized_ = false;
     bool hasAhbSupport_ = false;
     bool hasComputeSupport_ = false;
@@ -75,7 +77,8 @@ private:
 // RAII Scope Lock for GpuContext activation
 class GpuContextScope {
 public:
-    explicit GpuContextScope(GpuContext& ctx) : ctx_(ctx), locked_(false) {
+    explicit GpuContextScope(GpuContext& ctx)
+        : ctx_(ctx), lock_(ctx.getMutex()), locked_(false) {
         if (ctx_.makeCurrent()) {
             locked_ = true;
         }
@@ -91,6 +94,7 @@ public:
 
 private:
     GpuContext& ctx_;
+    std::unique_lock<std::recursive_mutex> lock_;
     bool locked_;
 };
 

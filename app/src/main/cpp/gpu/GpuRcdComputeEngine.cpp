@@ -116,6 +116,31 @@ bool GpuRcdComputeEngine::ensureShaders() {
     return true;
 }
 
+void GpuRcdComputeEngine::releaseTextures() {
+    if (bayerInputTex_ != 0) {
+        glDeleteTextures(1, &bayerInputTex_);
+        bayerInputTex_ = 0;
+    }
+    if (greenIntermTex_ != 0) {
+        glDeleteTextures(1, &greenIntermTex_);
+        greenIntermTex_ = 0;
+    }
+    if (outputTexR_ != 0) {
+        glDeleteTextures(1, &outputTexR_);
+        outputTexR_ = 0;
+    }
+    if (outputTexG_ != 0) {
+        glDeleteTextures(1, &outputTexG_);
+        outputTexG_ = 0;
+    }
+    if (outputTexB_ != 0) {
+        glDeleteTextures(1, &outputTexB_);
+        outputTexB_ = 0;
+    }
+    currentWidth_ = 0;
+    currentHeight_ = 0;
+}
+
 bool GpuRcdComputeEngine::prepareTextures(int width, int height) {
     if (width <= 0 || height <= 0) return false;
 
@@ -125,7 +150,7 @@ bool GpuRcdComputeEngine::prepareTextures(int width, int height) {
         return true;
     }
 
-    release();
+    releaseTextures(); // Only release textures, preserve compiled compute shaders!
 
     currentWidth_ = width;
     currentHeight_ = height;
@@ -157,7 +182,7 @@ bool GpuRcdComputeEngine::prepareTextures(int width, int height) {
         !createTex16UI(outputTexG_) ||
         !createTex16UI(outputTexB_)) {
         LOGE("Failed to allocate RCD GPU textures (%dx%d)", width, height);
-        release();
+        releaseTextures();
         return false;
     }
 
@@ -167,7 +192,7 @@ bool GpuRcdComputeEngine::prepareTextures(int width, int height) {
     return true;
 }
 
-bool GpuRcdComputeEngine::demosaicToTextures(
+bool GpuRcdComputeEngine::demosaicToTexturesLocked(
     const uint16_t* bayerData,
     int width, int height,
     int cfaPattern,
@@ -177,25 +202,7 @@ bool GpuRcdComputeEngine::demosaicToTextures(
     GLuint* outTexR, GLuint* outTexG, GLuint* outTexB,
     int64_t* outComputeMs
 ) {
-    if (!bayerData || width <= 0 || height <= 0 || !outTexR || !outTexG || !outTexB) {
-        LOGE("Invalid arguments for demosaicToTextures");
-        return false;
-    }
-
     auto start = std::chrono::high_resolution_clock::now();
-    std::lock_guard<std::mutex> lock(engineMutex_);
-
-    GpuContext& ctx = GpuContext::instance();
-    GpuContextScope ctxScope(ctx);
-    if (!ctxScope.isAcquired()) {
-        LOGE("Failed to acquire EGL context for RCD Compute");
-        return false;
-    }
-
-    if (!ctx.supportsComputeShader()) {
-        LOGE("GLES Compute Shader is not supported on this device");
-        return false;
-    }
 
     if (!ensureShaders()) {
         return false;
@@ -264,8 +271,8 @@ bool GpuRcdComputeEngine::demosaicToTextures(
 
     glDispatchCompute(numGroupsX, numGroupsY, 1);
 
-    // Memory barrier: ensure writes are visible to subsequent color pipe texture fetches
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+    // Memory barrier: ensure writes are visible to texture fetches AND framebuffer readback
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
 
     *outTexR = outputTexR_;
     *outTexG = outputTexG_;
@@ -280,6 +287,41 @@ bool GpuRcdComputeEngine::demosaicToTextures(
     return true;
 }
 
+bool GpuRcdComputeEngine::demosaicToTextures(
+    const uint16_t* bayerData,
+    int width, int height,
+    int cfaPattern,
+    const uint16_t* blackLevel,
+    uint16_t whiteLevel,
+    const float* whiteBalance,
+    GLuint* outTexR, GLuint* outTexG, GLuint* outTexB,
+    int64_t* outComputeMs
+) {
+    if (!bayerData || width <= 0 || height <= 0 || !outTexR || !outTexG || !outTexB) {
+        LOGE("Invalid arguments for demosaicToTextures");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(engineMutex_);
+
+    GpuContext& ctx = GpuContext::instance();
+    GpuContextScope ctxScope(ctx);
+    if (!ctxScope.isAcquired()) {
+        LOGE("Failed to acquire EGL context for RCD Compute");
+        return false;
+    }
+
+    if (!ctx.supportsComputeShader()) {
+        LOGE("GLES Compute Shader is not supported on this device");
+        return false;
+    }
+
+    return demosaicToTexturesLocked(
+        bayerData, width, height, cfaPattern, blackLevel, whiteLevel, whiteBalance,
+        outTexR, outTexG, outTexB, outComputeMs
+    );
+}
+
 bool GpuRcdComputeEngine::demosaicToCpuBuffer(
     const uint16_t* bayerData,
     int width, int height,
@@ -290,14 +332,33 @@ bool GpuRcdComputeEngine::demosaicToCpuBuffer(
     uint16_t* rgbOutput,
     int64_t* outComputeMs
 ) {
-    if (!rgbOutput) return false;
-
-    GLuint texR = 0, texG = 0, texB = 0;
-    if (!demosaicToTextures(bayerData, width, height, cfaPattern, blackLevel, whiteLevel, whiteBalance, &texR, &texG, &texB, outComputeMs)) {
+    if (!bayerData || !rgbOutput || width <= 0 || height <= 0) {
+        LOGE("Invalid arguments for demosaicToCpuBuffer");
         return false;
     }
 
-    // Read back planar R, G, B via FBO attachment
+    std::lock_guard<std::mutex> lock(engineMutex_);
+
+    GpuContext& ctx = GpuContext::instance();
+    GpuContextScope ctxScope(ctx);
+    if (!ctxScope.isAcquired()) {
+        LOGE("Failed to acquire EGL context for RCD Compute readback");
+        return false;
+    }
+
+    if (!ctx.supportsComputeShader()) {
+        LOGE("GLES Compute Shader is not supported on this device");
+        return false;
+    }
+
+    GLuint texR = 0, texG = 0, texB = 0;
+    if (!demosaicToTexturesLocked(
+            bayerData, width, height, cfaPattern, blackLevel, whiteLevel, whiteBalance,
+            &texR, &texG, &texB, outComputeMs)) {
+        return false;
+    }
+
+    // Context is active and engineMutex_ is held throughout readback!
     GLuint fbo = 0;
     glGenFramebuffers(1, &fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -325,26 +386,7 @@ bool GpuRcdComputeEngine::demosaicToCpuBuffer(
 }
 
 void GpuRcdComputeEngine::release() {
-    if (bayerInputTex_ != 0) {
-        glDeleteTextures(1, &bayerInputTex_);
-        bayerInputTex_ = 0;
-    }
-    if (greenIntermTex_ != 0) {
-        glDeleteTextures(1, &greenIntermTex_);
-        greenIntermTex_ = 0;
-    }
-    if (outputTexR_ != 0) {
-        glDeleteTextures(1, &outputTexR_);
-        outputTexR_ = 0;
-    }
-    if (outputTexG_ != 0) {
-        glDeleteTextures(1, &outputTexG_);
-        outputTexG_ = 0;
-    }
-    if (outputTexB_ != 0) {
-        glDeleteTextures(1, &outputTexB_);
-        outputTexB_ = 0;
-    }
+    releaseTextures();
     if (programPassA_ != 0) {
         glDeleteProgram(programPassA_);
         programPassA_ = 0;
@@ -354,8 +396,6 @@ void GpuRcdComputeEngine::release() {
         programPassB_ = 0;
     }
     shadersBuilt_ = false;
-    currentWidth_ = 0;
-    currentHeight_ = 0;
     LOGD("GpuRcdComputeEngine released");
 }
 

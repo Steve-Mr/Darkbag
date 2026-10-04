@@ -162,7 +162,7 @@ void main() {
         float nGrad = eps + (abs(sBayer[cy-1][cx] - sBayer[cy+1][cx]) + abs(cfai - sBayer[cy-2][cx]))
                           + (abs(sBayer[cy-1][cx] - sBayer[cy-3][cx]) + abs(sBayer[cy-2][cx] - sBayer[cy-4][cx]));
         float sGrad = eps + (abs(sBayer[cy-1][cx] - sBayer[cy+1][cx]) + abs(cfai - sBayer[cy+2][cx]))
-                          + (abs(sBayer[cy+1][cx] - sBayer[cy+3][cx]) + abs(sBayer[cy+2][cx] - sBayer[cy-4+8])); // cy+4
+                          + (abs(sBayer[cy+1][cx] - sBayer[cy+3][cx]) + abs(sBayer[cy+2][cx] - sBayer[cy+4]));
         float wGrad = eps + (abs(sBayer[cy][cx-1] - sBayer[cy][cx+1]) + abs(cfai - sBayer[cy][cx-2]))
                           + (abs(sBayer[cy][cx-1] - sBayer[cy][cx-3]) + abs(sBayer[cy][cx-2] - sBayer[cy][cx-4]));
         float eGrad = eps + (abs(sBayer[cy][cx-1] - sBayer[cy][cx+1]) + abs(cfai - sBayer[cy][cx+2]))

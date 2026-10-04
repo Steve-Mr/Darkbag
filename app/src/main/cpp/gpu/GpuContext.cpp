@@ -19,7 +19,7 @@ GpuContext::~GpuContext() {
 }
 
 bool GpuContext::initialize() {
-    std::lock_guard<std::mutex> lock(contextMutex_);
+    std::lock_guard<std::recursive_mutex> lock(contextMutex_);
     if (initialized_) {
         return true;
     }
