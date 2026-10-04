@@ -330,7 +330,8 @@ void main() {
     // 7. 3D LUT Sampling with Half-Texel Correction
     if (uHasLut != 0) {
         float lutSizeFloat = float(uLutSize);
-        vec3 lutCoord = color * ((lutSizeFloat - 1.0) / lutSizeFloat) + vec3(0.5 / lutSizeFloat);
+        vec3 clampedColor = clamp(color, 0.0, 1.0);
+        vec3 lutCoord = clampedColor * ((lutSizeFloat - 1.0) / lutSizeFloat) + vec3(0.5 / lutSizeFloat);
         color = texture(uLut3D, lutCoord).rgb;
     }
 

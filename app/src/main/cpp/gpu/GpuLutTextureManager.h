@@ -13,8 +13,11 @@ class GpuLutTextureManager {
 public:
     static GpuLutTextureManager& instance();
 
-    // Fetches or creates a 3D texture for the specified LUT path or data
-    GLuint getOrCreateLutTexture(const std::string& lutPath, const LUT3D* fallbackLut = nullptr);
+    // Fetches or creates a 3D texture for the specified LUT path or data.
+    // If outLutSize is provided, it is populated with the cube size (e.g. 33).
+    GLuint getOrCreateLutTexture(const std::string& lutPath, const LUT3D* fallbackLut = nullptr, int* outLutSize = nullptr);
+
+    int getCurrentLutSize() const { return currentLutSize_; }
 
     void clearCache();
 

@@ -564,8 +564,19 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                              cm1Vec, cm2Vec, fm1Vec, fm2Vec, neutralVec,
                              cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, neutralPtr);
 
-    const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { auto cached = get_cached_lut(lut_path_cstr); if (cached) lut = *cached; env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    std::string lutPathStr;
+    if (lutPath) {
+        const char* lut_cstr = env->GetStringUTFChars(lutPath, nullptr);
+        if (lut_cstr) {
+            lutPathStr = lut_cstr;
+            env->ReleaseStringUTFChars(lutPath, lut_cstr);
+        }
+    }
+    LUT3D lut;
+    if (!lutPathStr.empty()) {
+        auto cached = get_cached_lut(lutPathStr.c_str());
+        if (cached) lut = *cached;
+    }
 
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
@@ -654,7 +665,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
         bool gpuAttemptSuccess = false;
         if (darkbag::gpu::GpuColorPipeEngine::instance().isAvailable()) {
-            std::string lutPathStr = lut_path_cstr ? lut_path_cstr : "";
             gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImage(
                 sharedResult->rgbBuf.data(),
                 width, height,

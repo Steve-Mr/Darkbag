@@ -199,12 +199,17 @@ bool GpuColorPipeEngine::processAndSaveImage(
     GLuint lutTexId = 0;
     int lutSize = 0;
     if (!lutPath.empty() || (fallbackLut && fallbackLut->size > 1)) {
-        lutTexId = GpuLutTextureManager::instance().getOrCreateLutTexture(lutPath, fallbackLut);
-        if (lutTexId != 0) {
-            std::shared_ptr<LUT3D> cached = !lutPath.empty() ? get_cached_lut(lutPath.c_str()) : nullptr;
-            lutSize = cached ? cached->size : (fallbackLut ? fallbackLut->size : 0);
+        lutTexId = GpuLutTextureManager::instance().getOrCreateLutTexture(lutPath, fallbackLut, &lutSize);
+        if (lutSize <= 0) {
+            lutSize = GpuLutTextureManager::instance().getCurrentLutSize();
+        }
+        if (lutSize <= 0 && fallbackLut) {
+            lutSize = fallbackLut->size;
         }
     }
+
+    LOGD("GPU ColorPipe LUT status: path='%s', fallbackSize=%d, lutTexId=%u, lutSize=%d, hasLut=%d",
+         lutPath.c_str(), fallbackLut ? fallbackLut->size : 0, lutTexId, lutSize, (lutTexId != 0 && lutSize > 1) ? 1 : 0);
 
     if (lutTexId != 0 && lutSize > 1) {
         glActiveTexture(GL_TEXTURE3);

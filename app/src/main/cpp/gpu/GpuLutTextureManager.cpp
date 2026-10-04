@@ -20,6 +20,7 @@ GpuLutTextureManager::~GpuLutTextureManager() {
 
 GLuint GpuLutTextureManager::uploadLut3D(const LUT3D& lut) {
     if (lut.size <= 1 || lut.data.empty()) {
+        LOGE("uploadLut3D failed: invalid lut size=%d or empty data (%zu)", lut.size, lut.data.size());
         return 0;
     }
 
@@ -28,6 +29,8 @@ GLuint GpuLutTextureManager::uploadLut3D(const LUT3D& lut) {
         LOGE("LUT3D data size mismatch: expected %zu, got %zu", expectedCount, lut.data.size());
         return 0;
     }
+
+    while (glGetError() != GL_NO_ERROR); // Clear prior errors
 
     GLuint texId = 0;
     glGenTextures(1, &texId);
@@ -38,6 +41,8 @@ GLuint GpuLutTextureManager::uploadLut3D(const LUT3D& lut) {
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
     // Upload as GL_RGB16F or GL_RGB (3-channel float)
     glTexImage3D(
@@ -75,20 +80,28 @@ GLuint GpuLutTextureManager::uploadLut3D(const LUT3D& lut) {
             GL_UNSIGNED_BYTE,
             rgb8Data.data()
         );
+        GLenum err8 = glGetError();
+        if (err8 != GL_NO_ERROR) {
+            LOGE("glTexImage3D fallback with GL_RGB8 also failed (0x%x)", err8);
+        }
     }
 
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glBindTexture(GL_TEXTURE_3D, 0);
     LOGD("Uploaded 3D LUT texture id=%u, size=%d^3", texId, lut.size);
     return texId;
 }
 
-GLuint GpuLutTextureManager::getOrCreateLutTexture(const std::string& lutPath, const LUT3D* fallbackLut) {
+GLuint GpuLutTextureManager::getOrCreateLutTexture(const std::string& lutPath, const LUT3D* fallbackLut, int* outLutSize) {
+    if (outLutSize) *outLutSize = 0;
+
     if (lutPath.empty() && (!fallbackLut || fallbackLut->size <= 1)) {
         return 0;
     }
 
     // Fast path: if requesting the current active LUT
     if (!lutPath.empty() && lutPath == currentLutPath_ && currentTexId_ != 0) {
+        if (outLutSize) *outLutSize = currentLutSize_;
         return currentTexId_;
     }
 
@@ -99,6 +112,7 @@ GLuint GpuLutTextureManager::getOrCreateLutTexture(const std::string& lutPath, c
             currentLutPath_ = lutPath;
             currentTexId_ = it->second.texId;
             currentLutSize_ = it->second.lutSize;
+            if (outLutSize) *outLutSize = currentLutSize_;
             return currentTexId_;
         }
     }
@@ -109,17 +123,22 @@ GLuint GpuLutTextureManager::getOrCreateLutTexture(const std::string& lutPath, c
         resolvedLut = get_cached_lut(lutPath.c_str());
     }
 
-    const LUT3D* targetLut = resolvedLut ? resolvedLut.get() : fallbackLut;
+    const LUT3D* targetLut = (resolvedLut && resolvedLut->size > 1 && !resolvedLut->data.empty()) ? resolvedLut.get() : fallbackLut;
     if (!targetLut || targetLut->size <= 1 || targetLut->data.empty()) {
+        LOGW("getOrCreateLutTexture: No valid LUT data found (path='%s', fallbackSize=%d)",
+             lutPath.c_str(), fallbackLut ? fallbackLut->size : 0);
         return 0;
     }
 
     GLuint texId = uploadLut3D(*targetLut);
-    if (texId != 0 && !lutPath.empty()) {
-        cache_[lutPath] = {texId, targetLut->size};
+    if (texId != 0) {
+        if (!lutPath.empty()) {
+            cache_[lutPath] = {texId, targetLut->size};
+        }
         currentLutPath_ = lutPath;
         currentTexId_ = texId;
         currentLutSize_ = targetLut->size;
+        if (outLutSize) *outLutSize = targetLut->size;
     }
     return texId;
 }
