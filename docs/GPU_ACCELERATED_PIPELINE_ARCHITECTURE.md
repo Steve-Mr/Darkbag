@@ -1,7 +1,7 @@
 # Darkbag GPU 加速摄影计算管线架构方案 (阶段一至阶段三)
 
-> **版本**: 1.0.0-DRAFT  
-> **状态**: 方案讨论与设计阶段  
+> **版本**: 1.1.0  
+> **状态**: 阶段一已完成上线并经真机验证 (Commit: `8faf953a`)；阶段二进入详细方案设计阶段 (详见 [GPU_ACCELERATED_PIPELINE_PHASE2_DESIGN.md](file:///home/maary/Build/Darkbag/docs/GPU_ACCELERATED_PIPELINE_PHASE2_DESIGN.md))  
 > **适用目标**: HDR+ Burst 多帧管线 & Single RAW 单帧管线  
 
 ---
