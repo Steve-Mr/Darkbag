@@ -51,7 +51,7 @@ uniform float uWhiteLevel;
 
 // Input & Output
 uniform highp usampler2D uBayerTex;
-layout(r16ui, binding = 0) uniform writeonly highp uimage2D uGreenImg;
+layout(r32f, binding = 0) uniform writeonly highp image2D uGreenImg;
 
 // Cooperative shared memory tile: 16 + 2 * HALO = 28x28 (784 floats = 3.1 KB)
 const int HALO = 6;
@@ -162,7 +162,7 @@ void main() {
         float nGrad = eps + (abs(sBayer[cy-1][cx] - sBayer[cy+1][cx]) + abs(cfai - sBayer[cy-2][cx]))
                           + (abs(sBayer[cy-1][cx] - sBayer[cy-3][cx]) + abs(sBayer[cy-2][cx] - sBayer[cy-4][cx]));
         float sGrad = eps + (abs(sBayer[cy-1][cx] - sBayer[cy+1][cx]) + abs(cfai - sBayer[cy+2][cx]))
-                          + (abs(sBayer[cy+1][cx] - sBayer[cy+3][cx]) + abs(sBayer[cy+2][cx] - sBayer[cy+4]));
+                          + (abs(sBayer[cy+1][cx] - sBayer[cy+3][cx]) + abs(sBayer[cy+2][cx] - sBayer[cy+4][cx]));
         float wGrad = eps + (abs(sBayer[cy][cx-1] - sBayer[cy][cx+1]) + abs(cfai - sBayer[cy][cx-2]))
                           + (abs(sBayer[cy][cx-1] - sBayer[cy][cx-3]) + abs(sBayer[cy][cx-2] - sBayer[cy][cx-4]));
         float eGrad = eps + (abs(sBayer[cy][cx-1] - sBayer[cy][cx+1]) + abs(cfai - sBayer[cy][cx+2]))
@@ -192,7 +192,7 @@ void main() {
         greenVal = clamp(mix(vEst, hEst, vhDisc), 0.0, 1.0);
     }
 
-    imageStore(uGreenImg, outCoord, uvec4(denormalizePixel(greenVal), 0u, 0u, 0u));
+    imageStore(uGreenImg, outCoord, vec4(greenVal, 0.0, 0.0, 0.0));
 }
 )glsl";
 
@@ -239,12 +239,10 @@ uniform float uWhiteLevel;
 
 // Inputs
 uniform highp usampler2D uBayerTex;
-uniform highp usampler2D uGreenTex;
+uniform highp sampler2D uGreenTex;
 
-// 3 separate planar outputs (GL_R16UI sampled as .r by GpuColorPipeShader)
-layout(r16ui, binding = 0) uniform writeonly highp uimage2D uOutTexR;
-layout(r16ui, binding = 1) uniform writeonly highp uimage2D uOutTexG;
-layout(r16ui, binding = 2) uniform writeonly highp uimage2D uOutTexB;
+// RGBA16UI output containing R, G, B, and A channels (denormalized 0~65535)
+layout(rgba16ui, binding = 0) uniform writeonly highp uimage2D uOutRgbImg;
 
 // Cooperative shared memory tiles: 16 + 2 * HALO = 20x20 (4 buffers x 400 floats = 6.25 KB)
 const int HALO = 2;
@@ -304,8 +302,7 @@ void main() {
         uint rawBayer = texelFetch(uBayerTex, gCoord, 0).r;
         sBayer[sy][sx] = normalizePixel(rawBayer, gCoord.y, gCoord.x);
 
-        uint rawGreen = texelFetch(uGreenTex, gCoord, 0).r;
-        sGreen[sy][sx] = float(rawGreen) / 65535.0;
+        sGreen[sy][sx] = texelFetch(uGreenTex, gCoord, 0).r;
     }
     barrier();
 
@@ -454,10 +451,13 @@ void main() {
         blueVal = clamp(ratioB * greenVal, 0.0, 1.0);
     }
 
-    // Write to 3 separate planar images (GL_R16UI format matching GpuColorPipeShader.h)
-    imageStore(uOutTexR, outCoord, uvec4(denormalizePixel(redVal),   0u, 0u, 0u));
-    imageStore(uOutTexG, outCoord, uvec4(denormalizePixel(greenVal), 0u, 0u, 0u));
-    imageStore(uOutTexB, outCoord, uvec4(denormalizePixel(blueVal),  0u, 0u, 0u));
+    // Write RGBA16UI output image containing fully demosaiced R, G, B channels
+    imageStore(uOutRgbImg, outCoord, uvec4(
+        denormalizePixel(redVal),
+        denormalizePixel(greenVal),
+        denormalizePixel(blueVal),
+        65535u
+    ));
 }
 )glsl";
 

@@ -1519,14 +1519,37 @@ Java_top_maary_darkbag_processor_ColorProcessor_rcdDemosaicNative(
         wbPtr = wbArray;
     }
 
-    darkbag::demosaic::rcd_demosaic(
-        bayerData,
-        width,
-        height,
-        cfaPattern,
-        blArray,
-        static_cast<uint16_t>(whiteLevel),
-        wbPtr,
-        rgbData
-    );
+    bool gpuDemosaicOk = false;
+    if (darkbag::gpu::GpuRcdComputeEngine::instance().isAvailable()) {
+        int64_t gpuComputeMs = 0;
+        gpuDemosaicOk = darkbag::gpu::GpuRcdComputeEngine::instance().demosaicToCpuBuffer(
+            bayerData,
+            width,
+            height,
+            cfaPattern,
+            blArray,
+            static_cast<uint16_t>(whiteLevel),
+            wbPtr,
+            rgbData,
+            &gpuComputeMs
+        );
+        if (gpuDemosaicOk) {
+            LOGD("rcdDemosaicNative GPU Compute succeeded in %lld ms", (long long)gpuComputeMs);
+        } else {
+            LOGW("rcdDemosaicNative GPU Compute failed, falling back to CPU");
+        }
+    }
+
+    if (!gpuDemosaicOk) {
+        darkbag::demosaic::rcd_demosaic(
+            bayerData,
+            width,
+            height,
+            cfaPattern,
+            blArray,
+            static_cast<uint16_t>(whiteLevel),
+            wbPtr,
+            rgbData
+        );
+    }
 }

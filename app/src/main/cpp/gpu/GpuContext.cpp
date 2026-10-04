@@ -71,12 +71,20 @@ bool GpuContext::initialize() {
         return false;
     }
 
-    // Create OpenGL ES 3.0 Context
-    const EGLint contextAttribs[] = {
-        EGL_CONTEXT_CLIENT_VERSION, 3,
+    // Request OpenGL ES 3.1 context for Compute Shader support, with ES 3.0 fallback
+    const EGLint contextAttribs31[] = {
+        EGL_CONTEXT_MAJOR_VERSION_KHR, 3,
+        EGL_CONTEXT_MINOR_VERSION_KHR, 1,
         EGL_NONE
     };
-    eglContext_ = eglCreateContext(eglDisplay_, eglConfig_, EGL_NO_CONTEXT, contextAttribs);
+    eglContext_ = eglCreateContext(eglDisplay_, eglConfig_, EGL_NO_CONTEXT, contextAttribs31);
+    if (eglContext_ == EGL_NO_CONTEXT) {
+        const EGLint contextAttribs30[] = {
+            EGL_CONTEXT_CLIENT_VERSION, 3,
+            EGL_NONE
+        };
+        eglContext_ = eglCreateContext(eglDisplay_, eglConfig_, EGL_NO_CONTEXT, contextAttribs30);
+    }
     if (eglContext_ == EGL_NO_CONTEXT) {
         LOGE("eglCreateContext failed: 0x%x", eglGetError());
         release();

@@ -3,6 +3,7 @@
 #include "hdrplus_single_pipeline.h"
 #include "ColorPipe.h"
 #include "demosaic/RcdDemosaic.h"
+#include "gpu/GpuRcdComputeEngine.h"
 #include <android/log.h>
 #include <omp.h>
 #include <cmath>
@@ -321,19 +322,42 @@ int HdrPlusStreamingSession::finish(
         outSharedResult->isWhiteBalanceApplied = true;
     } else {
         // High-Fidelity RCD Demosaicing (Spatial + RCD)
-        // Directly demosaics from normalized bayerBuf, avoiding redundant Malvar demosaic in Halide
+        // Prefer GPU Compute RCD kernel (OpenGL ES 3.1+) with CPU fallback
         uint16_t bl_array[4] = {m_bl_r, m_bl_g0, m_bl_g1, m_bl_b};
         float wb_array[4] = {m_wb_r, m_wb_g0, m_wb_g1, m_wb_b};
-        darkbag::demosaic::rcd_demosaic(
-            outSharedResult->bayerBuf.data(),
-            m_width,
-            m_height,
-            m_cfaPattern,
-            bl_array,
-            static_cast<uint16_t>(m_whiteLevel),
-            wb_array,
-            outSharedResult->rgbBuf.data()
-        );
+        bool gpuDemosaicOk = false;
+        if (darkbag::gpu::GpuRcdComputeEngine::instance().isAvailable()) {
+            int64_t gpuComputeMs = 0;
+            gpuDemosaicOk = darkbag::gpu::GpuRcdComputeEngine::instance().demosaicToCpuBuffer(
+                outSharedResult->bayerBuf.data(),
+                m_width,
+                m_height,
+                m_cfaPattern,
+                bl_array,
+                static_cast<uint16_t>(m_whiteLevel),
+                wb_array,
+                outSharedResult->rgbBuf.data(),
+                &gpuComputeMs
+            );
+            if (gpuDemosaicOk) {
+                LOGD("HDR+ Burst GPU Compute RCD demosaic succeeded in %lld ms", (long long)gpuComputeMs);
+            } else {
+                LOGW("HDR+ Burst GPU Compute RCD demosaic failed, falling back to CPU RCD");
+            }
+        }
+
+        if (!gpuDemosaicOk) {
+            darkbag::demosaic::rcd_demosaic(
+                outSharedResult->bayerBuf.data(),
+                m_width,
+                m_height,
+                m_cfaPattern,
+                bl_array,
+                static_cast<uint16_t>(m_whiteLevel),
+                wb_array,
+                outSharedResult->rgbBuf.data()
+            );
+        }
         outSharedResult->isWhiteBalanceApplied = false;
     }
 

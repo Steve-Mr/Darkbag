@@ -43,6 +43,20 @@ public:
     );
 
     /**
+     * Demosaics Bayer CFA directly into a single unified GL_RGBA16UI texture on GPU.
+     */
+    bool demosaicToRgbTexture(
+        const uint16_t* bayerData,
+        int width, int height,
+        int cfaPattern,
+        const uint16_t* blackLevel,
+        uint16_t whiteLevel,
+        const float* whiteBalance,
+        GLuint* outTexRgb,
+        int64_t* outComputeMs = nullptr
+    );
+
+    /**
      * Backwards-compatible overload: demosaics and downloads planar 16-bit RGB to CPU memory.
      */
     bool demosaicToCpuBuffer(
@@ -68,14 +82,14 @@ private:
     bool prepareTextures(int width, int height);
     void releaseTextures();
 
-    bool demosaicToTexturesLocked(
+    bool demosaicToRgbTextureLocked(
         const uint16_t* bayerData,
         int width, int height,
         int cfaPattern,
         const uint16_t* blackLevel,
         uint16_t whiteLevel,
         const float* whiteBalance,
-        GLuint* outTexR, GLuint* outTexG, GLuint* outTexB,
+        GLuint* outTexRgb,
         int64_t* outComputeMs
     );
 
@@ -87,9 +101,7 @@ private:
 
     GLuint bayerInputTex_ = 0;
     GLuint greenIntermTex_ = 0;
-    GLuint outputTexR_ = 0;
-    GLuint outputTexG_ = 0;
-    GLuint outputTexB_ = 0;
+    GLuint outputTexRgb_ = 0;
 
     int currentWidth_ = 0;
     int currentHeight_ = 0;
