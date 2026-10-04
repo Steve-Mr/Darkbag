@@ -11,6 +11,8 @@
 #include "sabre/SabreEngine.h"
 #include "sabre/TileAligner.h"
 
+#include <GLES3/gl3.h>
+
 /**
  * Shared capture result holding normalized Bayer and demosaiced linear RGB buffers.
  * Stored in g_sharedMemoryMap for export and background processing.
@@ -21,6 +23,19 @@ struct SharedCaptureResult {
     std::vector<double> noiseProfile;
     bool isZoomCropped = false;
     bool isWhiteBalanceApplied = false;
+
+    GLuint gpuRgbTexture = 0;
+    int gpuTexWidth = 0;
+    int gpuTexHeight = 0;
+
+    SharedCaptureResult() = default;
+    ~SharedCaptureResult();
+    SharedCaptureResult(const SharedCaptureResult&) = delete;
+    SharedCaptureResult& operator=(const SharedCaptureResult&) = delete;
+    SharedCaptureResult(SharedCaptureResult&&) noexcept = default;
+    SharedCaptureResult& operator=(SharedCaptureResult&&) noexcept = default;
+
+    void releaseGpuResources();
 };
 
 

@@ -89,6 +89,8 @@ bool GpuProgram::build(const char* vertexSrc, const char* fragmentSrc) {
     uniforms_.uTexR = glGetUniformLocation(programId_, "uTexR");
     uniforms_.uTexG = glGetUniformLocation(programId_, "uTexG");
     uniforms_.uTexB = glGetUniformLocation(programId_, "uTexB");
+    uniforms_.uTexUnifiedRgb = glGetUniformLocation(programId_, "uTexUnifiedRgb");
+    uniforms_.uInputLayout = glGetUniformLocation(programId_, "uInputLayout");
     uniforms_.uLut3D = glGetUniformLocation(programId_, "uLut3D");
     uniforms_.uHasLut = glGetUniformLocation(programId_, "uHasLut");
     uniforms_.uLutSize = glGetUniformLocation(programId_, "uLutSize");

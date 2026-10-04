@@ -144,9 +144,79 @@ bool GpuColorPipeEngine::processAndSaveImage(
     int colorEngineMode, bool faithfulHighlights,
     int64_t* outColorPipeMs, int64_t* outJpegEncodeMs
 ) {
-    if (!planarRgb || width <= 0 || height <= 0) {
-        LOGE("Invalid arguments provided to GpuColorPipeEngine");
+    return executePipeline(
+        width, height,
+        false, 0,
+        planarRgb, stride_x, stride_y, stride_c,
+        digitalGain, targetLog,
+        lutPath, fallbackLut,
+        exposure, contrast, saturation,
+        highlights, shadows, whites, blacks,
+        jpgPath, outJpgFd,
+        ccm, wbVec,
+        orientation, mirror, zoomFactor,
+        colorEngineMode, faithfulHighlights,
+        outColorPipeMs, outJpegEncodeMs
+    );
+}
+
+bool GpuColorPipeEngine::processAndSaveImageFromTexture(
+    GLuint inputRgbTexId,
+    int width, int height,
+    float digitalGain, int targetLog,
+    const std::string& lutPath, const LUT3D* fallbackLut,
+    float exposure, float contrast, float saturation,
+    float highlights, float shadows, float whites, float blacks,
+    const char* jpgPath, int outJpgFd,
+    const float* ccm, const float* wbVec,
+    int orientation, bool mirror, float zoomFactor,
+    int colorEngineMode, bool faithfulHighlights,
+    int64_t* outColorPipeMs, int64_t* outJpegEncodeMs
+) {
+    return executePipeline(
+        width, height,
+        true, inputRgbTexId,
+        nullptr, 0, 0, 0,
+        digitalGain, targetLog,
+        lutPath, fallbackLut,
+        exposure, contrast, saturation,
+        highlights, shadows, whites, blacks,
+        jpgPath, outJpgFd,
+        ccm, wbVec,
+        orientation, mirror, zoomFactor,
+        colorEngineMode, faithfulHighlights,
+        outColorPipeMs, outJpegEncodeMs
+    );
+}
+
+bool GpuColorPipeEngine::executePipeline(
+    int width, int height,
+    bool isTextureInput, GLuint inputRgbTexId,
+    const uint16_t* planarRgb, int stride_x, int stride_y, int stride_c,
+    float digitalGain, int targetLog,
+    const std::string& lutPath, const LUT3D* fallbackLut,
+    float exposure, float contrast, float saturation,
+    float highlights, float shadows, float whites, float blacks,
+    const char* jpgPath, int outJpgFd,
+    const float* ccm, const float* wbVec,
+    int orientation, bool mirror, float zoomFactor,
+    int colorEngineMode, bool faithfulHighlights,
+    int64_t* outColorPipeMs, int64_t* outJpegEncodeMs
+) {
+    if (width <= 0 || height <= 0) {
+        LOGE("Invalid dimensions (%dx%d) for GpuColorPipeEngine", width, height);
         return false;
+    }
+    if (isTextureInput) {
+        if (inputRgbTexId == 0) {
+            LOGE("Invalid input texture ID 0 provided to GpuColorPipeEngine");
+            return false;
+        }
+    } else {
+        if (!planarRgb) {
+            LOGE("Null planar RGB buffer provided to GpuColorPipeEngine");
+            return false;
+        }
     }
 
     auto renderStartTime = std::chrono::high_resolution_clock::now();
@@ -182,20 +252,27 @@ bool GpuColorPipeEngine::processAndSaveImage(
         return false;
     }
 
-    // 3. Upload 16-bit planar sensor RGB textures
-    if (!inputTexture_->uploadPlanarRgb(planarRgb, width, height, stride_x, stride_y, stride_c)) {
-        LOGE("Failed to upload input planar RGB textures");
-        return false;
-    }
-
-    // 4. Activate shader program
+    // 3. Setup input texture layout and bind program
     program_->use();
     const ColorPipeUniforms& u = program_->uniforms();
 
-    // Bind planar R, G, B textures to Texture Units 0, 1, 2
-    inputTexture_->bind(u.uTexR, u.uTexG, u.uTexB, 0);
+    if (isTextureInput) {
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, inputRgbTexId);
+        glUniform1i(u.uTexUnifiedRgb, 0);
+        glUniform1i(u.uInputLayout, 1);
+    } else {
+        // Upload 16-bit planar sensor RGB textures
+        if (!inputTexture_->uploadPlanarRgb(planarRgb, width, height, stride_x, stride_y, stride_c)) {
+            LOGE("Failed to upload input planar RGB textures");
+            return false;
+        }
+        // Bind planar R, G, B textures to Texture Units 0, 1, 2
+        inputTexture_->bind(u.uTexR, u.uTexG, u.uTexB, 0);
+        glUniform1i(u.uInputLayout, 0);
+    }
 
-    // 5. 3D LUT Texture handling
+    // 4. 3D LUT Texture handling
     GLuint lutTexId = 0;
     int lutSize = 0;
     if (!lutPath.empty() || (fallbackLut && fallbackLut->size > 1)) {
@@ -208,8 +285,10 @@ bool GpuColorPipeEngine::processAndSaveImage(
         }
     }
 
-    LOGD("GPU ColorPipe LUT status: path='%s', fallbackSize=%d, lutTexId=%u, lutSize=%d, hasLut=%d",
-         lutPath.c_str(), fallbackLut ? fallbackLut->size : 0, lutTexId, lutSize, (lutTexId != 0 && lutSize > 1) ? 1 : 0);
+    LOGD("GPU ColorPipe LUT status: path='%s', fallbackSize=%d, lutTexId=%u, lutSize=%d, hasLut=%d, layout=%s",
+         lutPath.c_str(), fallbackLut ? fallbackLut->size : 0, lutTexId, lutSize,
+         (lutTexId != 0 && lutSize > 1) ? 1 : 0,
+         isTextureInput ? "unified_texture" : "planar_cpu");
 
     if (lutTexId != 0 && lutSize > 1) {
         glActiveTexture(GL_TEXTURE3);
@@ -225,7 +304,7 @@ bool GpuColorPipeEngine::processAndSaveImage(
         glUniform1f(u.uLutSize, 0.0f);
     }
 
-    // 6. Compute Color Transformation Matrix
+    // 5. Compute Color Transformation Matrix
     // Sensor CCM -> sRGB D65 -> CIE XYZ D65 -> Target Wide Gamut / Rec709
     Matrix3x3 effective_CCM = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
     if (ccm) {
@@ -255,7 +334,7 @@ bool GpuColorPipeEngine::processAndSaveImage(
     // In GLES 3.0, pass GL_TRUE for transpose to convert C++ row-major Matrix3x3 to GLSL column-major mat3
     glUniformMatrix3fv(u.uColorTransform, 1, GL_TRUE, M_final.m);
 
-    // 7. White balance gains & combined exposure / digital gain
+    // 6. White balance gains & combined exposure / digital gain
     float wbR = 1.0f, wbG = 1.0f, wbB = 1.0f;
     if (wbVec) {
         wbR = wbVec[0];
@@ -269,15 +348,15 @@ bool GpuColorPipeEngine::processAndSaveImage(
     const float totalGain = baseGain * expGain;
     glUniform1f(u.uDigitalGain, totalGain);
 
-    // 8. Color Engine & Log mode
+    // 7. Color Engine & Log mode
     glUniform1i(u.uTargetLog, targetLog);
     glUniform1i(u.uColorEngineMode, colorEngineMode);
 
-    // 9. Contrast & Saturation
+    // 8. Contrast & Saturation
     glUniform1f(u.uContrast, contrast);
     glUniform1f(u.uSaturation, saturation);
 
-    // 10. Highlights / Shadows / Whites / Blacks
+    // 9. Highlights / Shadows / Whites / Blacks
     bool hasHswb = (highlights != 0.0f || shadows != 0.0f || whites != 0.0f || blacks != 0.0f);
     glUniform1i(u.uHasHswb, hasHswb ? 1 : 0);
     glUniform1f(u.uHighlights, highlights);
@@ -285,15 +364,20 @@ bool GpuColorPipeEngine::processAndSaveImage(
     glUniform1f(u.uWhites, whites);
     glUniform1f(u.uBlacks, blacks);
 
-    // 11. Geometry: Orientation, Mirror, Zoom Factor
+    // 10. Geometry: Orientation, Mirror, Zoom Factor
     glUniform1i(u.uOrientation, orientation);
     glUniform1i(u.uMirror, mirror ? 1 : 0);
     glUniform1f(u.uZoomFactor, zoomFactor > 1.001f ? zoomFactor : 1.0f);
 
-    // 12. Execute offscreen GPU Draw Call
+    // 11. Execute offscreen GPU Draw Call
     program_->drawQuad();
 
-    // 13. Sync fence wait
+    if (isTextureInput) {
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    // 12. Sync fence wait
     if (!ahbTarget_->waitGpuFinish()) {
         LOGW("waitGpuFinish encountered fallback or warning");
     }
@@ -304,7 +388,7 @@ bool GpuColorPipeEngine::processAndSaveImage(
         ).count();
     }
 
-    // 14. Zero-Copy CPU direct memory mapping & libjpeg-turbo encoding
+    // 13. Zero-Copy CPU direct memory mapping & libjpeg-turbo encoding
     auto encodeStartTime = std::chrono::high_resolution_clock::now();
 
     void* virtualAddr = nullptr;
@@ -354,7 +438,8 @@ bool GpuColorPipeEngine::processAndSaveImage(
         ).count();
     }
 
-    LOGD("GpuColorPipe completed: %dx%d, render=%lld ms, encode=%lld ms, writeOk=%d",
+    LOGD("GpuColorPipe completed (%s): %dx%d, render=%lld ms, encode=%lld ms, writeOk=%d",
+         isTextureInput ? "texture" : "planar",
          finalW, finalH,
          outColorPipeMs ? (long long)*outColorPipeMs : 0LL,
          outJpegEncodeMs ? (long long)*outJpegEncodeMs : 0LL,

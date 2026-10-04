@@ -618,6 +618,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                 effectiveWhiteLevel = (whiteLevel > 0) ? whiteLevel : 1023;
             } else {
                 // Fallback to rgbBuf if bayerBuf is not present
+                if (sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
+                    LOGD("Lazy readback of GPU unified texture %u for Bayer fallback DNG export (%dx%d)",
+                         sharedResult->gpuRgbTexture, width, height);
+                    sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
+                    darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                        sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
+                    );
+                }
                 dngRawData = sharedResult->rgbBuf.data();
                 dngStrideX = 1;
                 dngStrideY = width;
@@ -626,6 +634,15 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                 effectiveWhiteLevel = kMax16BitValue;
             }
         } else {
+            // Linear DNG requested (rawOutputType != 0)
+            if (sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
+                LOGD("Lazy readback of GPU unified texture %u for Linear DNG export (%dx%d)",
+                     sharedResult->gpuRgbTexture, width, height);
+                sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
+                darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                    sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
+                );
+            }
             dngRawData = sharedResult->rgbBuf.data();
             dngStrideX = 1;
             dngStrideY = width;
@@ -666,20 +683,38 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
         bool gpuAttemptSuccess = false;
         if (darkbag::gpu::GpuColorPipeEngine::instance().isAvailable()) {
-            gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImage(
-                sharedResult->rgbBuf.data(),
-                width, height,
-                1, width, width * height,
-                digitalGain, targetLog,
-                lutPathStr, &lut,
-                exposure, contrast, saturation,
-                highlights, shadows, whites, blacks,
-                jpg_path_cstr, outJpgFd,
-                ccmVec.data(), effectiveWb,
-                orientation, (bool)mirror, effectiveZoom,
-                (int)colorEngineMode, faithfulHighlights,
-                &measuredColorPipe, &measuredJpegEncode
-            );
+            if (sharedResult && sharedResult->gpuRgbTexture != 0) {
+                LOGD("Invoking zero-copy GPU-to-GPU ColorPipe from unified texture %u (%dx%d)",
+                     sharedResult->gpuRgbTexture, width, height);
+                gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImageFromTexture(
+                    sharedResult->gpuRgbTexture,
+                    width, height,
+                    digitalGain, targetLog,
+                    lutPathStr, &lut,
+                    exposure, contrast, saturation,
+                    highlights, shadows, whites, blacks,
+                    jpg_path_cstr, outJpgFd,
+                    ccmVec.data(), effectiveWb,
+                    orientation, (bool)mirror, effectiveZoom,
+                    (int)colorEngineMode, faithfulHighlights,
+                    &measuredColorPipe, &measuredJpegEncode
+                );
+            } else if (sharedResult && !sharedResult->rgbBuf.empty()) {
+                gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImage(
+                    sharedResult->rgbBuf.data(),
+                    width, height,
+                    1, width, width * height,
+                    digitalGain, targetLog,
+                    lutPathStr, &lut,
+                    exposure, contrast, saturation,
+                    highlights, shadows, whites, blacks,
+                    jpg_path_cstr, outJpgFd,
+                    ccmVec.data(), effectiveWb,
+                    orientation, (bool)mirror, effectiveZoom,
+                    (int)colorEngineMode, faithfulHighlights,
+                    &measuredColorPipe, &measuredJpegEncode
+                );
+            }
             if (gpuAttemptSuccess) {
                 saveOk = true;
                 LOGD("GPU ColorPipe executed successfully (render: %lld ms, jpeg: %lld ms)",
@@ -690,10 +725,24 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         }
 
         if (!gpuAttemptSuccess) {
-            saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
-                                            exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                            jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd,
-                                            &measuredColorPipe, &measuredJpegEncode);
+            // Lazy readback of GPU texture if rgbBuf is empty for CPU ColorPipe fallback
+            if (sharedResult && sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
+                LOGW("Lazy readback of GPU unified texture %u for CPU ColorPipe fallback (%dx%d)",
+                     sharedResult->gpuRgbTexture, width, height);
+                sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
+                darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                    sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
+                );
+            }
+            if (sharedResult && !sharedResult->rgbBuf.empty()) {
+                saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
+                                                exposure, contrast, saturation, highlights, shadows, whites, blacks,
+                                                jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd,
+                                                &measuredColorPipe, &measuredJpegEncode);
+            } else {
+                LOGE("CPU ColorPipe fallback failed: no RGB buffer available");
+                saveOk = false;
+            }
         }
         jpgMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jpgStart).count();
         colorPipeMs = (jlong)measuredColorPipe;
@@ -1049,7 +1098,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
     auto sharedResult = std::make_shared<SharedCaptureResult>();
     sharedResult->bayerBuf.resize(numPixels);
-    sharedResult->rgbBuf.resize(numPixels * 3);
+    // Note: Do not pre-allocate sharedResult->rgbBuf when GPU demosaicing is available!
 
     // 1. Copy raw CFA into sharedResult->bayerBuf for native DNG writing (< 10ms)
     std::memcpy(sharedResult->bayerBuf.data(), rawDataPtr, numPixels * sizeof(uint16_t));
@@ -1076,24 +1125,33 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     bool gpuDemosaicOk = false;
     if (darkbag::gpu::GpuRcdComputeEngine::instance().isAvailable()) {
         int64_t gpuDemosaicMs = 0;
-        gpuDemosaicOk = darkbag::gpu::GpuRcdComputeEngine::instance().demosaicToCpuBuffer(
+        GLuint rgbTex = 0;
+        gpuDemosaicOk = darkbag::gpu::GpuRcdComputeEngine::instance().demosaicToRgbTexture(
             sharedResult->bayerBuf.data(),
             width, height,
             cfaPattern,
             bl_array,
             static_cast<uint16_t>(whiteLevel),
             wb_array,
-            sharedResult->rgbBuf.data(),
+            &rgbTex,
             &gpuDemosaicMs
         );
         if (gpuDemosaicOk) {
-            LOGD("GPU Compute RCD demosaic succeeded in %lld ms", (long long)gpuDemosaicMs);
+            sharedResult->gpuRgbTexture = darkbag::gpu::GpuRcdComputeEngine::instance().transferOutputTexture();
+            if (sharedResult->gpuRgbTexture == 0) {
+                sharedResult->gpuRgbTexture = rgbTex;
+            }
+            sharedResult->gpuTexWidth = width;
+            sharedResult->gpuTexHeight = height;
+            LOGD("GPU Compute RCD demosaic succeeded in %lld ms (unified texture %u, %dx%d)",
+                 (long long)gpuDemosaicMs, sharedResult->gpuRgbTexture, width, height);
         } else {
             LOGW("GPU Compute RCD demosaic failed, falling back to CPU RCD");
         }
     }
 
     if (!gpuDemosaicOk) {
+        sharedResult->rgbBuf.resize(numPixels * 3);
         darkbag::demosaic::rcd_demosaic(
             sharedResult->bayerBuf.data(),
             width,
@@ -1125,6 +1183,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     unsigned char* bitmapPixels = nullptr;
     if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
     if (bitmapPixels) {
+        if (sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
+            LOGD("Lazy readback of GPU unified texture %u for outputBitmap preview (%dx%d)",
+                 sharedResult->gpuRgbTexture, width, height);
+            sharedResult->rgbBuf.resize(numPixels * 3);
+            darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
+            );
+        }
         AndroidBitmapInfo info;
         AndroidBitmap_getInfo(env, outputBitmap, &info);
         std::vector<float> ccmVec(9, 0.0f);
@@ -1439,6 +1505,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
 
             int width = session->width();
             int height = session->height();
+            if (sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
+                LOGD("Lazy readback of GPU unified texture %u for streaming finish outputBitmap preview (%dx%d)",
+                     sharedResult->gpuRgbTexture, width, height);
+                sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
+                darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                    sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
+                );
+            }
             uint16_t* raw_ptr = sharedResult->rgbBuf.data();
             int stride_x = 1;
             int stride_y = width;

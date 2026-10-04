@@ -48,6 +48,8 @@ precision mediump sampler3D;
 uniform highp usampler2D uTexR;
 uniform highp usampler2D uTexG;
 uniform highp usampler2D uTexB;
+uniform highp usampler2D uTexUnifiedRgb;
+uniform int uInputLayout; // 0 = Planar 3-texture (uTexR, uTexG, uTexB), 1 = Unified RGBA16UI (uTexUnifiedRgb)
 
 uniform sampler3D uLut3D;
 uniform int uHasLut;
@@ -269,11 +271,18 @@ float applyHswb(float v) {
 }
 
 void main() {
-    // 1. Fetch 16-bit linear sensor RGB from planar textures
-    // Note: All planar textures are GL_R16UI (single-channel red integer), so each channel data resides in .r
-    float rawR = float(texture(uTexR, vTexCoord).r) / 65535.0;
-    float rawG = float(texture(uTexG, vTexCoord).r) / 65535.0;
-    float rawB = float(texture(uTexB, vTexCoord).r) / 65535.0;
+    // 1. Fetch 16-bit linear sensor RGB (Layout 1: unified RGBA16UI, Layout 0: planar 3-texture)
+    float rawR, rawG, rawB;
+    if (uInputLayout == 1) {
+        uvec4 rawRgba = texture(uTexUnifiedRgb, vTexCoord);
+        rawR = float(rawRgba.r) / 65535.0;
+        rawG = float(rawRgba.g) / 65535.0;
+        rawB = float(rawRgba.b) / 65535.0;
+    } else {
+        rawR = float(texture(uTexR, vTexCoord).r) / 65535.0;
+        rawG = float(texture(uTexG, vTexCoord).r) / 65535.0;
+        rawB = float(texture(uTexB, vTexCoord).r) / 65535.0;
+    }
     float rawMax = max(rawR, max(rawG, rawB));
 
     // 2. White Balance Gains & Digital Gain

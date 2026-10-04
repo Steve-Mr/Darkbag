@@ -205,6 +205,19 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
     return true;
 }
 
+void SharedCaptureResult::releaseGpuResources() {
+    if (gpuRgbTexture != 0) {
+        darkbag::gpu::GpuRcdComputeEngine::releaseTexture(gpuRgbTexture);
+        gpuRgbTexture = 0;
+    }
+    gpuTexWidth = 0;
+    gpuTexHeight = 0;
+}
+
+SharedCaptureResult::~SharedCaptureResult() {
+    releaseGpuResources();
+}
+
 int HdrPlusStreamingSession::finish(
     std::shared_ptr<SharedCaptureResult>& outSharedResult,
     Halide::Runtime::Buffer<uint16_t>& outRgbBuf,
@@ -222,7 +235,6 @@ int HdrPlusStreamingSession::finish(
 
     const size_t numPixels = static_cast<size_t>(m_width) * m_height;
     outSharedResult->bayerBuf.resize(numPixels);
-    outSharedResult->rgbBuf.resize(numPixels * 3);
     outSharedResult->noiseProfile = m_noiseProfile;
 
     // Determine effective fusion mode:
@@ -238,6 +250,7 @@ int HdrPlusStreamingSession::finish(
     if (effectiveMode == 2 && m_sabreEngine && m_framesPushed > 1) {
         LOGD("HdrPlusStreamingSession: resolving with Sabre Super-Resolution (zoom=%.2fx, frames=%d)",
              m_zoomFactor, m_framesPushed);
+        outSharedResult->rgbBuf.resize(numPixels * 3);
         auto fusionStart = std::chrono::high_resolution_clock::now();
         bool sabreOk = m_sabreEngine->resolve(
             outSharedResult->rgbBuf.data(),
@@ -278,10 +291,12 @@ int HdrPlusStreamingSession::finish(
     auto fusionStart = std::chrono::high_resolution_clock::now();
 
     outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
-    outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
 
     if (effectiveMode == 3) {
         // Classic Wiener mode: requires Halide single pipeline with Malvar 5x5 demosaic
+        outSharedResult->rgbBuf.resize(numPixels * 3);
+        outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
+
         Halide::Runtime::Buffer<uint16_t> inputBuf(m_refFrame.data(), m_width, m_height, 1);
         Halide::Runtime::Buffer<float> ccmHalideBuf(m_ccm.data(), 3, 3);
 
@@ -322,13 +337,14 @@ int HdrPlusStreamingSession::finish(
         outSharedResult->isWhiteBalanceApplied = true;
     } else {
         // High-Fidelity RCD Demosaicing (Spatial + RCD)
-        // Prefer GPU Compute RCD kernel (OpenGL ES 3.1+) with CPU fallback
+        // Prefer GPU Compute RCD kernel (OpenGL ES 3.1+) with direct texture output, CPU fallback
         uint16_t bl_array[4] = {m_bl_r, m_bl_g0, m_bl_g1, m_bl_b};
         float wb_array[4] = {m_wb_r, m_wb_g0, m_wb_g1, m_wb_b};
         bool gpuDemosaicOk = false;
         if (darkbag::gpu::GpuRcdComputeEngine::instance().isAvailable()) {
             int64_t gpuComputeMs = 0;
-            gpuDemosaicOk = darkbag::gpu::GpuRcdComputeEngine::instance().demosaicToCpuBuffer(
+            GLuint rgbTex = 0;
+            gpuDemosaicOk = darkbag::gpu::GpuRcdComputeEngine::instance().demosaicToRgbTexture(
                 outSharedResult->bayerBuf.data(),
                 m_width,
                 m_height,
@@ -336,17 +352,25 @@ int HdrPlusStreamingSession::finish(
                 bl_array,
                 static_cast<uint16_t>(m_whiteLevel),
                 wb_array,
-                outSharedResult->rgbBuf.data(),
+                &rgbTex,
                 &gpuComputeMs
             );
             if (gpuDemosaicOk) {
-                LOGD("HDR+ Burst GPU Compute RCD demosaic succeeded in %lld ms", (long long)gpuComputeMs);
+                outSharedResult->gpuRgbTexture = darkbag::gpu::GpuRcdComputeEngine::instance().transferOutputTexture();
+                if (outSharedResult->gpuRgbTexture == 0) {
+                    outSharedResult->gpuRgbTexture = rgbTex;
+                }
+                outSharedResult->gpuTexWidth = m_width;
+                outSharedResult->gpuTexHeight = m_height;
+                LOGD("HDR+ Burst GPU Compute RCD demosaic succeeded in %lld ms (unified texture %u, %dx%d)",
+                     (long long)gpuComputeMs, outSharedResult->gpuRgbTexture, m_width, m_height);
             } else {
                 LOGW("HDR+ Burst GPU Compute RCD demosaic failed, falling back to CPU RCD");
             }
         }
 
         if (!gpuDemosaicOk) {
+            outSharedResult->rgbBuf.resize(numPixels * 3);
             darkbag::demosaic::rcd_demosaic(
                 outSharedResult->bayerBuf.data(),
                 m_width,
@@ -357,6 +381,7 @@ int HdrPlusStreamingSession::finish(
                 wb_array,
                 outSharedResult->rgbBuf.data()
             );
+            outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
         }
         outSharedResult->isWhiteBalanceApplied = false;
     }

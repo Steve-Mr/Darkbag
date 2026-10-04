@@ -10,6 +10,8 @@ struct ColorPipeUniforms {
     GLint uTexR = -1;
     GLint uTexG = -1;
     GLint uTexB = -1;
+    GLint uTexUnifiedRgb = -1;
+    GLint uInputLayout = -1;
     GLint uLut3D = -1;
     GLint uHasLut = -1;
     GLint uLutSize = -1;

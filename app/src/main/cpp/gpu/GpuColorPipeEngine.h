@@ -21,11 +21,26 @@ public:
     // Query whether GPU offscreen acceleration is fully supported on this device
     bool isAvailable();
 
-    // Main entry point for GPU color grading, 3D LUT simulation, and zero-copy JPEG encoding
+    // Main entry point for GPU color grading, 3D LUT simulation, and zero-copy JPEG encoding (Planar RGB)
     bool processAndSaveImage(
         const uint16_t* planarRgb,
         int width, int height,
         int stride_x, int stride_y, int stride_c,
+        float digitalGain, int targetLog,
+        const std::string& lutPath, const LUT3D* fallbackLut,
+        float exposure, float contrast, float saturation,
+        float highlights, float shadows, float whites, float blacks,
+        const char* jpgPath, int outJpgFd,
+        const float* ccm, const float* wbVec,
+        int orientation, bool mirror, float zoomFactor,
+        int colorEngineMode, bool faithfulHighlights,
+        int64_t* outColorPipeMs, int64_t* outJpegEncodeMs
+    );
+
+    // Direct zero-copy GPU-to-GPU entry point from unified GL_RGBA16UI texture
+    bool processAndSaveImageFromTexture(
+        GLuint inputRgbTexId,
+        int width, int height,
         float digitalGain, int targetLog,
         const std::string& lutPath, const LUT3D* fallbackLut,
         float exposure, float contrast, float saturation,
@@ -46,6 +61,21 @@ private:
     GpuColorPipeEngine& operator=(const GpuColorPipeEngine&) = delete;
 
     bool ensureShaders();
+
+    bool executePipeline(
+        int width, int height,
+        bool isTextureInput, GLuint inputRgbTexId,
+        const uint16_t* planarRgb, int stride_x, int stride_y, int stride_c,
+        float digitalGain, int targetLog,
+        const std::string& lutPath, const LUT3D* fallbackLut,
+        float exposure, float contrast, float saturation,
+        float highlights, float shadows, float whites, float blacks,
+        const char* jpgPath, int outJpgFd,
+        const float* ccm, const float* wbVec,
+        int orientation, bool mirror, float zoomFactor,
+        int colorEngineMode, bool faithfulHighlights,
+        int64_t* outColorPipeMs, int64_t* outJpegEncodeMs
+    );
 
     std::mutex engineMutex_;
     std::unique_ptr<GpuProgram> program_;

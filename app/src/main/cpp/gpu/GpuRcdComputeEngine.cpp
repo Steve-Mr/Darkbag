@@ -139,17 +139,14 @@ void GpuRcdComputeEngine::releaseTextures() {
 bool GpuRcdComputeEngine::prepareTextures(int width, int height) {
     if (width <= 0 || height <= 0) return false;
 
-    if (currentWidth_ == width && currentHeight_ == height &&
-        bayerInputTex_ != 0 && greenIntermTex_ != 0 && outputTexRgb_ != 0) {
-        return true;
+    if (currentWidth_ != width || currentHeight_ != height) {
+        releaseTextures(); // Only release textures when dimensions change
+        currentWidth_ = width;
+        currentHeight_ = height;
     }
 
-    releaseTextures(); // Only release textures, preserve compiled compute shaders!
-
-    currentWidth_ = width;
-    currentHeight_ = height;
-
     auto createTex = [&](GLuint& tex, GLenum internalFormat, GLenum format, GLenum type) -> bool {
+        if (tex != 0) return true;
         glGenTextures(1, &tex);
         glBindTexture(GL_TEXTURE_2D, tex);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -179,7 +176,7 @@ bool GpuRcdComputeEngine::prepareTextures(int width, int height) {
     }
 
     glBindTexture(GL_TEXTURE_2D, 0);
-    LOGD("Allocated RCD textures (%dx%d): Bayer=%u, Green=%u, OutRGB=%u",
+    LOGD("Allocated/Prepared RCD textures (%dx%d): Bayer=%u, Green=%u, OutRGB=%u",
          width, height, bayerInputTex_, greenIntermTex_, outputTexRgb_);
     return true;
 }
@@ -354,18 +351,32 @@ bool GpuRcdComputeEngine::demosaicToRgbTexture(
     );
 }
 
-bool GpuRcdComputeEngine::demosaicToCpuBuffer(
-    const uint16_t* bayerData,
+GLuint GpuRcdComputeEngine::transferOutputTexture() {
+    std::lock_guard<std::mutex> lock(engineMutex_);
+    GLuint tex = outputTexRgb_;
+    outputTexRgb_ = 0;
+    return tex;
+}
+
+void GpuRcdComputeEngine::releaseTexture(GLuint texId) {
+    if (texId == 0) return;
+    GpuContext& ctx = GpuContext::instance();
+    GpuContextScope ctxScope(ctx);
+    if (ctxScope.isAcquired()) {
+        glDeleteTextures(1, &texId);
+        LOGD("GpuRcdComputeEngine::releaseTexture: deleted texture %u", texId);
+    } else {
+        LOGE("GpuRcdComputeEngine::releaseTexture: failed to acquire context for texture %u", texId);
+    }
+}
+
+bool GpuRcdComputeEngine::readbackRgbTextureToCpu(
+    GLuint texId,
     int width, int height,
-    int cfaPattern,
-    const uint16_t* blackLevel,
-    uint16_t whiteLevel,
-    const float* whiteBalance,
-    uint16_t* rgbOutput,
-    int64_t* outComputeMs
+    uint16_t* rgbOutput
 ) {
-    if (!bayerData || !rgbOutput || width <= 0 || height <= 0) {
-        LOGE("Invalid arguments for demosaicToCpuBuffer");
+    if (texId == 0 || !rgbOutput || width <= 0 || height <= 0) {
+        LOGE("Invalid arguments for readbackRgbTextureToCpu");
         return false;
     }
 
@@ -374,29 +385,25 @@ bool GpuRcdComputeEngine::demosaicToCpuBuffer(
     GpuContext& ctx = GpuContext::instance();
     GpuContextScope ctxScope(ctx);
     if (!ctxScope.isAcquired()) {
-        LOGE("Failed to acquire EGL context for RCD Compute readback");
+        LOGE("Failed to acquire EGL context for texture readback");
         return false;
     }
 
-    if (!ctx.supportsComputeShader()) {
-        LOGE("GLES Compute Shader is not supported on this device");
-        return false;
-    }
+    return readbackRgbTextureToCpuLocked(texId, width, height, rgbOutput);
+}
 
-    GLuint texRgb = 0;
-    if (!demosaicToRgbTextureLocked(
-            bayerData, width, height, cfaPattern, blackLevel, whiteLevel, whiteBalance,
-            &texRgb, outComputeMs)) {
-        return false;
-    }
-
+bool GpuRcdComputeEngine::readbackRgbTextureToCpuLocked(
+    GLuint texId,
+    int width, int height,
+    uint16_t* rgbOutput
+) {
     const size_t numPixels = static_cast<size_t>(width) * height;
 
     // Attach unified RGBA16UI texture to FBO for single-pass fast readback
     GLuint fbo = 0;
     glGenFramebuffers(1, &fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texRgb, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texId, 0);
 
     GLenum fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (fboStatus != GL_FRAMEBUFFER_COMPLETE) {
@@ -442,6 +449,45 @@ bool GpuRcdComputeEngine::demosaicToCpuBuffer(
 #endif
 
     return true;
+}
+
+bool GpuRcdComputeEngine::demosaicToCpuBuffer(
+    const uint16_t* bayerData,
+    int width, int height,
+    int cfaPattern,
+    const uint16_t* blackLevel,
+    uint16_t whiteLevel,
+    const float* whiteBalance,
+    uint16_t* rgbOutput,
+    int64_t* outComputeMs
+) {
+    if (!bayerData || !rgbOutput || width <= 0 || height <= 0) {
+        LOGE("Invalid arguments for demosaicToCpuBuffer");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(engineMutex_);
+
+    GpuContext& ctx = GpuContext::instance();
+    GpuContextScope ctxScope(ctx);
+    if (!ctxScope.isAcquired()) {
+        LOGE("Failed to acquire EGL context for RCD Compute readback");
+        return false;
+    }
+
+    if (!ctx.supportsComputeShader()) {
+        LOGE("GLES Compute Shader is not supported on this device");
+        return false;
+    }
+
+    GLuint texRgb = 0;
+    if (!demosaicToRgbTextureLocked(
+            bayerData, width, height, cfaPattern, blackLevel, whiteLevel, whiteBalance,
+            &texRgb, outComputeMs)) {
+        return false;
+    }
+
+    return readbackRgbTextureToCpuLocked(texRgb, width, height, rgbOutput);
 }
 
 void GpuRcdComputeEngine::release() {

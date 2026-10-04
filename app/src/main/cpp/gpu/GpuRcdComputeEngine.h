@@ -57,6 +57,27 @@ public:
     );
 
     /**
+     * Transfers ownership of the output GL_RGBA16UI texture handle to the caller.
+     * The internal texture reference is cleared to 0 so the engine will allocate
+     * a fresh texture for subsequent demosaicing calls.
+     */
+    GLuint transferOutputTexture();
+
+    /**
+     * Safely releases a GPU texture in an offscreen EGL context scope.
+     */
+    static void releaseTexture(GLuint texId);
+
+    /**
+     * Reads back an RGBA16UI texture to planar RGB CPU buffer using FBO readback + NEON deinterleaving.
+     */
+    bool readbackRgbTextureToCpu(
+        GLuint texId,
+        int width, int height,
+        uint16_t* rgbOutput
+    );
+
+    /**
      * Backwards-compatible overload: demosaics and downloads planar 16-bit RGB to CPU memory.
      */
     bool demosaicToCpuBuffer(
@@ -91,6 +112,12 @@ private:
         const float* whiteBalance,
         GLuint* outTexRgb,
         int64_t* outComputeMs
+    );
+
+    bool readbackRgbTextureToCpuLocked(
+        GLuint texId,
+        int width, int height,
+        uint16_t* rgbOutput
     );
 
     std::mutex engineMutex_;
