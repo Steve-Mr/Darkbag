@@ -128,9 +128,24 @@ bool GpuContext::initExtensions() {
                       fnDestroyImageKHR != nullptr &&
                       fnGlEGLImageTargetTexture2DOES != nullptr);
 
+    GLint major = 0, minor = 0;
+    glGetIntegerv(GL_MAJOR_VERSION, &major);
+    glGetIntegerv(GL_MINOR_VERSION, &minor);
+    glMajorVersion_ = major;
+    glMinorVersion_ = minor;
+    hasComputeSupport_ = (major > 3 || (major == 3 && minor >= 1));
+
+    if (hasComputeSupport_) {
+        glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS, &maxWorkGroupInvocations_);
+    }
+
     LOGD("EGL & AHB Extension Status: AHB Direct EGLImage=%s, SyncFence=%s",
          hasAhbSupport_ ? "AVAILABLE" : "UNAVAILABLE",
          (fnCreateSyncKHR && fnClientWaitSyncKHR) ? "AVAILABLE" : "UNAVAILABLE");
+    LOGD("GLES Capabilities: Version=%d.%d, ComputeShader=%s, MaxWorkGroupInvocations=%d",
+         major, minor,
+         hasComputeSupport_ ? "AVAILABLE" : "UNAVAILABLE",
+         maxWorkGroupInvocations_);
 
     return true;
 }

@@ -32,6 +32,7 @@
 #include "HdrPlusStreamingSession.h"
 #include "demosaic/RcdDemosaic.h"
 #include "gpu/GpuColorPipeEngine.h"
+#include "gpu/GpuRcdComputeEngine.h"
 
 
 #define TAG "HdrPlusJNI"
@@ -1070,18 +1071,40 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         env->GetFloatArrayRegion(whiteBalance, 0, 4, wb_array);
     }
 
-    // 3. High-Fidelity Multi-threaded RCD Demosaicing (~500ms instead of 5000ms Halide single pipeline)
+    // 3. High-Fidelity RCD Demosaicing (GPU Compute Shader preferred, CPU OpenMP fallback)
     auto demosaicStart = std::chrono::high_resolution_clock::now();
-    darkbag::demosaic::rcd_demosaic(
-        sharedResult->bayerBuf.data(),
-        width,
-        height,
-        cfaPattern,
-        bl_array,
-        static_cast<uint16_t>(whiteLevel),
-        wb_array,
-        sharedResult->rgbBuf.data()
-    );
+    bool gpuDemosaicOk = false;
+    if (darkbag::gpu::GpuRcdComputeEngine::instance().isAvailable()) {
+        int64_t gpuDemosaicMs = 0;
+        gpuDemosaicOk = darkbag::gpu::GpuRcdComputeEngine::instance().demosaicToCpuBuffer(
+            sharedResult->bayerBuf.data(),
+            width, height,
+            cfaPattern,
+            bl_array,
+            static_cast<uint16_t>(whiteLevel),
+            wb_array,
+            sharedResult->rgbBuf.data(),
+            &gpuDemosaicMs
+        );
+        if (gpuDemosaicOk) {
+            LOGD("GPU Compute RCD demosaic succeeded in %lld ms", (long long)gpuDemosaicMs);
+        } else {
+            LOGW("GPU Compute RCD demosaic failed, falling back to CPU RCD");
+        }
+    }
+
+    if (!gpuDemosaicOk) {
+        darkbag::demosaic::rcd_demosaic(
+            sharedResult->bayerBuf.data(),
+            width,
+            height,
+            cfaPattern,
+            bl_array,
+            static_cast<uint16_t>(whiteLevel),
+            wb_array,
+            sharedResult->rgbBuf.data()
+        );
+    }
     auto demosaicDurationMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::high_resolution_clock::now() - demosaicStart
     ).count();

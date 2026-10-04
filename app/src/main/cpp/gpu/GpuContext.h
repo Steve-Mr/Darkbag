@@ -3,6 +3,7 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
+#include <GLES3/gl31.h>
 #include <GLES3/gl3ext.h>
 #include <GLES2/gl2ext.h>
 #include <mutex>
@@ -31,6 +32,11 @@ public:
 
     bool isInitialized() const { return initialized_; }
     bool supportsAHardwareBuffer() const { return hasAhbSupport_; }
+    bool supportsComputeShader() const { return hasComputeSupport_; }
+
+    int getGlMajorVersion() const { return glMajorVersion_; }
+    int getGlMinorVersion() const { return glMinorVersion_; }
+    int getMaxWorkGroupInvocations() const { return maxWorkGroupInvocations_; }
 
     EGLDisplay getDisplay() const { return eglDisplay_; }
     EGLContext getContext() const { return eglContext_; }
@@ -55,6 +61,10 @@ private:
     std::mutex contextMutex_;
     bool initialized_ = false;
     bool hasAhbSupport_ = false;
+    bool hasComputeSupport_ = false;
+    int glMajorVersion_ = 0;
+    int glMinorVersion_ = 0;
+    int maxWorkGroupInvocations_ = 0;
 
     EGLDisplay eglDisplay_ = EGL_NO_DISPLAY;
     EGLContext eglContext_ = EGL_NO_CONTEXT;
