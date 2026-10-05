@@ -1086,6 +1086,7 @@ class CameraFragment : Fragment() {
 
             // Ensure Camera2 is closed if we are switching engines or lenses
             closeCamera2()
+            top.maary.darkbag.processor.StreamingBufferPool.clear()
 
             bindCameraUseCasesInternal()
         }
@@ -1561,6 +1562,10 @@ class CameraFragment : Fragment() {
 
             // Listener for button used to switch cameras. Only called if the button is enabled
             it.setOnClickListener {
+                if (isBurstActive) {
+                    Log.w(TAG, "Ignore switch camera while burst capture is active")
+                    return@setOnClickListener
+                }
                 if (isMultiCameraModeActive) {
                     toggleFrontPipInMultiCameraMode()
                     return@setOnClickListener

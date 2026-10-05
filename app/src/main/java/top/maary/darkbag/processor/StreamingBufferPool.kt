@@ -30,6 +30,7 @@ object StreamingBufferPool {
         return buf
     }
 
+    @Synchronized
     fun release(buffer: ByteBuffer?) {
         if (buffer != null && buffer.isDirect) {
             if (pool.size < MAX_CACHED_BUFFERS) {
@@ -41,6 +42,7 @@ object StreamingBufferPool {
         }
     }
 
+    @Synchronized
     fun clear() {
         var buf = pool.poll()
         var count = 0

@@ -360,34 +360,32 @@ class HdrPlusProcessingService : LifecycleService() {
                                 Log.i(TAG, baselineReport)
                                 top.maary.darkbag.utils.DebugLogManager.addDiagnosticLog(baselineReport)
 
-                                if (req.saveJpg || req.saveRaw) {
-                                    val shouldSaveJpg = req.saveJpg
-                                    val shouldSaveRaw = req.saveRaw
+                                val needsSecondaryJpg = req.saveJpg && pfdJpg == null
+                                val needsSecondaryRaw = req.saveRaw && pfdDng == null
 
-                                    if (shouldSaveJpg || shouldSaveRaw) {
-                                        top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
-                                            context = this@HdrPlusProcessingService,
-                                            inputBitmap = null,
-                                            bmpPath = if (shouldSaveJpg) req.fullResJpgPath else null,
-                                            rotationDegrees = 0,
-                                            zoomFactor = req.zoomFactor,
-                                            baseName = req.baseName,
-                                            linearDngPath = if (shouldSaveRaw) dngPathToUse else null,
-                                            saveJpg = shouldSaveJpg,
-                                            saveRaw = shouldSaveRaw,
-                                            jpgFolderUri = req.jpgFolderUri,
-                                            rawFolderUri = req.rawFolderUri,
-                                            mirror = false,
-                                            isFastPath = false,
-                                            halfFrameMetadata = req.hfMetadata,
-                                            editConfig = req.editConfig,
-                                            digitalGain = req.digitalGain,
-                                            captureMetadata = req.metadata,
-                                            isAlreadyCropped = true,
-                                            motionPhotoMp4Path = req.motionPhotoMp4Path,
-                                            motionPhotoStillPtsUs = req.motionPhotoStillPtsUs
-                                        )
-                                    }
+                                if (needsSecondaryJpg || needsSecondaryRaw) {
+                                    top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
+                                        context = this@HdrPlusProcessingService,
+                                        inputBitmap = null,
+                                        bmpPath = if (needsSecondaryJpg) req.fullResJpgPath else null,
+                                        rotationDegrees = 0,
+                                        zoomFactor = req.zoomFactor,
+                                        baseName = req.baseName,
+                                        linearDngPath = if (needsSecondaryRaw) dngPathToUse else null,
+                                        saveJpg = needsSecondaryJpg,
+                                        saveRaw = needsSecondaryRaw,
+                                        jpgFolderUri = req.jpgFolderUri,
+                                        rawFolderUri = req.rawFolderUri,
+                                        mirror = false,
+                                        isFastPath = false,
+                                        halfFrameMetadata = req.hfMetadata,
+                                        editConfig = req.editConfig,
+                                        digitalGain = req.digitalGain,
+                                        captureMetadata = req.metadata,
+                                        isAlreadyCropped = true,
+                                        motionPhotoMp4Path = req.motionPhotoMp4Path,
+                                        motionPhotoStillPtsUs = req.motionPhotoStillPtsUs
+                                    )
                                 }
                                 if (req.timing?.firstOutputWritten == 0L) {
                                     req.timing?.firstOutputWritten = System.currentTimeMillis()
