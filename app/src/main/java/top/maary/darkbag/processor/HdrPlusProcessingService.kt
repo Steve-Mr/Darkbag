@@ -222,110 +222,183 @@ class HdrPlusProcessingService : LifecycleService() {
                                 )
                             }
 
-                            var exportRet = -1
-                            try {
-                                exportRet = ColorProcessor.exportHdrPlus(
-                                    tempRawPath = req.requestId,
-                                    width = req.width,
-                                    height = req.height,
-                                    orientation = req.orientation,
-                                    digitalGain = req.digitalGain,
-                                    targetLog = req.targetLogIndex,
-                                    lutPath = req.lutPath,
-                                    exposure = edit?.exposure ?: 0f,
-                                    contrast = edit?.contrast ?: 0f,
-                                    saturation = edit?.saturation ?: 0f,
-                                    highlights = edit?.highlights ?: 0f,
-                                    shadows = edit?.shadows ?: 0f,
-                                    whites = edit?.whites ?: 0f,
-                                    blacks = edit?.blacks ?: 0f,
-                                    jpgPath = if (shouldSaveJpg && pfdJpg == null) req.fullResJpgPath else null,
-                                    dngPath = if (shouldSaveRaw && pfdDng == null) dngPathToUse else null,
-                                    faithfulHighlights = req.isSingleFrame,
-                                    ccm = req.ccm,
-                                    whiteBalance = req.whiteBalance,
-                                    zoomFactor = req.zoomFactor,
-                                    mirror = req.mirror,
-                                    metadata = req.metadata,
-                                    enableMemoryColor = req.enableMemoryColor,
-                                    colorEngineMode = req.colorEngineMode,
-                                    colorMatrix1 = req.colorMatrix1,
-                                    colorMatrix2 = req.colorMatrix2,
-                                    forwardMatrix1 = req.forwardMatrix1,
-                                    forwardMatrix2 = req.forwardMatrix2,
-                                    calibrationIlluminant1 = req.calibrationIlluminant1,
-                                    calibrationIlluminant2 = req.calibrationIlluminant2,
-                                    neutralColorPoint = req.neutralColorPoint,
-                                    debugStats = debugStats,
-                                    outJpgFd = pfdJpg?.first?.fd ?: -1,
-                                    outDngFd = pfdDng?.first?.fd ?: -1,
-                                    dngCompressionMode = req.dngCompressionMode,
-                                    rawOutputType = req.rawOutputType,
-                                    cfaPattern = req.cfaPattern,
-                                    blackLevelPattern = req.blackLevelPattern,
-                                    whiteLevel = req.whiteLevel,
-                                    dynamicBlackLevel = req.dynamicBlackLevel,
-                                    noiseProfile = req.noiseProfile,
-                                    activeArray = req.activeArray,
-                                    lensShadingMap = req.lensShadingMap,
-                                    lensShadingRows = req.lensShadingRows,
-                                    lensShadingCols = req.lensShadingCols
-                                )
-                                 exportSuccessful = (exportRet == 0)
-                                req.timing?.stage2ExportDone = System.currentTimeMillis()
-                                req.timing?.recordStage2Metrics(
-                                    postMs = debugStats[2],
-                                    dngMs = debugStats[3],
-                                    jpgMs = debugStats[4]
-                                )
-                            } finally {
-                                if (pfdJpg != null) {
-                                    top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
-                                        context = this@HdrPlusProcessingService,
-                                        pfdPair = pfdJpg,
-                                        success = exportSuccessful,
-                                        editConfig = req.editConfig,
-                                        captureMetadata = req.metadata
+                            val jpgDebugStats = LongArray(15)
+                            val dngDebugStats = LongArray(15)
+                            var jpgExportRet = 0
+                            var dngExportRet = 0
+                            var jpgSuccess = false
+                            var dngSuccess = false
+
+                            // Phase 3B: Decoupled Stage 2 export.
+                            // Fast Path: Prioritize JPEG export to achieve sub-second T2 time to first output.
+                            if (shouldSaveJpg) {
+                                try {
+                                    jpgExportRet = ColorProcessor.exportHdrPlus(
+                                        tempRawPath = req.requestId,
+                                        width = req.width,
+                                        height = req.height,
+                                        orientation = req.orientation,
+                                        digitalGain = req.digitalGain,
+                                        targetLog = req.targetLogIndex,
+                                        lutPath = req.lutPath,
+                                        exposure = edit?.exposure ?: 0f,
+                                        contrast = edit?.contrast ?: 0f,
+                                        saturation = edit?.saturation ?: 0f,
+                                        highlights = edit?.highlights ?: 0f,
+                                        shadows = edit?.shadows ?: 0f,
+                                        whites = edit?.whites ?: 0f,
+                                        blacks = edit?.blacks ?: 0f,
+                                        jpgPath = if (pfdJpg == null) req.fullResJpgPath else null,
+                                        dngPath = null,
+                                        faithfulHighlights = req.isSingleFrame,
+                                        ccm = req.ccm,
+                                        whiteBalance = req.whiteBalance,
+                                        zoomFactor = req.zoomFactor,
+                                        mirror = req.mirror,
+                                        metadata = req.metadata,
+                                        enableMemoryColor = req.enableMemoryColor,
+                                        colorEngineMode = req.colorEngineMode,
+                                        colorMatrix1 = req.colorMatrix1,
+                                        colorMatrix2 = req.colorMatrix2,
+                                        forwardMatrix1 = req.forwardMatrix1,
+                                        forwardMatrix2 = req.forwardMatrix2,
+                                        calibrationIlluminant1 = req.calibrationIlluminant1,
+                                        calibrationIlluminant2 = req.calibrationIlluminant2,
+                                        neutralColorPoint = req.neutralColorPoint,
+                                        debugStats = jpgDebugStats,
+                                        outJpgFd = pfdJpg?.first?.fd ?: -1,
+                                        outDngFd = -1,
+                                        dngCompressionMode = req.dngCompressionMode,
+                                        rawOutputType = req.rawOutputType,
+                                        cfaPattern = req.cfaPattern,
+                                        blackLevelPattern = req.blackLevelPattern,
+                                        whiteLevel = req.whiteLevel,
+                                        dynamicBlackLevel = req.dynamicBlackLevel,
+                                        noiseProfile = req.noiseProfile,
+                                        activeArray = req.activeArray,
+                                        lensShadingMap = req.lensShadingMap,
+                                        lensShadingRows = req.lensShadingRows,
+                                        lensShadingCols = req.lensShadingCols
                                     )
-                                    if (exportSuccessful) {
-                                        top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
-                                            top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
-                                                baseName = req.baseName,
-                                                dngPath = if (req.saveRaw) dngPathToUse else null,
-                                                jpgPath = null,
-                                                targetUri = pfdJpg.second.toString(),
-                                                zoomFactor = req.zoomFactor,
-                                                orientation = req.orientation,
-                                                saveJpg = req.saveJpg
-                                            )
+                                    jpgSuccess = (jpgExportRet == 0)
+                                } finally {
+                                    if (pfdJpg != null) {
+                                        top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
+                                            context = this@HdrPlusProcessingService,
+                                            pfdPair = pfdJpg,
+                                            success = jpgSuccess,
+                                            editConfig = req.editConfig,
+                                            captureMetadata = req.metadata
                                         )
+                                        if (jpgSuccess) {
+                                            top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
+                                                top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
+                                                    baseName = req.baseName,
+                                                    dngPath = if (req.saveRaw) dngPathToUse else null,
+                                                    jpgPath = null,
+                                                    targetUri = pfdJpg.second.toString(),
+                                                    zoomFactor = req.zoomFactor,
+                                                    orientation = req.orientation,
+                                                    saveJpg = true
+                                                )
+                                            )
+                                        }
                                     }
-                                }
-                                if (pfdDng != null) {
-                                    top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
-                                        context = this@HdrPlusProcessingService,
-                                        pfdPair = pfdDng,
-                                        success = exportSuccessful
-                                    )
-                                    if (pfdJpg == null && exportSuccessful) {
-                                        top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
-                                            top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
-                                                baseName = req.baseName,
-                                                dngPath = if (req.saveRaw) dngPathToUse else null,
-                                                jpgPath = null,
-                                                targetUri = pfdDng.second.toString(),
-                                                zoomFactor = req.zoomFactor,
-                                                orientation = req.orientation,
-                                                saveJpg = false
-                                            )
-                                        )
+                                    if (jpgSuccess && req.timing?.firstOutputWritten == 0L) {
+                                        req.timing?.firstOutputWritten = System.currentTimeMillis()
                                     }
                                 }
                             }
 
-                            if (exportSuccessful && req.timing?.firstOutputWritten == 0L) {
-                                req.timing?.firstOutputWritten = System.currentTimeMillis()
+                            // Background Path: Export DNG asynchronously without blocking user feedback
+                            if (shouldSaveRaw) {
+                                try {
+                                    dngExportRet = ColorProcessor.exportHdrPlus(
+                                        tempRawPath = req.requestId,
+                                        width = req.width,
+                                        height = req.height,
+                                        orientation = req.orientation,
+                                        digitalGain = req.digitalGain,
+                                        targetLog = req.targetLogIndex,
+                                        lutPath = req.lutPath,
+                                        exposure = edit?.exposure ?: 0f,
+                                        contrast = edit?.contrast ?: 0f,
+                                        saturation = edit?.saturation ?: 0f,
+                                        highlights = edit?.highlights ?: 0f,
+                                        shadows = edit?.shadows ?: 0f,
+                                        whites = edit?.whites ?: 0f,
+                                        blacks = edit?.blacks ?: 0f,
+                                        jpgPath = null,
+                                        dngPath = if (pfdDng == null) dngPathToUse else null,
+                                        faithfulHighlights = req.isSingleFrame,
+                                        ccm = req.ccm,
+                                        whiteBalance = req.whiteBalance,
+                                        zoomFactor = req.zoomFactor,
+                                        mirror = req.mirror,
+                                        metadata = req.metadata,
+                                        enableMemoryColor = req.enableMemoryColor,
+                                        colorEngineMode = req.colorEngineMode,
+                                        colorMatrix1 = req.colorMatrix1,
+                                        colorMatrix2 = req.colorMatrix2,
+                                        forwardMatrix1 = req.forwardMatrix1,
+                                        forwardMatrix2 = req.forwardMatrix2,
+                                        calibrationIlluminant1 = req.calibrationIlluminant1,
+                                        calibrationIlluminant2 = req.calibrationIlluminant2,
+                                        neutralColorPoint = req.neutralColorPoint,
+                                        debugStats = dngDebugStats,
+                                        outJpgFd = -1,
+                                        outDngFd = pfdDng?.first?.fd ?: -1,
+                                        dngCompressionMode = req.dngCompressionMode,
+                                        rawOutputType = req.rawOutputType,
+                                        cfaPattern = req.cfaPattern,
+                                        blackLevelPattern = req.blackLevelPattern,
+                                        whiteLevel = req.whiteLevel,
+                                        dynamicBlackLevel = req.dynamicBlackLevel,
+                                        noiseProfile = req.noiseProfile,
+                                        activeArray = req.activeArray,
+                                        lensShadingMap = req.lensShadingMap,
+                                        lensShadingRows = req.lensShadingRows,
+                                        lensShadingCols = req.lensShadingCols
+                                    )
+                                    dngSuccess = (dngExportRet == 0)
+                                } finally {
+                                    if (pfdDng != null) {
+                                        top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
+                                            context = this@HdrPlusProcessingService,
+                                            pfdPair = pfdDng,
+                                            success = dngSuccess
+                                        )
+                                        if (pfdJpg == null && dngSuccess) {
+                                            top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
+                                                top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
+                                                    baseName = req.baseName,
+                                                    dngPath = dngPathToUse,
+                                                    jpgPath = null,
+                                                    targetUri = pfdDng.second.toString(),
+                                                    zoomFactor = req.zoomFactor,
+                                                    orientation = req.orientation,
+                                                    saveJpg = false
+                                                )
+                                            )
+                                        }
+                                    }
+                                    if (dngSuccess && req.timing?.firstOutputWritten == 0L) {
+                                        req.timing?.firstOutputWritten = System.currentTimeMillis()
+                                    }
+                                }
                             }
+
+                            val exportSuccessful = (!shouldSaveJpg || jpgSuccess) && (!shouldSaveRaw || dngSuccess)
+                            val exportRet = if (exportSuccessful) 0 else -1
+                            req.timing?.stage2ExportDone = System.currentTimeMillis()
+                            req.timing?.recordStage2Metrics(
+                                postMs = if (shouldSaveJpg) jpgDebugStats[2] else 0L,
+                                dngMs = if (shouldSaveRaw) dngDebugStats[3] else 0L,
+                                jpgMs = if (shouldSaveJpg) jpgDebugStats[4] else 0L
+                            )
+                            debugStats[2] = if (shouldSaveJpg) jpgDebugStats[2] else 0L
+                            debugStats[3] = if (shouldSaveRaw) dngDebugStats[3] else 0L
+                            debugStats[4] = if (shouldSaveJpg) jpgDebugStats[4] else 0L
 
                             if (exportRet == 0) {
                                 val totalTime = System.currentTimeMillis() - start

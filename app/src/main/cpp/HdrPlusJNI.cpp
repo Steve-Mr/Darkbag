@@ -495,7 +495,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         auto it = g_sharedMemoryMap.find(temp_path_cstr);
         if (it != g_sharedMemoryMap.end()) {
             sharedResult = it->second;
-            g_sharedMemoryMap.erase(it);
+            // Retain in g_sharedMemoryMap across decoupled export passes (JPEG / DNG).
+            // Explicitly erased and freed via freeSharedRawMemory when the task completes.
         }
     }
 

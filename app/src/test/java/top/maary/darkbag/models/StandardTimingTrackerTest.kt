@@ -171,4 +171,45 @@ class StandardTimingTrackerTest {
         val report = timing.buildSummaryReport()
         assertTrue(report.contains("流式累加完成: 19700ms (排队: 14500ms, 累加: 4800ms)"))
     }
+
+    @Test
+    fun testBuildSummaryReport_decoupledStage2_jpegOnly() {
+        val timing = StandardTimingTracker(shutterClick = 6000L)
+        timing.recordFrameArrival(6040L)
+        timing.recordShutterReady(6080L)
+        timing.enqueued = 6090L
+        timing.processingStart = 6100L
+        timing.stage1ComputeDone = 6400L // 300ms compute
+        timing.firstOutputWritten = 6520L // Fast path JPEG written at 6520L (T2 = 520ms)
+        timing.stage2ExportDone = 6530L
+        timing.taskCompleted = 6540L
+        timing.recordStage2Metrics(postMs = 60L, dngMs = 0L, jpgMs = 40L)
+
+        val report = timing.buildSummaryReport()
+        assertTrue(report.contains("T2 首张出片耗时: 520ms"))
+        assertTrue(report.contains("C++ ColorPipe (调色/LUT): 60ms"))
+        assertTrue(report.contains("JPEG 压缩:    40ms"))
+        assertFalse(report.contains("DNG 编码"))
+    }
+
+    @Test
+    fun testBuildSummaryReport_decoupledStage2_rawOnly() {
+        val timing = StandardTimingTracker(shutterClick = 7000L)
+        timing.recordFrameArrival(7050L)
+        timing.recordShutterReady(7100L)
+        timing.enqueued = 7110L
+        timing.processingStart = 7120L
+        timing.stage1ComputeDone = 7450L
+        timing.firstOutputWritten = 7650L // RAW-only output written at 7650L (T2 = 650ms)
+        timing.stage2ExportDone = 7660L
+        timing.taskCompleted = 7670L
+        timing.recordStage2Metrics(postMs = 0L, dngMs = 180L, jpgMs = 0L)
+
+        val report = timing.buildSummaryReport()
+        assertTrue(report.contains("T2 首张出片耗时: 650ms"))
+        assertTrue(report.contains("DNG 编码:     180ms"))
+        assertFalse(report.contains("C++ ColorPipe"))
+        assertFalse(report.contains("JPEG 压缩"))
+    }
 }
+
