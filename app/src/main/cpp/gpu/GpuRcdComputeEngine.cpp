@@ -237,11 +237,6 @@ bool GpuRcdComputeEngine::demosaicToRgbTextureLocked(
     // Memory barrier: ensure Pass A image writes are visible for Pass B texture sampling
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
-    // Unbind image binding 0 & input bayer texture
-    glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
     // 3. Dispatch Pass B (Color Ratios + Red/Blue Recovery + RGBA16UI Output)
     glUseProgram(programPassB_);
     glUniform1i(glGetUniformLocation(programPassB_, "uWidth"), width);
@@ -265,18 +260,6 @@ bool GpuRcdComputeEngine::demosaicToRgbTextureLocked(
 
     // Memory barrier: ensure writes are visible to texture fetches AND framebuffer readback
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
-
-    // Release write-hazard on outputTexRgb_ by unbinding image binding 0
-    glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16UI);
-
-    // Unbind input textures
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    // Flush GPU command queue so compute work is submitted
-    glFlush();
 
     if (outTexRgb) {
         *outTexRgb = outputTexRgb_;

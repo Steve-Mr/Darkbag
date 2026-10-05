@@ -261,9 +261,6 @@ bool GpuColorPipeEngine::executePipeline(
         glBindTexture(GL_TEXTURE_2D, inputRgbTexId);
         glUniform1i(u.uTexUnifiedRgb, 0);
         glUniform1i(u.uInputLayout, 1);
-        if (u.uTexR >= 0) glUniform1i(u.uTexR, 1);
-        if (u.uTexG >= 0) glUniform1i(u.uTexG, 2);
-        if (u.uTexB >= 0) glUniform1i(u.uTexB, 4);
     } else {
         // Upload 16-bit planar sensor RGB textures
         if (!inputTexture_->uploadPlanarRgb(planarRgb, width, height, stride_x, stride_y, stride_c)) {
@@ -273,7 +270,6 @@ bool GpuColorPipeEngine::executePipeline(
         // Bind planar R, G, B textures to Texture Units 0, 1, 2
         inputTexture_->bind(u.uTexR, u.uTexG, u.uTexB, 0);
         glUniform1i(u.uInputLayout, 0);
-        if (u.uTexUnifiedRgb >= 0) glUniform1i(u.uTexUnifiedRgb, 4);
     }
 
     // 4. 3D LUT Texture handling
@@ -379,17 +375,7 @@ bool GpuColorPipeEngine::executePipeline(
     if (isTextureInput) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, 0);
-    } else {
-        glActiveTexture(GL_TEXTURE2);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, 0);
     }
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_3D, 0);
-    glActiveTexture(GL_TEXTURE0);
 
     // 12. Sync fence wait
     if (!ahbTarget_->waitGpuFinish()) {
