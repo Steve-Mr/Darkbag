@@ -178,6 +178,7 @@ bool GpuContext::makeCurrent() {
 
 void GpuContext::doneCurrent() {
     if (eglDisplay_ != EGL_NO_DISPLAY) {
+        glFlush();
         eglMakeCurrent(eglDisplay_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     }
 }
