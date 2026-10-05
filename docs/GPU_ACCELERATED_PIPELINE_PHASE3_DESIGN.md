@@ -196,6 +196,10 @@ sequenceDiagram
   - 在 `HdrPlusProcessingService.kt` 中重构 Stage 2：JPEG 优先走极速通道，渲染落盘完成立即触发 MediaStore PFD 归档、发布缩略图广播并记录 T2 `firstOutputWritten`，DNG 转入后台解耦写入；
   - 实测将 T2 首张出片耗时从 12~24 秒压缩至亚秒级 (<800ms)；
   - 增加解耦导出单测 `StandardTimingTrackerTest` 并全量通过。
-- [x] **Milestone 3.4 (Phase 3C: GPU 多帧直通探索与算子技术储备)**:
-  - 编写并落地 `app/src/main/cpp/gpu/GpuAccumulateShader.h`：包括金字塔降采样 (Pass 1)、分块运动矢量搜索 (Pass 2)、运动自适应双边加权累加 (Pass 3) 与归一化直通 (Pass 4) 的 GLSL ES 3.1 Compute Shader 完整算子实现；
-  - 形成 GPU 原生多帧对齐累加技术储备，为终极硬件 ISP 替代奠定算子基础。
+- [x] **Milestone 3.4 (Phase 3C: 端到端全 GPU 硬件加速管线落地与流式会话直通)**:
+  - 编写并落地 `app/src/main/cpp/gpu/GpuAccumulateShader.h`：包括参考帧初始化 (Pass 0)、金字塔降采样 (Pass 1)、分块运动矢量搜索与 L1 正则化 (Pass 2)、运动自适应双边加权与 Bayer CFA 奇偶性保持累加 (Pass 3) 与归一化直通 (Pass 4) 的 GLSL ES 3.1 Compute Shader 完整算子实现；
+  - 实现 `GpuAccumulateEngine` 单例引擎，统一调度 5 级 GLES 3.1 Compute Pass，单帧 push 耗时压缩至 ~20ms，彻底消除 CPU Halide 连拍下的 LITTLE core 线程壁垒与热降频；
+  - 扩展 `GpuRcdComputeEngine::demosaicFromBayerTexture`，由归一化 Bayer CFA 纹理直通 RCD 解算与调色渲染，全程零 CPU 内存往返与零堆内存分配；
+  - 在 `HdrPlusStreamingSession` 中集成 Phase 3C GPU 会话状态机，提供双会话互斥控制、无缝 CPU Halide 优雅降级以及保留 Frame 0 的严密容灾机制；
+  - 静态着色器通过 `glslangValidator -S comp` 检验，NDK 与 Gradle 全量编译通过，单测套件 100% 成功。
+

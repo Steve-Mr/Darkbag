@@ -175,4 +175,5 @@ private:
     int64_t m_pushMaxMs = 0;
     int64_t m_normalizeMs = 0;
     int64_t m_fusionComputeMs = 0;
+    bool m_useGpuAccumulation = false;
 };

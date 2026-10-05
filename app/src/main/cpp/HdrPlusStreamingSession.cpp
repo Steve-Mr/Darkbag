@@ -4,9 +4,12 @@
 #include "ColorPipe.h"
 #include "demosaic/RcdDemosaic.h"
 #include "gpu/GpuRcdComputeEngine.h"
+#include "gpu/GpuAccumulateEngine.h"
 #include <android/log.h>
 #include <omp.h>
 #include <cmath>
+
+extern "C" int halide_set_num_threads(int n);
 
 #define TAG "HdrPlusStreamingSession"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -108,11 +111,30 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
         LOGD("HdrPlusStreamingSession: Sabre skipped (zoom=%.2f, mode=%d), saving ~350MB RAM", m_zoomFactor, m_fusionMode);
     }
 
-    LOGD("HdrPlusStreamingSession initialized: %dx%d, orientation=%d, WL=%d, BL=[%u,%u,%u,%u], fusionMode=%d, zoom=%.2f",
-         m_width, m_height, m_orientation, m_whiteLevel, m_bl_r, m_bl_g0, m_bl_g1, m_bl_b, m_fusionMode, m_zoomFactor);
+    // Cap CPU Halide worker threads to prevent core thrashing across dual sessions
+    halide_set_num_threads(3);
+
+    // Initialize Phase 3C GPU-native multi-frame accumulation if supported
+    m_useGpuAccumulation = darkbag::gpu::GpuAccumulateEngine::instance().isAvailable();
+    if (m_useGpuAccumulation && m_fusionMode != 2 && m_fusionMode != 3) {
+        float noiseS = (m_noiseProfile.size() >= 2) ? static_cast<float>(m_noiseProfile[0]) : 0.0001f;
+        float noiseO = (m_noiseProfile.size() >= 2) ? static_cast<float>(m_noiseProfile[1]) : 0.00001f;
+        m_useGpuAccumulation = darkbag::gpu::GpuAccumulateEngine::instance().startSession(
+            m_width, m_height, m_cfaPattern, noiseS, noiseO
+        );
+        LOGD("HdrPlusStreamingSession: Phase 3C GPU Accumulation initialized = %d", m_useGpuAccumulation);
+    } else {
+        m_useGpuAccumulation = false;
+    }
+
+    LOGD("HdrPlusStreamingSession initialized: %dx%d, orientation=%d, WL=%d, BL=[%u,%u,%u,%u], fusionMode=%d, zoom=%.2f, gpuAccum=%d",
+         m_width, m_height, m_orientation, m_whiteLevel, m_bl_r, m_bl_g0, m_bl_g1, m_bl_b, m_fusionMode, m_zoomFactor, m_useGpuAccumulation);
 }
 
 HdrPlusStreamingSession::~HdrPlusStreamingSession() {
+    if (m_useGpuAccumulation) {
+        darkbag::gpu::GpuAccumulateEngine::instance().endSession();
+    }
     LOGD("HdrPlusStreamingSession destroyed (total frames pushed: %d)", m_framesPushed);
 }
 
@@ -127,6 +149,35 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
     if (numPixels != expectedPixels) {
         LOGE("pushFrame: numPixels mismatch (got %zu, expected %zu)", numPixels, expectedPixels);
         return false;
+    }
+
+    if (m_framesPushed == 0) {
+        // Always preserve Frame 0 (Reference Frame) in CPU buffer for fallback and DNG
+        std::memcpy(m_refFrame.data(), rawData, numPixels * sizeof(uint16_t));
+    }
+
+    if (m_useGpuAccumulation) {
+        int64_t gpuPushMs = 0;
+        bool gpuOk = darkbag::gpu::GpuAccumulateEngine::instance().pushFrame(rawData, numPixels, &gpuPushMs);
+        if (gpuOk) {
+            m_framesPushed++;
+            m_pushTotalMs += gpuPushMs;
+            if (m_pushCount == 0 || gpuPushMs < m_pushMinMs) m_pushMinMs = gpuPushMs;
+            if (gpuPushMs > m_pushMaxMs) m_pushMaxMs = gpuPushMs;
+            m_pushCount++;
+            LOGD("pushFrame (GPU Phase 3C): accumulated frame %d (%lld ms)", m_framesPushed - 1, (long long)gpuPushMs);
+            return true;
+        } else {
+            LOGW("pushFrame (GPU Phase 3C) failed, falling back to CPU Halide accumulation");
+            darkbag::gpu::GpuAccumulateEngine::instance().endSession();
+            m_useGpuAccumulation = false;
+            #pragma omp parallel for schedule(static)
+            for (size_t i = 0; i < numPixels; ++i) {
+                m_accumVal[0][i] = static_cast<float>(m_refFrame[i]);
+                m_accumWeight[0][i] = 1.0f;
+            }
+            m_accumIdx = 0;
+        }
     }
 
     if (m_framesPushed == 0) {
@@ -270,6 +321,62 @@ int HdrPlusStreamingSession::finish(
             return 0;
         }
         LOGW("HdrPlusStreamingSession: Sabre resolve returned false, falling back to Spatial + RCD");
+    }
+
+    if (m_useGpuAccumulation && m_framesPushed > 0 && effectiveMode != 2 && effectiveMode != 3) {
+        int64_t normMs = 0;
+        GLuint normBayerTex = 0;
+        bool normOk = darkbag::gpu::GpuAccumulateEngine::instance().finish(
+            outSharedResult->bayerBuf.data(),
+            &normBayerTex,
+            &normMs
+        );
+        m_normalizeMs = normMs;
+
+        if (normOk && normBayerTex != 0) {
+            uint16_t bl_array[4] = {m_bl_r, m_bl_g0, m_bl_g1, m_bl_b};
+            float wb_array[4] = {m_wb_r, m_wb_g0, m_wb_g1, m_wb_b};
+            int64_t gpuComputeMs = 0;
+            GLuint rgbTex = 0;
+
+            bool demosaicOk = darkbag::gpu::GpuRcdComputeEngine::instance().demosaicFromBayerTexture(
+                normBayerTex,
+                m_width,
+                m_height,
+                m_cfaPattern,
+                bl_array,
+                static_cast<uint16_t>(m_whiteLevel),
+                wb_array,
+                &rgbTex,
+                &gpuComputeMs
+            );
+            darkbag::gpu::GpuAccumulateEngine::instance().endSession();
+            m_useGpuAccumulation = false;
+
+            if (demosaicOk) {
+                outSharedResult->gpuRgbTexture = darkbag::gpu::GpuRcdComputeEngine::instance().transferOutputTexture();
+                if (outSharedResult->gpuRgbTexture == 0) {
+                    outSharedResult->gpuRgbTexture = rgbTex;
+                }
+                outSharedResult->gpuTexWidth = m_width;
+                outSharedResult->gpuTexHeight = m_height;
+                outSharedResult->isWhiteBalanceApplied = false;
+                m_fusionComputeMs = gpuComputeMs;
+                outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
+
+                LOGD("HdrPlusStreamingSession (Phase 3C End-to-End GPU): Succeeded in %lld ms (norm=%lld ms, demosaic=%lld ms, texture=%u)",
+                     (long long)(m_normalizeMs + m_fusionComputeMs),
+                     (long long)m_normalizeMs, (long long)m_fusionComputeMs,
+                     outSharedResult->gpuRgbTexture);
+                return 0;
+            } else {
+                LOGW("HdrPlusStreamingSession (Phase 3C): demosaicFromBayerTexture failed, falling back to CPU finish");
+            }
+        } else {
+            LOGW("HdrPlusStreamingSession (Phase 3C): GpuAccumulateEngine finish failed, falling back to CPU finish");
+            darkbag::gpu::GpuAccumulateEngine::instance().endSession();
+            m_useGpuAccumulation = false;
+        }
     }
 
     // Normalize accumulated val / weight into m_refFrame buffer to avoid input/output aliasing

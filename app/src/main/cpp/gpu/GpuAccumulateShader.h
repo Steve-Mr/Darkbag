@@ -13,6 +13,28 @@ namespace gpu {
  * - Pass 4: Accumulation Normalization & Zero-Copy Handover to GpuRcdComputeEngine
  */
 
+// Pass 0: Reference Frame Accumulation Buffer Initializer
+static const char* kInitAccumulateComputeShader = R"glsl(#version 310 es
+layout(local_size_x = 16, local_size_y = 16) in;
+
+uniform highp usampler2D uRefBayer;
+layout(r32f) uniform highp writeonly image2D uAccumValOut;
+layout(r32f) uniform highp writeonly image2D uAccumWeightOut;
+
+uniform int uWidth;
+uniform int uHeight;
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= uWidth || coord.y >= uHeight) {
+        return;
+    }
+    float val = float(texelFetch(uRefBayer, coord, 0).r);
+    imageStore(uAccumValOut, coord, vec4(val, 0.0, 0.0, 0.0));
+    imageStore(uAccumWeightOut, coord, vec4(1.0, 0.0, 0.0, 0.0));
+}
+)glsl";
+
 // Pass 1: Bayer Pyramid Downsampler (Downsamples Bayer CFA into luminance pyramid)
 static const char* kPyramidDownsampleComputeShader = R"glsl(#version 310 es
 layout(local_size_x = 16, local_size_y = 16) in;

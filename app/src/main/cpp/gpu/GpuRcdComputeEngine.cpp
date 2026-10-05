@@ -208,6 +208,67 @@ bool GpuRcdComputeEngine::demosaicToRgbTextureLocked(
     glBindTexture(GL_TEXTURE_2D, 0);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 
+    return demosaicFromBayerTextureLocked(
+        bayerInputTex_, width, height, cfaPattern, blackLevel, whiteLevel, whiteBalance,
+        outTexRgb, outComputeMs
+    );
+}
+
+bool GpuRcdComputeEngine::demosaicFromBayerTexture(
+    GLuint inputBayerTex,
+    int width, int height,
+    int cfaPattern,
+    const uint16_t* blackLevel,
+    uint16_t whiteLevel,
+    const float* whiteBalance,
+    GLuint* outTexRgb,
+    int64_t* outComputeMs
+) {
+    if (inputBayerTex == 0 || width <= 0 || height <= 0 || !outTexRgb) {
+        LOGE("Invalid arguments for demosaicFromBayerTexture");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(engineMutex_);
+
+    GpuContext& ctx = GpuContext::instance();
+    GpuContextScope ctxScope(ctx);
+    if (!ctxScope.isAcquired()) {
+        LOGE("Failed to acquire EGL context for RCD Compute");
+        return false;
+    }
+
+    if (!ctx.supportsComputeShader()) {
+        LOGE("GLES Compute Shader is not supported on this device");
+        return false;
+    }
+
+    return demosaicFromBayerTextureLocked(
+        inputBayerTex, width, height, cfaPattern, blackLevel, whiteLevel, whiteBalance,
+        outTexRgb, outComputeMs
+    );
+}
+
+bool GpuRcdComputeEngine::demosaicFromBayerTextureLocked(
+    GLuint inputBayerTex,
+    int width, int height,
+    int cfaPattern,
+    const uint16_t* blackLevel,
+    uint16_t whiteLevel,
+    const float* whiteBalance,
+    GLuint* outTexRgb,
+    int64_t* outComputeMs
+) {
+    auto start = std::chrono::high_resolution_clock::now();
+
+    if (!ensureShaders()) {
+        return false;
+    }
+
+    if (!prepareTextures(width, height)) {
+        return false;
+    }
+
     float blR  = blackLevel ? static_cast<float>(blackLevel[0]) : 64.0f;
     float blG0 = blackLevel ? static_cast<float>(blackLevel[1]) : 64.0f;
     float blG1 = blackLevel ? static_cast<float>(blackLevel[2]) : 64.0f;
@@ -226,7 +287,7 @@ bool GpuRcdComputeEngine::demosaicToRgbTextureLocked(
     glUniform1f(glGetUniformLocation(programPassA_, "uWhiteLevel"), wl);
 
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, bayerInputTex_);
+    glBindTexture(GL_TEXTURE_2D, inputBayerTex);
     glUniform1i(glGetUniformLocation(programPassA_, "uBayerTex"), 0);
 
     // Bind greenIntermTex_ to image binding 0 (layout(r32f))
@@ -247,7 +308,7 @@ bool GpuRcdComputeEngine::demosaicToRgbTextureLocked(
     glUniform1f(glGetUniformLocation(programPassB_, "uWhiteLevel"), wl);
 
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, bayerInputTex_);
+    glBindTexture(GL_TEXTURE_2D, inputBayerTex);
     glUniform1i(glGetUniformLocation(programPassB_, "uBayerTex"), 0);
 
     // Bind greenIntermTex_ to image binding 1 (layout(r32f, binding=1) readonly)

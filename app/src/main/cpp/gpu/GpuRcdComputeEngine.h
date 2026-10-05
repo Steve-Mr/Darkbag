@@ -57,6 +57,21 @@ public:
     );
 
     /**
+     * Demosaics directly from an existing GPU Bayer CFA texture (e.g. from GpuAccumulateEngine)
+     * into a single unified GL_RGBA16F texture on GPU with ZERO CPU memory trips.
+     */
+    bool demosaicFromBayerTexture(
+        GLuint inputBayerTex,
+        int width, int height,
+        int cfaPattern,
+        const uint16_t* blackLevel,
+        uint16_t whiteLevel,
+        const float* whiteBalance,
+        GLuint* outTexRgb,
+        int64_t* outComputeMs = nullptr
+    );
+
+    /**
      * Transfers ownership of the output GL_RGBA16UI texture handle to the caller.
      * The internal texture reference is cleared to 0 so the engine will allocate
      * a fresh texture for subsequent demosaicing calls.
@@ -105,6 +120,17 @@ private:
 
     bool demosaicToRgbTextureLocked(
         const uint16_t* bayerData,
+        int width, int height,
+        int cfaPattern,
+        const uint16_t* blackLevel,
+        uint16_t whiteLevel,
+        const float* whiteBalance,
+        GLuint* outTexRgb,
+        int64_t* outComputeMs
+    );
+
+    bool demosaicFromBayerTextureLocked(
+        GLuint inputBayerTex,
         int width, int height,
         int cfaPattern,
         const uint16_t* blackLevel,
