@@ -36,6 +36,7 @@ static const char* kRcdPassAComputeShader = R"glsl(#version 310 es
 precision highp float;
 precision highp int;
 precision highp usampler2D;
+precision highp image2D;
 precision highp uimage2D;
 
 layout(local_size_x = 16, local_size_y = 16) in;
@@ -224,7 +225,7 @@ static const char* kRcdPassBComputeShader = R"glsl(#version 310 es
 precision highp float;
 precision highp int;
 precision highp usampler2D;
-precision highp uimage2D;
+precision highp image2D;
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
@@ -239,10 +240,10 @@ uniform float uWhiteLevel;
 
 // Inputs
 uniform highp usampler2D uBayerTex;
-uniform highp sampler2D uGreenTex;
+layout(r32f, binding = 1) uniform readonly highp image2D uGreenImg;
 
-// RGBA16UI output containing R, G, B, and A channels (denormalized 0~65535)
-layout(rgba16ui, binding = 0) uniform writeonly highp uimage2D uOutRgbImg;
+// RGBA16F output containing R, G, B, and A channels (normalized float 0.0 ~ 1.0)
+layout(rgba16f, binding = 0) uniform writeonly highp image2D uOutRgbImg;
 
 // Cooperative shared memory tiles: 16 + 2 * HALO = 20x20 (4 buffers x 400 floats = 6.25 KB)
 const int HALO = 2;
@@ -302,7 +303,7 @@ void main() {
         uint rawBayer = texelFetch(uBayerTex, gCoord, 0).r;
         sBayer[sy][sx] = normalizePixel(rawBayer, gCoord.y, gCoord.x);
 
-        sGreen[sy][sx] = texelFetch(uGreenTex, gCoord, 0).r;
+        sGreen[sy][sx] = imageLoad(uGreenImg, gCoord).r;
     }
     barrier();
 
@@ -451,12 +452,12 @@ void main() {
         blueVal = clamp(ratioB * greenVal, 0.0, 1.0);
     }
 
-    // Write RGBA16UI output image containing fully demosaiced R, G, B channels
-    imageStore(uOutRgbImg, outCoord, uvec4(
-        denormalizePixel(redVal),
-        denormalizePixel(greenVal),
-        denormalizePixel(blueVal),
-        65535u
+    // Write RGBA16F output image containing fully demosaiced R, G, B channels
+    imageStore(uOutRgbImg, outCoord, vec4(
+        redVal,
+        greenVal,
+        blueVal,
+        1.0
     ));
 }
 )glsl";

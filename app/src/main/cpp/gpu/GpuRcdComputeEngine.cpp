@@ -145,12 +145,12 @@ bool GpuRcdComputeEngine::prepareTextures(int width, int height) {
         currentHeight_ = height;
     }
 
-    auto createTex = [&](GLuint& tex, GLenum internalFormat, GLenum format, GLenum type) -> bool {
+    auto createTex = [&](GLuint& tex, GLenum internalFormat, GLenum format, GLenum type, GLenum filter = GL_NEAREST) -> bool {
         if (tex != 0) return true;
         glGenTextures(1, &tex);
         glBindTexture(GL_TEXTURE_2D, tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glTexStorage2D(GL_TEXTURE_2D, 1, internalFormat, width, height);
@@ -167,16 +167,16 @@ bool GpuRcdComputeEngine::prepareTextures(int width, int height) {
         return true;
     };
 
-    if (!createTex(bayerInputTex_, GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT) ||
-        !createTex(greenIntermTex_, GL_R32F, GL_RED, GL_FLOAT) ||
-        !createTex(outputTexRgb_, GL_RGBA16UI, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT)) {
+    if (!createTex(bayerInputTex_, GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT, GL_NEAREST) ||
+        !createTex(greenIntermTex_, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST) ||
+        !createTex(outputTexRgb_, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, GL_LINEAR)) {
         LOGE("Failed to allocate RCD GPU textures (%dx%d)", width, height);
         releaseTextures();
         return false;
     }
 
     glBindTexture(GL_TEXTURE_2D, 0);
-    LOGD("Allocated/Prepared RCD textures (%dx%d): Bayer=%u, Green=%u, OutRGB=%u",
+    LOGD("Allocated/Prepared RCD textures (%dx%d): Bayer=%u, Green=%u, OutRGB(RGBA16F)=%u",
          width, height, bayerInputTex_, greenIntermTex_, outputTexRgb_);
     return true;
 }
@@ -234,10 +234,11 @@ bool GpuRcdComputeEngine::demosaicToRgbTextureLocked(
 
     glDispatchCompute(numGroupsX, numGroupsY, 1);
 
-    // Memory barrier: ensure Pass A image writes are visible for Pass B texture sampling
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+    // Memory barrier: ensure Pass A image writes are visible for Pass B image reading
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+    glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
 
-    // 3. Dispatch Pass B (Color Ratios + Red/Blue Recovery + RGBA16UI Output)
+    // 3. Dispatch Pass B (Color Ratios + Red/Blue Recovery + RGBA16F Output)
     glUseProgram(programPassB_);
     glUniform1i(glGetUniformLocation(programPassB_, "uWidth"), width);
     glUniform1i(glGetUniformLocation(programPassB_, "uHeight"), height);
@@ -249,17 +250,25 @@ bool GpuRcdComputeEngine::demosaicToRgbTextureLocked(
     glBindTexture(GL_TEXTURE_2D, bayerInputTex_);
     glUniform1i(glGetUniformLocation(programPassB_, "uBayerTex"), 0);
 
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, greenIntermTex_);
-    glUniform1i(glGetUniformLocation(programPassB_, "uGreenTex"), 1);
+    // Bind greenIntermTex_ to image binding 1 (layout(r32f, binding=1) readonly)
+    glBindImageTexture(1, greenIntermTex_, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
 
-    // Bind outputTexRgb_ to image binding 0 (layout(rgba16ui))
-    glBindImageTexture(0, outputTexRgb_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16UI);
+    // Bind outputTexRgb_ to image binding 0 (layout(rgba16f, binding=0) writeonly)
+    glBindImageTexture(0, outputTexRgb_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
 
     glDispatchCompute(numGroupsX, numGroupsY, 1);
 
     // Memory barrier: ensure writes are visible to texture fetches AND framebuffer readback
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
+    glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
+
+    // Explicit unbinds to eliminate write hazards and active image bindings
+    glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+    glBindImageTexture(1, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Explicit GPU finish before context detachment / texture handover across threads
+    glFinish();
 
     if (outTexRgb) {
         *outTexRgb = outputTexRgb_;
@@ -399,7 +408,7 @@ bool GpuRcdComputeEngine::readbackRgbTextureToCpuLocked(
 ) {
     const size_t numPixels = static_cast<size_t>(width) * height;
 
-    // Attach unified RGBA16UI texture to FBO for single-pass fast readback
+    // Attach unified RGBA16F texture to FBO for single-pass fast readback
     GLuint fbo = 0;
     glGenFramebuffers(1, &fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -407,46 +416,31 @@ bool GpuRcdComputeEngine::readbackRgbTextureToCpuLocked(
 
     GLenum fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (fboStatus != GL_FRAMEBUFFER_COMPLETE) {
-        LOGE("FBO attachment incomplete for RGBA16UI: 0x%x", fboStatus);
+        LOGE("FBO attachment incomplete for RGBA16F: 0x%x", fboStatus);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glDeleteFramebuffers(1, &fbo);
         return false;
     }
 
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    std::vector<uint16_t> rgbaBuf(numPixels * 4);
-    glReadPixels(0, 0, width, height, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, rgbaBuf.data());
+    std::vector<float> rgbaBuf(numPixels * 4);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_FLOAT, rgbaBuf.data());
     glPixelStorei(GL_PACK_ALIGNMENT, 4);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glDeleteFramebuffers(1, &fbo);
 
-    // Deinterleave RGBA16 to planar [Plane R, Plane G, Plane B] with ARM NEON SIMD
+    // Convert RGBA16F float [0.0, 1.0] to planar uint16 [0, 65535]
     uint16_t* dstR = rgbOutput;
     uint16_t* dstG = rgbOutput + numPixels;
     uint16_t* dstB = rgbOutput + 2 * numPixels;
-    const uint16_t* src = rgbaBuf.data();
+    const float* src = rgbaBuf.data();
 
-#if defined(__ARM_NEON) || defined(__aarch64__)
-    size_t i = 0;
-    for (; i + 8 <= numPixels; i += 8) {
-        uint16x8x4_t rgba = vld4q_u16(src + i * 4);
-        vst1q_u16(dstR + i, rgba.val[0]);
-        vst1q_u16(dstG + i, rgba.val[1]);
-        vst1q_u16(dstB + i, rgba.val[2]);
-    }
-    for (; i < numPixels; ++i) {
-        dstR[i] = src[i * 4 + 0];
-        dstG[i] = src[i * 4 + 1];
-        dstB[i] = src[i * 4 + 2];
-    }
-#else
     for (size_t i = 0; i < numPixels; ++i) {
-        dstR[i] = src[i * 4 + 0];
-        dstG[i] = src[i * 4 + 1];
-        dstB[i] = src[i * 4 + 2];
+        dstR[i] = static_cast<uint16_t>(std::clamp(src[i * 4 + 0] * 65535.0f + 0.5f, 0.0f, 65535.0f));
+        dstG[i] = static_cast<uint16_t>(std::clamp(src[i * 4 + 1] * 65535.0f + 0.5f, 0.0f, 65535.0f));
+        dstB[i] = static_cast<uint16_t>(std::clamp(src[i * 4 + 2] * 65535.0f + 0.5f, 0.0f, 65535.0f));
     }
-#endif
 
     return true;
 }

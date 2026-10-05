@@ -42,14 +42,15 @@ void main() {
 
 static const char* kColorPipeFragmentShader = R"glsl(#version 300 es
 precision highp float;
+precision highp sampler2D;
 precision highp usampler2D;
 precision mediump sampler3D;
 
 uniform highp usampler2D uTexR;
 uniform highp usampler2D uTexG;
 uniform highp usampler2D uTexB;
-uniform highp usampler2D uTexUnifiedRgb;
-uniform int uInputLayout; // 0 = Planar 3-texture (uTexR, uTexG, uTexB), 1 = Unified RGBA16UI (uTexUnifiedRgb)
+uniform highp sampler2D uTexUnifiedRgb;
+uniform int uInputLayout; // 0 = Planar 3-texture (uTexR, uTexG, uTexB), 1 = Unified RGBA16F (uTexUnifiedRgb)
 
 uniform sampler3D uLut3D;
 uniform int uHasLut;
@@ -271,13 +272,13 @@ float applyHswb(float v) {
 }
 
 void main() {
-    // 1. Fetch 16-bit linear sensor RGB (Layout 1: unified RGBA16UI, Layout 0: planar 3-texture)
+    // 1. Fetch linear sensor RGB (Layout 1: unified RGBA16F float, Layout 0: planar 3-texture uint16)
     float rawR, rawG, rawB;
     if (uInputLayout == 1) {
-        uvec4 rawRgba = texture(uTexUnifiedRgb, vTexCoord);
-        rawR = float(rawRgba.r) / 65535.0;
-        rawG = float(rawRgba.g) / 65535.0;
-        rawB = float(rawRgba.b) / 65535.0;
+        vec4 rawRgba = texture(uTexUnifiedRgb, vTexCoord);
+        rawR = rawRgba.r;
+        rawG = rawRgba.g;
+        rawB = rawRgba.b;
     } else {
         rawR = float(texture(uTexR, vTexCoord).r) / 65535.0;
         rawG = float(texture(uTexG, vTexCoord).r) / 65535.0;
