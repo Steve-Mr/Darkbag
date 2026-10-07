@@ -169,21 +169,28 @@ bool GpuContext::makeCurrent() {
         return false;
     }
 
-    if (!eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_)) {
-        LOGE("eglMakeCurrent failed: 0x%x", eglGetError());
-        return false;
+    if (attachDepth_ == 0) {
+        if (!eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_)) {
+            LOGE("eglMakeCurrent failed: 0x%x", eglGetError());
+            return false;
+        }
     }
+    attachDepth_++;
     return true;
 }
 
 void GpuContext::doneCurrent() {
-    if (eglDisplay_ != EGL_NO_DISPLAY) {
-        glFlush();
-        eglMakeCurrent(eglDisplay_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    if (attachDepth_ > 0) {
+        attachDepth_--;
+        if (attachDepth_ == 0 && eglDisplay_ != EGL_NO_DISPLAY) {
+            glFlush();
+            eglMakeCurrent(eglDisplay_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        }
     }
 }
 
 void GpuContext::release() {
+    attachDepth_ = 0;
     if (eglDisplay_ != EGL_NO_DISPLAY) {
         eglMakeCurrent(eglDisplay_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (eglSurface_ != EGL_NO_SURFACE) {

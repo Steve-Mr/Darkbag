@@ -72,6 +72,7 @@ private:
     EGLContext eglContext_ = EGL_NO_CONTEXT;
     EGLSurface eglSurface_ = EGL_NO_SURFACE;
     EGLConfig  eglConfig_  = nullptr;
+    int        attachDepth_ = 0;
 };
 
 // RAII Scope Lock for GpuContext activation

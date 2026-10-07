@@ -74,6 +74,10 @@ GLuint compileComputeShader(const char* source) {
 bool createTexStorage(GLuint& tex, GLenum internalFormat, int w, int h) {
     if (tex == 0) {
         glGenTextures(1, &tex);
+        if (tex == 0) {
+            LOGE("createTexStorage: glGenTextures failed to generate texture (format 0x%x)", internalFormat);
+            return false;
+        }
     }
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -267,8 +271,11 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
     flowTexWidth_ = 1;
     flowTexHeight_ = 1;
 
-    LOGD("GpuSabreEngine: textures allocated successfully (%dx%d, quad=%dx%d)",
-         width_, height_, quadWidth_, quadHeight_);
+    LOGD("GpuSabreEngine: textures allocated successfully (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, flow=%u, accum=[%u,%u], weight=[%u,%u], outRgb=%u (this=%p)",
+         width_, height_, quadWidth_, quadHeight_,
+         refBayerTex_, candBayerTex_, covTex_, flowTex_,
+         accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1],
+         outputRgbTex_, this);
     return true;
 }
 
@@ -278,6 +285,7 @@ void GpuSabreEngine::releaseTextures() {
     if (!ctxScope.isAcquired()) {
         return;
     }
+    LOGD("GpuSabreEngine::releaseTextures (this=%p): ref=%u, outRgb=%u", this, refBayerTex_, outputRgbTex_);
 
     if (refBayerTex_ != 0) { glDeleteTextures(1, &refBayerTex_); refBayerTex_ = 0; }
     if (candBayerTex_ != 0) { glDeleteTextures(1, &candBayerTex_); candBayerTex_ = 0; }
@@ -514,8 +522,14 @@ bool GpuSabreEngine::resolve(
 ) {
     auto startTime = std::chrono::high_resolution_clock::now();
     std::lock_guard<std::mutex> lock(mutex_);
+    LOGD("GpuSabreEngine::resolve: this=%p, sessionActive=%d, framesAccumulated=%d, ref=%u, cand=%u, cov=%u, flow=%u, accum=[%u,%u], weight=[%u,%u], outRgb=%u, width=%d, height=%d",
+         this, sessionActive_ ? 1 : 0, framesAccumulated_,
+         refBayerTex_, candBayerTex_, covTex_, flowTex_,
+         accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1],
+         outputRgbTex_, width_, height_);
     if (!sessionActive_ || framesAccumulated_ == 0 || outputRgbTex_ == 0) {
-        LOGE("GpuSabreEngine::resolve: inactive session, 0 frames accumulated, or null output texture");
+        LOGE("GpuSabreEngine::resolve: failed check (this=%p): sessionActive=%d, framesAccumulated=%d, outputRgbTex=%u",
+             this, sessionActive_ ? 1 : 0, framesAccumulated_, outputRgbTex_);
         return false;
     }
 
