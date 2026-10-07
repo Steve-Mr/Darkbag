@@ -20,13 +20,14 @@ namespace sabre {
  */
 class GpuSabreEngine {
 public:
-    static GpuSabreEngine& instance();
-
     // Query whether GPU compute shaders and EGL context are available
-    bool isAvailable() const;
+    static bool isAvailable();
 
-    // Initialize an accumulation session for the given camera resolution and config
-    bool initSession(const SabreConfig& config);
+    explicit GpuSabreEngine(const SabreConfig& config);
+    ~GpuSabreEngine();
+
+    GpuSabreEngine(const GpuSabreEngine&) = delete;
+    GpuSabreEngine& operator=(const GpuSabreEngine&) = delete;
 
     // Set and accumulate Reference Frame 0 (computes Structure Tensor and Steering Covariance)
     bool setReferenceFrame(const uint16_t* refBayer);
@@ -49,7 +50,7 @@ public:
         int64_t* outComputeMs = nullptr
     );
 
-    // End session and release GPU textures
+    // End session and release GPU textures owned by this instance
     void releaseSession();
 
     // Transfer ownership of output RGB texture to caller (for zero-copy Handover to GpuColorPipeEngine)
@@ -62,15 +63,11 @@ public:
     bool isSessionActive() const;
 
 private:
-    GpuSabreEngine() = default;
-    ~GpuSabreEngine();
-    GpuSabreEngine(const GpuSabreEngine&) = delete;
-    GpuSabreEngine& operator=(const GpuSabreEngine&) = delete;
+    static bool ensureShaders();
+    static void releaseShaders();
 
-    bool ensureShaders();
     bool prepareTextures(int width, int height);
     void releaseTextures();
-    void releaseShaders();
 
     bool accumulateFrameLocked(
         const uint16_t* altBayer,
@@ -96,7 +93,7 @@ private:
     mutable std::mutex mutex_;
     SabreConfig config_;
     bool sessionActive_ = false;
-    bool shadersBuilt_ = false;
+    bool shadersAcquired_ = false;
 
     int width_ = 0;
     int height_ = 0;
@@ -120,11 +117,6 @@ private:
     GLuint accumTex_[2] = {0, 0};
     GLuint weightTex_[2] = {0, 0};
     GLuint outputRgbTex_ = 0;
-
-    // Compute Shader Programs
-    GLuint programStructureTensor_ = 0;
-    GLuint programAccumulate_ = 0;
-    GLuint programResolve_ = 0;
 };
 
 } // namespace sabre

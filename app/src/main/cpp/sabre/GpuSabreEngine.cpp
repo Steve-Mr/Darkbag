@@ -93,17 +93,13 @@ bool createTexStorage(GLuint& tex, GLenum internalFormat, int w, int h) {
 
 } // namespace
 
-GpuSabreEngine& GpuSabreEngine::instance() {
-    static GpuSabreEngine s_instance;
-    return s_instance;
-}
+static GLuint s_programStructureTensor = 0;
+static GLuint s_programAccumulate = 0;
+static GLuint s_programResolve = 0;
+static std::mutex s_shaderMutex;
+static int s_shaderRefCount = 0;
 
-GpuSabreEngine::~GpuSabreEngine() {
-    releaseSession();
-    releaseShaders();
-}
-
-bool GpuSabreEngine::isAvailable() const {
+bool GpuSabreEngine::isAvailable() {
     darkbag::gpu::GpuContext& ctx = darkbag::gpu::GpuContext::instance();
     if (!ctx.isInitialized()) {
         if (!const_cast<darkbag::gpu::GpuContext&>(ctx).initialize()) {
@@ -111,6 +107,55 @@ bool GpuSabreEngine::isAvailable() const {
         }
     }
     return ctx.supportsComputeShader();
+}
+
+GpuSabreEngine::GpuSabreEngine(const SabreConfig& config)
+    : config_(config)
+{
+    float z = std::max(1.0f, config_.zoomFactor);
+    config_.zoomFactor = z;
+
+    width_ = config.width;
+    height_ = config.height;
+    quadWidth_ = width_ / 2;
+    quadHeight_ = height_ / 2;
+
+    cropWidth_ = static_cast<float>(width_) / z;
+    cropHeight_ = static_cast<float>(height_) / z;
+    cropXStart_ = (static_cast<float>(width_) - cropWidth_) * 0.5f;
+    cropYStart_ = (static_cast<float>(height_) - cropHeight_) * 0.5f;
+
+    if (!isAvailable()) {
+        LOGE("GpuSabreEngine: GPU compute shaders not supported");
+        return;
+    }
+
+    if (!ensureShaders()) {
+        LOGE("GpuSabreEngine: failed to build shaders");
+        return;
+    }
+    shadersAcquired_ = true;
+
+    if (!prepareTextures(width_, height_)) {
+        LOGE("GpuSabreEngine: failed to prepare textures");
+        return;
+    }
+
+    framesAccumulated_ = 0;
+    accumIdx_ = 0;
+    sessionActive_ = true;
+
+    LOGD("GpuSabreEngine session initialized: %dx%d, CFA=%d, Zoom=%.2fx (crop: %.1fx%.1f at (%.1f, %.1f))",
+         width_, height_, static_cast<int>(config_.cfa), z,
+         cropWidth_, cropHeight_, cropXStart_, cropYStart_);
+}
+
+GpuSabreEngine::~GpuSabreEngine() {
+    releaseSession();
+    if (shadersAcquired_) {
+        releaseShaders();
+        shadersAcquired_ = false;
+    }
 }
 
 int GpuSabreEngine::framesAccumulated() const {
@@ -124,43 +169,66 @@ bool GpuSabreEngine::isSessionActive() const {
 }
 
 bool GpuSabreEngine::ensureShaders() {
-    if (shadersBuilt_) return true;
+    std::lock_guard<std::mutex> lock(s_shaderMutex);
+    if (s_shaderRefCount == 0) {
+        darkbag::gpu::GpuContext& ctx = darkbag::gpu::GpuContext::instance();
+        darkbag::gpu::GpuContextScope ctxScope(ctx);
+        if (!ctxScope.isAcquired()) {
+            LOGE("GpuSabreEngine: failed to acquire GPU context for shader compilation");
+            return false;
+        }
 
-    programStructureTensor_ = compileComputeShader(kSabreStructureTensorComputeShader);
-    programAccumulate_ = compileComputeShader(kSabreAccumulateComputeShader);
-    programResolve_ = compileComputeShader(kSabreResolveComputeShader);
+        s_programStructureTensor = compileComputeShader(kSabreStructureTensorComputeShader);
+        s_programAccumulate = compileComputeShader(kSabreAccumulateComputeShader);
+        s_programResolve = compileComputeShader(kSabreResolveComputeShader);
 
-    if (!programStructureTensor_ || !programAccumulate_ || !programResolve_) {
-        LOGE("GpuSabreEngine: failed to build one or more compute shaders");
-        releaseShaders();
-        return false;
+        if (!s_programStructureTensor || !s_programAccumulate || !s_programResolve) {
+            LOGE("GpuSabreEngine: failed to build one or more compute shaders");
+            if (s_programStructureTensor != 0) { glDeleteProgram(s_programStructureTensor); s_programStructureTensor = 0; }
+            if (s_programAccumulate != 0) { glDeleteProgram(s_programAccumulate); s_programAccumulate = 0; }
+            if (s_programResolve != 0) { glDeleteProgram(s_programResolve); s_programResolve = 0; }
+            return false;
+        }
+        LOGD("GpuSabreEngine: all 3 compute shaders built successfully (shared)");
     }
-
-    shadersBuilt_ = true;
-    LOGD("GpuSabreEngine: all 3 compute shaders built successfully");
+    s_shaderRefCount++;
     return true;
 }
 
 void GpuSabreEngine::releaseShaders() {
-    darkbag::gpu::GpuContext& ctx = darkbag::gpu::GpuContext::instance();
-    darkbag::gpu::GpuContextScope ctxScope(ctx);
-
-    if (programStructureTensor_ != 0) {
-        glDeleteProgram(programStructureTensor_);
-        programStructureTensor_ = 0;
+    std::lock_guard<std::mutex> lock(s_shaderMutex);
+    if (s_shaderRefCount > 0) {
+        s_shaderRefCount--;
+        if (s_shaderRefCount == 0) {
+            darkbag::gpu::GpuContext& ctx = darkbag::gpu::GpuContext::instance();
+            darkbag::gpu::GpuContextScope ctxScope(ctx);
+            if (ctxScope.isAcquired()) {
+                if (s_programStructureTensor != 0) {
+                    glDeleteProgram(s_programStructureTensor);
+                    s_programStructureTensor = 0;
+                }
+                if (s_programAccumulate != 0) {
+                    glDeleteProgram(s_programAccumulate);
+                    s_programAccumulate = 0;
+                }
+                if (s_programResolve != 0) {
+                    glDeleteProgram(s_programResolve);
+                    s_programResolve = 0;
+                }
+            }
+            LOGD("GpuSabreEngine: all 3 compute shaders released");
+        }
     }
-    if (programAccumulate_ != 0) {
-        glDeleteProgram(programAccumulate_);
-        programAccumulate_ = 0;
-    }
-    if (programResolve_ != 0) {
-        glDeleteProgram(programResolve_);
-        programResolve_ = 0;
-    }
-    shadersBuilt_ = false;
 }
 
 bool GpuSabreEngine::prepareTextures(int width, int height) {
+    darkbag::gpu::GpuContext& ctx = darkbag::gpu::GpuContext::instance();
+    darkbag::gpu::GpuContextScope ctxScope(ctx);
+    if (!ctxScope.isAcquired()) {
+        LOGE("GpuSabreEngine::prepareTextures: failed to acquire GPU context");
+        return false;
+    }
+
     if (width == width_ && height == height_ && refBayerTex_ != 0) {
         return true;
     }
@@ -207,6 +275,9 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
 void GpuSabreEngine::releaseTextures() {
     darkbag::gpu::GpuContext& ctx = darkbag::gpu::GpuContext::instance();
     darkbag::gpu::GpuContextScope ctxScope(ctx);
+    if (!ctxScope.isAcquired()) {
+        return;
+    }
 
     if (refBayerTex_ != 0) { glDeleteTextures(1, &refBayerTex_); refBayerTex_ = 0; }
     if (candBayerTex_ != 0) { glDeleteTextures(1, &candBayerTex_); candBayerTex_ = 0; }
@@ -220,54 +291,6 @@ void GpuSabreEngine::releaseTextures() {
 
     flowTexWidth_ = 0;
     flowTexHeight_ = 0;
-}
-
-bool GpuSabreEngine::initSession(const SabreConfig& config) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!isAvailable()) {
-        LOGE("GpuSabreEngine::initSession: GPU compute shaders not supported");
-        return false;
-    }
-
-    darkbag::gpu::GpuContext& ctx = darkbag::gpu::GpuContext::instance();
-    darkbag::gpu::GpuContextScope ctxScope(ctx);
-    if (!ctxScope.isAcquired()) {
-        LOGE("GpuSabreEngine::initSession: failed to acquire GPU context");
-        return false;
-    }
-
-    if (!ensureShaders()) {
-        LOGE("GpuSabreEngine::initSession: failed to build shaders");
-        return false;
-    }
-
-    config_ = config;
-    float z = std::max(1.0f, config_.zoomFactor);
-    config_.zoomFactor = z;
-
-    width_ = config.width;
-    height_ = config.height;
-    quadWidth_ = width_ / 2;
-    quadHeight_ = height_ / 2;
-
-    cropWidth_ = static_cast<float>(width_) / z;
-    cropHeight_ = static_cast<float>(height_) / z;
-    cropXStart_ = (static_cast<float>(width_) - cropWidth_) * 0.5f;
-    cropYStart_ = (static_cast<float>(height_) - cropHeight_) * 0.5f;
-
-    if (!prepareTextures(width_, height_)) {
-        LOGE("GpuSabreEngine::initSession: failed to prepare textures");
-        return false;
-    }
-
-    framesAccumulated_ = 0;
-    accumIdx_ = 0;
-    sessionActive_ = true;
-
-    LOGD("GpuSabreEngine session initialized: %dx%d, CFA=%d, Zoom=%.2fx (crop: %.1fx%.1f at (%.1f, %.1f))",
-         width_, height_, static_cast<int>(config_.cfa), z,
-         cropWidth_, cropHeight_, cropXStart_, cropYStart_);
-    return true;
 }
 
 bool GpuSabreEngine::setReferenceFrame(const uint16_t* refBayer) {
@@ -290,18 +313,18 @@ bool GpuSabreEngine::setReferenceFrame(const uint16_t* refBayer) {
     glBindTexture(GL_TEXTURE_2D, 0);
 
     // 2. Dispatch Pass 1: Structure Tensor & Steering Covariance
-    glUseProgram(programStructureTensor_);
+    glUseProgram(s_programStructureTensor);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, refBayerTex_);
-    glUniform1i(glGetUniformLocation(programStructureTensor_, "uRefBayer"), 0);
+    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uRefBayer"), 0);
 
     glBindImageTexture(0, covTex_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
-    glUniform1i(glGetUniformLocation(programStructureTensor_, "uCovImg"), 0);
+    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uCovImg"), 0);
 
-    glUniform1i(glGetUniformLocation(programStructureTensor_, "uQuadWidth"), quadWidth_);
-    glUniform1i(glGetUniformLocation(programStructureTensor_, "uQuadHeight"), quadHeight_);
-    glUniform1i(glGetUniformLocation(programStructureTensor_, "uCfaPattern"), static_cast<int>(config_.cfa));
+    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uQuadWidth"), quadWidth_);
+    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uQuadHeight"), quadHeight_);
+    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uCfaPattern"), static_cast<int>(config_.cfa));
 
     GLuint numGroupsX = (quadWidth_ + 15) / 16;
     GLuint numGroupsY = (quadHeight_ + 15) / 16;
@@ -400,60 +423,60 @@ bool GpuSabreEngine::accumulateFrameLocked(
     int inIdx = (framesAccumulated_ == 0) ? 1 : accumIdx_;
     int outIdx = (framesAccumulated_ == 0) ? 0 : (1 - accumIdx_);
 
-    glUseProgram(programAccumulate_);
+    glUseProgram(s_programAccumulate);
 
     // Texture unit 0: Reference Bayer
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, refBayerTex_);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uRefBayer"), 0);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uRefBayer"), 0);
 
     // Texture unit 1: Candidate Bayer
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, candBayerTex_);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uCandBayer"), 1);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uCandBayer"), 1);
 
     // Texture unit 2: Optical Flow
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, flowTex_);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uFlowTex"), 2);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uFlowTex"), 2);
 
     // Image unit 0: Steering Covariance (readonly, RGBA16F)
     glBindImageTexture(0, covTex_, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uCovImg"), 0);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uCovImg"), 0);
 
     // Image unit 1: Input Accumulation (readonly, RGBA32F)
     glBindImageTexture(1, accumTex_[inIdx], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uInAccumImg"), 1);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uInAccumImg"), 1);
 
     // Image unit 2: Input Weight (readonly, RGBA32F)
     glBindImageTexture(2, weightTex_[inIdx], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uInWeightImg"), 2);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uInWeightImg"), 2);
 
     // Image unit 3: Output Accumulation (writeonly, RGBA32F)
     glBindImageTexture(3, accumTex_[outIdx], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uOutAccumImg"), 3);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uOutAccumImg"), 3);
 
     // Image unit 4: Output Weight (writeonly, RGBA32F)
     glBindImageTexture(4, weightTex_[outIdx], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uOutWeightImg"), 4);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uOutWeightImg"), 4);
 
     // Set uniforms
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uWidth"), width_);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uHeight"), height_);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uSensorWidth"), width_);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uSensorHeight"), height_);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uQuadWidth"), quadWidth_);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uQuadHeight"), quadHeight_);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uCfaPattern"), static_cast<int>(config_.cfa));
-    glUniform1f(glGetUniformLocation(programAccumulate_, "uZoomFactor"), config_.zoomFactor);
-    glUniform1f(glGetUniformLocation(programAccumulate_, "uCropXStart"), cropXStart_);
-    glUniform1f(glGetUniformLocation(programAccumulate_, "uCropYStart"), cropYStart_);
-    glUniform2f(glGetUniformLocation(programAccumulate_, "uNoiseModel"), config_.noiseModelS, config_.noiseModelO);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uIsRef"), isRef ? 1 : 0);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uIsFirstFrame"), (framesAccumulated_ == 0) ? 1 : 0);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uHasFlow"), hasFlow ? 1 : 0);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uFlowWidth"), flowWidth);
-    glUniform1i(glGetUniformLocation(programAccumulate_, "uFlowHeight"), flowHeight);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uWidth"), width_);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uHeight"), height_);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uSensorWidth"), width_);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uSensorHeight"), height_);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uQuadWidth"), quadWidth_);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uQuadHeight"), quadHeight_);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uCfaPattern"), static_cast<int>(config_.cfa));
+    glUniform1f(glGetUniformLocation(s_programAccumulate, "uZoomFactor"), config_.zoomFactor);
+    glUniform1f(glGetUniformLocation(s_programAccumulate, "uCropXStart"), cropXStart_);
+    glUniform1f(glGetUniformLocation(s_programAccumulate, "uCropYStart"), cropYStart_);
+    glUniform2f(glGetUniformLocation(s_programAccumulate, "uNoiseModel"), config_.noiseModelS, config_.noiseModelO);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uIsRef"), isRef ? 1 : 0);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uIsFirstFrame"), (framesAccumulated_ == 0) ? 1 : 0);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uHasFlow"), hasFlow ? 1 : 0);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uFlowWidth"), flowWidth);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uFlowHeight"), flowHeight);
 
     GLuint numGroupsX = (width_ + 15) / 16;
     GLuint numGroupsY = (height_ + 15) / 16;
@@ -491,8 +514,8 @@ bool GpuSabreEngine::resolve(
 ) {
     auto startTime = std::chrono::high_resolution_clock::now();
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!sessionActive_ || framesAccumulated_ == 0) {
-        LOGE("GpuSabreEngine::resolve: inactive session or 0 frames accumulated");
+    if (!sessionActive_ || framesAccumulated_ == 0 || outputRgbTex_ == 0) {
+        LOGE("GpuSabreEngine::resolve: inactive session, 0 frames accumulated, or null output texture");
         return false;
     }
 
@@ -504,29 +527,29 @@ bool GpuSabreEngine::resolve(
     }
 
     // Dispatch Pass 3: Resolve & Guided Color Difference Recovery
-    glUseProgram(programResolve_);
+    glUseProgram(s_programResolve);
 
     // Image unit 0: Input Accumulation (readonly, RGBA32F)
     glBindImageTexture(0, accumTex_[accumIdx_], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
-    glUniform1i(glGetUniformLocation(programResolve_, "uInAccumImg"), 0);
+    glUniform1i(glGetUniformLocation(s_programResolve, "uInAccumImg"), 0);
 
     // Image unit 1: Input Weight (readonly, RGBA32F)
     glBindImageTexture(1, weightTex_[accumIdx_], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
-    glUniform1i(glGetUniformLocation(programResolve_, "uInWeightImg"), 1);
+    glUniform1i(glGetUniformLocation(s_programResolve, "uInWeightImg"), 1);
 
     // Image unit 2: Output RGB Texture (writeonly, RGBA16F)
     glBindImageTexture(2, outputRgbTex_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
-    glUniform1i(glGetUniformLocation(programResolve_, "uOutRgbImg"), 2);
+    glUniform1i(glGetUniformLocation(s_programResolve, "uOutRgbImg"), 2);
 
     const float wl = static_cast<float>(config_.whiteLevel);
     const float bl_r = static_cast<float>(config_.blackLevel[0]);
     const float bl_g = 0.5f * (static_cast<float>(config_.blackLevel[1]) + static_cast<float>(config_.blackLevel[2]));
     const float bl_b = static_cast<float>(config_.blackLevel[3]);
 
-    glUniform1i(glGetUniformLocation(programResolve_, "uWidth"), width_);
-    glUniform1i(glGetUniformLocation(programResolve_, "uHeight"), height_);
-    glUniform1f(glGetUniformLocation(programResolve_, "uWhiteLevel"), wl);
-    glUniform4f(glGetUniformLocation(programResolve_, "uBlackLevel"), bl_r, bl_g, bl_b, 0.0f);
+    glUniform1i(glGetUniformLocation(s_programResolve, "uWidth"), width_);
+    glUniform1i(glGetUniformLocation(s_programResolve, "uHeight"), height_);
+    glUniform1f(glGetUniformLocation(s_programResolve, "uWhiteLevel"), wl);
+    glUniform4f(glGetUniformLocation(s_programResolve, "uBlackLevel"), bl_r, bl_g, bl_b, 0.0f);
 
     GLuint numGroupsX = (width_ + 15) / 16;
     GLuint numGroupsY = (height_ + 15) / 16;
@@ -568,6 +591,12 @@ bool GpuSabreEngine::readbackRgbTextureLocked(
     uint16_t* outCpuRgb,
     uint16_t* outCpuBayer
 ) {
+    if (texId == 0 || width <= 0 || height <= 0) {
+        LOGE("GpuSabreEngine::readbackRgbTextureLocked: invalid texId (%u) or dimensions (%dx%d)",
+             texId, width, height);
+        return false;
+    }
+
     const size_t numPixels = static_cast<size_t>(width) * height;
 
     // Attach unified RGBA16F texture to FBO for single-pass readback
@@ -578,7 +607,7 @@ bool GpuSabreEngine::readbackRgbTextureLocked(
 
     GLenum fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (fboStatus != GL_FRAMEBUFFER_COMPLETE) {
-        LOGE("GpuSabreEngine: FBO attachment incomplete for RGBA16F: 0x%x", fboStatus);
+        LOGE("GpuSabreEngine: FBO attachment incomplete for RGBA16F: 0x%x (texId=%u)", fboStatus, texId);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glDeleteFramebuffers(1, &fbo);
         return false;
