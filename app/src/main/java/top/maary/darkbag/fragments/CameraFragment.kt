@@ -203,6 +203,7 @@ class CameraFragment : Fragment() {
 
     @Volatile private var isBurstActive = false
     @Volatile private var isSwitchingLens = false
+    private var lensSwitchWatchdog: kotlinx.coroutines.Job? = null
     private val rawVideoSessionManager = top.maary.darkbag.rawvideo.RawVideoSessionManager()
     private var mp4VideoRecorder: top.maary.darkbag.video.Mp4VideoRecorder? = null
     private val requestAudioPermissionLauncher = registerForActivityResult(
@@ -1083,29 +1084,18 @@ class CameraFragment : Fragment() {
     private fun bindCameraUseCases() {
         bindJob?.cancel()
         bindJob = lifecycleScope.launch {
-            val watchdog = launch {
-                delay(2000)
-                if (isSwitchingLens) {
-                    isSwitchingLens = false
-                    _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
-                }
+            // Move heavy lens refresh to background
+            withContext(Dispatchers.Default) {
+                refreshLenses()
             }
-            try {
-                // Move heavy lens refresh to background
-                withContext(Dispatchers.Default) {
-                    refreshLenses()
-                }
 
-                // Ensure Camera2 is closed if we are switching engines or lenses
-                closeCamera2()
-                if (!isBurstActive && !isProcessing && top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value == 0) {
-                    top.maary.darkbag.processor.StreamingBufferPool.clear()
-                }
-
-                bindCameraUseCasesInternal()
-            } finally {
-                watchdog.cancel()
+            // Ensure Camera2 is closed if we are switching engines or lenses
+            closeCamera2()
+            if (!isBurstActive && !isProcessing && top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value == 0) {
+                top.maary.darkbag.processor.StreamingBufferPool.clear()
             }
+
+            bindCameraUseCasesInternal()
         }
     }
 
@@ -2911,6 +2901,17 @@ class CameraFragment : Fragment() {
     private fun animateSwitch(onMidPoint: () -> Unit) {
         if (isSwitchingLens) return
         isSwitchingLens = true
+
+        lensSwitchWatchdog?.cancel()
+        lensSwitchWatchdog = lifecycleScope.launch {
+            delay(2000)
+            if (isSwitchingLens) {
+                Log.w(TAG, "Lens switch watchdog triggered: camera did not deliver frame in 2000ms")
+                isSwitchingLens = false
+                _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+            }
+        }
+
         val switchDuration = 150L
         fragmentCameraBinding.viewFinder.animate()
             .alpha(0f)
@@ -4030,12 +4031,24 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
 
                 override fun onDisconnected(device: android.hardware.camera2.CameraDevice) {
-                    lifecycleScope.launch { closeCamera2() }
+                    lensSwitchWatchdog?.cancel()
+                    lensSwitchWatchdog = null
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        isSwitchingLens = false
+                        _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                        closeCamera2()
+                    }
                 }
 
                 override fun onError(device: android.hardware.camera2.CameraDevice, error: Int) {
                     Log.e(TAG, "Camera2 open error: $error for camera $cameraId")
-                    lifecycleScope.launch { closeCamera2() }
+                    lensSwitchWatchdog?.cancel()
+                    lensSwitchWatchdog = null
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        isSwitchingLens = false
+                        _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                        closeCamera2()
+                    }
 
                     if (error == 2 && camera2RetryCount < 1) {
                          camera2RetryCount++
@@ -4053,6 +4066,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }, camera2Handler)
         } catch (e: android.hardware.camera2.CameraAccessException) {
             Log.e(TAG, "Failed to open Camera2", e)
+            lensSwitchWatchdog?.cancel()
+            lensSwitchWatchdog = null
+            lifecycleScope.launch(Dispatchers.Main) {
+                isSwitchingLens = false
+                _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+            }
         }
     }
 
@@ -4117,13 +4136,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
         }, handler)
 
-        val previewCandidates = map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)
-            ?.filter { it.width.toFloat()/it.height.toFloat() in 1.3f..1.4f }
-        val previewSize = previewCandidates
-            ?.filter { it.width <= 1920 && it.height <= 1440 }
-            ?.maxByOrNull { it.width * it.height }
-            ?: previewCandidates?.minByOrNull { it.width * it.height }
-            ?: android.util.Size(1440, 1080)
+        val previewSize = CameraRepository.selectOptimalPreviewSize(map?.getOutputSizes(android.graphics.SurfaceTexture::class.java))
 
         Log.d(TAG, "Requesting preview surface from LutProcessor: ${previewSize.width}x${previewSize.height}")
         lutProcessor?.getInputSurface(previewSize.width, previewSize.height) { surface ->
@@ -4179,6 +4192,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                     handleCaptureResult(result)
                                     if (!firstFrameDelivered) {
                                         firstFrameDelivered = true
+                                        lensSwitchWatchdog?.cancel()
+                                        lensSwitchWatchdog = null
                                         lifecycleScope.launch(Dispatchers.Main) {
                                             isSwitchingLens = false
                                             _fragmentCameraBinding?.viewFinder?.animate()
@@ -4191,6 +4206,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             }, handler)
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to start repeating request", e)
+                            lensSwitchWatchdog?.cancel()
+                            lensSwitchWatchdog = null
                             lifecycleScope.launch(Dispatchers.Main) {
                                 isSwitchingLens = false
                                 _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
@@ -4200,6 +4217,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     override fun onConfigureFailed(session: android.hardware.camera2.CameraCaptureSession) {
                         Log.e(TAG, "Camera2 session config failed for lens: ${currentLens?.name ?: camera2Device?.id}")
+                        lensSwitchWatchdog?.cancel()
+                        lensSwitchWatchdog = null
                         lifecycleScope.launch(Dispatchers.Main) {
                             isSwitchingLens = false
                             _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
@@ -4217,6 +4236,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }, handler)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to create capture session", e)
+                lensSwitchWatchdog?.cancel()
+                lensSwitchWatchdog = null
+                lifecycleScope.launch(Dispatchers.Main) {
+                    isSwitchingLens = false
+                    _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                }
             }
                 }
             }
