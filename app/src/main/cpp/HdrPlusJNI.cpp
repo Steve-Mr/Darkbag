@@ -1121,49 +1121,19 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         env->GetFloatArrayRegion(whiteBalance, 0, 4, wb_array);
     }
 
-    // 3. High-Fidelity RCD Demosaicing (GPU Compute Shader preferred, CPU OpenMP fallback)
+    // 3. High-Fidelity RCD Demosaicing (CPU OpenMP+NEON: 339ms, zero GPU contention)
     auto demosaicStart = std::chrono::high_resolution_clock::now();
-    bool gpuDemosaicOk = false;
-    if (darkbag::gpu::GpuRcdComputeEngine::instance().isAvailable()) {
-        int64_t gpuDemosaicMs = 0;
-        GLuint rgbTex = 0;
-        gpuDemosaicOk = darkbag::gpu::GpuRcdComputeEngine::instance().demosaicToRgbTexture(
-            sharedResult->bayerBuf.data(),
-            width, height,
-            cfaPattern,
-            bl_array,
-            static_cast<uint16_t>(whiteLevel),
-            wb_array,
-            &rgbTex,
-            &gpuDemosaicMs
-        );
-        if (gpuDemosaicOk) {
-            sharedResult->gpuRgbTexture = darkbag::gpu::GpuRcdComputeEngine::instance().transferOutputTexture();
-            if (sharedResult->gpuRgbTexture == 0) {
-                sharedResult->gpuRgbTexture = rgbTex;
-            }
-            sharedResult->gpuTexWidth = width;
-            sharedResult->gpuTexHeight = height;
-            LOGD("GPU Compute RCD demosaic succeeded in %lld ms (unified texture %u, %dx%d)",
-                 (long long)gpuDemosaicMs, sharedResult->gpuRgbTexture, width, height);
-        } else {
-            LOGW("GPU Compute RCD demosaic failed, falling back to CPU RCD");
-        }
-    }
-
-    if (!gpuDemosaicOk) {
-        sharedResult->rgbBuf.resize(numPixels * 3);
-        darkbag::demosaic::rcd_demosaic(
-            sharedResult->bayerBuf.data(),
-            width,
-            height,
-            cfaPattern,
-            bl_array,
-            static_cast<uint16_t>(whiteLevel),
-            wb_array,
-            sharedResult->rgbBuf.data()
-        );
-    }
+    sharedResult->rgbBuf.resize(numPixels * 3);
+    darkbag::demosaic::rcd_demosaic(
+        sharedResult->bayerBuf.data(),
+        width,
+        height,
+        cfaPattern,
+        bl_array,
+        static_cast<uint16_t>(whiteLevel),
+        wb_array,
+        sharedResult->rgbBuf.data()
+    );
     auto demosaicDurationMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::high_resolution_clock::now() - demosaicStart
     ).count();

@@ -271,7 +271,7 @@ class CameraFragment : Fragment() {
     private var isVideoSaving = false
 
     private val isProcessing: Boolean
-        get() = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0 || isVideoSaving
+        get() = top.maary.darkbag.processor.HdrPlusRequestManager.pendingForegroundTasksCount.value > 0 || isVideoSaving
 
     // Half-frame State
     private var pendingVfSnapshot: android.graphics.Bitmap? = null
@@ -751,8 +751,11 @@ class CameraFragment : Fragment() {
                     Pair(target, lm)
                 }
 
+                val thumbSizePx = resources.getDimensionPixelSize(R.dimen.round_button_medium)
                 Glide.with(photoViewButton)
                     .load(loadTarget)
+                    .override(thumbSizePx, thumbSizePx)
+                    .downsample(com.bumptech.glide.load.resource.bitmap.DownsampleStrategy.CENTER_INSIDE)
                     .apply(RequestOptions.circleCropTransform())
                     .signature(com.bumptech.glide.signature.ObjectKey(lastModified))
                     .into(photoViewButton)
@@ -857,6 +860,7 @@ class CameraFragment : Fragment() {
                                 imageRepository.invalidateCache()
                                 prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, event.targetUri).apply()
                                 setGalleryThumbnail(event.targetUri)
+                                updateProcessingAnimationUi()
                             }
                         } else {
                              Log.w(TAG, "Received save event for ${event.baseName} without targetUri.")
@@ -868,9 +872,9 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // Listen for HDR+/RAW processing queue changes to drive loading animation
+        // Listen for HDR+/RAW foreground processing queue changes to drive loading animation
         viewLifecycleOwner.lifecycleScope.launch {
-            top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.collect {
+            top.maary.darkbag.processor.HdrPlusRequestManager.pendingForegroundTasksCount.collect {
                 withContext(Dispatchers.Main) {
                     updateProcessingAnimationUi()
                 }
@@ -1555,7 +1559,15 @@ class CameraFragment : Fragment() {
             } else {
                 if (isHdrPlusEnabled && isRawSupported) {
                     timing.captureMode = if (isHalfFrameModeEnabled) top.maary.darkbag.models.CaptureTimingMode.HALF_FRAME else top.maary.darkbag.models.CaptureTimingMode.HDR_BURST
-                    triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, timing)
+                    isBurstActive = true
+                    val h = camera2Handler
+                    if (h != null) {
+                        h.post {
+                            triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, timing)
+                        }
+                    } else {
+                        triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, timing)
+                    }
                 } else {
                     timing.captureMode = if (isHalfFrameModeEnabled) top.maary.darkbag.models.CaptureTimingMode.HALF_FRAME else top.maary.darkbag.models.CaptureTimingMode.SINGLE_RAW
                     takeSinglePictureCamera2(timing, isFrame1Trigger, hfMetadataForTrigger)
@@ -2697,7 +2709,7 @@ class CameraFragment : Fragment() {
                     cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
 
                     setOnClickListener {
-                        if (isBurstActive || isProcessing || isSwitchingLens) return@setOnClickListener
+                        if (isBurstActive || isSwitchingLens) return@setOnClickListener
                         if (isMultiCameraModeActive) {
                             currentLens = lens
                             updateLensUI()
@@ -4661,10 +4673,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         hfMetadata: HalfFrameManager.Metadata? = null,
         timing: StandardTimingTracker? = null
     ) {
-        val device = camera2Device ?: run { processingSemaphore.release(); return }
-        val session = camera2Session ?: run { processingSemaphore.release(); return }
-        val reader = rawImageReader ?: run { processingSemaphore.release(); return }
-        val handler = camera2Handler ?: run { processingSemaphore.release(); return }
+        val device = camera2Device ?: run { isBurstActive = false; processingSemaphore.release(); return }
+        val session = camera2Session ?: run { isBurstActive = false; processingSemaphore.release(); return }
+        val reader = rawImageReader ?: run { isBurstActive = false; processingSemaphore.release(); return }
+        val handler = camera2Handler ?: run { isBurstActive = false; processingSemaphore.release(); return }
 
         isBurstActive = true
         val captureStartTime = hfMetadata?.captureTimeMillis ?: System.currentTimeMillis()

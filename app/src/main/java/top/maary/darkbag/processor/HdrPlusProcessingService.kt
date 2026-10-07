@@ -65,6 +65,12 @@ class HdrPlusProcessingService : LifecycleService() {
 
     private suspend fun processRequest(req: HdrPlusRequest) {
         var buffersReleased = false
+        val foregroundCompleted = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun notifyForegroundComplete() {
+            if (foregroundCompleted.compareAndSet(false, true)) {
+                HdrPlusRequestManager.onForegroundTaskFinished()
+            }
+        }
         try {
             val start = System.currentTimeMillis()
             req.timing?.processingStart = start
@@ -302,10 +308,14 @@ class HdrPlusProcessingService : LifecycleService() {
                                                     saveJpg = true
                                                 )
                                             )
+                                            notifyForegroundComplete()
                                         }
                                     }
                                     if (jpgSuccess && req.timing?.firstOutputWritten == 0L) {
                                         req.timing?.firstOutputWritten = System.currentTimeMillis()
+                                    }
+                                    if (pfdJpg == null && jpgSuccess) {
+                                        notifyForegroundComplete()
                                     }
                                 }
                             }
@@ -381,9 +391,15 @@ class HdrPlusProcessingService : LifecycleService() {
                                                 )
                                             )
                                         }
+                                        if (dngSuccess && !shouldSaveJpg) {
+                                            notifyForegroundComplete()
+                                        }
                                     }
                                     if (dngSuccess && req.timing?.firstOutputWritten == 0L) {
                                         req.timing?.firstOutputWritten = System.currentTimeMillis()
+                                    }
+                                    if (pfdDng == null && dngSuccess && !shouldSaveJpg) {
+                                        notifyForegroundComplete()
                                     }
                                 }
                             }
@@ -477,7 +493,7 @@ class HdrPlusProcessingService : LifecycleService() {
                         } finally {
                             req.timing?.taskCompleted = System.currentTimeMillis()
                             exportSemaphore.release()
-                            finishTaskAndCheckStopService(req.requestId)
+                            finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
                         }
                     }
                     stage2HandedOff = true
@@ -486,11 +502,11 @@ class HdrPlusProcessingService : LifecycleService() {
                 }
 
                 if (!stage2HandedOff) {
-                    finishTaskAndCheckStopService(req.requestId)
+                    finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
                 }
             } else {
                 Log.e(TAG, "Stage 1 Halide processing failed for ${req.requestId}")
-                finishTaskAndCheckStopService(req.requestId)
+                finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception processing ${req.requestId}", e)
@@ -504,11 +520,11 @@ class HdrPlusProcessingService : LifecycleService() {
                     Log.w(TAG, "Error aborting streaming session ${req.streamingSessionHandle}", abortEx)
                 }
             }
-            finishTaskAndCheckStopService(req.requestId)
+            finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
         }
     }
 
-    private fun finishTaskAndCheckStopService(requestId: String? = null) {
+    private fun finishTaskAndCheckStopService(requestId: String? = null, foregroundAlreadyFinished: Boolean = false) {
         if (requestId != null) {
             try {
                 ColorProcessor.freeSharedRawMemory(requestId)
@@ -516,7 +532,7 @@ class HdrPlusProcessingService : LifecycleService() {
                 Log.e(TAG, "Error freeing shared raw memory for $requestId", e)
             }
         }
-        HdrPlusRequestManager.onTaskFinished()
+        HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = foregroundAlreadyFinished)
         val remaining = HdrPlusRequestManager.pendingTasksCount.value
         if (remaining == 0) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {

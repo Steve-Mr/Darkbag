@@ -72,13 +72,10 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
         m_noiseProfile.assign(noiseProfile, noiseProfile + noiseProfileLen);
     }
 
-    // Fixed constant O(1) memory allocation
+    // Fixed constant O(1) memory allocation for reference frame
     size_t numPixels = static_cast<size_t>(m_width) * m_height;
     m_refFrame.resize(numPixels);
-    m_accumVal[0].resize(numPixels);
-    m_accumVal[1].resize(numPixels);
-    m_accumWeight[0].resize(numPixels);
-    m_accumWeight[1].resize(numPixels);
+    // m_accumVal and m_accumWeight are lazily allocated on first CPU frame push to save ~200MB upfront heap
 
     // Initialize Sabre Super-Resolution Engine only if eligible
     // Sabre is eligible if Force Sabre (mode == 2), or Auto (mode == 0) with zoom >= 1.25x
@@ -114,18 +111,8 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
     // Cap CPU Halide worker threads to prevent core thrashing across dual sessions
     halide_set_num_threads(3);
 
-    // Initialize Phase 3C GPU-native multi-frame accumulation if supported
-    m_useGpuAccumulation = darkbag::gpu::GpuAccumulateEngine::instance().isAvailable();
-    if (m_useGpuAccumulation && m_fusionMode != 2 && m_fusionMode != 3) {
-        float noiseS = (m_noiseProfile.size() >= 2) ? static_cast<float>(m_noiseProfile[0]) : 0.0001f;
-        float noiseO = (m_noiseProfile.size() >= 2) ? static_cast<float>(m_noiseProfile[1]) : 0.00001f;
-        m_useGpuAccumulation = darkbag::gpu::GpuAccumulateEngine::instance().startSession(
-            m_width, m_height, m_cfaPattern, noiseS, noiseO
-        );
-        LOGD("HdrPlusStreamingSession: Phase 3C GPU Accumulation initialized = %d", m_useGpuAccumulation);
-    } else {
-        m_useGpuAccumulation = false;
-    }
+    // Disable Phase 3C GPU accumulation by default to preserve 60fps UI fluidity and prevent GPU fence timeouts
+    m_useGpuAccumulation = false;
 
     LOGD("HdrPlusStreamingSession initialized: %dx%d, orientation=%d, WL=%d, BL=[%u,%u,%u,%u], fusionMode=%d, zoom=%.2f, gpuAccum=%d",
          m_width, m_height, m_orientation, m_whiteLevel, m_bl_r, m_bl_g0, m_bl_g1, m_bl_b, m_fusionMode, m_zoomFactor, m_useGpuAccumulation);
@@ -171,6 +158,10 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
             LOGW("pushFrame (GPU Phase 3C) failed, falling back to CPU Halide accumulation");
             darkbag::gpu::GpuAccumulateEngine::instance().endSession();
             m_useGpuAccumulation = false;
+            if (m_accumVal[0].size() != numPixels) {
+                m_accumVal[0].resize(numPixels);
+                m_accumWeight[0].resize(numPixels);
+            }
             #pragma omp parallel for schedule(static)
             for (size_t i = 0; i < numPixels; ++i) {
                 m_accumVal[0][i] = static_cast<float>(m_refFrame[i]);
@@ -183,6 +174,11 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
     if (m_framesPushed == 0) {
         // Frame 0 (Reference Frame)
         std::memcpy(m_refFrame.data(), rawData, numPixels * sizeof(uint16_t));
+
+        if (m_accumVal[0].size() != numPixels) {
+            m_accumVal[0].resize(numPixels);
+            m_accumWeight[0].resize(numPixels);
+        }
 
         #pragma omp parallel for schedule(static)
         for (size_t i = 0; i < numPixels; ++i) {
@@ -216,6 +212,11 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
     // Frames 1..N-1 (Alternate Frames)
     int inIdx = m_accumIdx;
     int outIdx = 1 - m_accumIdx;
+
+    if (m_accumVal[outIdx].size() != numPixels) {
+        m_accumVal[outIdx].resize(numPixels);
+        m_accumWeight[outIdx].resize(numPixels);
+    }
 
     Halide::Runtime::Buffer<uint16_t> refBuf(m_refFrame.data(), m_width, m_height);
     Halide::Runtime::Buffer<uint16_t> altBuf(const_cast<uint16_t*>(rawData), m_width, m_height);
@@ -461,52 +462,22 @@ int HdrPlusStreamingSession::finish(
         outSharedResult->isWhiteBalanceApplied = true;
     } else {
         // High-Fidelity RCD Demosaicing (Spatial + RCD)
-        // Prefer GPU Compute RCD kernel (OpenGL ES 3.1+) with direct texture output, CPU fallback
+        // Perform CPU multithreaded OpenMP+NEON RCD (339ms, zero GPU contention)
         uint16_t bl_array[4] = {m_bl_r, m_bl_g0, m_bl_g1, m_bl_b};
         float wb_array[4] = {m_wb_r, m_wb_g0, m_wb_g1, m_wb_b};
-        bool gpuDemosaicOk = false;
-        if (darkbag::gpu::GpuRcdComputeEngine::instance().isAvailable()) {
-            int64_t gpuComputeMs = 0;
-            GLuint rgbTex = 0;
-            gpuDemosaicOk = darkbag::gpu::GpuRcdComputeEngine::instance().demosaicToRgbTexture(
-                outSharedResult->bayerBuf.data(),
-                m_width,
-                m_height,
-                m_cfaPattern,
-                bl_array,
-                static_cast<uint16_t>(m_whiteLevel),
-                wb_array,
-                &rgbTex,
-                &gpuComputeMs
-            );
-            if (gpuDemosaicOk) {
-                outSharedResult->gpuRgbTexture = darkbag::gpu::GpuRcdComputeEngine::instance().transferOutputTexture();
-                if (outSharedResult->gpuRgbTexture == 0) {
-                    outSharedResult->gpuRgbTexture = rgbTex;
-                }
-                outSharedResult->gpuTexWidth = m_width;
-                outSharedResult->gpuTexHeight = m_height;
-                LOGD("HDR+ Burst GPU Compute RCD demosaic succeeded in %lld ms (unified texture %u, %dx%d)",
-                     (long long)gpuComputeMs, outSharedResult->gpuRgbTexture, m_width, m_height);
-            } else {
-                LOGW("HDR+ Burst GPU Compute RCD demosaic failed, falling back to CPU RCD");
-            }
-        }
 
-        if (!gpuDemosaicOk) {
-            outSharedResult->rgbBuf.resize(numPixels * 3);
-            darkbag::demosaic::rcd_demosaic(
-                outSharedResult->bayerBuf.data(),
-                m_width,
-                m_height,
-                m_cfaPattern,
-                bl_array,
-                static_cast<uint16_t>(m_whiteLevel),
-                wb_array,
-                outSharedResult->rgbBuf.data()
-            );
-            outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
-        }
+        outSharedResult->rgbBuf.resize(numPixels * 3);
+        darkbag::demosaic::rcd_demosaic(
+            outSharedResult->bayerBuf.data(),
+            m_width,
+            m_height,
+            m_cfaPattern,
+            bl_array,
+            static_cast<uint16_t>(m_whiteLevel),
+            wb_array,
+            outSharedResult->rgbBuf.data()
+        );
+        outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
         outSharedResult->isWhiteBalanceApplied = false;
     }
 

@@ -81,25 +81,38 @@ object HdrPlusRequestManager {
     private val _pendingTasksCount = MutableStateFlow(0)
     val pendingTasksCount: StateFlow<Int> = _pendingTasksCount.asStateFlow()
 
+    private val _pendingForegroundTasksCount = MutableStateFlow(0)
+    val pendingForegroundTasksCount: StateFlow<Int> = _pendingForegroundTasksCount.asStateFlow()
+
     fun onTaskStarted() {
         _pendingTasksCount.update { it + 1 }
+        _pendingForegroundTasksCount.update { it + 1 }
+    }
+
+    fun onForegroundTaskFinished() {
+        _pendingForegroundTasksCount.update { (it - 1).coerceAtLeast(0) }
     }
 
     fun enqueue(request: HdrPlusRequest, alreadyTracked: Boolean = false) {
         if (!alreadyTracked) {
             _pendingTasksCount.update { it + 1 }
+            _pendingForegroundTasksCount.update { it + 1 }
         }
         val result = requestChannel.trySend(request)
         if (!result.isSuccess) {
             if (!alreadyTracked) {
                 _pendingTasksCount.update { (it - 1).coerceAtLeast(0) }
+                _pendingForegroundTasksCount.update { (it - 1).coerceAtLeast(0) }
             }
             throw IllegalStateException("Failed to enqueue HdrPlusRequest (pipeline queue full/rejected): ${request.requestId}")
         }
     }
 
-    fun onTaskFinished() {
+    fun onTaskFinished(foregroundAlreadyFinished: Boolean = false) {
         _pendingTasksCount.update { (it - 1).coerceAtLeast(0) }
+        if (!foregroundAlreadyFinished) {
+            _pendingForegroundTasksCount.update { (it - 1).coerceAtLeast(0) }
+        }
     }
 
     fun canAcceptNewTask(maxAllowedQueue: Int, context: Context): Boolean {
