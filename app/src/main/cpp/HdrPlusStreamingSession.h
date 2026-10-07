@@ -10,6 +10,7 @@
 #include <HalideRuntime.h>
 #include "sabre/SabreEngine.h"
 #include "sabre/TileAligner.h"
+#include "sabre/GpuSabreEngine.h"
 
 #include <GLES3/gl3.h>
 
@@ -76,7 +77,7 @@ public:
     float zoomFactor() const { return m_zoomFactor; }
     bool isSabreEngineActive() const {
         std::lock_guard<std::mutex> lock(m_sessionMutex);
-        return m_sabreEngine != nullptr;
+        return m_sabreEngine != nullptr || m_useGpuSabre;
     }
 
     // Push an incoming RAW Bayer frame.
@@ -176,4 +177,5 @@ private:
     int64_t m_normalizeMs = 0;
     int64_t m_fusionComputeMs = 0;
     bool m_useGpuAccumulation = false;
+    bool m_useGpuSabre = false;
 };

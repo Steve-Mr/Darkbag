@@ -99,10 +99,27 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
             sabreCfg.noiseModelS = static_cast<float>(m_noiseProfile[0]);
             sabreCfg.noiseModelO = static_cast<float>(m_noiseProfile[1]);
         }
-        m_sabreEngine = std::make_unique<darkbag::sabre::SabreEngine>(sabreCfg);
+
+        if (darkbag::sabre::GpuSabreEngine::instance().isAvailable()) {
+            m_useGpuSabre = darkbag::sabre::GpuSabreEngine::instance().initSession(sabreCfg);
+            if (m_useGpuSabre) {
+                LOGD("HdrPlusStreamingSession: GPU Sabre Super-Resolution engine initialized (zoom=%.2f, mode=%d)", m_zoomFactor, m_fusionMode);
+            } else {
+                LOGW("HdrPlusStreamingSession: GPU Sabre initSession failed, falling back to CPU Sabre");
+            }
+        } else {
+            m_useGpuSabre = false;
+        }
+
+        if (!m_useGpuSabre) {
+            m_sabreEngine = std::make_unique<darkbag::sabre::SabreEngine>(sabreCfg);
+            LOGD("HdrPlusStreamingSession: CPU Sabre Super-Resolution engine initialized (zoom=%.2f, mode=%d)", m_zoomFactor, m_fusionMode);
+        } else {
+            m_sabreEngine = nullptr;
+        }
         m_tileAligner = std::make_unique<darkbag::sabre::TileAligner>();
-        LOGD("HdrPlusStreamingSession: Sabre Super-Resolution engine initialized (zoom=%.2f, mode=%d)", m_zoomFactor, m_fusionMode);
     } else {
+        m_useGpuSabre = false;
         m_sabreEngine = nullptr;
         m_tileAligner = nullptr;
         LOGD("HdrPlusStreamingSession: Sabre skipped (zoom=%.2f, mode=%d), saving ~350MB RAM", m_zoomFactor, m_fusionMode);
@@ -121,6 +138,9 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
 HdrPlusStreamingSession::~HdrPlusStreamingSession() {
     if (m_useGpuAccumulation) {
         darkbag::gpu::GpuAccumulateEngine::instance().endSession();
+    }
+    if (m_useGpuSabre) {
+        darkbag::sabre::GpuSabreEngine::instance().releaseSession();
     }
     LOGD("HdrPlusStreamingSession destroyed (total frames pushed: %d)", m_framesPushed);
 }
@@ -190,7 +210,12 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
             m_tileAligner->setReferenceFrame(rawData, m_width, m_height, m_cfaPattern);
         }
 
-        if (m_sabreEngine) {
+        if (m_useGpuSabre) {
+            bool ok = darkbag::sabre::GpuSabreEngine::instance().setReferenceFrame(rawData);
+            if (!ok) {
+                LOGW("HdrPlusStreamingSession: GPU Sabre setReferenceFrame failed");
+            }
+        } else if (m_sabreEngine) {
             m_sabreEngine->setReferenceFrame(rawData);
         }
 
@@ -231,15 +256,24 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
         return false;
     }
 
-    if (m_sabreEngine && m_tileAligner) {
+    if (m_tileAligner) {
         bool alignOk = m_tileAligner->alignFrame(rawData, m_flowX, m_flowY, m_flowWidth, m_flowHeight);
-        if (alignOk) {
-            m_sabreEngine->accumulateFrame(rawData, m_flowX.data(), m_flowY.data(), m_flowWidth, m_flowHeight);
-        } else {
+        const float* fx = alignOk ? m_flowX.data() : nullptr;
+        const float* fy = alignOk ? m_flowY.data() : nullptr;
+        int fw = alignOk ? m_flowWidth : 0;
+        int fh = alignOk ? m_flowHeight : 0;
+
+        if (m_useGpuSabre) {
+            darkbag::sabre::GpuSabreEngine::instance().accumulateFrame(rawData, fx, fy, fw, fh);
+        } else if (m_sabreEngine) {
+            m_sabreEngine->accumulateFrame(rawData, fx, fy, fw, fh);
+        }
+    } else {
+        if (m_useGpuSabre) {
+            darkbag::sabre::GpuSabreEngine::instance().accumulateFrame(rawData);
+        } else if (m_sabreEngine) {
             m_sabreEngine->accumulateFrame(rawData);
         }
-    } else if (m_sabreEngine) {
-        m_sabreEngine->accumulateFrame(rawData);
     }
 
     m_accumIdx = outIdx;
@@ -299,26 +333,59 @@ int HdrPlusStreamingSession::finish(
         effectiveMode = (m_zoomFactor >= 1.25f) ? 2 : 1;
     }
 
-    if (effectiveMode == 2 && m_sabreEngine && m_framesPushed > 1) {
-        LOGD("HdrPlusStreamingSession: resolving with Sabre Super-Resolution (zoom=%.2fx, frames=%d)",
-             m_zoomFactor, m_framesPushed);
+    if (effectiveMode == 2 && (m_useGpuSabre || m_sabreEngine) && m_framesPushed > 1) {
+        LOGD("HdrPlusStreamingSession: resolving with Sabre Super-Resolution (zoom=%.2fx, frames=%d, gpu=%d)",
+             m_zoomFactor, m_framesPushed, m_useGpuSabre ? 1 : 0);
         outSharedResult->rgbBuf.resize(numPixels * 3);
+        outSharedResult->bayerBuf.resize(numPixels);
         auto fusionStart = std::chrono::high_resolution_clock::now();
-        bool sabreOk = m_sabreEngine->resolve(
-            outSharedResult->rgbBuf.data(),
-            outSharedResult->bayerBuf.data()
-        );
+        bool sabreOk = false;
+
+        if (m_useGpuSabre) {
+            GLuint outTex = 0;
+            int64_t gpuComputeMs = 0;
+            sabreOk = darkbag::sabre::GpuSabreEngine::instance().resolve(
+                &outTex,
+                outSharedResult->rgbBuf.data(),
+                outSharedResult->bayerBuf.data(),
+                &gpuComputeMs
+            );
+            if (sabreOk && outTex != 0) {
+                outSharedResult->gpuRgbTexture = darkbag::sabre::GpuSabreEngine::instance().transferOutputTexture();
+                if (outSharedResult->gpuRgbTexture == 0) {
+                    outSharedResult->gpuRgbTexture = outTex;
+                }
+                outSharedResult->gpuTexWidth = m_width;
+                outSharedResult->gpuTexHeight = m_height;
+                m_fusionComputeMs = gpuComputeMs;
+                LOGD("HdrPlusStreamingSession: GPU Sabre resolve succeeded (%lld ms, tex=%u)",
+                     (long long)m_fusionComputeMs, outSharedResult->gpuRgbTexture);
+            } else {
+                LOGW("HdrPlusStreamingSession: GPU Sabre resolve failed");
+                sabreOk = false;
+            }
+            darkbag::sabre::GpuSabreEngine::instance().releaseSession();
+            m_useGpuSabre = false;
+        } else if (m_sabreEngine) {
+            sabreOk = m_sabreEngine->resolve(
+                outSharedResult->rgbBuf.data(),
+                outSharedResult->bayerBuf.data()
+            );
+            if (sabreOk) {
+                m_fusionComputeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::high_resolution_clock::now() - fusionStart
+                ).count();
+                LOGD("HdrPlusStreamingSession: CPU Sabre Super-Resolution resolve succeeded (%lld ms)", (long long)m_fusionComputeMs);
+            }
+        }
+
         if (sabreOk) {
-            m_fusionComputeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - fusionStart
-            ).count();
             if (m_zoomFactor > 1.05f) {
                 outSharedResult->isZoomCropped = true;
             }
             outSharedResult->isWhiteBalanceApplied = false;
             outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
             outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
-            LOGD("HdrPlusStreamingSession: Sabre Super-Resolution resolve succeeded (%lld ms)", (long long)m_fusionComputeMs);
             return 0;
         }
         LOGW("HdrPlusStreamingSession: Sabre resolve returned false, falling back to Spatial + RCD");

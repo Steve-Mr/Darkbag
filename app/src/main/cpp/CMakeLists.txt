@@ -256,6 +256,7 @@ add_library(
         demosaic/RcdDemosaic.cpp
         sabre/SabreEngine.cpp
         sabre/TileAligner.cpp
+        sabre/GpuSabreEngine.cpp
         gpu/GpuContext.cpp
         gpu/GpuProgram.cpp
         gpu/GpuLutTextureManager.cpp
