@@ -195,15 +195,18 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
         // Frame 0 (Reference Frame)
         std::memcpy(m_refFrame.data(), rawData, numPixels * sizeof(uint16_t));
 
-        if (m_accumVal[0].size() != numPixels) {
-            m_accumVal[0].resize(numPixels);
-            m_accumWeight[0].resize(numPixels);
-        }
+        const bool isSabreActive = m_useGpuSabre || (m_sabreEngine != nullptr);
+        if (!isSabreActive) {
+            if (m_accumVal[0].size() != numPixels) {
+                m_accumVal[0].resize(numPixels);
+                m_accumWeight[0].resize(numPixels);
+            }
 
-        #pragma omp parallel for schedule(static)
-        for (size_t i = 0; i < numPixels; ++i) {
-            m_accumVal[0][i] = static_cast<float>(rawData[i]);
-            m_accumWeight[0][i] = 1.0f;
+            #pragma omp parallel for schedule(static)
+            for (size_t i = 0; i < numPixels; ++i) {
+                m_accumVal[0][i] = static_cast<float>(rawData[i]);
+                m_accumWeight[0][i] = 1.0f;
+            }
         }
 
         if (m_tileAligner) {
@@ -235,25 +238,28 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
     }
 
     // Frames 1..N-1 (Alternate Frames)
+    const bool isSabreActive = m_useGpuSabre || (m_sabreEngine != nullptr);
     int inIdx = m_accumIdx;
     int outIdx = 1 - m_accumIdx;
 
-    if (m_accumVal[outIdx].size() != numPixels) {
-        m_accumVal[outIdx].resize(numPixels);
-        m_accumWeight[outIdx].resize(numPixels);
-    }
+    if (!isSabreActive) {
+        if (m_accumVal[outIdx].size() != numPixels) {
+            m_accumVal[outIdx].resize(numPixels);
+            m_accumWeight[outIdx].resize(numPixels);
+        }
 
-    Halide::Runtime::Buffer<uint16_t> refBuf(m_refFrame.data(), m_width, m_height);
-    Halide::Runtime::Buffer<uint16_t> altBuf(const_cast<uint16_t*>(rawData), m_width, m_height);
-    Halide::Runtime::Buffer<float> valIn(m_accumVal[inIdx].data(), m_width, m_height);
-    Halide::Runtime::Buffer<float> weightIn(m_accumWeight[inIdx].data(), m_width, m_height);
-    Halide::Runtime::Buffer<float> valOut(m_accumVal[outIdx].data(), m_width, m_height);
-    Halide::Runtime::Buffer<float> weightOut(m_accumWeight[outIdx].data(), m_width, m_height);
+        Halide::Runtime::Buffer<uint16_t> refBuf(m_refFrame.data(), m_width, m_height);
+        Halide::Runtime::Buffer<uint16_t> altBuf(const_cast<uint16_t*>(rawData), m_width, m_height);
+        Halide::Runtime::Buffer<float> valIn(m_accumVal[inIdx].data(), m_width, m_height);
+        Halide::Runtime::Buffer<float> weightIn(m_accumWeight[inIdx].data(), m_width, m_height);
+        Halide::Runtime::Buffer<float> valOut(m_accumVal[outIdx].data(), m_width, m_height);
+        Halide::Runtime::Buffer<float> weightOut(m_accumWeight[outIdx].data(), m_width, m_height);
 
-    int res = hdrplus_accumulate_step(refBuf, altBuf, valIn, weightIn, valOut, weightOut);
-    if (res != 0) {
-        LOGE("hdrplus_accumulate_step failed with error %d at frame %d", res, m_framesPushed);
-        return false;
+        int res = hdrplus_accumulate_step(refBuf, altBuf, valIn, weightIn, valOut, weightOut);
+        if (res != 0) {
+            LOGE("hdrplus_accumulate_step failed with error %d at frame %d", res, m_framesPushed);
+            return false;
+        }
     }
 
     if (m_tileAligner) {
