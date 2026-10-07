@@ -136,7 +136,7 @@ void GpuRcdComputeEngine::releaseTextures() {
     currentHeight_ = 0;
 }
 
-bool GpuRcdComputeEngine::prepareTextures(int width, int height) {
+bool GpuRcdComputeEngine::prepareTextures(int width, int height, bool needBayerInput) {
     if (width <= 0 || height <= 0) return false;
 
     if (currentWidth_ != width || currentHeight_ != height) {
@@ -167,10 +167,17 @@ bool GpuRcdComputeEngine::prepareTextures(int width, int height) {
         return true;
     };
 
-    if (!createTex(bayerInputTex_, GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT, GL_NEAREST) ||
-        !createTex(greenIntermTex_, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST) ||
+    if (needBayerInput) {
+        if (!createTex(bayerInputTex_, GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT, GL_NEAREST)) {
+            LOGE("Failed to allocate RCD Bayer input texture (%dx%d)", width, height);
+            releaseTextures();
+            return false;
+        }
+    }
+
+    if (!createTex(greenIntermTex_, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST) ||
         !createTex(outputTexRgb_, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, GL_LINEAR)) {
-        LOGE("Failed to allocate RCD GPU textures (%dx%d)", width, height);
+        LOGE("Failed to allocate RCD GPU intermediate/output textures (%dx%d)", width, height);
         releaseTextures();
         return false;
     }
@@ -265,7 +272,7 @@ bool GpuRcdComputeEngine::demosaicFromBayerTextureLocked(
         return false;
     }
 
-    if (!prepareTextures(width, height)) {
+    if (!prepareTextures(width, height, /*needBayerInput=*/false)) {
         return false;
     }
 

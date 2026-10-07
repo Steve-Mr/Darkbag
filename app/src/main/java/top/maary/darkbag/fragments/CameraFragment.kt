@@ -737,15 +737,18 @@ class CameraFragment : Fragment() {
                     }
                 }
 
-                val lastModified = try {
-                    context?.let { mediaStoreUtils.getFileLastModified(it, android.net.Uri.parse(filename)) } ?: 0L
-                } catch (e: Exception) {
+                val (loadTarget, lastModified) = withContext(Dispatchers.IO) {
+                    val lm = try {
+                        context?.let { mediaStoreUtils.getFileLastModified(it, android.net.Uri.parse(filename)) } ?: 0L
+                    } catch (e: Exception) {
+                        val file = java.io.File(filename)
+                        if (file.exists()) file.lastModified() else 0L
+                    }
                     val file = java.io.File(filename)
-                    if (file.exists()) file.lastModified() else 0L
+                    val target: Any = if (file.exists()) file else filename
+                    Pair(target, lm)
                 }
 
-                val file = java.io.File(filename)
-                val loadTarget = if (file.exists()) file else filename
                 Glide.with(photoViewButton)
                     .load(loadTarget)
                     .apply(RequestOptions.circleCropTransform())
@@ -1086,7 +1089,9 @@ class CameraFragment : Fragment() {
 
             // Ensure Camera2 is closed if we are switching engines or lenses
             closeCamera2()
-            top.maary.darkbag.processor.StreamingBufferPool.clear()
+            if (!isBurstActive && !isProcessing && top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value == 0) {
+                top.maary.darkbag.processor.StreamingBufferPool.clear()
+            }
 
             bindCameraUseCasesInternal()
         }
@@ -2690,7 +2695,7 @@ class CameraFragment : Fragment() {
                     cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
 
                     setOnClickListener {
-                        if (isBurstActive) return@setOnClickListener
+                        if (isBurstActive || isProcessing) return@setOnClickListener
                         if (isMultiCameraModeActive) {
                             currentLens = lens
                             updateLensUI()
@@ -2963,7 +2968,8 @@ class CameraFragment : Fragment() {
         try {
             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
             request.addTarget(surface)
-            if (isManualExposure || isHdrPlusEnabled) {
+            val isMainLens = currentLens == null || (currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
+            if ((isManualExposure || isHdrPlusEnabled) && isMainLens) {
                 analysisImageReader?.surface?.let { request.addTarget(it) }
             }
             applyManualSettingsToRequest(request, isHdrBurst)
@@ -4114,7 +4120,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
 
                     camera2PreviewSurface = surface
-                    val surfaces = listOf(surface, rawImageReader!!.surface, analysisImageReader!!.surface)
+                    val surfaces = mutableListOf(surface, rawImageReader!!.surface)
+                    val isMainLens = currentLens == null || (currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
+                    if (isMainLens && analysisImageReader != null) {
+                        surfaces.add(analysisImageReader!!.surface)
+                    }
 
                     try {
                         device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
@@ -4127,7 +4137,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         try {
                             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                             request.addTarget(surface)
-                            if (isManualExposure || isHdrPlusEnabled) {
+                            if ((isManualExposure || isHdrPlusEnabled) && isMainLens) {
                                 analysisImageReader?.surface?.let { request.addTarget(it) }
                             }
 
@@ -4159,7 +4169,18 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
 
                     override fun onConfigureFailed(session: android.hardware.camera2.CameraCaptureSession) {
-                        Log.e(TAG, "Camera2 session config failed")
+                        Log.e(TAG, "Camera2 session config failed for lens: ${currentLens?.name ?: camera2Device?.id}")
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            val currentMult = currentLens?.multiplier
+                            if (currentMult != null && currentMult !in 0.95f..1.05f) {
+                                val mainLens = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                                if (mainLens != null) {
+                                    Log.w(TAG, "Falling back to main lens ${mainLens.name} after session configure failure")
+                                    currentLens = mainLens
+                                    bindCameraUseCases()
+                                }
+                            }
+                        }
                     }
                 }, handler)
             } catch (e: Exception) {
@@ -5078,7 +5099,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD)
                 camera2PreviewSurface?.let { request.addTarget(it) }
                 request.addTarget(reader.surface)
-                analysisImageReader?.surface?.let { request.addTarget(it) }
+                val isMainLens = currentLens == null || (currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
+                if (isMainLens) {
+                    analysisImageReader?.surface?.let { request.addTarget(it) }
+                }
 
                 // 1. Lock Target FPS range for AE to enforce frame rate and AE exposure ceiling
                 if (bestFpsRange != null) {
@@ -5125,7 +5149,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             try {
                 val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                 request.addTarget(surface)
-                analysisImageReader?.surface?.let { request.addTarget(it) }
+                val isMainLens = currentLens == null || (currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
+                if (isMainLens) {
+                    analysisImageReader?.surface?.let { request.addTarget(it) }
+                }
                 applyManualSettingsToRequest(request)
                 session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                     override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {

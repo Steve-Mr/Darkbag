@@ -115,7 +115,7 @@ private:
     GpuRcdComputeEngine& operator=(const GpuRcdComputeEngine&) = delete;
 
     bool ensureShaders();
-    bool prepareTextures(int width, int height);
+    bool prepareTextures(int width, int height, bool needBayerInput = true);
     void releaseTextures();
 
     bool demosaicToRgbTextureLocked(

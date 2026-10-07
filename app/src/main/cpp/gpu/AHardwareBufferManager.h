@@ -21,6 +21,9 @@ public:
     // Binds the offscreen FBO for rendering and sets viewport
     bool bindFbo();
 
+    // Unbinds the offscreen FBO to release active framebuffer render target attachment
+    void unbindFbo();
+
     // Inserts sync fence and waits until GPU rendering finishes
     bool waitGpuFinish();
 

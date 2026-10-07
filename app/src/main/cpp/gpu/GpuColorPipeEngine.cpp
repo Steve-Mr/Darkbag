@@ -393,6 +393,9 @@ bool GpuColorPipeEngine::executePipeline(
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE0);
 
+    // Detach FBO render target before sync and CPU lock
+    ahbTarget_->unbindFbo();
+
     // 12. Sync fence wait
     if (!ahbTarget_->waitGpuFinish()) {
         LOGW("waitGpuFinish encountered fallback or warning");

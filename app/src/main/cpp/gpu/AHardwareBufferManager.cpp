@@ -149,7 +149,12 @@ bool AHardwareBufferTarget::bindFbo() {
     return true;
 }
 
+void AHardwareBufferTarget::unbindFbo() {
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
 bool AHardwareBufferTarget::waitGpuFinish() {
+    unbindFbo();
     GpuContext& ctx = GpuContext::instance();
     glFlush();
 

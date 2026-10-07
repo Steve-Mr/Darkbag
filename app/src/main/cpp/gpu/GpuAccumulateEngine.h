@@ -77,6 +77,7 @@ private:
     bool ensureShaders();
     bool prepareTextures(int width, int height);
     void releaseTextures();
+    void releaseTempTextures();
 
     std::mutex engineMutex_;
     bool shadersBuilt_ = false;

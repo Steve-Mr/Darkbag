@@ -323,6 +323,8 @@ int HdrPlusStreamingSession::finish(
         LOGW("HdrPlusStreamingSession: Sabre resolve returned false, falling back to Spatial + RCD");
     }
 
+    const bool usedGpuAccumulation = m_useGpuAccumulation;
+    bool gpuNormSucceeded = false;
     if (m_useGpuAccumulation && m_framesPushed > 0 && effectiveMode != 2 && effectiveMode != 3) {
         int64_t normMs = 0;
         GLuint normBayerTex = 0;
@@ -334,6 +336,7 @@ int HdrPlusStreamingSession::finish(
         m_normalizeMs = normMs;
 
         if (normOk && normBayerTex != 0) {
+            gpuNormSucceeded = true;
             uint16_t bl_array[4] = {m_bl_r, m_bl_g0, m_bl_g1, m_bl_b};
             float wb_array[4] = {m_wb_r, m_wb_g0, m_wb_g1, m_wb_b};
             int64_t gpuComputeMs = 0;
@@ -370,30 +373,40 @@ int HdrPlusStreamingSession::finish(
                      outSharedResult->gpuRgbTexture);
                 return 0;
             } else {
-                LOGW("HdrPlusStreamingSession (Phase 3C): demosaicFromBayerTexture failed, falling back to CPU finish");
+                LOGW("HdrPlusStreamingSession (Phase 3C): demosaicFromBayerTexture failed, falling back to CPU RCD using GPU-normalized Bayer");
             }
         } else {
-            LOGW("HdrPlusStreamingSession (Phase 3C): GpuAccumulateEngine finish failed, falling back to CPU finish");
+            LOGW("HdrPlusStreamingSession (Phase 3C): GpuAccumulateEngine finish failed, falling back to Frame 0");
             darkbag::gpu::GpuAccumulateEngine::instance().endSession();
             m_useGpuAccumulation = false;
         }
     }
 
-    // Normalize accumulated val / weight into m_refFrame buffer to avoid input/output aliasing
-    auto normStart = std::chrono::high_resolution_clock::now();
-    const float* valData = m_accumVal[m_accumIdx].data();
-    const float* weightData = m_accumWeight[m_accumIdx].data();
+    if (gpuNormSucceeded) {
+        // GPU normalization already succeeded and populated outSharedResult->bayerBuf.
+        // Sync to m_refFrame for downstream consistency; DO NOT overwrite with uninitialized m_accumVal!
+        std::copy(outSharedResult->bayerBuf.begin(), outSharedResult->bayerBuf.end(), m_refFrame.begin());
+    } else if (m_framesPushed > 0 && m_accumVal[m_accumIdx].size() == numPixels && !usedGpuAccumulation) {
+        // Pure CPU accumulation mode: normalize accumulated val / weight into m_refFrame buffer
+        auto normStart = std::chrono::high_resolution_clock::now();
+        const float* valData = m_accumVal[m_accumIdx].data();
+        const float* weightData = m_accumWeight[m_accumIdx].data();
 
-    #pragma omp parallel for schedule(static)
-    for (size_t i = 0; i < numPixels; ++i) {
-        float norm = valData[i] / std::max(0.001f, weightData[i]) + 0.5f;
-        m_refFrame[i] = static_cast<uint16_t>(std::clamp(norm, 0.0f, 65535.0f));
+        #pragma omp parallel for schedule(static)
+        for (size_t i = 0; i < numPixels; ++i) {
+            float norm = valData[i] / std::max(0.001f, weightData[i]) + 0.5f;
+            m_refFrame[i] = static_cast<uint16_t>(std::clamp(norm, 0.0f, 65535.0f));
+        }
+        m_normalizeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - normStart
+        ).count();
+
+        std::copy(m_refFrame.begin(), m_refFrame.end(), outSharedResult->bayerBuf.begin());
+    } else {
+        // Fallback to retained reference frame 0
+        LOGW("HdrPlusStreamingSession: Using reference Frame 0 for output bayer buffer");
+        std::copy(m_refFrame.begin(), m_refFrame.end(), outSharedResult->bayerBuf.begin());
     }
-    m_normalizeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::high_resolution_clock::now() - normStart
-    ).count();
-
-    std::copy(m_refFrame.begin(), m_refFrame.end(), outSharedResult->bayerBuf.begin());
 
     auto fusionStart = std::chrono::high_resolution_clock::now();
 

@@ -165,18 +165,27 @@ bool GpuAccumulateEngine::prepareTextures(int width, int height) {
 }
 
 void GpuAccumulateEngine::releaseTextures() {
+    releaseTempTextures();
+    if (normalizedBayerTex_ != 0) {
+        glDeleteTextures(1, &normalizedBayerTex_);
+        normalizedBayerTex_ = 0;
+    }
+    width_ = height_ = 0;
+}
+
+void GpuAccumulateEngine::releaseTempTextures() {
     GLuint texs[] = {
         refBayerTex_, candBayerTex_, refPyramidTex_, candPyramidTex_,
         motionVectorTex_, accumValTex_[0], accumValTex_[1],
-        accumWeightTex_[0], accumWeightTex_[1], normalizedBayerTex_
+        accumWeightTex_[0], accumWeightTex_[1]
     };
     for (GLuint t : texs) {
         if (t != 0) glDeleteTextures(1, &t);
     }
     refBayerTex_ = candBayerTex_ = refPyramidTex_ = candPyramidTex_ = 0;
     motionVectorTex_ = accumValTex_[0] = accumValTex_[1] = 0;
-    accumWeightTex_[0] = accumWeightTex_[1] = normalizedBayerTex_ = 0;
-    width_ = height_ = 0;
+    accumWeightTex_[0] = accumWeightTex_[1] = 0;
+    LOGD("GpuAccumulateEngine: released temporary accumulation textures");
 }
 
 bool GpuAccumulateEngine::startSession(
@@ -358,7 +367,7 @@ bool GpuAccumulateEngine::pushFrame(const uint16_t* rawData, size_t numPixels, i
     }
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glFinish();
+    glFlush();
 
     if (outPushMs) {
         *outPushMs = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -432,6 +441,10 @@ bool GpuAccumulateEngine::finish(
         glDeleteFramebuffers(1, &fbo);
     }
 
+    // Crucial: Release temporary accumulation buffers (~280MB VRAM) immediately
+    // so Stage 1 RCD demosaic has ample GPU memory headroom!
+    releaseTempTextures();
+
     glFinish();
 
     if (outNormalizeMs) {
@@ -448,10 +461,13 @@ bool GpuAccumulateEngine::finish(
 
 void GpuAccumulateEngine::endSession() {
     std::lock_guard<std::mutex> lock(engineMutex_);
+    GpuContext& ctx = GpuContext::instance();
+    GpuContextScope ctxScope(ctx);
+    releaseTextures();
     sessionActive_ = false;
     framesPushed_ = 0;
     accumIdx_ = 0;
-    LOGD("GpuAccumulateEngine: session ended");
+    LOGD("GpuAccumulateEngine: session ended, all textures released");
 }
 
 bool GpuAccumulateEngine::isSessionActive() const {
