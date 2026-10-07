@@ -202,6 +202,7 @@ class CameraFragment : Fragment() {
                     .getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
 
     @Volatile private var isBurstActive = false
+    @Volatile private var isSwitchingLens = false
     private val rawVideoSessionManager = top.maary.darkbag.rawvideo.RawVideoSessionManager()
     private var mp4VideoRecorder: top.maary.darkbag.video.Mp4VideoRecorder? = null
     private val requestAudioPermissionLauncher = registerForActivityResult(
@@ -1082,18 +1083,29 @@ class CameraFragment : Fragment() {
     private fun bindCameraUseCases() {
         bindJob?.cancel()
         bindJob = lifecycleScope.launch {
-            // Move heavy lens refresh to background
-            withContext(Dispatchers.Default) {
-                refreshLenses()
+            val watchdog = launch {
+                delay(2000)
+                if (isSwitchingLens) {
+                    isSwitchingLens = false
+                    _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                }
             }
+            try {
+                // Move heavy lens refresh to background
+                withContext(Dispatchers.Default) {
+                    refreshLenses()
+                }
 
-            // Ensure Camera2 is closed if we are switching engines or lenses
-            closeCamera2()
-            if (!isBurstActive && !isProcessing && top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value == 0) {
-                top.maary.darkbag.processor.StreamingBufferPool.clear()
+                // Ensure Camera2 is closed if we are switching engines or lenses
+                closeCamera2()
+                if (!isBurstActive && !isProcessing && top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value == 0) {
+                    top.maary.darkbag.processor.StreamingBufferPool.clear()
+                }
+
+                bindCameraUseCasesInternal()
+            } finally {
+                watchdog.cancel()
             }
-
-            bindCameraUseCasesInternal()
         }
     }
 
@@ -2695,7 +2707,7 @@ class CameraFragment : Fragment() {
                     cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
 
                     setOnClickListener {
-                        if (isBurstActive || isProcessing) return@setOnClickListener
+                        if (isBurstActive || isProcessing || isSwitchingLens) return@setOnClickListener
                         if (isMultiCameraModeActive) {
                             currentLens = lens
                             updateLensUI()
@@ -2897,18 +2909,17 @@ class CameraFragment : Fragment() {
     }
 
     private fun animateSwitch(onMidPoint: () -> Unit) {
-        val switchDuration = 200L
+        if (isSwitchingLens) return
+        isSwitchingLens = true
+        val switchDuration = 150L
         fragmentCameraBinding.viewFinder.animate()
             .alpha(0f)
             .setDuration(switchDuration)
             .withEndAction {
                 lifecycleScope.launch(Dispatchers.Main) {
                     onMidPoint()
-                    delay(100)
-                    fragmentCameraBinding.viewFinder.animate()
-                        .alpha(1f)
-                        .setDuration(switchDuration)
-                        .start()
+                    // Note: viewFinder will be faded in to 1.0 smoothly when the new camera session
+                    // delivers its first live frame in onCaptureCompleted!
                 }
             }
             .start()
@@ -4106,9 +4117,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
         }, handler)
 
-        val previewSize = map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)
+        val previewCandidates = map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)
             ?.filter { it.width.toFloat()/it.height.toFloat() in 1.3f..1.4f }
-            ?.maxByOrNull { it.width * it.height } ?: android.util.Size(1440, 1080)
+        val previewSize = previewCandidates
+            ?.filter { it.width <= 1920 && it.height <= 1440 }
+            ?.maxByOrNull { it.width * it.height }
+            ?: previewCandidates?.minByOrNull { it.width * it.height }
+            ?: android.util.Size(1440, 1080)
 
         Log.d(TAG, "Requesting preview surface from LutProcessor: ${previewSize.width}x${previewSize.height}")
         lutProcessor?.getInputSurface(previewSize.width, previewSize.height) { surface ->
@@ -4158,19 +4173,36 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                 request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                             }
 
+                            var firstFrameDelivered = false
                             session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                                 override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
                                     handleCaptureResult(result)
+                                    if (!firstFrameDelivered) {
+                                        firstFrameDelivered = true
+                                        lifecycleScope.launch(Dispatchers.Main) {
+                                            isSwitchingLens = false
+                                            _fragmentCameraBinding?.viewFinder?.animate()
+                                                ?.alpha(1f)
+                                                ?.setDuration(200L)
+                                                ?.start()
+                                        }
+                                    }
                                 }
                             }, handler)
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to start repeating request", e)
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                isSwitchingLens = false
+                                _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                            }
                         }
                     }
 
                     override fun onConfigureFailed(session: android.hardware.camera2.CameraCaptureSession) {
                         Log.e(TAG, "Camera2 session config failed for lens: ${currentLens?.name ?: camera2Device?.id}")
                         lifecycleScope.launch(Dispatchers.Main) {
+                            isSwitchingLens = false
+                            _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
                             val currentMult = currentLens?.multiplier
                             if (currentMult != null && currentMult !in 0.95f..1.05f) {
                                 val mainLens = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
@@ -4819,11 +4851,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             for (i in 0 until burstSize) {
                 val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                 request.addTarget(reader.surface)
-                camera2PreviewSurface?.let { previewSurf ->
-                    if (previewSurf.isValid) {
-                        request.addTarget(previewSurf)
-                    }
-                }
                 request.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, combinedOrientation)
 
                 applyManualSettingsToRequest(request, true)

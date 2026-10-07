@@ -445,7 +445,7 @@ bool GpuAccumulateEngine::finish(
     // so Stage 1 RCD demosaic has ample GPU memory headroom!
     releaseTempTextures();
 
-    glFinish();
+    glFlush();
 
     if (outNormalizeMs) {
         *outNormalizeMs = std::chrono::duration_cast<std::chrono::milliseconds>(

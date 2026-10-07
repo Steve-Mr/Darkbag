@@ -328,8 +328,9 @@ int HdrPlusStreamingSession::finish(
     if (m_useGpuAccumulation && m_framesPushed > 0 && effectiveMode != 2 && effectiveMode != 3) {
         int64_t normMs = 0;
         GLuint normBayerTex = 0;
+        // Fast GPU-to-GPU path: pass nullptr to finish() to eliminate 3000ms+ synchronous glReadPixels!
         bool normOk = darkbag::gpu::GpuAccumulateEngine::instance().finish(
-            outSharedResult->bayerBuf.data(),
+            nullptr,
             &normBayerTex,
             &normMs
         );
@@ -337,6 +338,9 @@ int HdrPlusStreamingSession::finish(
 
         if (normOk && normBayerTex != 0) {
             gpuNormSucceeded = true;
+            // Pre-populate outSharedResult->bayerBuf with clean reference Frame 0 for fast DNG export and CPU fallback
+            std::copy(m_refFrame.begin(), m_refFrame.end(), outSharedResult->bayerBuf.begin());
+
             uint16_t bl_array[4] = {m_bl_r, m_bl_g0, m_bl_g1, m_bl_b};
             float wb_array[4] = {m_wb_r, m_wb_g0, m_wb_g1, m_wb_b};
             int64_t gpuComputeMs = 0;
@@ -373,7 +377,7 @@ int HdrPlusStreamingSession::finish(
                      outSharedResult->gpuRgbTexture);
                 return 0;
             } else {
-                LOGW("HdrPlusStreamingSession (Phase 3C): demosaicFromBayerTexture failed, falling back to CPU RCD using GPU-normalized Bayer");
+                LOGW("HdrPlusStreamingSession (Phase 3C): demosaicFromBayerTexture failed, falling back to CPU RCD using Frame 0");
             }
         } else {
             LOGW("HdrPlusStreamingSession (Phase 3C): GpuAccumulateEngine finish failed, falling back to Frame 0");
