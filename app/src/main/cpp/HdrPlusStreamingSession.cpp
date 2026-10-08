@@ -103,7 +103,7 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
         if (darkbag::sabre::GpuSabreEngine::isAvailable()) {
             m_gpuSabreEngine = std::make_unique<darkbag::sabre::GpuSabreEngine>(sabreCfg);
             if (!m_gpuSabreEngine->isSessionActive()) {
-                LOGW("HdrPlusStreamingSession: GPU Sabre initialization failed, falling back to CPU Sabre");
+                LOGW("HdrPlusStreamingSession: GPU Sabre initialization failed, falling back to Spatial + RCD");
                 m_gpuSabreEngine.reset();
             } else {
                 LOGD("HdrPlusStreamingSession: GPU Sabre Super-Resolution engine initialized (zoom=%.2f, mode=%d)", m_zoomFactor, m_fusionMode);
@@ -113,12 +113,14 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
         }
 
         if (!m_gpuSabreEngine) {
-            m_sabreEngine = std::make_unique<darkbag::sabre::SabreEngine>(sabreCfg);
-            LOGD("HdrPlusStreamingSession: CPU Sabre Super-Resolution engine initialized (zoom=%.2f, mode=%d)", m_zoomFactor, m_fusionMode);
+            // Smart Fallback: Avoid slow CPU Sabre (13s blowout). Fall back to Spatial + RCD (339ms).
+            m_sabreEngine = nullptr;
+            m_tileAligner = nullptr;
+            LOGW("HdrPlusStreamingSession: GPU Sabre unavailable, falling back to Spatial + RCD (skipping slow CPU Sabre)");
         } else {
             m_sabreEngine = nullptr;
+            m_tileAligner = std::make_unique<darkbag::sabre::TileAligner>();
         }
-        m_tileAligner = std::make_unique<darkbag::sabre::TileAligner>();
     } else {
         m_gpuSabreEngine = nullptr;
         m_sabreEngine = nullptr;

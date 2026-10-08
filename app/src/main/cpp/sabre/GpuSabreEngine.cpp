@@ -71,11 +71,11 @@ GLuint compileComputeShader(const char* source) {
     return program;
 }
 
-bool createTexStorage(GLuint& tex, GLenum internalFormat, int w, int h) {
+static bool createTexWithFallback(GLuint& tex, GLenum internalFormat, int w, int h) {
     if (tex == 0) {
         glGenTextures(1, &tex);
         if (tex == 0) {
-            LOGE("createTexStorage: glGenTextures failed to generate texture (format 0x%x)", internalFormat);
+            LOGE("createTexWithFallback: glGenTextures failed to generate texture (format 0x%x)", internalFormat);
             return false;
         }
     }
@@ -84,16 +84,73 @@ bool createTexStorage(GLuint& tex, GLenum internalFormat, int w, int h) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // Drain any pre-existing OpenGL error
+    while (glGetError() != GL_NO_ERROR) {}
+
+    // 1. First attempt: Immutable storage via glTexStorage2D
     glTexStorage2D(GL_TEXTURE_2D, 1, internalFormat, w, h);
+    GLenum err = glGetError();
+    if (err == GL_NO_ERROR) {
+        glBindTexture(GL_TEXTURE_2D, 0);
+        return true;
+    }
+
+    // 2. Second attempt: Fallback to mutable glTexImage2D (for ARM Mali / Adreno compatibility)
+    GLenum format = GL_RGBA;
+    GLenum type = GL_FLOAT;
+    switch (internalFormat) {
+        case GL_R16UI:
+            format = GL_RED_INTEGER;
+            type = GL_UNSIGNED_SHORT;
+            break;
+        case GL_RGBA16F:
+            format = GL_RGBA;
+            type = GL_HALF_FLOAT;
+            break;
+        case GL_RGBA32F:
+            format = GL_RGBA;
+            type = GL_FLOAT;
+            break;
+        case GL_RG32F:
+            format = GL_RG;
+            type = GL_FLOAT;
+            break;
+        default:
+            format = GL_RGBA;
+            type = GL_FLOAT;
+            break;
+    }
+
+    LOGW("glTexStorage2D(0x%x, %dx%d) failed with 0x%x, falling back to glTexImage2D", internalFormat, w, h, err);
+    while (glGetError() != GL_NO_ERROR) {}
+
+    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, nullptr);
+    err = glGetError();
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
-        LOGE("glTexStorage2D failed (format=0x%x, %dx%d): 0x%x", internalFormat, w, h, err);
+        LOGE("glTexImage2D fallback also failed (format=0x%x, %dx%d): 0x%x", internalFormat, w, h, err);
         return false;
     }
+
+    LOGD("glTexImage2D fallback succeeded for texture %u (format=0x%x, %dx%d)", tex, internalFormat, w, h);
     return true;
 }
+
+struct CachedSabreTextures {
+    int width = 0;
+    int height = 0;
+    GLuint refBayerTex = 0;
+    GLuint candBayerTex = 0;
+    GLuint covTex = 0;
+    GLuint accumTex[2] = {0, 0};
+    GLuint weightTex[2] = {0, 0};
+    bool inUse = false;
+};
+
+static CachedSabreTextures s_cachedTextures;
+static std::mutex s_cacheMutex;
 
 } // namespace
 
@@ -244,38 +301,95 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
     quadWidth_ = width / 2;
     quadHeight_ = height / 2;
 
-    if (!createTexStorage(refBayerTex_, GL_R16UI, width_, height_) ||
-        !createTexStorage(candBayerTex_, GL_R16UI, width_, height_) ||
-        !createTexStorage(covTex_, GL_RGBA16F, quadWidth_, quadHeight_) ||
-        !createTexStorage(accumTex_[0], GL_RGBA32F, width_, height_) ||
-        !createTexStorage(accumTex_[1], GL_RGBA32F, width_, height_) ||
-        !createTexStorage(weightTex_[0], GL_RGBA32F, width_, height_) ||
-        !createTexStorage(weightTex_[1], GL_RGBA32F, width_, height_) ||
-        !createTexStorage(outputRgbTex_, GL_RGBA16F, width_, height_)) {
-        LOGE("GpuSabreEngine: failed to allocate storage textures");
+    bool gotFromCache = false;
+    {
+        std::lock_guard<std::mutex> cacheLock(s_cacheMutex);
+        if (s_cachedTextures.width == width_ && s_cachedTextures.height == height_ &&
+            !s_cachedTextures.inUse && s_cachedTextures.refBayerTex != 0) {
+            // Reuse cached intermediate textures
+            refBayerTex_ = s_cachedTextures.refBayerTex;
+            candBayerTex_ = s_cachedTextures.candBayerTex;
+            covTex_ = s_cachedTextures.covTex;
+            accumTex_[0] = s_cachedTextures.accumTex[0];
+            accumTex_[1] = s_cachedTextures.accumTex[1];
+            weightTex_[0] = s_cachedTextures.weightTex[0];
+            weightTex_[1] = s_cachedTextures.weightTex[1];
+            s_cachedTextures.inUse = true;
+            reusedFromCache_ = true;
+            gotFromCache = true;
+            LOGD("GpuSabreEngine: reused cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=[%u,%u], weight=[%u,%u] (this=%p)",
+                 width_, height_, quadWidth_, quadHeight_,
+                 refBayerTex_, candBayerTex_, covTex_,
+                 accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1], this);
+        } else if (s_cachedTextures.refBayerTex != 0 && !s_cachedTextures.inUse) {
+            // Dimension changed or stale cache: release old cached textures
+            glDeleteTextures(1, &s_cachedTextures.refBayerTex);
+            glDeleteTextures(1, &s_cachedTextures.candBayerTex);
+            glDeleteTextures(1, &s_cachedTextures.covTex);
+            glDeleteTextures(1, &s_cachedTextures.accumTex[0]);
+            glDeleteTextures(1, &s_cachedTextures.accumTex[1]);
+            glDeleteTextures(1, &s_cachedTextures.weightTex[0]);
+            glDeleteTextures(1, &s_cachedTextures.weightTex[1]);
+            s_cachedTextures = CachedSabreTextures();
+            LOGD("GpuSabreEngine: destroyed stale cached textures of different dimensions");
+        }
+    }
+
+    if (!gotFromCache) {
+        // Allocate intermediate textures OUTSIDE s_cacheMutex to prevent deadlock if releaseTextures is called
+        if (!createTexWithFallback(refBayerTex_, GL_R16UI, width_, height_) ||
+            !createTexWithFallback(candBayerTex_, GL_R16UI, width_, height_) ||
+            !createTexWithFallback(covTex_, GL_RGBA16F, quadWidth_, quadHeight_) ||
+            !createTexWithFallback(accumTex_[0], GL_RGBA32F, width_, height_) ||
+            !createTexWithFallback(accumTex_[1], GL_RGBA32F, width_, height_) ||
+            !createTexWithFallback(weightTex_[0], GL_RGBA32F, width_, height_) ||
+            !createTexWithFallback(weightTex_[1], GL_RGBA32F, width_, height_)) {
+            LOGE("GpuSabreEngine: failed to allocate storage textures");
+            releaseTextures();
+            return false;
+        }
+
+        // Register newly allocated textures into s_cachedTextures under lock
+        {
+            std::lock_guard<std::mutex> cacheLock(s_cacheMutex);
+            s_cachedTextures.width = width_;
+            s_cachedTextures.height = height_;
+            s_cachedTextures.refBayerTex = refBayerTex_;
+            s_cachedTextures.candBayerTex = candBayerTex_;
+            s_cachedTextures.covTex = covTex_;
+            s_cachedTextures.accumTex[0] = accumTex_[0];
+            s_cachedTextures.accumTex[1] = accumTex_[1];
+            s_cachedTextures.weightTex[0] = weightTex_[0];
+            s_cachedTextures.weightTex[1] = weightTex_[1];
+            s_cachedTextures.inUse = true;
+            reusedFromCache_ = true;
+            LOGD("GpuSabreEngine: newly allocated and cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=[%u,%u], weight=[%u,%u] (this=%p)",
+                 width_, height_, quadWidth_, quadHeight_,
+                 refBayerTex_, candBayerTex_, covTex_,
+                 accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1], this);
+        }
+    }
+
+    // Allocate dummy 1x1 flow texture (instance-owned)
+    if (!createTexWithFallback(flowTex_, GL_RG32F, 1, 1)) {
+        LOGE("GpuSabreEngine: failed to allocate dummy flow texture");
         releaseTextures();
         return false;
     }
-
-    // Allocate dummy 1x1 flow texture
-    glGenTextures(1, &flowTex_);
-    glBindTexture(GL_TEXTURE_2D, flowTex_);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RG32F, 1, 1);
     float zeroFlow[2] = {0.0f, 0.0f};
+    glBindTexture(GL_TEXTURE_2D, flowTex_);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RG, GL_FLOAT, zeroFlow);
     glBindTexture(GL_TEXTURE_2D, 0);
     flowTexWidth_ = 1;
     flowTexHeight_ = 1;
 
-    LOGD("GpuSabreEngine: textures allocated successfully (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, flow=%u, accum=[%u,%u], weight=[%u,%u], outRgb=%u (this=%p)",
-         width_, height_, quadWidth_, quadHeight_,
-         refBayerTex_, candBayerTex_, covTex_, flowTex_,
-         accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1],
-         outputRgbTex_, this);
+    // Allocate output RGB texture (not pooled because its ownership transfers to SharedCaptureResult)
+    if (!createTexWithFallback(outputRgbTex_, GL_RGBA16F, width_, height_)) {
+        LOGE("GpuSabreEngine: failed to allocate output RGB texture");
+        releaseTextures();
+        return false;
+    }
+    LOGD("GpuSabreEngine: outputRgbTex_ allocated: %u (this=%p)", outputRgbTex_, this);
     return true;
 }
 
@@ -285,20 +399,56 @@ void GpuSabreEngine::releaseTextures() {
     if (!ctxScope.isAcquired()) {
         return;
     }
-    LOGD("GpuSabreEngine::releaseTextures (this=%p): ref=%u, outRgb=%u", this, refBayerTex_, outputRgbTex_);
+    LOGD("GpuSabreEngine::releaseTextures (this=%p): ref=%u, outRgb=%u, reusedFromCache=%d",
+         this, refBayerTex_, outputRgbTex_, reusedFromCache_);
+
+    {
+        std::lock_guard<std::mutex> cacheLock(s_cacheMutex);
+        if (reusedFromCache_ && s_cachedTextures.refBayerTex == refBayerTex_) {
+            s_cachedTextures.inUse = false;
+            refBayerTex_ = 0;
+            candBayerTex_ = 0;
+            covTex_ = 0;
+            accumTex_[0] = 0;
+            accumTex_[1] = 0;
+            weightTex_[0] = 0;
+            weightTex_[1] = 0;
+            reusedFromCache_ = false;
+            LOGD("GpuSabreEngine: returned intermediate textures to cache");
+        }
+    }
 
     if (refBayerTex_ != 0) { glDeleteTextures(1, &refBayerTex_); refBayerTex_ = 0; }
     if (candBayerTex_ != 0) { glDeleteTextures(1, &candBayerTex_); candBayerTex_ = 0; }
     if (covTex_ != 0) { glDeleteTextures(1, &covTex_); covTex_ = 0; }
-    if (flowTex_ != 0) { glDeleteTextures(1, &flowTex_); flowTex_ = 0; }
     if (accumTex_[0] != 0) { glDeleteTextures(1, &accumTex_[0]); accumTex_[0] = 0; }
     if (accumTex_[1] != 0) { glDeleteTextures(1, &accumTex_[1]); accumTex_[1] = 0; }
     if (weightTex_[0] != 0) { glDeleteTextures(1, &weightTex_[0]); weightTex_[0] = 0; }
     if (weightTex_[1] != 0) { glDeleteTextures(1, &weightTex_[1]); weightTex_[1] = 0; }
+    if (flowTex_ != 0) { glDeleteTextures(1, &flowTex_); flowTex_ = 0; }
     if (outputRgbTex_ != 0) { glDeleteTextures(1, &outputRgbTex_); outputRgbTex_ = 0; }
 
     flowTexWidth_ = 0;
     flowTexHeight_ = 0;
+}
+
+void GpuSabreEngine::clearTexturePool() {
+    darkbag::gpu::GpuContext& ctx = darkbag::gpu::GpuContext::instance();
+    darkbag::gpu::GpuContextScope ctxScope(ctx);
+    if (!ctxScope.isAcquired()) return;
+
+    std::lock_guard<std::mutex> cacheLock(s_cacheMutex);
+    if (s_cachedTextures.refBayerTex != 0 && !s_cachedTextures.inUse) {
+        glDeleteTextures(1, &s_cachedTextures.refBayerTex);
+        glDeleteTextures(1, &s_cachedTextures.candBayerTex);
+        glDeleteTextures(1, &s_cachedTextures.covTex);
+        glDeleteTextures(1, &s_cachedTextures.accumTex[0]);
+        glDeleteTextures(1, &s_cachedTextures.accumTex[1]);
+        glDeleteTextures(1, &s_cachedTextures.weightTex[0]);
+        glDeleteTextures(1, &s_cachedTextures.weightTex[1]);
+        LOGD("GpuSabreEngine: cleared cached intermediate textures");
+    }
+    s_cachedTextures = CachedSabreTextures();
 }
 
 bool GpuSabreEngine::setReferenceFrame(const uint16_t* refBayer) {
@@ -391,19 +541,15 @@ void GpuSabreEngine::updateFlowTexture(const float* flowX, const float* flowY, i
             glDeleteTextures(1, &flowTex_);
             flowTex_ = 0;
         }
-        glGenTextures(1, &flowTex_);
-        glBindTexture(GL_TEXTURE_2D, flowTex_);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexStorage2D(GL_TEXTURE_2D, 1, GL_RG32F, flowWidth, flowHeight);
+        if (!createTexWithFallback(flowTex_, GL_RG32F, flowWidth, flowHeight)) {
+            LOGE("GpuSabreEngine::updateFlowTexture: failed to allocate flowTex (%dx%d)", flowWidth, flowHeight);
+            return;
+        }
         flowTexWidth_ = flowWidth;
         flowTexHeight_ = flowHeight;
-    } else {
-        glBindTexture(GL_TEXTURE_2D, flowTex_);
     }
 
+    glBindTexture(GL_TEXTURE_2D, flowTex_);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, flowWidth, flowHeight, GL_RG, GL_FLOAT, flowBuf.data());
     glBindTexture(GL_TEXTURE_2D, 0);
 }
@@ -654,17 +800,21 @@ bool GpuSabreEngine::readbackRgbTextureLocked(
     // 2. Synthesize Bayer CFA in original raw sensor range [0, whiteLevel]
     if (outCpuBayer) {
         const float wl = static_cast<float>(config_.whiteLevel);
-        const float bl_r = static_cast<float>(config_.blackLevel[0]);
-        const float bl_g = 0.5f * (static_cast<float>(config_.blackLevel[1]) + static_cast<float>(config_.blackLevel[2]));
-        const float bl_b = static_cast<float>(config_.blackLevel[3]);
 
         #pragma omp parallel for schedule(static)
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
                 size_t idx = static_cast<size_t>(y) * width + x;
-                int c = getBayerChannel(x, y);
-                float normVal = (c == 0) ? src[idx * 4 + 0] : ((c == 1) ? src[idx * 4 + 1] : src[idx * 4 + 2]);
-                float bl = (c == 0) ? bl_r : ((c == 1) ? bl_g : bl_b);
+                int c = getBayerChannel(x, y); // 0=R, 1=Gr, 2=Gb, 3=B
+                float normVal;
+                if (c == 0) {
+                    normVal = src[idx * 4 + 0];
+                } else if (c == 3) {
+                    normVal = src[idx * 4 + 2];
+                } else {
+                    normVal = src[idx * 4 + 1];
+                }
+                float bl = static_cast<float>(config_.blackLevel[c]);
                 float rawVal = normVal * (wl - bl) + bl;
                 outCpuBayer[idx] = static_cast<uint16_t>(std::clamp(rawVal + 0.5f, 0.0f, wl));
             }
@@ -679,17 +829,17 @@ int GpuSabreEngine::getBayerChannel(int x, int y) const {
     int py = y & 1;
     switch (config_.cfa) {
         case CfaPattern::RGGB:
-            if (py == 0) return (px == 0) ? 0 : 1; // R, G
-            else         return (px == 0) ? 1 : 2; // G, B
+            if (py == 0) return (px == 0) ? 0 : 1; // R, Gr
+            else         return (px == 0) ? 2 : 3; // Gb, B
         case CfaPattern::GRBG:
-            if (py == 0) return (px == 0) ? 1 : 0; // G, R
-            else         return (px == 0) ? 2 : 1; // B, G
+            if (py == 0) return (px == 0) ? 1 : 0; // Gr, R
+            else         return (px == 0) ? 3 : 2; // B, Gb
         case CfaPattern::GBRG:
-            if (py == 0) return (px == 0) ? 1 : 2; // G, B
-            else         return (px == 0) ? 0 : 1; // R, G
+            if (py == 0) return (px == 0) ? 2 : 3; // Gb, B
+            else         return (px == 0) ? 0 : 1; // R, Gr
         case CfaPattern::BGGR:
-            if (py == 0) return (px == 0) ? 2 : 1; // B, G
-            else         return (px == 0) ? 1 : 0; // G, R
+            if (py == 0) return (px == 0) ? 3 : 2; // B, Gb
+            else         return (px == 0) ? 1 : 0; // Gr, R
     }
     return 1;
 }

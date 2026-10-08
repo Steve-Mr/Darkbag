@@ -1806,24 +1806,7 @@ class CameraFragment : Fragment() {
                     for(row in 0 until 3) for(col in 0 until 3) ccm[idx++] = ccmMat.getElement(col, row).toFloat()
                 }
 
-                var lensShadingMapData: FloatArray? = null
-                var lensShadingRows = 0
-                var lensShadingCols = 0
-                captureResult?.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)?.let { lsc ->
-                    lensShadingRows = lsc.rowCount
-                    lensShadingCols = lsc.columnCount
-                    val out = FloatArray(4 * lensShadingRows * lensShadingCols)
-                    fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
-                    for (row in 0 until lensShadingRows) {
-                        for (col in 0 until lensShadingCols) {
-                            out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
-                            out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
-                            out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
-                            out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
-                        }
-                    }
-                    lensShadingMapData = out
-                }
+                val (lensShadingMapData, lensShadingRows, lensShadingCols) = findLatestLensShadingMap(captureResult)
 
                 // 2. Prepare Settings
                 val prefs =
@@ -3426,9 +3409,7 @@ class CameraFragment : Fragment() {
                 )
                 var cfa = 0
                 var ccmCapture = ccmMain.copyOf()
-                var lensShadingMapData: FloatArray? = null
-                var lensShadingRows = 0
-                var lensShadingCols = 0
+                val (lensShadingMapData, lensShadingRows, lensShadingCols) = findLatestLensShadingMap(result)
                 val useSensorColorMatrix = true
 
                 whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
@@ -3463,23 +3444,6 @@ class CameraFragment : Fragment() {
                                 ccmCapture[idx++] = rat.toFloat()
                             }
                         }
-                    }
-
-                    val lsc = r.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
-                    if (lsc != null) {
-                        lensShadingRows = lsc.rowCount
-                        lensShadingCols = lsc.columnCount
-                        val out = FloatArray(4 * lensShadingRows * lensShadingCols)
-                        fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
-                        for (row in 0 until lensShadingRows) {
-                            for (col in 0 until lensShadingCols) {
-                                out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
-                                out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
-                                out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
-                                out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
-                            }
-                        }
-                        lensShadingMapData = out
                     }
                 }
 
@@ -3845,6 +3809,23 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     motionStillPtsUs = res?.second ?: 0L
                 }
 
+                var effectiveLsc = lensShadingMapData
+                var effectiveRows = lensShadingRows
+                var effectiveCols = lensShadingCols
+                if (effectiveLsc == null || effectiveRows <= 1 || effectiveCols <= 1) {
+                    val (latchedLsc, latchedRows, latchedCols) = findLatestLensShadingMap(result)
+                    if (latchedLsc != null) {
+                        effectiveLsc = latchedLsc
+                        effectiveRows = latchedRows
+                        effectiveCols = latchedCols
+                    }
+                }
+                if (effectiveLsc != null) {
+                    Log.i(TAG, "LSC map latched for DNG OpcodeList2: ${effectiveRows}x${effectiveCols} (${effectiveLsc.size} elements)")
+                } else {
+                    Log.w(TAG, "LSC map unavailable across all capture results! DNG may lack GainMap.")
+                }
+
                 val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
                 val request = top.maary.darkbag.processor.HdrPlusRequest(
                     requestId = java.util.UUID.randomUUID().toString(),
@@ -3856,9 +3837,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     orientation = combinedOrientation,
                     whiteLevel = whiteLevel,
                     blackLevelPattern = blackLevelPattern,
-                    lensShadingMap = lensShadingMapData,
-                    lensShadingRows = lensShadingRows,
-                    lensShadingCols = lensShadingCols,
+                    lensShadingMap = effectiveLsc,
+                    lensShadingRows = effectiveRows,
+                    lensShadingCols = effectiveCols,
                     useSensorColorMatrix = useSensorColorMatrix,
                     whiteBalance = wb,
                     ccm = ccm,
@@ -4732,9 +4713,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 -0.5f, 2.0f, -0.5f,
                 0.0f, -1.0f, 2.0f
             )
-            var lensShadingMapData: FloatArray? = null
-            var lensShadingRows = 0
-            var lensShadingCols = 0
+            val (initialLsc, initialRows, initialCols) = findLatestLensShadingMap(result)
+            var lensShadingMapData: FloatArray? = initialLsc
+            var lensShadingRows = initialRows
+            var lensShadingCols = initialCols
 
             result?.let { r ->
                 val wbVec = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)
@@ -4752,22 +4734,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             ccmCapture[idx++] = ccmMat.getElement(col, row).toFloat()
                         }
                     }
-                }
-                val lsc = r.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
-                if (lsc != null) {
-                    lensShadingRows = lsc.rowCount
-                    lensShadingCols = lsc.columnCount
-                    val out = FloatArray(4 * lensShadingRows * lensShadingCols)
-                    fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
-                    for (row in 0 until lensShadingRows) {
-                        for (col in 0 until lensShadingCols) {
-                            out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
-                            out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
-                            out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
-                            out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
-                        }
-                    }
-                    lensShadingMapData = out
                 }
             }
 
@@ -4891,6 +4857,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 request.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, combinedOrientation)
 
                 applyManualSettingsToRequest(request, true)
+
+                val lscModes = burstChars.get(android.hardware.camera2.CameraCharacteristics.STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES)
+                if (lscModes != null && lscModes.contains(android.hardware.camera2.CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)) {
+                    request.set(android.hardware.camera2.CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE, android.hardware.camera2.CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)
+                }
 
                 request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
                 request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, burstIso)
@@ -5456,6 +5427,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val deviceId = camera2Device?.id ?: currentLens?.id
             if (deviceId != null) {
                 val chars = CameraRepository.getCharacteristics(camera2Manager, deviceId)
+                val lscModes = chars.get(android.hardware.camera2.CameraCharacteristics.STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES)
+                if (lscModes != null && lscModes.contains(android.hardware.camera2.CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)) {
+                    request.set(android.hardware.camera2.CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE, android.hardware.camera2.CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)
+                }
                 val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                 if (activeArray != null) {
                     val targetRatio = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
@@ -6119,6 +6094,44 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             neutralColorPoint = neutralColorPoint,
             renderCcm = renderCcm
         )
+    }
+
+    private fun extractLensShadingMap(result: android.hardware.camera2.CaptureResult?): Triple<FloatArray?, Int, Int> {
+        if (result == null) return Triple(null, 0, 0)
+        val lsc = result.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP) ?: return Triple(null, 0, 0)
+        val rows = lsc.rowCount
+        val cols = lsc.columnCount
+        if (rows <= 1 || cols <= 1) return Triple(null, 0, 0)
+        val out = FloatArray(4 * rows * cols)
+        fun idx(ch: Int, row: Int, col: Int): Int = ch * rows * cols + row * cols + col
+        for (row in 0 until rows) {
+            for (col in 0 until cols) {
+                out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
+                out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
+                out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
+                out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
+            }
+        }
+        return Triple(out, rows, cols)
+    }
+
+    private fun findLatestLensShadingMap(preferredResult: android.hardware.camera2.CaptureResult? = null): Triple<FloatArray?, Int, Int> {
+        val (lsc1, r1, c1) = extractLensShadingMap(preferredResult)
+        if (lsc1 != null) return Triple(lsc1, r1, c1)
+
+        synchronized(captureResults) {
+            for (res in captureResults.values.reversed()) {
+                val (lsc2, r2, c2) = extractLensShadingMap(res)
+                if (lsc2 != null) return Triple(lsc2, r2, c2)
+            }
+        }
+
+        for (res in captureResultFlow.replayCache.reversed()) {
+            val (lsc3, r3, c3) = extractLensShadingMap(res)
+            if (lsc3 != null) return Triple(lsc3, r3, c3)
+        }
+
+        return Triple(null, 0, 0)
     }
 
     private fun createCaptureMetadata(

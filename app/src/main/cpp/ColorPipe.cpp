@@ -7,6 +7,8 @@
 
 #define TAG "ColorPipe"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 
@@ -2231,7 +2233,14 @@ bool write_dng(
         );
         if (!opcodeList.empty()) {
             TIFFSetField(tif, TIFFTAG_OPCODELIST2, (uint32_t)opcodeList.size(), opcodeList.data());
+            LOGI("write_dng: successfully written OpcodeList2 GainMap (%dx%d, %zu bytes, cfa=%d)",
+                 lensShadingCols, lensShadingRows, opcodeList.size(), cfaPattern);
+        } else {
+            LOGW("write_dng: build_dng_gainmap_opcodes returned empty buffer");
         }
+    } else {
+        LOGW("write_dng: OpcodeList2 GainMap skipped (isBayer=%d, mapPtr=%p, rows=%d, cols=%d)",
+             isBayer, lensShadingMap, lensShadingRows, lensShadingCols);
     }
 
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);

@@ -59,6 +59,9 @@ public:
     // Safely delete a GPU texture inside an active EGL context
     static void releaseTexture(GLuint texId);
 
+    // Release cached intermediate textures in the texture pool
+    static void clearTexturePool();
+
     int framesAccumulated() const;
     bool isSessionActive() const;
 
@@ -117,6 +120,7 @@ private:
     GLuint accumTex_[2] = {0, 0};
     GLuint weightTex_[2] = {0, 0};
     GLuint outputRgbTex_ = 0;
+    bool reusedFromCache_ = false;
 };
 
 } // namespace sabre

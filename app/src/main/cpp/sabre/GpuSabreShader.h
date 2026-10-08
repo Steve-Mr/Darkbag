@@ -394,14 +394,14 @@ void main() {
             if (sumWeightR > 0.0) {
                 rOut = clamp(normG + sumDiffR / sumWeightR, bl_r, wl);
             } else {
-                rOut = bl_r + max(0.0, gOut - bl_g);
+                rOut = (wr > 0.001) ? clamp(normR, bl_r, wl) : bl_r;
             }
         }
         if (wb < 0.25) {
             if (sumWeightB > 0.0) {
                 bOut = clamp(normG + sumDiffB / sumWeightB, bl_b, wl);
             } else {
-                bOut = bl_b + max(0.0, gOut - bl_g);
+                bOut = (wb > 0.001) ? clamp(normB, bl_b, wl) : bl_b;
             }
         }
     }
