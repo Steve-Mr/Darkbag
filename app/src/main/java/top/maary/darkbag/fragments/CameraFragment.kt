@@ -1902,73 +1902,99 @@ class CameraFragment : Fragment() {
                 } else null
 
                 val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
-                val request = top.maary.darkbag.processor.HdrPlusRequest(
-                    requestId = java.util.UUID.randomUUID().toString(),
-                    megaBuffer = image.data!!,
-                    numFrames = 1,
-                    width = image.width,
-                    height = image.height,
-                    orientation = image.combinedOrientation,
-                    whiteLevel = whiteLevel,
-                    blackLevelPattern = blackLevelPattern ?: intArrayOf(64,64,64,64),
-                    lensShadingMap = lensShadingMapData,
-                    lensShadingRows = lensShadingRows,
-                    lensShadingCols = lensShadingCols,
-                    useSensorColorMatrix = useSensorColorMatrix,
-                    whiteBalance = wb,
-                    ccm = finalCcm,
-                    ccmAlt = null,
-                    exportMatrixAB = false,
+                val hwProfile = top.maary.darkbag.pipeline.model.HardwareProfile(
+                    lensId = targetCharId,
                     cfaPattern = cfa,
-                    targetLogIndex = targetLogIndex,
-                    lutPath = nativeLutPath,
-                    digitalGain = image.digitalGain,
-                    zoomFactor = image.zoomRatio,
-                    mirror = mirror,
-                    metadata = captureMetadata,
-                    isSingleFrame = true,
-                    saveJpg = saveJpg,
-                    saveRaw = saveRaw,
-                    baseName = dngName,
-                    fullResJpgPath = fullResJpgFile.absolutePath,
-                    linearDngPath = linearDngFile.absolutePath,
-                    zslTargetUriStr = fastOutputUri?.toString(),
-                    jpgFolderUri = jpgFolderUri,
-                    rawFolderUri = rawFolderUri,
-                    hfMetadata = image.halfFrameMetadata,
-                    editConfig = top.maary.darkbag.models.EditConfig(
-                        log = targetLogName ?: "None",
-                        lut = activeLutName ?: "None",
-                        digitalGain = image.digitalGain,
-                        adjustments = if (image.halfFrameMetadata?.profile != null && image.halfFrameMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
-                            listOf(
-                                top.maary.darkbag.models.BasicAdjustments(digitalGain = image.halfFrameMetadata.frame1DigitalGain),
-                                top.maary.darkbag.models.BasicAdjustments(digitalGain = image.digitalGain)
-                            )
-                        } else null,
-                        hfLayout = if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
-                        showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
-                        zoomFactor = image.zoomRatio,
-                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
-                    ),
-                    runAblationTest = false,
-                    motionPhotoMp4Path = motionMp4Path,
-                    motionPhotoStillPtsUs = motionStillPtsUs,
-                    enableMemoryColor = false,
-                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                    whiteLevel = whiteLevel,
+                    blackLevelPattern = blackLevelPattern ?: intArrayOf(64, 64, 64, 64),
+                    dynamicBlackLevel = dynamicBlackLevel,
                     colorMatrix1 = singleCalib.colorMatrix1,
                     colorMatrix2 = singleCalib.colorMatrix2,
                     forwardMatrix1 = singleCalib.forwardMatrix1,
                     forwardMatrix2 = singleCalib.forwardMatrix2,
                     calibrationIlluminant1 = singleCalib.calibrationIlluminant1,
                     calibrationIlluminant2 = singleCalib.calibrationIlluminant2,
+                    activeArray = activeArray,
+                    noiseProfile = noiseProfileFlat,
+                    useSensorColorMatrix = useSensorColorMatrix
+                )
+                val frameMeta = top.maary.darkbag.pipeline.model.CaptureFrameMetadata(
+                    timestamp = image.timestamp,
+                    iso = captureMetadata.iso ?: 100,
+                    exposureTimeNs = captureMetadata.exposureTime ?: 10_000_000L,
+                    lensShadingMap = lensShadingMapData,
+                    lensShadingRows = lensShadingRows,
+                    lensShadingCols = lensShadingCols,
+                    whiteBalance = wb,
+                    ccm = finalCcm,
+                    ccmAlt = null,
+                    exportMatrixAB = false,
                     neutralColorPoint = singleCalib.neutralColorPoint,
+                    postRawSensitivityBoost = 1.0f,
+                    captureMetadata = captureMetadata
+                )
+                val editConfig = top.maary.darkbag.models.EditConfig(
+                    log = targetLogName ?: "None",
+                    lut = activeLutName ?: "None",
+                    digitalGain = image.digitalGain,
+                    adjustments = if (image.halfFrameMetadata?.profile != null && image.halfFrameMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
+                        listOf(
+                            top.maary.darkbag.models.BasicAdjustments(digitalGain = image.halfFrameMetadata.frame1DigitalGain),
+                            top.maary.darkbag.models.BasicAdjustments(digitalGain = image.digitalGain)
+                        )
+                    } else null,
+                    hfLayout = if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
+                    showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
+                    flareType = image.halfFrameMetadata?.flareType ?: -1,
+                    zoomFactor = image.zoomRatio,
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
+                )
+                val renderRecipe = top.maary.darkbag.pipeline.model.RenderRecipe(
+                    targetLogIndex = targetLogIndex,
+                    lutPath = nativeLutPath,
+                    digitalGain = image.digitalGain,
+                    exposure = editConfig.exposure,
+                    contrast = editConfig.contrast,
+                    saturation = editConfig.saturation,
+                    highlights = editConfig.highlights,
+                    shadows = editConfig.shadows,
+                    whites = editConfig.whites,
+                    blacks = editConfig.blacks,
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                    faithfulHighlights = true,
+                    enableMemoryColor = false,
+                    editConfig = editConfig
+                )
+                val spec = top.maary.darkbag.pipeline.model.CaptureTaskSpec(
+                    taskId = java.util.UUID.randomUUID().toString(),
+                    width = image.width,
+                    height = image.height,
+                    orientation = image.combinedOrientation,
+                    zoomFactor = image.zoomRatio,
+                    mirror = mirror,
+                    isSingleFrame = true,
+                    hardwareProfile = hwProfile,
+                    frameMetadata = frameMeta,
+                    renderRecipe = renderRecipe,
                     timing = timing,
                     dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
                     rawOutputType = rawOutputType,
-                    dynamicBlackLevel = dynamicBlackLevel,
-                    noiseProfile = noiseProfileFlat,
-                    activeArray = activeArray
+                    fusionMode = 0,
+                    baseName = dngName,
+                    fullResJpgPath = fullResJpgFile.absolutePath,
+                    linearDngPath = linearDngFile.absolutePath,
+                    saveJpg = saveJpg,
+                    saveRaw = saveRaw,
+                    jpgFolderUri = jpgFolderUri,
+                    rawFolderUri = rawFolderUri,
+                    hfMetadata = image.halfFrameMetadata,
+                    motionPhotoMp4Path = motionMp4Path,
+                    motionPhotoStillPtsUs = motionStillPtsUs
+                )
+                val request = top.maary.darkbag.processor.HdrPlusRequest.fromSpec(
+                    spec = spec,
+                    megaBuffer = image.data!!,
+                    numFrames = 1
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request, alreadyTracked = true)
                 enqueued = true
@@ -3569,74 +3595,99 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
 
                     val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
-                    val request = top.maary.darkbag.processor.HdrPlusRequest(
-                        requestId = java.util.UUID.randomUUID().toString(),
-                        megaBuffer = megaBuffer,
-                        numFrames = burstResult.frames.size,
-                        width = width,
-                        height = height,
-                        orientation = combinedOrientation,
-                        whiteLevel = whiteLevel,
-                        blackLevelPattern = blackLevelPattern ?: intArrayOf(64,64,64,64),
-                        lensShadingMap = lensShadingMapData,
-                        lensShadingRows = lensShadingRows,
-                        lensShadingCols = lensShadingCols,
-                        useSensorColorMatrix = useSensorColorMatrix,
-                        whiteBalance = wb,
-                        ccm = ccm,
-                        ccmAlt = ccmAlt,
-                        exportMatrixAB = exportMatrixAB,
+                    val hwProfile = top.maary.darkbag.pipeline.model.HardwareProfile(
+                        lensId = targetCharId,
                         cfaPattern = cfa,
-                        targetLogIndex = targetLogIndex,
-                        lutPath = nativeLutPath,
-                        digitalGain = digitalGain,
-                        zoomFactor = currentZoom,
-                        mirror = mirror,
-                        metadata = captureMetadata,
-                        isSingleFrame = false,
-                        saveJpg = saveJpg,
-                        saveRaw = saveRaw,
-                        baseName = dngName,
-                        fullResJpgPath = fullResJpgFile.absolutePath,
-                        linearDngPath = linearDngFile.absolutePath,
-                        zslTargetUriStr = fastJpegUri?.toString(),
-                        jpgFolderUri = jpgFolderUri,
-                        rawFolderUri = rawFolderUri,
-                        hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
-                        editConfig = top.maary.darkbag.models.EditConfig(
-                            log = targetLogName ?: "None",
-                            lut = activeLutName ?: "None",
-                            digitalGain = digitalGain,
-                            adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
-                                listOf(
-                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
-                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
-                                )
-                            } else null,
-                            hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
-                            showTimestamp = hfMetadata?.dateStamp ?: false,
-                            flareType = hfMetadata?.flareType ?: -1,
-                            zoomFactor = currentZoom,
-                            colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
-                        ),
-                        runAblationTest = false,
-                        motionPhotoMp4Path = motionMp4Path,
-                        motionPhotoStillPtsUs = motionStillPtsUs,
-                        enableMemoryColor = false,
-                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                        whiteLevel = whiteLevel,
+                        blackLevelPattern = blackLevelPattern ?: intArrayOf(64, 64, 64, 64),
+                        dynamicBlackLevel = dynamicBlackLevel,
                         colorMatrix1 = burstCalib.colorMatrix1,
                         colorMatrix2 = burstCalib.colorMatrix2,
                         forwardMatrix1 = burstCalib.forwardMatrix1,
                         forwardMatrix2 = burstCalib.forwardMatrix2,
                         calibrationIlluminant1 = burstCalib.calibrationIlluminant1,
                         calibrationIlluminant2 = burstCalib.calibrationIlluminant2,
+                        activeArray = activeArray,
+                        noiseProfile = noiseProfileFlat,
+                        useSensorColorMatrix = useSensorColorMatrix
+                    )
+                    val frameMeta = top.maary.darkbag.pipeline.model.CaptureFrameMetadata(
+                        timestamp = captureMetadata.dateTimeOriginal ?: captureTime,
+                        iso = captureMetadata.iso ?: 100,
+                        exposureTimeNs = captureMetadata.exposureTime ?: 10_000_000L,
+                        lensShadingMap = lensShadingMapData,
+                        lensShadingRows = lensShadingRows,
+                        lensShadingCols = lensShadingCols,
+                        whiteBalance = wb,
+                        ccm = ccm,
+                        ccmAlt = ccmAlt,
+                        exportMatrixAB = exportMatrixAB,
                         neutralColorPoint = burstCalib.neutralColorPoint,
+                        postRawSensitivityBoost = 1.0f,
+                        captureMetadata = captureMetadata
+                    )
+                    val editConfig = top.maary.darkbag.models.EditConfig(
+                        log = targetLogName ?: "None",
+                        lut = activeLutName ?: "None",
+                        digitalGain = digitalGain,
+                        adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
+                            listOf(
+                                top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
+                                top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
+                            )
+                        } else null,
+                        hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
+                        showTimestamp = hfMetadata?.dateStamp ?: false,
+                        flareType = hfMetadata?.flareType ?: -1,
+                        zoomFactor = currentZoom,
+                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
+                    )
+                    val renderRecipe = top.maary.darkbag.pipeline.model.RenderRecipe(
+                        targetLogIndex = targetLogIndex,
+                        lutPath = nativeLutPath,
+                        digitalGain = digitalGain,
+                        exposure = editConfig.exposure,
+                        contrast = editConfig.contrast,
+                        saturation = editConfig.saturation,
+                        highlights = editConfig.highlights,
+                        shadows = editConfig.shadows,
+                        whites = editConfig.whites,
+                        blacks = editConfig.blacks,
+                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                        faithfulHighlights = false,
+                        enableMemoryColor = false,
+                        editConfig = editConfig
+                    )
+                    val spec = top.maary.darkbag.pipeline.model.CaptureTaskSpec(
+                        taskId = java.util.UUID.randomUUID().toString(),
+                        width = width,
+                        height = height,
+                        orientation = combinedOrientation,
+                        zoomFactor = currentZoom,
+                        mirror = mirror,
+                        isSingleFrame = false,
+                        hardwareProfile = hwProfile,
+                        frameMetadata = frameMeta,
+                        renderRecipe = renderRecipe,
                         timing = timing,
                         dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
                         rawOutputType = rawOutputType,
-                        dynamicBlackLevel = dynamicBlackLevel,
-                        noiseProfile = noiseProfileFlat,
-                        activeArray = activeArray
+                        fusionMode = 0,
+                        baseName = dngName,
+                        fullResJpgPath = fullResJpgFile.absolutePath,
+                        linearDngPath = linearDngFile.absolutePath,
+                        saveJpg = saveJpg,
+                        saveRaw = saveRaw,
+                        jpgFolderUri = jpgFolderUri,
+                        rawFolderUri = rawFolderUri,
+                        hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
+                        motionPhotoMp4Path = motionMp4Path,
+                        motionPhotoStillPtsUs = motionStillPtsUs
+                    )
+                    val request = top.maary.darkbag.processor.HdrPlusRequest.fromSpec(
+                        spec = spec,
+                        megaBuffer = megaBuffer,
+                        numFrames = burstResult.frames.size
                     )
 
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
@@ -3837,81 +3888,106 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
 
                 val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
-                val request = top.maary.darkbag.processor.HdrPlusRequest(
-                    requestId = java.util.UUID.randomUUID().toString(),
-                    megaBuffer = null,
-                    streamingSessionHandle = streamingResult.sessionHandle,
-                    numFrames = frames.size,
-                    width = width,
-                    height = height,
-                    orientation = combinedOrientation,
+                val fusionMode = when (prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_AUTO)) {
+                    SettingsFragment.HDR_FUSION_SPATIAL_RCD -> 1
+                    SettingsFragment.HDR_FUSION_SABRE -> 2
+                    SettingsFragment.HDR_FUSION_CLASSIC -> 3
+                    else -> 0
+                }
+                val hwProfile = top.maary.darkbag.pipeline.model.HardwareProfile(
+                    lensId = targetCharId,
+                    cfaPattern = cfa,
                     whiteLevel = whiteLevel,
                     blackLevelPattern = blackLevelPattern,
-                    lensShadingMap = effectiveLsc,
-                    lensShadingRows = effectiveRows,
-                    lensShadingCols = effectiveCols,
-                    useSensorColorMatrix = useSensorColorMatrix,
-                    whiteBalance = wb,
-                    ccm = ccm,
-                    ccmAlt = ccmAlt,
-                    exportMatrixAB = exportMatrixAB,
-                    cfaPattern = cfa,
-                    targetLogIndex = targetLogIndex,
-                    lutPath = nativeLutPath,
-                    digitalGain = digitalGain,
-                    zoomFactor = currentZoom,
-                    mirror = mirror,
-                    metadata = captureMetadata,
-                    isSingleFrame = false,
-                    saveJpg = saveJpg,
-                    saveRaw = saveRaw,
-                    baseName = dngName,
-                    fullResJpgPath = fullResJpgFile.absolutePath,
-                    linearDngPath = linearDngFile.absolutePath,
-                    zslTargetUriStr = null,
-                    jpgFolderUri = jpgFolderUri,
-                    rawFolderUri = rawFolderUri,
-                    hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
-                    editConfig = top.maary.darkbag.models.EditConfig(
-                        log = targetLogName ?: "None",
-                        lut = activeLutName ?: "None",
-                        digitalGain = digitalGain,
-                        adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
-                            listOf(
-                                top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
-                                top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
-                            )
-                        } else null,
-                        hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
-                        showTimestamp = hfMetadata?.dateStamp ?: false,
-                        flareType = hfMetadata?.flareType ?: -1,
-                        zoomFactor = currentZoom,
-                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
-                    ),
-                    runAblationTest = false,
-                    motionPhotoMp4Path = motionMp4Path,
-                    motionPhotoStillPtsUs = motionStillPtsUs,
-                    enableMemoryColor = false,
-                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                    dynamicBlackLevel = dynamicBlackLevel,
                     colorMatrix1 = burstCalib.colorMatrix1,
                     colorMatrix2 = burstCalib.colorMatrix2,
                     forwardMatrix1 = burstCalib.forwardMatrix1,
                     forwardMatrix2 = burstCalib.forwardMatrix2,
                     calibrationIlluminant1 = burstCalib.calibrationIlluminant1,
                     calibrationIlluminant2 = burstCalib.calibrationIlluminant2,
+                    activeArray = activeArray,
+                    noiseProfile = noiseProfileFlat,
+                    useSensorColorMatrix = useSensorColorMatrix
+                )
+                val frameMeta = top.maary.darkbag.pipeline.model.CaptureFrameMetadata(
+                    timestamp = captureMetadata.dateTimeOriginal ?: System.currentTimeMillis(),
+                    iso = captureMetadata.iso ?: 100,
+                    exposureTimeNs = captureMetadata.exposureTime ?: 10_000_000L,
+                    lensShadingMap = effectiveLsc,
+                    lensShadingRows = effectiveRows,
+                    lensShadingCols = effectiveCols,
+                    whiteBalance = wb,
+                    ccm = ccm,
+                    ccmAlt = ccmAlt,
+                    exportMatrixAB = exportMatrixAB,
                     neutralColorPoint = burstCalib.neutralColorPoint,
+                    postRawSensitivityBoost = 1.0f,
+                    captureMetadata = captureMetadata
+                )
+                val editConfig = top.maary.darkbag.models.EditConfig(
+                    log = targetLogName ?: "None",
+                    lut = activeLutName ?: "None",
+                    digitalGain = digitalGain,
+                    adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
+                        listOf(
+                            top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
+                            top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
+                        )
+                    } else null,
+                    hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
+                    showTimestamp = hfMetadata?.dateStamp ?: false,
+                    flareType = hfMetadata?.flareType ?: -1,
+                    zoomFactor = currentZoom,
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
+                )
+                val renderRecipe = top.maary.darkbag.pipeline.model.RenderRecipe(
+                    targetLogIndex = targetLogIndex,
+                    lutPath = nativeLutPath,
+                    digitalGain = digitalGain,
+                    exposure = editConfig.exposure,
+                    contrast = editConfig.contrast,
+                    saturation = editConfig.saturation,
+                    highlights = editConfig.highlights,
+                    shadows = editConfig.shadows,
+                    whites = editConfig.whites,
+                    blacks = editConfig.blacks,
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                    faithfulHighlights = false,
+                    enableMemoryColor = false,
+                    editConfig = editConfig
+                )
+                val spec = top.maary.darkbag.pipeline.model.CaptureTaskSpec(
+                    taskId = java.util.UUID.randomUUID().toString(),
+                    width = width,
+                    height = height,
+                    orientation = combinedOrientation,
+                    zoomFactor = currentZoom,
+                    mirror = mirror,
+                    isSingleFrame = false,
+                    hardwareProfile = hwProfile,
+                    frameMetadata = frameMeta,
+                    renderRecipe = renderRecipe,
                     timing = timing,
                     dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
                     rawOutputType = rawOutputType,
-                    dynamicBlackLevel = dynamicBlackLevel,
-                    noiseProfile = noiseProfileFlat,
-                    activeArray = activeArray,
-                    fusionMode = when (prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_AUTO)) {
-                        SettingsFragment.HDR_FUSION_SPATIAL_RCD -> 1
-                        SettingsFragment.HDR_FUSION_SABRE -> 2
-                        SettingsFragment.HDR_FUSION_CLASSIC -> 3
-                        else -> 0
-                    }
+                    fusionMode = fusionMode,
+                    baseName = dngName,
+                    fullResJpgPath = fullResJpgFile.absolutePath,
+                    linearDngPath = linearDngFile.absolutePath,
+                    saveJpg = saveJpg,
+                    saveRaw = saveRaw,
+                    jpgFolderUri = jpgFolderUri,
+                    rawFolderUri = rawFolderUri,
+                    hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
+                    motionPhotoMp4Path = motionMp4Path,
+                    motionPhotoStillPtsUs = motionStillPtsUs
+                )
+                val request = top.maary.darkbag.processor.HdrPlusRequest.fromSpec(
+                    spec = spec,
+                    megaBuffer = null,
+                    streamingSessionHandle = streamingResult.sessionHandle,
+                    numFrames = frames.size
                 )
 
 

@@ -230,6 +230,67 @@ object ColorProcessor {
         lensShadingCols: Int = 0
     ): Int
 
+    fun exportHdrPlus(
+        spec: top.maary.darkbag.pipeline.model.CaptureTaskSpec,
+        jpgPath: String? = null,
+        dngPath: String? = null,
+        outJpgFd: Int = -1,
+        outDngFd: Int = -1,
+        debugStats: LongArray? = null
+    ): Int {
+        val hw = spec.hardwareProfile
+        val fm = spec.frameMetadata
+        val rr = spec.renderRecipe
+        val edit = rr.editConfig
+        return exportHdrPlus(
+            tempRawPath = spec.taskId,
+            width = spec.width,
+            height = spec.height,
+            orientation = spec.orientation,
+            digitalGain = rr.digitalGain,
+            targetLog = rr.targetLogIndex,
+            lutPath = rr.lutPath,
+            exposure = edit?.exposure ?: rr.exposure,
+            contrast = edit?.contrast ?: rr.contrast,
+            saturation = edit?.saturation ?: rr.saturation,
+            highlights = edit?.highlights ?: rr.highlights,
+            shadows = edit?.shadows ?: rr.shadows,
+            whites = edit?.whites ?: rr.whites,
+            blacks = edit?.blacks ?: rr.blacks,
+            jpgPath = jpgPath,
+            dngPath = dngPath,
+            faithfulHighlights = rr.faithfulHighlights,
+            ccm = fm.ccm,
+            whiteBalance = fm.whiteBalance,
+            zoomFactor = spec.zoomFactor,
+            mirror = spec.mirror,
+            metadata = fm.captureMetadata,
+            enableMemoryColor = rr.enableMemoryColor,
+            colorEngineMode = rr.colorEngineMode,
+            colorMatrix1 = hw.colorMatrix1,
+            colorMatrix2 = hw.colorMatrix2,
+            forwardMatrix1 = hw.forwardMatrix1,
+            forwardMatrix2 = hw.forwardMatrix2,
+            calibrationIlluminant1 = hw.calibrationIlluminant1,
+            calibrationIlluminant2 = hw.calibrationIlluminant2,
+            neutralColorPoint = fm.neutralColorPoint,
+            debugStats = debugStats,
+            outJpgFd = outJpgFd,
+            outDngFd = outDngFd,
+            dngCompressionMode = spec.dngCompressionMode,
+            rawOutputType = spec.rawOutputType,
+            cfaPattern = hw.cfaPattern,
+            blackLevelPattern = hw.blackLevelPattern,
+            whiteLevel = hw.whiteLevel,
+            dynamicBlackLevel = hw.dynamicBlackLevel,
+            noiseProfile = hw.noiseProfile,
+            activeArray = hw.activeArray,
+            lensShadingMap = fm.lensShadingMap,
+            lensShadingRows = fm.lensShadingRows,
+            lensShadingCols = fm.lensShadingCols
+        )
+    }
+
     external fun processHdrPlus(
         dngBuffer: ByteBuffer,
         numFrames: Int,
