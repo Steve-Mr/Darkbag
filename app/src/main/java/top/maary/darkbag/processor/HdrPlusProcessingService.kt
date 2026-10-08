@@ -479,6 +479,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                 if (req.timing?.firstOutputWritten == 0L) {
                                     req.timing?.firstOutputWritten = System.currentTimeMillis()
                                 }
+                                req.timing?.taskCompleted = System.currentTimeMillis()
 
                                 req.timing?.let { t ->
                                     val timingReport = t.buildSummaryReport()
@@ -491,7 +492,9 @@ class HdrPlusProcessingService : LifecycleService() {
                         } catch (e: Exception) {
                             Log.e(TAG, "Exception during Stage 2 export for ${req.requestId}", e)
                         } finally {
-                            req.timing?.taskCompleted = System.currentTimeMillis()
+                            if (req.timing?.taskCompleted == 0L) {
+                                req.timing?.taskCompleted = System.currentTimeMillis()
+                            }
                             exportSemaphore.release()
                             finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
                         }

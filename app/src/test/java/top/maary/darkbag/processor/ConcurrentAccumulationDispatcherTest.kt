@@ -24,46 +24,55 @@ class ConcurrentAccumulationDispatcherTest {
     }
 
     @Test
-    fun testDispatcher_DualWorkerConcurrencyAndPriority() = runBlocking {
-        assertEquals(2, HdrPlusAccumulationDispatcher.MAX_CONCURRENT_ACCUM_WORKERS)
+    fun testDispatcher_SequentialFifoExecutionAndPriority() = runBlocking {
+        assertEquals(1, HdrPlusAccumulationDispatcher.MAX_CONCURRENT_ACCUM_WORKERS)
 
-        val latchStarted = CountDownLatch(2)
-        val latchRelease = CountDownLatch(1)
+        val job1Started = CountDownLatch(1)
+        val job1Release = CountDownLatch(1)
+        val job2Started = CountDownLatch(1)
+        val executionOrder = mutableListOf<Int>()
         val workerThreadNames = mutableListOf<String>()
         val workerPriorities = mutableListOf<Int>()
-        val executedCount = AtomicInteger(0)
 
         val job1 = HdrPlusAccumulationDispatcher.scope.launch {
             synchronized(workerThreadNames) {
                 workerThreadNames.add(Thread.currentThread().name)
                 workerPriorities.add(Thread.currentThread().priority)
+                executionOrder.add(1)
             }
-            latchStarted.countDown()
-            latchRelease.await(5, TimeUnit.SECONDS)
-            executedCount.incrementAndGet()
+            job1Started.countDown()
+            // Hold execution until released
+            job1Release.await(5, TimeUnit.SECONDS)
         }
 
         val job2 = HdrPlusAccumulationDispatcher.scope.launch {
             synchronized(workerThreadNames) {
                 workerThreadNames.add(Thread.currentThread().name)
                 workerPriorities.add(Thread.currentThread().priority)
+                executionOrder.add(2)
             }
-            latchStarted.countDown()
-            latchRelease.await(5, TimeUnit.SECONDS)
-            executedCount.incrementAndGet()
+            job2Started.countDown()
         }
 
-        // Both jobs MUST start concurrently without waiting for the other to complete
-        val bothStarted = latchStarted.await(2, TimeUnit.SECONDS)
-        assertTrue("Both dual accumulation workers should execute concurrently", bothStarted)
+        // Wait for Job 1 to start
+        val j1Started = job1Started.await(2, TimeUnit.SECONDS)
+        assertTrue("Job 1 should start promptly", j1Started)
 
-        latchRelease.countDown()
+        // Job 2 MUST NOT have started while Job 1 is still running (sequential FIFO contract)
+        val j2PrematurelyStarted = job2Started.await(200, TimeUnit.MILLISECONDS)
+        assertFalse("Job 2 must wait in FIFO queue while Job 1 is executing", j2PrematurelyStarted)
+
+        // Release Job 1
+        job1Release.countDown()
         job1.join()
+
+        // Now Job 2 should execute
+        val j2Finished = job2Started.await(2, TimeUnit.SECONDS)
+        assertTrue("Job 2 should execute after Job 1 completes", j2Finished)
         job2.join()
 
-        assertEquals(2, executedCount.get())
         synchronized(workerThreadNames) {
-            assertEquals(2, workerThreadNames.size)
+            assertEquals(listOf(1, 2), executionOrder)
             workerThreadNames.forEach { name ->
                 assertTrue("Worker thread name should match pattern: $name", name.startsWith("HdrPlusAccumWorker-"))
             }
