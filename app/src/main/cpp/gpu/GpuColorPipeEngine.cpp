@@ -142,7 +142,10 @@ bool GpuColorPipeEngine::processAndSaveImage(
     const float* ccm, const float* wbVec,
     int orientation, bool mirror, float zoomFactor,
     int colorEngineMode, bool faithfulHighlights,
-    int64_t* outColorPipeMs, int64_t* outJpegEncodeMs
+    int64_t* outColorPipeMs, int64_t* outJpegEncodeMs,
+    const float* lensShadingMap,
+    int lensShadingRows,
+    int lensShadingCols
 ) {
     return executePipeline(
         width, height,
@@ -156,7 +159,8 @@ bool GpuColorPipeEngine::processAndSaveImage(
         ccm, wbVec,
         orientation, mirror, zoomFactor,
         colorEngineMode, faithfulHighlights,
-        outColorPipeMs, outJpegEncodeMs
+        outColorPipeMs, outJpegEncodeMs,
+        lensShadingMap, lensShadingRows, lensShadingCols
     );
 }
 
@@ -171,7 +175,10 @@ bool GpuColorPipeEngine::processAndSaveImageFromTexture(
     const float* ccm, const float* wbVec,
     int orientation, bool mirror, float zoomFactor,
     int colorEngineMode, bool faithfulHighlights,
-    int64_t* outColorPipeMs, int64_t* outJpegEncodeMs
+    int64_t* outColorPipeMs, int64_t* outJpegEncodeMs,
+    const float* lensShadingMap,
+    int lensShadingRows,
+    int lensShadingCols
 ) {
     return executePipeline(
         width, height,
@@ -185,7 +192,8 @@ bool GpuColorPipeEngine::processAndSaveImageFromTexture(
         ccm, wbVec,
         orientation, mirror, zoomFactor,
         colorEngineMode, faithfulHighlights,
-        outColorPipeMs, outJpegEncodeMs
+        outColorPipeMs, outJpegEncodeMs,
+        lensShadingMap, lensShadingRows, lensShadingCols
     );
 }
 
@@ -201,7 +209,10 @@ bool GpuColorPipeEngine::executePipeline(
     const float* ccm, const float* wbVec,
     int orientation, bool mirror, float zoomFactor,
     int colorEngineMode, bool faithfulHighlights,
-    int64_t* outColorPipeMs, int64_t* outJpegEncodeMs
+    int64_t* outColorPipeMs, int64_t* outJpegEncodeMs,
+    const float* lensShadingMap,
+    int lensShadingRows,
+    int lensShadingCols
 ) {
     if (width <= 0 || height <= 0) {
         LOGE("Invalid dimensions (%dx%d) for GpuColorPipeEngine", width, height);
@@ -312,6 +323,42 @@ bool GpuColorPipeEngine::executePipeline(
         glUniform1f(u.uLutSize, 0.0f);
     }
 
+    // 4.5 Lens Shading Correction (Hardware GainMap) Texture handling
+    bool hasLsc = (lensShadingMap != nullptr && lensShadingRows > 1 && lensShadingCols > 1);
+    if (hasLsc) {
+        if (lscTexId_ == 0) {
+            glGenTextures(1, &lscTexId_);
+        }
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, lscTexId_);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        const size_t planeSize = static_cast<size_t>(lensShadingRows) * lensShadingCols;
+        std::vector<float> lscRgba(planeSize * 4);
+        for (int r = 0; r < lensShadingRows; ++r) {
+            for (int c = 0; c < lensShadingCols; ++c) {
+                size_t gridIdx = static_cast<size_t>(r) * lensShadingCols + c;
+                size_t texIdx = gridIdx * 4;
+                lscRgba[texIdx + 0] = lensShadingMap[0 * planeSize + gridIdx];
+                lscRgba[texIdx + 1] = 0.5f * (lensShadingMap[1 * planeSize + gridIdx] + lensShadingMap[2 * planeSize + gridIdx]);
+                lscRgba[texIdx + 2] = lensShadingMap[3 * planeSize + gridIdx];
+                lscRgba[texIdx + 3] = 1.0f;
+            }
+        }
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, lensShadingCols, lensShadingRows, 0, GL_RGBA, GL_FLOAT, lscRgba.data());
+
+        glUniform1i(u.uTexLsc, 5);
+        glUniform1i(u.uHasLsc, 1);
+    } else {
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glUniform1i(u.uTexLsc, 5);
+        glUniform1i(u.uHasLsc, 0);
+    }
+
     // 5. Compute Color Transformation Matrix
     // Sensor CCM -> sRGB D65 -> CIE XYZ D65 -> Target Wide Gamut / Rec709
     Matrix3x3 effective_CCM = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
@@ -390,6 +437,8 @@ bool GpuColorPipeEngine::executePipeline(
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_3D, 0);
     glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE0);
 
@@ -470,6 +519,12 @@ bool GpuColorPipeEngine::executePipeline(
 void GpuColorPipeEngine::release() {
     std::lock_guard<std::mutex> lock(engineMutex_);
     GpuLutTextureManager::instance().clearCache();
+    if (lscTexId_ != 0) {
+        GpuContext& ctx = GpuContext::instance();
+        GpuContextScope ctxScope(ctx);
+        glDeleteTextures(1, &lscTexId_);
+        lscTexId_ = 0;
+    }
     if (ahbTarget_) {
         ahbTarget_->release();
         ahbTarget_.reset();

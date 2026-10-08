@@ -52,6 +52,9 @@ uniform highp usampler2D uTexB;
 uniform highp sampler2D uTexUnifiedRgb;
 uniform int uInputLayout; // 0 = Planar 3-texture (uTexR, uTexG, uTexB), 1 = Unified RGBA16F (uTexUnifiedRgb)
 
+uniform highp sampler2D uTexLsc;
+uniform int uHasLsc;
+
 uniform sampler3D uLut3D;
 uniform int uHasLut;
 uniform float uLutSize;
@@ -283,6 +286,13 @@ void main() {
         rawR = float(texture(uTexR, vTexCoord).r) / 65535.0;
         rawG = float(texture(uTexG, vTexCoord).r) / 65535.0;
         rawB = float(texture(uTexB, vTexCoord).r) / 65535.0;
+    }
+    // 1.5 Lens Shading Correction (Hardware Sensor GainMap)
+    if (uHasLsc != 0) {
+        vec4 lscGain = texture(uTexLsc, vTexCoord);
+        rawR *= lscGain.r;
+        rawG *= lscGain.g;
+        rawB *= lscGain.b;
     }
     float rawMax = max(rawR, max(rawG, rawB));
 

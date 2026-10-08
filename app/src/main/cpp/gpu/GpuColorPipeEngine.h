@@ -34,7 +34,10 @@ public:
         const float* ccm, const float* wbVec,
         int orientation, bool mirror, float zoomFactor,
         int colorEngineMode, bool faithfulHighlights,
-        int64_t* outColorPipeMs, int64_t* outJpegEncodeMs
+        int64_t* outColorPipeMs, int64_t* outJpegEncodeMs,
+        const float* lensShadingMap = nullptr,
+        int lensShadingRows = 0,
+        int lensShadingCols = 0
     );
 
     // Direct zero-copy GPU-to-GPU entry point from unified GL_RGBA16UI texture
@@ -49,7 +52,10 @@ public:
         const float* ccm, const float* wbVec,
         int orientation, bool mirror, float zoomFactor,
         int colorEngineMode, bool faithfulHighlights,
-        int64_t* outColorPipeMs, int64_t* outJpegEncodeMs
+        int64_t* outColorPipeMs, int64_t* outJpegEncodeMs,
+        const float* lensShadingMap = nullptr,
+        int lensShadingRows = 0,
+        int lensShadingCols = 0
     );
 
     void release();
@@ -74,13 +80,17 @@ private:
         const float* ccm, const float* wbVec,
         int orientation, bool mirror, float zoomFactor,
         int colorEngineMode, bool faithfulHighlights,
-        int64_t* outColorPipeMs, int64_t* outJpegEncodeMs
+        int64_t* outColorPipeMs, int64_t* outJpegEncodeMs,
+        const float* lensShadingMap = nullptr,
+        int lensShadingRows = 0,
+        int lensShadingCols = 0
     );
 
     std::mutex engineMutex_;
     std::unique_ptr<GpuProgram> program_;
     std::unique_ptr<GpuInputTexture> inputTexture_;
     std::unique_ptr<AHardwareBufferTarget> ahbTarget_;
+    GLuint lscTexId_ = 0;
     bool shadersBuilt_ = false;
 };
 

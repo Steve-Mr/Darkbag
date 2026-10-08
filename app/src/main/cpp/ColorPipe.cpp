@@ -1033,6 +1033,9 @@ bool process_and_save_image(
     std::vector<unsigned char>& debugC8 = tls_debugC8;
 
     const bool hasLsc = (lensShadingVec != nullptr && lensShadingRows > 0 && lensShadingCols > 0);
+    if (hasLsc) {
+        edgeComp.enabled = false;
+    }
     auto lsc_idx = [&](int ch, int row, int col) -> int {
         return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
     };
@@ -1072,6 +1075,22 @@ bool process_and_save_image(
         float r = static_cast<float>(planarData[r_idx]);
         float g = static_cast<float>(planarData[g_idx]);
         float b = static_cast<float>(planarData[b_idx]);
+
+        // Lens Shading Correction in sensor linear space
+        if (hasLsc) {
+            const auto& lx = lscX[x];
+            const auto& ly = lscY[y];
+            auto sample_ch = [&](int ch) {
+                float v00 = lensShadingVec[lsc_idx(ch, ly.idx0, lx.idx0)];
+                float v01 = lensShadingVec[lsc_idx(ch, ly.idx0, lx.idx1)];
+                float v10 = lensShadingVec[lsc_idx(ch, ly.idx1, lx.idx0)];
+                float v11 = lensShadingVec[lsc_idx(ch, ly.idx1, lx.idx1)];
+                return (v00 * lx.w0 + v01 * lx.w1) * ly.w0 + (v10 * lx.w0 + v11 * lx.w1) * ly.w1;
+            };
+            r *= sample_ch(0);
+            g *= 0.5f * (sample_ch(1) + sample_ch(2));
+            b *= sample_ch(3);
+        }
         
         // Highlight handling.
         //  * Multi-frame path (faithfulHighlights == false): joint proportional

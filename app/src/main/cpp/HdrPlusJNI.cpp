@@ -685,8 +685,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         bool gpuAttemptSuccess = false;
         if (darkbag::gpu::GpuColorPipeEngine::instance().isAvailable()) {
             if (sharedResult && sharedResult->gpuRgbTexture != 0) {
-                LOGD("Invoking zero-copy GPU-to-GPU ColorPipe from unified texture %u (%dx%d)",
-                     sharedResult->gpuRgbTexture, width, height);
+                LOGD("Invoking zero-copy GPU-to-GPU ColorPipe from unified texture %u (%dx%d, LSC=%d)",
+                     sharedResult->gpuRgbTexture, width, height, lens_shading_ptr != nullptr ? 1 : 0);
                 gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImageFromTexture(
                     sharedResult->gpuRgbTexture,
                     width, height,
@@ -698,7 +698,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                     ccmVec.data(), effectiveWb,
                     orientation, (bool)mirror, effectiveZoom,
                     (int)colorEngineMode, faithfulHighlights,
-                    &measuredColorPipe, &measuredJpegEncode
+                    &measuredColorPipe, &measuredJpegEncode,
+                    lens_shading_ptr, lensShadingRows, lensShadingCols
                 );
             } else if (sharedResult && !sharedResult->rgbBuf.empty()) {
                 gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImage(
@@ -713,7 +714,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                     ccmVec.data(), effectiveWb,
                     orientation, (bool)mirror, effectiveZoom,
                     (int)colorEngineMode, faithfulHighlights,
-                    &measuredColorPipe, &measuredJpegEncode
+                    &measuredColorPipe, &measuredJpegEncode,
+                    lens_shading_ptr, lensShadingRows, lensShadingCols
                 );
             }
             if (gpuAttemptSuccess) {
@@ -736,7 +738,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                 );
             }
             if (sharedResult && !sharedResult->rgbBuf.empty()) {
-                saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
+                saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height,
+                                                lens_shading_ptr, lensShadingRows, lensShadingCols,
+                                                width, height, digitalGain, targetLog, lut,
                                                 exposure, contrast, saturation, highlights, shadows, whites, blacks,
                                                 jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd,
                                                 &measuredColorPipe, &measuredJpegEncode);
@@ -1081,8 +1085,19 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     (void)forwardMatrix1; (void)forwardMatrix2;
     (void)calibrationIlluminant1; (void)calibrationIlluminant2;
     (void)neutralColorPoint; (void)dngCompressionMode;
-    (void)lensShadingMap; (void)lensShadingRows; (void)lensShadingCols;
     (void)outputJpgPath; (void)outputDngPath;
+
+    std::vector<float> lensShadingVec;
+    const float* lens_shading_ptr = nullptr;
+    if (lensShadingMap && lensShadingRows > 0 && lensShadingCols > 0) {
+        int lsSize = env->GetArrayLength(lensShadingMap);
+        int expected = 4 * lensShadingRows * lensShadingCols;
+        if (lsSize >= expected) {
+            lensShadingVec.resize(expected);
+            env->GetFloatArrayRegion(lensShadingMap, 0, expected, lensShadingVec.data());
+            lens_shading_ptr = lensShadingVec.data();
+        }
+    }
 
     if (!bayerBuffer) { LOGE("processSingleFrameRaw: bayerBuffer is null"); return -1; }
     uint16_t* rawDataPtr = (uint16_t*)env->GetDirectBufferAddress(bayerBuffer);
@@ -1176,7 +1191,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
             env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
         }
         const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
-        process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width * height, nullptr, 0, 0,
+        process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width * height, lens_shading_ptr, lensShadingRows, lensShadingCols,
                                 width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                 nullptr, nullptr, nullptr, 1, ccmVec.data(), wb_array, orientation,

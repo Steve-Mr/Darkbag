@@ -211,5 +211,25 @@ class StandardTimingTrackerTest {
         assertFalse(report.contains("C++ ColorPipe"))
         assertFalse(report.contains("JPEG 压缩"))
     }
+
+    @Test
+    fun testBuildSummaryReport_singleRawMode_displaysSingleRcdEvenWithZoom() {
+        val timing = StandardTimingTracker(
+            shutterClick = 2000L,
+            captureMode = CaptureTimingMode.SINGLE_RAW
+        )
+        timing.recordEnvironment(
+            width = 4032,
+            height = 3024,
+            isoVal = 400,
+            exposureNs = 20_000_000L,
+            zoom = 1.5f,
+            fusion = 0,
+            isSingle = true
+        )
+        val report = timing.buildSummaryReport()
+        assertTrue(report.contains("Mode: Single(RCD)"))
+        assertFalse(report.contains("Auto(Sabre)"))
+    }
 }
 

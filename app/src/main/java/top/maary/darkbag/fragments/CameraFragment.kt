@@ -5505,7 +5505,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         isFrame1Trigger: Boolean,
         shutterClickTime: Long?
     ): Float {
-        val result = captureResults[timestamp]
+        val result = captureResults[timestamp] ?: captureResultFlow.replayCache.lastOrNull()
         val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
         val curTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
         val validIsoRange = isoRange ?: android.util.Range(100, 3200)
@@ -5518,7 +5518,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             ExposureUtils.calculateHdrPlusExposure(
                 curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
             ).digitalGain
-        } else 1.0f
+        } else {
+            val postRawBoost = result?.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST)
+            if (postRawBoost != null && postRawBoost > 100) {
+                postRawBoost / 100.0f
+            } else if (curIso > validIsoRange.upper && validIsoRange.upper > 0) {
+                curIso.toFloat() / validIsoRange.upper.toFloat()
+            } else {
+                1.0f
+            }
+        }
 
         if (isFrame1Trigger) {
             val session = halfFrameSessionStore.readSession()

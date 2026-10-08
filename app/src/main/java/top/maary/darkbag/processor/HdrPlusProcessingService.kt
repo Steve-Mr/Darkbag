@@ -80,7 +80,8 @@ class HdrPlusProcessingService : LifecycleService() {
                 isoVal = req.metadata.iso ?: 0,
                 exposureNs = req.metadata.exposureTime ?: 0L,
                 zoom = req.zoomFactor,
-                fusion = req.fusionMode
+                fusion = req.fusionMode,
+                isSingle = req.isSingleFrame
             )
             val debugStats = LongArray(20)
             
