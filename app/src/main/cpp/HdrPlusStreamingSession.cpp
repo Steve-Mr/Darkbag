@@ -3,9 +3,13 @@
 #include "hdrplus_single_pipeline.h"
 #include "ColorPipe.h"
 #include "demosaic/RcdDemosaic.h"
+#include "gpu/GpuRcdComputeEngine.h"
+#include "gpu/GpuAccumulateEngine.h"
 #include <android/log.h>
 #include <omp.h>
 #include <cmath>
+
+extern "C" int halide_set_num_threads(int n);
 
 #define TAG "HdrPlusStreamingSession"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -68,13 +72,10 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
         m_noiseProfile.assign(noiseProfile, noiseProfile + noiseProfileLen);
     }
 
-    // Fixed constant O(1) memory allocation
+    // Fixed constant O(1) memory allocation for reference frame
     size_t numPixels = static_cast<size_t>(m_width) * m_height;
     m_refFrame.resize(numPixels);
-    m_accumVal[0].resize(numPixels);
-    m_accumVal[1].resize(numPixels);
-    m_accumWeight[0].resize(numPixels);
-    m_accumWeight[1].resize(numPixels);
+    // m_accumVal and m_accumWeight are lazily allocated on first CPU frame push to save ~200MB upfront heap
 
     // Initialize Sabre Super-Resolution Engine only if eligible
     // Sabre is eligible if Force Sabre (mode == 2), or Auto (mode == 0) with zoom >= 1.25x
@@ -98,20 +99,50 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
             sabreCfg.noiseModelS = static_cast<float>(m_noiseProfile[0]);
             sabreCfg.noiseModelO = static_cast<float>(m_noiseProfile[1]);
         }
-        m_sabreEngine = std::make_unique<darkbag::sabre::SabreEngine>(sabreCfg);
-        m_tileAligner = std::make_unique<darkbag::sabre::TileAligner>();
-        LOGD("HdrPlusStreamingSession: Sabre Super-Resolution engine initialized (zoom=%.2f, mode=%d)", m_zoomFactor, m_fusionMode);
+
+        if (darkbag::sabre::GpuSabreEngine::isAvailable()) {
+            m_gpuSabreEngine = std::make_unique<darkbag::sabre::GpuSabreEngine>(sabreCfg);
+            if (!m_gpuSabreEngine->isSessionActive()) {
+                LOGW("HdrPlusStreamingSession: GPU Sabre initialization failed, falling back to Spatial + RCD");
+                m_gpuSabreEngine.reset();
+            } else {
+                LOGD("HdrPlusStreamingSession: GPU Sabre Super-Resolution engine initialized (zoom=%.2f, mode=%d)", m_zoomFactor, m_fusionMode);
+            }
+        } else {
+            m_gpuSabreEngine = nullptr;
+        }
+
+        if (!m_gpuSabreEngine) {
+            // Smart Fallback: Avoid slow CPU Sabre (13s blowout). Fall back to Spatial + RCD (339ms).
+            m_sabreEngine = nullptr;
+            m_tileAligner = nullptr;
+            LOGW("HdrPlusStreamingSession: GPU Sabre unavailable, falling back to Spatial + RCD (skipping slow CPU Sabre)");
+        } else {
+            m_sabreEngine = nullptr;
+            m_tileAligner = std::make_unique<darkbag::sabre::TileAligner>();
+        }
     } else {
+        m_gpuSabreEngine = nullptr;
         m_sabreEngine = nullptr;
         m_tileAligner = nullptr;
         LOGD("HdrPlusStreamingSession: Sabre skipped (zoom=%.2f, mode=%d), saving ~350MB RAM", m_zoomFactor, m_fusionMode);
     }
 
-    LOGD("HdrPlusStreamingSession initialized: %dx%d, orientation=%d, WL=%d, BL=[%u,%u,%u,%u], fusionMode=%d, zoom=%.2f",
-         m_width, m_height, m_orientation, m_whiteLevel, m_bl_r, m_bl_g0, m_bl_g1, m_bl_b, m_fusionMode, m_zoomFactor);
+    // Cap CPU Halide worker threads to prevent core thrashing across dual sessions
+    halide_set_num_threads(3);
+
+    // Disable Phase 3C GPU accumulation by default to preserve 60fps UI fluidity and prevent GPU fence timeouts
+    m_useGpuAccumulation = false;
+
+    LOGD("HdrPlusStreamingSession initialized: %dx%d, orientation=%d, WL=%d, BL=[%u,%u,%u,%u], fusionMode=%d, zoom=%.2f, gpuAccum=%d",
+         m_width, m_height, m_orientation, m_whiteLevel, m_bl_r, m_bl_g0, m_bl_g1, m_bl_b, m_fusionMode, m_zoomFactor, m_useGpuAccumulation);
 }
 
 HdrPlusStreamingSession::~HdrPlusStreamingSession() {
+    if (m_useGpuAccumulation) {
+        darkbag::gpu::GpuAccumulateEngine::instance().endSession();
+    }
+    m_gpuSabreEngine.reset();
     LOGD("HdrPlusStreamingSession destroyed (total frames pushed: %d)", m_framesPushed);
 }
 
@@ -129,20 +160,66 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
     }
 
     if (m_framesPushed == 0) {
+        // Always preserve Frame 0 (Reference Frame) in CPU buffer for fallback and DNG
+        std::memcpy(m_refFrame.data(), rawData, numPixels * sizeof(uint16_t));
+    }
+
+    if (m_useGpuAccumulation) {
+        int64_t gpuPushMs = 0;
+        bool gpuOk = darkbag::gpu::GpuAccumulateEngine::instance().pushFrame(rawData, numPixels, &gpuPushMs);
+        if (gpuOk) {
+            m_framesPushed++;
+            m_pushTotalMs += gpuPushMs;
+            if (m_pushCount == 0 || gpuPushMs < m_pushMinMs) m_pushMinMs = gpuPushMs;
+            if (gpuPushMs > m_pushMaxMs) m_pushMaxMs = gpuPushMs;
+            m_pushCount++;
+            LOGD("pushFrame (GPU Phase 3C): accumulated frame %d (%lld ms)", m_framesPushed - 1, (long long)gpuPushMs);
+            return true;
+        } else {
+            LOGW("pushFrame (GPU Phase 3C) failed, falling back to CPU Halide accumulation");
+            darkbag::gpu::GpuAccumulateEngine::instance().endSession();
+            m_useGpuAccumulation = false;
+            if (m_accumVal[0].size() != numPixels) {
+                m_accumVal[0].resize(numPixels);
+                m_accumWeight[0].resize(numPixels);
+            }
+            #pragma omp parallel for schedule(static)
+            for (size_t i = 0; i < numPixels; ++i) {
+                m_accumVal[0][i] = static_cast<float>(m_refFrame[i]);
+                m_accumWeight[0][i] = 1.0f;
+            }
+            m_accumIdx = 0;
+        }
+    }
+
+    if (m_framesPushed == 0) {
         // Frame 0 (Reference Frame)
         std::memcpy(m_refFrame.data(), rawData, numPixels * sizeof(uint16_t));
 
-        #pragma omp parallel for schedule(static)
-        for (size_t i = 0; i < numPixels; ++i) {
-            m_accumVal[0][i] = static_cast<float>(rawData[i]);
-            m_accumWeight[0][i] = 1.0f;
+        const bool isSabreActive = (m_gpuSabreEngine != nullptr) || (m_sabreEngine != nullptr);
+        if (!isSabreActive) {
+            if (m_accumVal[0].size() != numPixels) {
+                m_accumVal[0].resize(numPixels);
+                m_accumWeight[0].resize(numPixels);
+            }
+
+            #pragma omp parallel for schedule(static)
+            for (size_t i = 0; i < numPixels; ++i) {
+                m_accumVal[0][i] = static_cast<float>(rawData[i]);
+                m_accumWeight[0][i] = 1.0f;
+            }
         }
 
         if (m_tileAligner) {
             m_tileAligner->setReferenceFrame(rawData, m_width, m_height, m_cfaPattern);
         }
 
-        if (m_sabreEngine) {
+        if (m_gpuSabreEngine) {
+            bool ok = m_gpuSabreEngine->setReferenceFrame(rawData);
+            if (!ok) {
+                LOGW("HdrPlusStreamingSession: GPU Sabre setReferenceFrame failed");
+            }
+        } else if (m_sabreEngine) {
             m_sabreEngine->setReferenceFrame(rawData);
         }
 
@@ -162,31 +239,48 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
     }
 
     // Frames 1..N-1 (Alternate Frames)
+    const bool isSabreActive = (m_gpuSabreEngine != nullptr) || (m_sabreEngine != nullptr);
     int inIdx = m_accumIdx;
     int outIdx = 1 - m_accumIdx;
 
-    Halide::Runtime::Buffer<uint16_t> refBuf(m_refFrame.data(), m_width, m_height);
-    Halide::Runtime::Buffer<uint16_t> altBuf(const_cast<uint16_t*>(rawData), m_width, m_height);
-    Halide::Runtime::Buffer<float> valIn(m_accumVal[inIdx].data(), m_width, m_height);
-    Halide::Runtime::Buffer<float> weightIn(m_accumWeight[inIdx].data(), m_width, m_height);
-    Halide::Runtime::Buffer<float> valOut(m_accumVal[outIdx].data(), m_width, m_height);
-    Halide::Runtime::Buffer<float> weightOut(m_accumWeight[outIdx].data(), m_width, m_height);
+    if (!isSabreActive) {
+        if (m_accumVal[outIdx].size() != numPixels) {
+            m_accumVal[outIdx].resize(numPixels);
+            m_accumWeight[outIdx].resize(numPixels);
+        }
 
-    int res = hdrplus_accumulate_step(refBuf, altBuf, valIn, weightIn, valOut, weightOut);
-    if (res != 0) {
-        LOGE("hdrplus_accumulate_step failed with error %d at frame %d", res, m_framesPushed);
-        return false;
+        Halide::Runtime::Buffer<uint16_t> refBuf(m_refFrame.data(), m_width, m_height);
+        Halide::Runtime::Buffer<uint16_t> altBuf(const_cast<uint16_t*>(rawData), m_width, m_height);
+        Halide::Runtime::Buffer<float> valIn(m_accumVal[inIdx].data(), m_width, m_height);
+        Halide::Runtime::Buffer<float> weightIn(m_accumWeight[inIdx].data(), m_width, m_height);
+        Halide::Runtime::Buffer<float> valOut(m_accumVal[outIdx].data(), m_width, m_height);
+        Halide::Runtime::Buffer<float> weightOut(m_accumWeight[outIdx].data(), m_width, m_height);
+
+        int res = hdrplus_accumulate_step(refBuf, altBuf, valIn, weightIn, valOut, weightOut);
+        if (res != 0) {
+            LOGE("hdrplus_accumulate_step failed with error %d at frame %d", res, m_framesPushed);
+            return false;
+        }
     }
 
-    if (m_sabreEngine && m_tileAligner) {
+    if (m_tileAligner) {
         bool alignOk = m_tileAligner->alignFrame(rawData, m_flowX, m_flowY, m_flowWidth, m_flowHeight);
-        if (alignOk) {
-            m_sabreEngine->accumulateFrame(rawData, m_flowX.data(), m_flowY.data(), m_flowWidth, m_flowHeight);
-        } else {
+        const float* fx = alignOk ? m_flowX.data() : nullptr;
+        const float* fy = alignOk ? m_flowY.data() : nullptr;
+        int fw = alignOk ? m_flowWidth : 0;
+        int fh = alignOk ? m_flowHeight : 0;
+
+        if (m_gpuSabreEngine) {
+            m_gpuSabreEngine->accumulateFrame(rawData, fx, fy, fw, fh);
+        } else if (m_sabreEngine) {
+            m_sabreEngine->accumulateFrame(rawData, fx, fy, fw, fh);
+        }
+    } else {
+        if (m_gpuSabreEngine) {
+            m_gpuSabreEngine->accumulateFrame(rawData);
+        } else if (m_sabreEngine) {
             m_sabreEngine->accumulateFrame(rawData);
         }
-    } else if (m_sabreEngine) {
-        m_sabreEngine->accumulateFrame(rawData);
     }
 
     m_accumIdx = outIdx;
@@ -202,6 +296,19 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
 
     LOGD("pushFrame: accumulated frame %d (%lld ms)", m_framesPushed - 1, (long long)pushElapsed);
     return true;
+}
+
+void SharedCaptureResult::releaseGpuResources() {
+    if (gpuRgbTexture != 0) {
+        darkbag::gpu::GpuRcdComputeEngine::releaseTexture(gpuRgbTexture);
+        gpuRgbTexture = 0;
+    }
+    gpuTexWidth = 0;
+    gpuTexHeight = 0;
+}
+
+SharedCaptureResult::~SharedCaptureResult() {
+    releaseGpuResources();
 }
 
 int HdrPlusStreamingSession::finish(
@@ -221,7 +328,6 @@ int HdrPlusStreamingSession::finish(
 
     const size_t numPixels = static_cast<size_t>(m_width) * m_height;
     outSharedResult->bayerBuf.resize(numPixels);
-    outSharedResult->rgbBuf.resize(numPixels * 3);
     outSharedResult->noiseProfile = m_noiseProfile;
 
     // Determine effective fusion mode:
@@ -234,53 +340,161 @@ int HdrPlusStreamingSession::finish(
         effectiveMode = (m_zoomFactor >= 1.25f) ? 2 : 1;
     }
 
-    if (effectiveMode == 2 && m_sabreEngine && m_framesPushed > 1) {
-        LOGD("HdrPlusStreamingSession: resolving with Sabre Super-Resolution (zoom=%.2fx, frames=%d)",
-             m_zoomFactor, m_framesPushed);
+    if (effectiveMode == 2 && (m_gpuSabreEngine || m_sabreEngine) && m_framesPushed > 1) {
+        LOGD("HdrPlusStreamingSession: resolving with Sabre Super-Resolution (zoom=%.2fx, frames=%d, gpu=%d)",
+             m_zoomFactor, m_framesPushed, m_gpuSabreEngine ? 1 : 0);
+        outSharedResult->rgbBuf.resize(numPixels * 3);
+        outSharedResult->bayerBuf.resize(numPixels);
         auto fusionStart = std::chrono::high_resolution_clock::now();
-        bool sabreOk = m_sabreEngine->resolve(
-            outSharedResult->rgbBuf.data(),
-            outSharedResult->bayerBuf.data()
-        );
+        bool sabreOk = false;
+
+        if (m_gpuSabreEngine) {
+            GLuint outTex = 0;
+            int64_t gpuComputeMs = 0;
+            sabreOk = m_gpuSabreEngine->resolve(
+                &outTex,
+                outSharedResult->rgbBuf.data(),
+                outSharedResult->bayerBuf.data(),
+                &gpuComputeMs
+            );
+            if (sabreOk && outTex != 0) {
+                outSharedResult->gpuRgbTexture = m_gpuSabreEngine->transferOutputTexture();
+                if (outSharedResult->gpuRgbTexture == 0) {
+                    outSharedResult->gpuRgbTexture = outTex;
+                }
+                outSharedResult->gpuTexWidth = m_width;
+                outSharedResult->gpuTexHeight = m_height;
+                m_fusionComputeMs = gpuComputeMs;
+                LOGD("HdrPlusStreamingSession: GPU Sabre resolve succeeded (%lld ms, tex=%u)",
+                     (long long)m_fusionComputeMs, outSharedResult->gpuRgbTexture);
+            } else {
+                LOGW("HdrPlusStreamingSession: GPU Sabre resolve failed");
+                sabreOk = false;
+            }
+            m_gpuSabreEngine.reset();
+        } else if (m_sabreEngine) {
+            sabreOk = m_sabreEngine->resolve(
+                outSharedResult->rgbBuf.data(),
+                outSharedResult->bayerBuf.data()
+            );
+            if (sabreOk) {
+                m_fusionComputeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::high_resolution_clock::now() - fusionStart
+                ).count();
+                LOGD("HdrPlusStreamingSession: CPU Sabre Super-Resolution resolve succeeded (%lld ms)", (long long)m_fusionComputeMs);
+            }
+        }
+
         if (sabreOk) {
-            m_fusionComputeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - fusionStart
-            ).count();
             if (m_zoomFactor > 1.05f) {
                 outSharedResult->isZoomCropped = true;
             }
             outSharedResult->isWhiteBalanceApplied = false;
             outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
             outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
-            LOGD("HdrPlusStreamingSession: Sabre Super-Resolution resolve succeeded (%lld ms)", (long long)m_fusionComputeMs);
             return 0;
         }
         LOGW("HdrPlusStreamingSession: Sabre resolve returned false, falling back to Spatial + RCD");
     }
 
-    // Normalize accumulated val / weight into m_refFrame buffer to avoid input/output aliasing
-    auto normStart = std::chrono::high_resolution_clock::now();
-    const float* valData = m_accumVal[m_accumIdx].data();
-    const float* weightData = m_accumWeight[m_accumIdx].data();
+    const bool usedGpuAccumulation = m_useGpuAccumulation;
+    bool gpuNormSucceeded = false;
+    if (m_useGpuAccumulation && m_framesPushed > 0 && effectiveMode != 2 && effectiveMode != 3) {
+        int64_t normMs = 0;
+        GLuint normBayerTex = 0;
+        // Fast GPU-to-GPU path: pass nullptr to finish() to eliminate 3000ms+ synchronous glReadPixels!
+        bool normOk = darkbag::gpu::GpuAccumulateEngine::instance().finish(
+            nullptr,
+            &normBayerTex,
+            &normMs
+        );
+        m_normalizeMs = normMs;
 
-    #pragma omp parallel for schedule(static)
-    for (size_t i = 0; i < numPixels; ++i) {
-        float norm = valData[i] / std::max(0.001f, weightData[i]) + 0.5f;
-        m_refFrame[i] = static_cast<uint16_t>(std::clamp(norm, 0.0f, 65535.0f));
+        if (normOk && normBayerTex != 0) {
+            gpuNormSucceeded = true;
+            // Pre-populate outSharedResult->bayerBuf with clean reference Frame 0 for fast DNG export and CPU fallback
+            std::copy(m_refFrame.begin(), m_refFrame.end(), outSharedResult->bayerBuf.begin());
+
+            uint16_t bl_array[4] = {m_bl_r, m_bl_g0, m_bl_g1, m_bl_b};
+            float wb_array[4] = {m_wb_r, m_wb_g0, m_wb_g1, m_wb_b};
+            int64_t gpuComputeMs = 0;
+            GLuint rgbTex = 0;
+
+            bool demosaicOk = darkbag::gpu::GpuRcdComputeEngine::instance().demosaicFromBayerTexture(
+                normBayerTex,
+                m_width,
+                m_height,
+                m_cfaPattern,
+                bl_array,
+                static_cast<uint16_t>(m_whiteLevel),
+                wb_array,
+                &rgbTex,
+                &gpuComputeMs
+            );
+            darkbag::gpu::GpuAccumulateEngine::instance().endSession();
+            m_useGpuAccumulation = false;
+
+            if (demosaicOk) {
+                outSharedResult->gpuRgbTexture = darkbag::gpu::GpuRcdComputeEngine::instance().transferOutputTexture();
+                if (outSharedResult->gpuRgbTexture == 0) {
+                    outSharedResult->gpuRgbTexture = rgbTex;
+                }
+                outSharedResult->gpuTexWidth = m_width;
+                outSharedResult->gpuTexHeight = m_height;
+                outSharedResult->isWhiteBalanceApplied = false;
+                m_fusionComputeMs = gpuComputeMs;
+                outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
+
+                LOGD("HdrPlusStreamingSession (Phase 3C End-to-End GPU): Succeeded in %lld ms (norm=%lld ms, demosaic=%lld ms, texture=%u)",
+                     (long long)(m_normalizeMs + m_fusionComputeMs),
+                     (long long)m_normalizeMs, (long long)m_fusionComputeMs,
+                     outSharedResult->gpuRgbTexture);
+                return 0;
+            } else {
+                LOGW("HdrPlusStreamingSession (Phase 3C): demosaicFromBayerTexture failed, falling back to CPU RCD using Frame 0");
+            }
+        } else {
+            LOGW("HdrPlusStreamingSession (Phase 3C): GpuAccumulateEngine finish failed, falling back to Frame 0");
+            darkbag::gpu::GpuAccumulateEngine::instance().endSession();
+            m_useGpuAccumulation = false;
+        }
     }
-    m_normalizeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::high_resolution_clock::now() - normStart
-    ).count();
 
-    std::copy(m_refFrame.begin(), m_refFrame.end(), outSharedResult->bayerBuf.begin());
+    if (gpuNormSucceeded) {
+        // GPU normalization already succeeded and populated outSharedResult->bayerBuf.
+        // Sync to m_refFrame for downstream consistency; DO NOT overwrite with uninitialized m_accumVal!
+        std::copy(outSharedResult->bayerBuf.begin(), outSharedResult->bayerBuf.end(), m_refFrame.begin());
+    } else if (m_framesPushed > 0 && m_accumVal[m_accumIdx].size() == numPixels && !usedGpuAccumulation) {
+        // Pure CPU accumulation mode: normalize accumulated val / weight into m_refFrame buffer
+        auto normStart = std::chrono::high_resolution_clock::now();
+        const float* valData = m_accumVal[m_accumIdx].data();
+        const float* weightData = m_accumWeight[m_accumIdx].data();
+
+        #pragma omp parallel for schedule(static)
+        for (size_t i = 0; i < numPixels; ++i) {
+            float norm = valData[i] / std::max(0.001f, weightData[i]) + 0.5f;
+            m_refFrame[i] = static_cast<uint16_t>(std::clamp(norm, 0.0f, 65535.0f));
+        }
+        m_normalizeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - normStart
+        ).count();
+
+        std::copy(m_refFrame.begin(), m_refFrame.end(), outSharedResult->bayerBuf.begin());
+    } else {
+        // Fallback to retained reference frame 0
+        LOGW("HdrPlusStreamingSession: Using reference Frame 0 for output bayer buffer");
+        std::copy(m_refFrame.begin(), m_refFrame.end(), outSharedResult->bayerBuf.begin());
+    }
 
     auto fusionStart = std::chrono::high_resolution_clock::now();
 
     outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
-    outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
 
     if (effectiveMode == 3) {
         // Classic Wiener mode: requires Halide single pipeline with Malvar 5x5 demosaic
+        outSharedResult->rgbBuf.resize(numPixels * 3);
+        outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
+
         Halide::Runtime::Buffer<uint16_t> inputBuf(m_refFrame.data(), m_width, m_height, 1);
         Halide::Runtime::Buffer<float> ccmHalideBuf(m_ccm.data(), 3, 3);
 
@@ -321,9 +535,11 @@ int HdrPlusStreamingSession::finish(
         outSharedResult->isWhiteBalanceApplied = true;
     } else {
         // High-Fidelity RCD Demosaicing (Spatial + RCD)
-        // Directly demosaics from normalized bayerBuf, avoiding redundant Malvar demosaic in Halide
+        // Perform CPU multithreaded OpenMP+NEON RCD (339ms, zero GPU contention)
         uint16_t bl_array[4] = {m_bl_r, m_bl_g0, m_bl_g1, m_bl_b};
         float wb_array[4] = {m_wb_r, m_wb_g0, m_wb_g1, m_wb_b};
+
+        outSharedResult->rgbBuf.resize(numPixels * 3);
         darkbag::demosaic::rcd_demosaic(
             outSharedResult->bayerBuf.data(),
             m_width,
@@ -334,6 +550,7 @@ int HdrPlusStreamingSession::finish(
             wb_array,
             outSharedResult->rgbBuf.data()
         );
+        outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
         outSharedResult->isWhiteBalanceApplied = false;
     }
 

@@ -120,4 +120,33 @@ class HalfFrameManagerTest {
         assertEquals(1, session.step)
         assertEquals("hf_group_001", session.baseName)
     }
+
+    @Test
+    fun testHalfFrameCapture_HqPath_CorrectlyCachesFrame1AndWaitsForFrame2() {
+        val dummyFile = File(context.cacheDir, "test_hf1_hq.jpg")
+        dummyFile.writeBytes(byteArrayOf(10, 20, 30))
+
+        val metadata = HalfFrameManager.Metadata(
+            profile = HalfFrameSessionStore.PROFILE_HALF_SIDE,
+            dateStamp = false,
+            captureTimeMillis = System.currentTimeMillis()
+        )
+
+        // When: Frame 1 is handled on HQ path (as done by HdrPlusProcessingService)
+        val result = halfFrameManager.handleCapture(
+            currentJpgPath = dummyFile.absolutePath,
+            baseName = "hf_group_hq_001",
+            isFastPath = false,
+            metadata = metadata
+        )
+
+        // Then: Result is null (Frame 1 stored in temp, not published directly to MediaStore)
+        assertNull(result)
+        val session = sessionStore.readSession(profile = HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        assertEquals("hf_group_hq_001", session.baseName)
+        assert(session.tempPath != null)
+        val tempFile = File(session.tempPath!!)
+        assert(tempFile.exists())
+        assertEquals(3, tempFile.length())
+    }
 }

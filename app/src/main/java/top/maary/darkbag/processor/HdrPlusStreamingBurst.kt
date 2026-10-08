@@ -48,7 +48,8 @@ class HdrPlusStreamingBurst(
 
     private class QueuedFrame(
         val buffer: ByteBuffer,
-        val frame: StreamingBurstFrame
+        val frame: StreamingBurstFrame,
+        var isReleased: Boolean = false
     )
 
     private val lock = Any()
@@ -151,11 +152,11 @@ class HdrPlusStreamingBurst(
                             val maxCandidates = minOf(3, frameCount)
                             val candidateItems = mutableListOf<QueuedFrame>()
                             val candidateScores = mutableListOf<Float>()
-                            val releasedBuffers = mutableSetOf<ByteBuffer>()
 
-                            fun safeRelease(buf: ByteBuffer) {
-                                if (releasedBuffers.add(buf)) {
-                                    StreamingBufferPool.release(buf)
+                            fun safeRelease(item: QueuedFrame) {
+                                if (!item.isReleased) {
+                                    item.isReleased = true
+                                    StreamingBufferPool.release(item.buffer)
                                 }
                             }
 
@@ -203,7 +204,7 @@ class HdrPlusStreamingBurst(
                                         }
                                         Log.d(TAG, "Streaming frame 1/$frameCount accumulated (Adaptive Best Base: candidate $bestIdx)")
                                     } finally {
-                                        safeRelease(bestCand.buffer)
+                                        safeRelease(bestCand)
                                     }
 
                                     // Push remaining candidates in order
@@ -220,13 +221,13 @@ class HdrPlusStreamingBurst(
                                             }
                                             Log.d(TAG, "Streaming frame ${processedFrames.size}/$frameCount accumulated (Candidate $idx)")
                                         } finally {
-                                            safeRelease(cand.buffer)
+                                            safeRelease(cand)
                                         }
                                     }
                                 }
                             } finally {
                                 for (cand in candidateItems) {
-                                    safeRelease(cand.buffer)
+                                    safeRelease(cand)
                                 }
                             }
 

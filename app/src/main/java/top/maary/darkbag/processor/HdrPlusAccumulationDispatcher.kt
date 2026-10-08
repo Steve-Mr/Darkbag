@@ -4,15 +4,23 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Shared singleton accumulation dispatcher for Halide streaming accumulation.
- * Ensures that CPU-heavy Halide accumulation runs sequentially on a dedicated background thread
- * with lower priority than camera capture threads, completely preventing CPU core contention.
+ * Uses a single dedicated worker thread (MAX_CONCURRENT_ACCUM_WORKERS = 1) to enforce
+ * strict sequential FIFO execution of streaming accumulation sessions.
+ *
+ * Consecutive burst captures queue cleanly in FIFO order without thrashing CPU big cores
+ * or saturating mobile LPDDR DRAM bandwidth. This prevents dual concurrent sessions from
+ * slowing down exponentially (from ~2.8s to 26.2s) under rapid burst firing.
  */
 object HdrPlusAccumulationDispatcher {
-    private val executor = Executors.newSingleThreadExecutor { r ->
-        Thread(r, "HdrPlusGlobalAccumWorker").apply {
+    const val MAX_CONCURRENT_ACCUM_WORKERS = 1
+    private val workerId = AtomicInteger(1)
+
+    private val executor = Executors.newFixedThreadPool(MAX_CONCURRENT_ACCUM_WORKERS) { r ->
+        Thread(r, "HdrPlusAccumWorker-${workerId.getAndIncrement()}").apply {
             priority = Thread.NORM_PRIORITY - 1
         }
     }

@@ -10,6 +10,9 @@
 #include <HalideRuntime.h>
 #include "sabre/SabreEngine.h"
 #include "sabre/TileAligner.h"
+#include "sabre/GpuSabreEngine.h"
+
+#include <GLES3/gl3.h>
 
 /**
  * Shared capture result holding normalized Bayer and demosaiced linear RGB buffers.
@@ -21,6 +24,19 @@ struct SharedCaptureResult {
     std::vector<double> noiseProfile;
     bool isZoomCropped = false;
     bool isWhiteBalanceApplied = false;
+
+    GLuint gpuRgbTexture = 0;
+    int gpuTexWidth = 0;
+    int gpuTexHeight = 0;
+
+    SharedCaptureResult() = default;
+    ~SharedCaptureResult();
+    SharedCaptureResult(const SharedCaptureResult&) = delete;
+    SharedCaptureResult& operator=(const SharedCaptureResult&) = delete;
+    SharedCaptureResult(SharedCaptureResult&&) noexcept = default;
+    SharedCaptureResult& operator=(SharedCaptureResult&&) noexcept = default;
+
+    void releaseGpuResources();
 };
 
 
@@ -61,7 +77,7 @@ public:
     float zoomFactor() const { return m_zoomFactor; }
     bool isSabreEngineActive() const {
         std::lock_guard<std::mutex> lock(m_sessionMutex);
-        return m_sabreEngine != nullptr;
+        return m_sabreEngine != nullptr || m_gpuSabreEngine != nullptr;
     }
 
     // Push an incoming RAW Bayer frame.
@@ -160,4 +176,6 @@ private:
     int64_t m_pushMaxMs = 0;
     int64_t m_normalizeMs = 0;
     int64_t m_fusionComputeMs = 0;
+    bool m_useGpuAccumulation = false;
+    std::unique_ptr<darkbag::sabre::GpuSabreEngine> m_gpuSabreEngine;
 };

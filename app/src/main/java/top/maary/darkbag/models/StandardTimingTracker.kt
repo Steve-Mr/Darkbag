@@ -41,7 +41,8 @@ data class StandardTimingTracker(
     @Volatile var streamingPushMinMs: Long = 0,
     @Volatile var streamingPushMaxMs: Long = 0,
     @Volatile var stage1NormalizeMs: Long = 0,
-    @Volatile var stage1FusionMs: Long = 0
+    @Volatile var stage1FusionMs: Long = 0,
+    @Volatile var isSingleFrame: Boolean = false
 ) {
     val frameArrivalTimes = mutableListOf<Long>()
 
@@ -73,7 +74,8 @@ data class StandardTimingTracker(
         isoVal: Int = 0,
         exposureNs: Long = 0,
         zoom: Float = 1.0f,
-        fusion: Int = 0
+        fusion: Int = 0,
+        isSingle: Boolean = false
     ) {
         imageWidth = width
         imageHeight = height
@@ -81,6 +83,7 @@ data class StandardTimingTracker(
         exposureTimeNs = exposureNs
         zoomFactor = zoom
         fusionMode = fusion
+        isSingleFrame = isSingle
     }
 
     fun recordStreamingPushStats(count: Int, avgMs: Long, minMs: Long, maxMs: Long) {
@@ -116,7 +119,9 @@ data class StandardTimingTracker(
         if (zoomFactor > 1.05f || zoomFactor < 0.95f) {
             envParts.add(String.format(Locale.US, "Zoom %.1fx", zoomFactor))
         }
-        val fusionModeStr = when (fusionMode) {
+        val fusionModeStr = if (isSingleFrame) {
+            "Single(RCD)"
+        } else when (fusionMode) {
             1 -> "Spatial+RCD"
             2 -> "Sabre SR"
             3 -> "Classic Wiener"

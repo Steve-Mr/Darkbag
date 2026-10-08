@@ -7,6 +7,8 @@
 
 #define TAG "ColorPipe"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 
@@ -1031,6 +1033,9 @@ bool process_and_save_image(
     std::vector<unsigned char>& debugC8 = tls_debugC8;
 
     const bool hasLsc = (lensShadingVec != nullptr && lensShadingRows > 0 && lensShadingCols > 0);
+    if (hasLsc) {
+        edgeComp.enabled = false;
+    }
     auto lsc_idx = [&](int ch, int row, int col) -> int {
         return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
     };
@@ -1070,6 +1075,22 @@ bool process_and_save_image(
         float r = static_cast<float>(planarData[r_idx]);
         float g = static_cast<float>(planarData[g_idx]);
         float b = static_cast<float>(planarData[b_idx]);
+
+        // Lens Shading Correction in sensor linear space
+        if (hasLsc) {
+            const auto& lx = lscX[x];
+            const auto& ly = lscY[y];
+            auto sample_ch = [&](int ch) {
+                float v00 = lensShadingVec[lsc_idx(ch, ly.idx0, lx.idx0)];
+                float v01 = lensShadingVec[lsc_idx(ch, ly.idx0, lx.idx1)];
+                float v10 = lensShadingVec[lsc_idx(ch, ly.idx1, lx.idx0)];
+                float v11 = lensShadingVec[lsc_idx(ch, ly.idx1, lx.idx1)];
+                return (v00 * lx.w0 + v01 * lx.w1) * ly.w0 + (v10 * lx.w0 + v11 * lx.w1) * ly.w1;
+            };
+            r *= sample_ch(0);
+            g *= 0.5f * (sample_ch(1) + sample_ch(2));
+            b *= sample_ch(3);
+        }
         
         // Highlight handling.
         //  * Multi-frame path (faithfulHighlights == false): joint proportional
@@ -2231,7 +2252,14 @@ bool write_dng(
         );
         if (!opcodeList.empty()) {
             TIFFSetField(tif, TIFFTAG_OPCODELIST2, (uint32_t)opcodeList.size(), opcodeList.data());
+            LOGI("write_dng: successfully written OpcodeList2 GainMap (%dx%d, %zu bytes, cfa=%d)",
+                 lensShadingCols, lensShadingRows, opcodeList.size(), cfaPattern);
+        } else {
+            LOGW("write_dng: build_dng_gainmap_opcodes returned empty buffer");
         }
+    } else {
+        LOGW("write_dng: OpcodeList2 GainMap skipped (isBayer=%d, mapPtr=%p, rows=%d, cols=%d)",
+             isBayer, lensShadingMap, lensShadingRows, lensShadingCols);
     }
 
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);

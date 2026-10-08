@@ -202,6 +202,8 @@ class CameraFragment : Fragment() {
                     .getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
 
     @Volatile private var isBurstActive = false
+    @Volatile private var isSwitchingLens = false
+    private var lensSwitchWatchdog: kotlinx.coroutines.Job? = null
     private val rawVideoSessionManager = top.maary.darkbag.rawvideo.RawVideoSessionManager()
     private var mp4VideoRecorder: top.maary.darkbag.video.Mp4VideoRecorder? = null
     private val requestAudioPermissionLauncher = registerForActivityResult(
@@ -269,7 +271,7 @@ class CameraFragment : Fragment() {
     private var isVideoSaving = false
 
     private val isProcessing: Boolean
-        get() = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0 || isVideoSaving
+        get() = top.maary.darkbag.processor.HdrPlusRequestManager.pendingForegroundTasksCount.value > 0 || isVideoSaving
 
     // Half-frame State
     private var pendingVfSnapshot: android.graphics.Bitmap? = null
@@ -283,6 +285,9 @@ class CameraFragment : Fragment() {
     private var halfFrameTempPath: String? = null
     private lateinit var halfFrameSessionStore: HalfFrameSessionStore
     private var isHalfFrameUiAnimating = false
+    private val hideBlackoutRunnable = Runnable {
+        _fragmentCameraBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
+    }
 
     enum class CaptureMode(val key: String) {
         NORMAL(SettingsFragment.MODE_NORMAL),
@@ -611,6 +616,7 @@ class CameraFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        _fragmentCameraBinding?.viewFinderBlackout?.removeCallbacks(hideBlackoutRunnable)
         _fragmentCameraBinding = null
         super.onDestroyView()
 
@@ -737,17 +743,23 @@ class CameraFragment : Fragment() {
                     }
                 }
 
-                val lastModified = try {
-                    context?.let { mediaStoreUtils.getFileLastModified(it, android.net.Uri.parse(filename)) } ?: 0L
-                } catch (e: Exception) {
+                val (loadTarget, lastModified) = withContext(Dispatchers.IO) {
+                    val lm = try {
+                        context?.let { mediaStoreUtils.getFileLastModified(it, android.net.Uri.parse(filename)) } ?: 0L
+                    } catch (e: Exception) {
+                        val file = java.io.File(filename)
+                        if (file.exists()) file.lastModified() else 0L
+                    }
                     val file = java.io.File(filename)
-                    if (file.exists()) file.lastModified() else 0L
+                    val target: Any = if (file.exists()) file else filename
+                    Pair(target, lm)
                 }
 
-                val file = java.io.File(filename)
-                val loadTarget = if (file.exists()) file else filename
+                val thumbSizePx = resources.getDimensionPixelSize(R.dimen.round_button_medium)
                 Glide.with(photoViewButton)
                     .load(loadTarget)
+                    .override(thumbSizePx, thumbSizePx)
+                    .downsample(com.bumptech.glide.load.resource.bitmap.DownsampleStrategy.CENTER_INSIDE)
                     .apply(RequestOptions.circleCropTransform())
                     .signature(com.bumptech.glide.signature.ObjectKey(lastModified))
                     .into(photoViewButton)
@@ -852,6 +864,7 @@ class CameraFragment : Fragment() {
                                 imageRepository.invalidateCache()
                                 prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, event.targetUri).apply()
                                 setGalleryThumbnail(event.targetUri)
+                                updateProcessingAnimationUi()
                             }
                         } else {
                              Log.w(TAG, "Received save event for ${event.baseName} without targetUri.")
@@ -863,9 +876,9 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // Listen for HDR+/RAW processing queue changes to drive loading animation
+        // Listen for HDR+/RAW foreground processing queue changes to drive loading animation
         viewLifecycleOwner.lifecycleScope.launch {
-            top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.collect {
+            top.maary.darkbag.processor.HdrPlusRequestManager.pendingForegroundTasksCount.collect {
                 withContext(Dispatchers.Main) {
                     updateProcessingAnimationUi()
                 }
@@ -1086,6 +1099,9 @@ class CameraFragment : Fragment() {
 
             // Ensure Camera2 is closed if we are switching engines or lenses
             closeCamera2()
+            if (!isBurstActive && !isProcessing && top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value == 0) {
+                top.maary.darkbag.processor.StreamingBufferPool.clear()
+            }
 
             bindCameraUseCasesInternal()
         }
@@ -1547,7 +1563,21 @@ class CameraFragment : Fragment() {
             } else {
                 if (isHdrPlusEnabled && isRawSupported) {
                     timing.captureMode = if (isHalfFrameModeEnabled) top.maary.darkbag.models.CaptureTimingMode.HALF_FRAME else top.maary.darkbag.models.CaptureTimingMode.HDR_BURST
-                    triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, timing)
+                    isBurstActive = true
+                    cameraUiContainerBinding?.cameraCaptureButton?.apply {
+                        setProgress(0f)
+                        startRotation()
+                        isEnabled = false
+                    }
+                    showShutterBlackout()
+                    val h = camera2Handler
+                    if (h != null) {
+                        h.post {
+                            triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, timing)
+                        }
+                    } else {
+                        triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, timing)
+                    }
                 } else {
                     timing.captureMode = if (isHalfFrameModeEnabled) top.maary.darkbag.models.CaptureTimingMode.HALF_FRAME else top.maary.darkbag.models.CaptureTimingMode.SINGLE_RAW
                     takeSinglePictureCamera2(timing, isFrame1Trigger, hfMetadataForTrigger)
@@ -1561,6 +1591,10 @@ class CameraFragment : Fragment() {
 
             // Listener for button used to switch cameras. Only called if the button is enabled
             it.setOnClickListener {
+                if (isBurstActive) {
+                    Log.w(TAG, "Ignore switch camera while burst capture is active")
+                    return@setOnClickListener
+                }
                 if (isMultiCameraModeActive) {
                     toggleFrontPipInMultiCameraMode()
                     return@setOnClickListener
@@ -1782,24 +1816,7 @@ class CameraFragment : Fragment() {
                     for(row in 0 until 3) for(col in 0 until 3) ccm[idx++] = ccmMat.getElement(col, row).toFloat()
                 }
 
-                var lensShadingMapData: FloatArray? = null
-                var lensShadingRows = 0
-                var lensShadingCols = 0
-                captureResult?.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)?.let { lsc ->
-                    lensShadingRows = lsc.rowCount
-                    lensShadingCols = lsc.columnCount
-                    val out = FloatArray(4 * lensShadingRows * lensShadingCols)
-                    fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
-                    for (row in 0 until lensShadingRows) {
-                        for (col in 0 until lensShadingCols) {
-                            out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
-                            out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
-                            out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
-                            out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
-                        }
-                    }
-                    lensShadingMapData = out
-                }
+                val (lensShadingMapData, lensShadingRows, lensShadingCols) = findLatestLensShadingMap(captureResult)
 
                 // 2. Prepare Settings
                 val prefs =
@@ -2685,7 +2702,7 @@ class CameraFragment : Fragment() {
                     cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
 
                     setOnClickListener {
-                        if (isBurstActive) return@setOnClickListener
+                        if (isBurstActive || isSwitchingLens) return@setOnClickListener
                         if (isMultiCameraModeActive) {
                             currentLens = lens
                             updateLensUI()
@@ -2887,18 +2904,28 @@ class CameraFragment : Fragment() {
     }
 
     private fun animateSwitch(onMidPoint: () -> Unit) {
-        val switchDuration = 200L
+        if (isSwitchingLens) return
+        isSwitchingLens = true
+
+        lensSwitchWatchdog?.cancel()
+        lensSwitchWatchdog = lifecycleScope.launch {
+            delay(2000)
+            if (isSwitchingLens) {
+                Log.w(TAG, "Lens switch watchdog triggered: camera did not deliver frame in 2000ms")
+                isSwitchingLens = false
+                _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+            }
+        }
+
+        val switchDuration = 150L
         fragmentCameraBinding.viewFinder.animate()
             .alpha(0f)
             .setDuration(switchDuration)
             .withEndAction {
                 lifecycleScope.launch(Dispatchers.Main) {
                     onMidPoint()
-                    delay(100)
-                    fragmentCameraBinding.viewFinder.animate()
-                        .alpha(1f)
-                        .setDuration(switchDuration)
-                        .start()
+                    // Note: viewFinder will be faded in to 1.0 smoothly when the new camera session
+                    // delivers its first live frame in onCaptureCompleted!
                 }
             }
             .start()
@@ -2958,7 +2985,8 @@ class CameraFragment : Fragment() {
         try {
             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
             request.addTarget(surface)
-            if (isManualExposure || isHdrPlusEnabled) {
+            val isMainLens = currentLens == null || (currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
+            if ((isManualExposure || isHdrPlusEnabled) && isMainLens) {
                 analysisImageReader?.surface?.let { request.addTarget(it) }
             }
             applyManualSettingsToRequest(request, isHdrBurst)
@@ -3391,9 +3419,7 @@ class CameraFragment : Fragment() {
                 )
                 var cfa = 0
                 var ccmCapture = ccmMain.copyOf()
-                var lensShadingMapData: FloatArray? = null
-                var lensShadingRows = 0
-                var lensShadingCols = 0
+                val (lensShadingMapData, lensShadingRows, lensShadingCols) = findLatestLensShadingMap(result)
                 val useSensorColorMatrix = true
 
                 whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
@@ -3428,23 +3454,6 @@ class CameraFragment : Fragment() {
                                 ccmCapture[idx++] = rat.toFloat()
                             }
                         }
-                    }
-
-                    val lsc = r.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
-                    if (lsc != null) {
-                        lensShadingRows = lsc.rowCount
-                        lensShadingCols = lsc.columnCount
-                        val out = FloatArray(4 * lensShadingRows * lensShadingCols)
-                        fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
-                        for (row in 0 until lensShadingRows) {
-                            for (col in 0 until lensShadingCols) {
-                                out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
-                                out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
-                                out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
-                                out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
-                            }
-                        }
-                        lensShadingMapData = out
                     }
                 }
 
@@ -3810,6 +3819,23 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     motionStillPtsUs = res?.second ?: 0L
                 }
 
+                var effectiveLsc = lensShadingMapData
+                var effectiveRows = lensShadingRows
+                var effectiveCols = lensShadingCols
+                if (effectiveLsc == null || effectiveRows <= 1 || effectiveCols <= 1) {
+                    val (latchedLsc, latchedRows, latchedCols) = findLatestLensShadingMap(result)
+                    if (latchedLsc != null) {
+                        effectiveLsc = latchedLsc
+                        effectiveRows = latchedRows
+                        effectiveCols = latchedCols
+                    }
+                }
+                if (effectiveLsc != null) {
+                    Log.i(TAG, "LSC map latched for DNG OpcodeList2: ${effectiveRows}x${effectiveCols} (${effectiveLsc.size} elements)")
+                } else {
+                    Log.w(TAG, "LSC map unavailable across all capture results! DNG may lack GainMap.")
+                }
+
                 val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
                 val request = top.maary.darkbag.processor.HdrPlusRequest(
                     requestId = java.util.UUID.randomUUID().toString(),
@@ -3821,9 +3847,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     orientation = combinedOrientation,
                     whiteLevel = whiteLevel,
                     blackLevelPattern = blackLevelPattern,
-                    lensShadingMap = lensShadingMapData,
-                    lensShadingRows = lensShadingRows,
-                    lensShadingCols = lensShadingCols,
+                    lensShadingMap = effectiveLsc,
+                    lensShadingRows = effectiveRows,
+                    lensShadingCols = effectiveCols,
                     useSensorColorMatrix = useSensorColorMatrix,
                     whiteBalance = wb,
                     ccm = ccm,
@@ -4008,12 +4034,24 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
 
                 override fun onDisconnected(device: android.hardware.camera2.CameraDevice) {
-                    lifecycleScope.launch { closeCamera2() }
+                    lensSwitchWatchdog?.cancel()
+                    lensSwitchWatchdog = null
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        isSwitchingLens = false
+                        _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                        closeCamera2()
+                    }
                 }
 
                 override fun onError(device: android.hardware.camera2.CameraDevice, error: Int) {
                     Log.e(TAG, "Camera2 open error: $error for camera $cameraId")
-                    lifecycleScope.launch { closeCamera2() }
+                    lensSwitchWatchdog?.cancel()
+                    lensSwitchWatchdog = null
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        isSwitchingLens = false
+                        _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                        closeCamera2()
+                    }
 
                     if (error == 2 && camera2RetryCount < 1) {
                          camera2RetryCount++
@@ -4031,6 +4069,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }, camera2Handler)
         } catch (e: android.hardware.camera2.CameraAccessException) {
             Log.e(TAG, "Failed to open Camera2", e)
+            lensSwitchWatchdog?.cancel()
+            lensSwitchWatchdog = null
+            lifecycleScope.launch(Dispatchers.Main) {
+                isSwitchingLens = false
+                _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+            }
         }
     }
 
@@ -4095,9 +4139,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
         }, handler)
 
-        val previewSize = map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)
-            ?.filter { it.width.toFloat()/it.height.toFloat() in 1.3f..1.4f }
-            ?.maxByOrNull { it.width * it.height } ?: android.util.Size(1440, 1080)
+        val previewSize = CameraRepository.selectOptimalPreviewSize(map?.getOutputSizes(android.graphics.SurfaceTexture::class.java))
 
         Log.d(TAG, "Requesting preview surface from LutProcessor: ${previewSize.width}x${previewSize.height}")
         lutProcessor?.getInputSurface(previewSize.width, previewSize.height) { surface ->
@@ -4109,7 +4151,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
 
                     camera2PreviewSurface = surface
-                    val surfaces = listOf(surface, rawImageReader!!.surface, analysisImageReader!!.surface)
+                    val surfaces = mutableListOf(surface, rawImageReader!!.surface)
+                    val isMainLens = currentLens == null || (currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
+                    if (isMainLens && analysisImageReader != null) {
+                        surfaces.add(analysisImageReader!!.surface)
+                    }
 
                     try {
                         device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
@@ -4122,7 +4168,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         try {
                             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                             request.addTarget(surface)
-                            if (isManualExposure || isHdrPlusEnabled) {
+                            if ((isManualExposure || isHdrPlusEnabled) && isMainLens) {
                                 analysisImageReader?.surface?.let { request.addTarget(it) }
                             }
 
@@ -4143,22 +4189,62 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                 request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                             }
 
+                            var firstFrameDelivered = false
                             session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                                 override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
                                     handleCaptureResult(result)
+                                    if (!firstFrameDelivered) {
+                                        firstFrameDelivered = true
+                                        lensSwitchWatchdog?.cancel()
+                                        lensSwitchWatchdog = null
+                                        lifecycleScope.launch(Dispatchers.Main) {
+                                            isSwitchingLens = false
+                                            _fragmentCameraBinding?.viewFinder?.animate()
+                                                ?.alpha(1f)
+                                                ?.setDuration(200L)
+                                                ?.start()
+                                        }
+                                    }
                                 }
                             }, handler)
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to start repeating request", e)
+                            lensSwitchWatchdog?.cancel()
+                            lensSwitchWatchdog = null
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                isSwitchingLens = false
+                                _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                            }
                         }
                     }
 
                     override fun onConfigureFailed(session: android.hardware.camera2.CameraCaptureSession) {
-                        Log.e(TAG, "Camera2 session config failed")
+                        Log.e(TAG, "Camera2 session config failed for lens: ${currentLens?.name ?: camera2Device?.id}")
+                        lensSwitchWatchdog?.cancel()
+                        lensSwitchWatchdog = null
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            isSwitchingLens = false
+                            _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                            val currentMult = currentLens?.multiplier
+                            if (currentMult != null && currentMult !in 0.95f..1.05f) {
+                                val mainLens = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                                if (mainLens != null) {
+                                    Log.w(TAG, "Falling back to main lens ${mainLens.name} after session configure failure")
+                                    currentLens = mainLens
+                                    bindCameraUseCases()
+                                }
+                            }
+                        }
                     }
                 }, handler)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to create capture session", e)
+                lensSwitchWatchdog?.cancel()
+                lensSwitchWatchdog = null
+                lifecycleScope.launch(Dispatchers.Main) {
+                    isSwitchingLens = false
+                    _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                }
             }
                 }
             }
@@ -4578,10 +4664,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         hfMetadata: HalfFrameManager.Metadata? = null,
         timing: StandardTimingTracker? = null
     ) {
-        val device = camera2Device ?: run { processingSemaphore.release(); return }
-        val session = camera2Session ?: run { processingSemaphore.release(); return }
-        val reader = rawImageReader ?: run { processingSemaphore.release(); return }
-        val handler = camera2Handler ?: run { processingSemaphore.release(); return }
+        val device = camera2Device ?: run { isBurstActive = false; processingSemaphore.release(); lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }; return }
+        val session = camera2Session ?: run { isBurstActive = false; processingSemaphore.release(); lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }; return }
+        val reader = rawImageReader ?: run { isBurstActive = false; processingSemaphore.release(); lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }; return }
+        val handler = camera2Handler ?: run { isBurstActive = false; processingSemaphore.release(); lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }; return }
 
         isBurstActive = true
         val captureStartTime = hfMetadata?.captureTimeMillis ?: System.currentTimeMillis()
@@ -4637,9 +4723,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 -0.5f, 2.0f, -0.5f,
                 0.0f, -1.0f, 2.0f
             )
-            var lensShadingMapData: FloatArray? = null
-            var lensShadingRows = 0
-            var lensShadingCols = 0
+            val (initialLsc, initialRows, initialCols) = findLatestLensShadingMap(result)
+            var lensShadingMapData: FloatArray? = initialLsc
+            var lensShadingRows = initialRows
+            var lensShadingCols = initialCols
 
             result?.let { r ->
                 val wbVec = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)
@@ -4657,22 +4744,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             ccmCapture[idx++] = ccmMat.getElement(col, row).toFloat()
                         }
                     }
-                }
-                val lsc = r.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
-                if (lsc != null) {
-                    lensShadingRows = lsc.rowCount
-                    lensShadingCols = lsc.columnCount
-                    val out = FloatArray(4 * lensShadingRows * lensShadingCols)
-                    fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
-                    for (row in 0 until lensShadingRows) {
-                        for (col in 0 until lensShadingCols) {
-                            out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
-                            out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
-                            out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
-                            out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
-                        }
-                    }
-                    lensShadingMapData = out
                 }
             }
 
@@ -4728,6 +4799,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 Log.e(TAG, "Failed to create native streaming session")
                 isBurstActive = false
                 processingSemaphore.release()
+                lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }
                 return
             }
 
@@ -4786,21 +4858,20 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
                 cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
-                showShutterBlackout()
             }
 
             val burstRequests = mutableListOf<android.hardware.camera2.CaptureRequest>()
             for (i in 0 until burstSize) {
                 val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                 request.addTarget(reader.surface)
-                camera2PreviewSurface?.let { previewSurf ->
-                    if (previewSurf.isValid) {
-                        request.addTarget(previewSurf)
-                    }
-                }
                 request.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, combinedOrientation)
 
                 applyManualSettingsToRequest(request, true)
+
+                val lscModes = burstChars.get(android.hardware.camera2.CameraCharacteristics.STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES)
+                if (lscModes != null && lscModes.contains(android.hardware.camera2.CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)) {
+                    request.set(android.hardware.camera2.CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE, android.hardware.camera2.CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)
+                }
 
                 request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
                 request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, burstIso)
@@ -5073,7 +5144,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD)
                 camera2PreviewSurface?.let { request.addTarget(it) }
                 request.addTarget(reader.surface)
-                analysisImageReader?.surface?.let { request.addTarget(it) }
+                val isMainLens = currentLens == null || (currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
+                if (isMainLens) {
+                    analysisImageReader?.surface?.let { request.addTarget(it) }
+                }
 
                 // 1. Lock Target FPS range for AE to enforce frame rate and AE exposure ceiling
                 if (bestFpsRange != null) {
@@ -5120,7 +5194,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             try {
                 val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                 request.addTarget(surface)
-                analysisImageReader?.surface?.let { request.addTarget(it) }
+                val isMainLens = currentLens == null || (currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
+                if (isMainLens) {
+                    analysisImageReader?.surface?.let { request.addTarget(it) }
+                }
                 applyManualSettingsToRequest(request)
                 session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                     override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
@@ -5360,6 +5437,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val deviceId = camera2Device?.id ?: currentLens?.id
             if (deviceId != null) {
                 val chars = CameraRepository.getCharacteristics(camera2Manager, deviceId)
+                val lscModes = chars.get(android.hardware.camera2.CameraCharacteristics.STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES)
+                if (lscModes != null && lscModes.contains(android.hardware.camera2.CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)) {
+                    request.set(android.hardware.camera2.CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE, android.hardware.camera2.CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)
+                }
                 val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                 if (activeArray != null) {
                     val targetRatio = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
@@ -5424,7 +5505,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         isFrame1Trigger: Boolean,
         shutterClickTime: Long?
     ): Float {
-        val result = captureResults[timestamp]
+        val result = captureResults[timestamp] ?: captureResultFlow.replayCache.lastOrNull()
         val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
         val curTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
         val validIsoRange = isoRange ?: android.util.Range(100, 3200)
@@ -5437,7 +5518,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             ExposureUtils.calculateHdrPlusExposure(
                 curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
             ).digitalGain
-        } else 1.0f
+        } else {
+            val postRawBoost = result?.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST)
+            if (postRawBoost != null && postRawBoost > 100) {
+                postRawBoost / 100.0f
+            } else if (curIso > validIsoRange.upper && validIsoRange.upper > 0) {
+                curIso.toFloat() / validIsoRange.upper.toFloat()
+            } else {
+                1.0f
+            }
+        }
 
         if (isFrame1Trigger) {
             val session = halfFrameSessionStore.readSession()
@@ -5474,18 +5564,24 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val vfBinding = _fragmentCameraBinding ?: return
         val blackout = vfBinding.viewFinderBlackout ?: return
         val vf = vfBinding.viewFinder
-        blackout.post {
+
+        val applyBlackout = Runnable {
             // Sync translation and scaling with the ViewFinder to ensure full coverage in Half-frame mode
             blackout.translationX = vf.translationX
             blackout.translationY = vf.translationY
             blackout.scaleX = vf.scaleX
             blackout.scaleY = vf.scaleY
+            blackout.elevation = vf.elevation + 4f
 
             blackout.visibility = View.VISIBLE
-            blackout.bringToFront()
-            blackout.postDelayed({
-                _fragmentCameraBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
-            }, 100L) // Use 100ms to ensure visibility during processing
+            blackout.removeCallbacks(hideBlackoutRunnable)
+            blackout.postDelayed(hideBlackoutRunnable, 100L) // Use 100ms to ensure visibility during processing
+        }
+
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            applyBlackout.run()
+        } else {
+            blackout.post(applyBlackout)
         }
     }
 
@@ -6023,6 +6119,44 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             neutralColorPoint = neutralColorPoint,
             renderCcm = renderCcm
         )
+    }
+
+    private fun extractLensShadingMap(result: android.hardware.camera2.CaptureResult?): Triple<FloatArray?, Int, Int> {
+        if (result == null) return Triple(null, 0, 0)
+        val lsc = result.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP) ?: return Triple(null, 0, 0)
+        val rows = lsc.rowCount
+        val cols = lsc.columnCount
+        if (rows <= 1 || cols <= 1) return Triple(null, 0, 0)
+        val out = FloatArray(4 * rows * cols)
+        fun idx(ch: Int, row: Int, col: Int): Int = ch * rows * cols + row * cols + col
+        for (row in 0 until rows) {
+            for (col in 0 until cols) {
+                out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
+                out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
+                out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
+                out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
+            }
+        }
+        return Triple(out, rows, cols)
+    }
+
+    private fun findLatestLensShadingMap(preferredResult: android.hardware.camera2.CaptureResult? = null): Triple<FloatArray?, Int, Int> {
+        val (lsc1, r1, c1) = extractLensShadingMap(preferredResult)
+        if (lsc1 != null) return Triple(lsc1, r1, c1)
+
+        synchronized(captureResults) {
+            for (res in captureResults.values.reversed()) {
+                val (lsc2, r2, c2) = extractLensShadingMap(res)
+                if (lsc2 != null) return Triple(lsc2, r2, c2)
+            }
+        }
+
+        for (res in captureResultFlow.replayCache.reversed()) {
+            val (lsc3, r3, c3) = extractLensShadingMap(res)
+            if (lsc3 != null) return Triple(lsc3, r3, c3)
+        }
+
+        return Triple(null, 0, 0)
     }
 
     private fun createCaptureMetadata(

@@ -24,11 +24,18 @@
 namespace darkbag {
 namespace sabre {
 
+static inline int getOptimalThreadCount() {
+    // Cap to 4 threads to prioritize big cores and avoid slow little-core barrier stalling
+    return std::min(4, std::max(1, omp_get_num_procs()));
+}
+
 static void fillPadding(std::vector<uint16_t>& image, int width, int height, int pad, int stride) {
     if (image.empty() || width <= 0 || height <= 0) return;
 
+    const int numThreads = getOptimalThreadCount();
+
     // 1. Replicate left and right columns for active rows
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for num_threads(numThreads) schedule(static)
     for (int y = 0; y < height; ++y) {
         uint16_t* row = image.data() + (y + pad) * stride;
         uint16_t leftVal = row[pad];
@@ -191,8 +198,10 @@ void TileAligner::buildPyramid(
     std::vector<uint16_t>& lvl1,
     std::vector<uint16_t>& lvl2
 ) {
+    const int numThreads = getOptimalThreadCount();
+
     // 1. Level 0: Bayer Quad fast grayscale downsampling L = (R + 2G + B) / 4
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for num_threads(numThreads) schedule(static)
     for (int y = 0; y < m_lvl0Height; ++y) {
         int by = y * 2;
         const uint16_t* row0 = bayer + by * m_width;
@@ -229,7 +238,7 @@ void TileAligner::buildPyramid(
     fillPadding(lvl0, m_lvl0Width, m_lvl0Height, PAD, m_stride0);
 
     // 2. Level 1: 2x mean downsampling
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for num_threads(numThreads) schedule(static)
     for (int y = 0; y < m_lvl1Height; ++y) {
         const uint16_t* src0 = lvl0.data() + (2 * y + PAD) * m_stride0 + PAD;
         const uint16_t* src1 = lvl0.data() + (2 * y + 1 + PAD) * m_stride0 + PAD;
@@ -246,7 +255,7 @@ void TileAligner::buildPyramid(
     fillPadding(lvl1, m_lvl1Width, m_lvl1Height, PAD, m_stride1);
 
     // 3. Level 2: 2x mean downsampling
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for num_threads(numThreads) schedule(static)
     for (int y = 0; y < m_lvl2Height; ++y) {
         const uint16_t* src0 = lvl1.data() + (2 * y + PAD) * m_stride1 + PAD;
         const uint16_t* src1 = lvl1.data() + (2 * y + 1 + PAD) * m_stride1 + PAD;
@@ -300,8 +309,10 @@ bool TileAligner::alignFrame(
     outFlowWidth = m_tilesX;
     outFlowHeight = m_tilesY;
 
+    const int numThreads = getOptimalThreadCount();
+
     // 2. Level 2 Coarse Tile Matching (4x4 tiles, search range [-4, +4])
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for num_threads(numThreads) schedule(guided)
     for (int tileIdx = 0; tileIdx < totalTiles; ++tileIdx) {
         int tx = tileIdx % m_tilesX;
         int ty = tileIdx / m_tilesX;
@@ -333,7 +344,7 @@ bool TileAligner::alignFrame(
     }
 
     // 3. Level 1 Refinement (8x8 tiles, neighborhood [-1, +1] around predicted 2 * L2)
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for num_threads(numThreads) schedule(guided)
     for (int tileIdx = 0; tileIdx < totalTiles; ++tileIdx) {
         int tx = tileIdx % m_tilesX;
         int ty = tileIdx / m_tilesX;
@@ -370,7 +381,7 @@ bool TileAligner::alignFrame(
     }
 
     // 4. Level 0 Fine Search (16x16 tiles, neighborhood [-1, +1] around predicted 2 * L1) & Subpixel Parabolic Fit
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for num_threads(numThreads) schedule(guided)
     for (int tileIdx = 0; tileIdx < totalTiles; ++tileIdx) {
         int tx = tileIdx % m_tilesX;
         int ty = tileIdx / m_tilesX;

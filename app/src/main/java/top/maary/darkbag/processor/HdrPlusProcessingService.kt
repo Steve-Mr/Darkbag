@@ -65,6 +65,12 @@ class HdrPlusProcessingService : LifecycleService() {
 
     private suspend fun processRequest(req: HdrPlusRequest) {
         var buffersReleased = false
+        val foregroundCompleted = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun notifyForegroundComplete() {
+            if (foregroundCompleted.compareAndSet(false, true)) {
+                HdrPlusRequestManager.onForegroundTaskFinished()
+            }
+        }
         try {
             val start = System.currentTimeMillis()
             req.timing?.processingStart = start
@@ -74,7 +80,8 @@ class HdrPlusProcessingService : LifecycleService() {
                 isoVal = req.metadata.iso ?: 0,
                 exposureNs = req.metadata.exposureTime ?: 0L,
                 zoom = req.zoomFactor,
-                fusion = req.fusionMode
+                fusion = req.fusionMode,
+                isSingle = req.isSingleFrame
             )
             val debugStats = LongArray(20)
             
@@ -196,10 +203,12 @@ class HdrPlusProcessingService : LifecycleService() {
                         var exportSuccessful = false
                         try {
                             val edit = req.editConfig
+                            val isHalfFrameActive = (req.hfMetadata != null && req.hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL)
+                            val halfFrameManager = if (isHalfFrameActive) top.maary.darkbag.utils.HalfFrameManager(this@HdrPlusProcessingService) else null
                             val shouldSaveJpg = req.saveJpg
-                            val shouldSaveRaw = req.saveRaw
+                            val shouldSaveRaw = if (isHalfFrameActive) (halfFrameManager?.saveRaw ?: false) else req.saveRaw
 
-                            if (shouldSaveJpg && req.jpgFolderUri == null && req.motionPhotoMp4Path == null) {
+                            if (shouldSaveJpg && req.jpgFolderUri == null && req.motionPhotoMp4Path == null && !isHalfFrameActive) {
                                 pfdJpg = top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
                                     context = this@HdrPlusProcessingService,
                                     displayName = "${req.baseName}.jpg",
@@ -214,7 +223,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                 req.linearDngPath
                             }
 
-                            if (shouldSaveRaw && req.rawFolderUri == null) {
+                            if (shouldSaveRaw && req.rawFolderUri == null && !isHalfFrameActive) {
                                 pfdDng = top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
                                     context = this@HdrPlusProcessingService,
                                     displayName = dngFileName,
@@ -222,110 +231,193 @@ class HdrPlusProcessingService : LifecycleService() {
                                 )
                             }
 
-                            var exportRet = -1
-                            try {
-                                exportRet = ColorProcessor.exportHdrPlus(
-                                    tempRawPath = req.requestId,
-                                    width = req.width,
-                                    height = req.height,
-                                    orientation = req.orientation,
-                                    digitalGain = req.digitalGain,
-                                    targetLog = req.targetLogIndex,
-                                    lutPath = req.lutPath,
-                                    exposure = edit?.exposure ?: 0f,
-                                    contrast = edit?.contrast ?: 0f,
-                                    saturation = edit?.saturation ?: 0f,
-                                    highlights = edit?.highlights ?: 0f,
-                                    shadows = edit?.shadows ?: 0f,
-                                    whites = edit?.whites ?: 0f,
-                                    blacks = edit?.blacks ?: 0f,
-                                    jpgPath = if (shouldSaveJpg && pfdJpg == null) req.fullResJpgPath else null,
-                                    dngPath = if (shouldSaveRaw && pfdDng == null) dngPathToUse else null,
-                                    faithfulHighlights = req.isSingleFrame,
-                                    ccm = req.ccm,
-                                    whiteBalance = req.whiteBalance,
-                                    zoomFactor = req.zoomFactor,
-                                    mirror = req.mirror,
-                                    metadata = req.metadata,
-                                    enableMemoryColor = req.enableMemoryColor,
-                                    colorEngineMode = req.colorEngineMode,
-                                    colorMatrix1 = req.colorMatrix1,
-                                    colorMatrix2 = req.colorMatrix2,
-                                    forwardMatrix1 = req.forwardMatrix1,
-                                    forwardMatrix2 = req.forwardMatrix2,
-                                    calibrationIlluminant1 = req.calibrationIlluminant1,
-                                    calibrationIlluminant2 = req.calibrationIlluminant2,
-                                    neutralColorPoint = req.neutralColorPoint,
-                                    debugStats = debugStats,
-                                    outJpgFd = pfdJpg?.first?.fd ?: -1,
-                                    outDngFd = pfdDng?.first?.fd ?: -1,
-                                    dngCompressionMode = req.dngCompressionMode,
-                                    rawOutputType = req.rawOutputType,
-                                    cfaPattern = req.cfaPattern,
-                                    blackLevelPattern = req.blackLevelPattern,
-                                    whiteLevel = req.whiteLevel,
-                                    dynamicBlackLevel = req.dynamicBlackLevel,
-                                    noiseProfile = req.noiseProfile,
-                                    activeArray = req.activeArray,
-                                    lensShadingMap = req.lensShadingMap,
-                                    lensShadingRows = req.lensShadingRows,
-                                    lensShadingCols = req.lensShadingCols
-                                )
-                                 exportSuccessful = (exportRet == 0)
-                                req.timing?.stage2ExportDone = System.currentTimeMillis()
-                                req.timing?.recordStage2Metrics(
-                                    postMs = debugStats[2],
-                                    dngMs = debugStats[3],
-                                    jpgMs = debugStats[4]
-                                )
-                            } finally {
-                                if (pfdJpg != null) {
-                                    top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
-                                        context = this@HdrPlusProcessingService,
-                                        pfdPair = pfdJpg,
-                                        success = exportSuccessful,
-                                        editConfig = req.editConfig,
-                                        captureMetadata = req.metadata
+                            val jpgDebugStats = LongArray(15)
+                            val dngDebugStats = LongArray(15)
+                            var jpgExportRet = 0
+                            var dngExportRet = 0
+                            var jpgSuccess = false
+                            var dngSuccess = false
+
+                            // Phase 3B: Decoupled Stage 2 export.
+                            // Fast Path: Prioritize JPEG export to achieve sub-second T2 time to first output.
+                            if (shouldSaveJpg) {
+                                try {
+                                    jpgExportRet = ColorProcessor.exportHdrPlus(
+                                        tempRawPath = req.requestId,
+                                        width = req.width,
+                                        height = req.height,
+                                        orientation = req.orientation,
+                                        digitalGain = req.digitalGain,
+                                        targetLog = req.targetLogIndex,
+                                        lutPath = req.lutPath,
+                                        exposure = edit?.exposure ?: 0f,
+                                        contrast = edit?.contrast ?: 0f,
+                                        saturation = edit?.saturation ?: 0f,
+                                        highlights = edit?.highlights ?: 0f,
+                                        shadows = edit?.shadows ?: 0f,
+                                        whites = edit?.whites ?: 0f,
+                                        blacks = edit?.blacks ?: 0f,
+                                        jpgPath = if (pfdJpg == null) req.fullResJpgPath else null,
+                                        dngPath = null,
+                                        faithfulHighlights = req.isSingleFrame,
+                                        ccm = req.ccm,
+                                        whiteBalance = req.whiteBalance,
+                                        zoomFactor = req.zoomFactor,
+                                        mirror = req.mirror,
+                                        metadata = req.metadata,
+                                        enableMemoryColor = req.enableMemoryColor,
+                                        colorEngineMode = req.colorEngineMode,
+                                        colorMatrix1 = req.colorMatrix1,
+                                        colorMatrix2 = req.colorMatrix2,
+                                        forwardMatrix1 = req.forwardMatrix1,
+                                        forwardMatrix2 = req.forwardMatrix2,
+                                        calibrationIlluminant1 = req.calibrationIlluminant1,
+                                        calibrationIlluminant2 = req.calibrationIlluminant2,
+                                        neutralColorPoint = req.neutralColorPoint,
+                                        debugStats = jpgDebugStats,
+                                        outJpgFd = pfdJpg?.first?.fd ?: -1,
+                                        outDngFd = -1,
+                                        dngCompressionMode = req.dngCompressionMode,
+                                        rawOutputType = req.rawOutputType,
+                                        cfaPattern = req.cfaPattern,
+                                        blackLevelPattern = req.blackLevelPattern,
+                                        whiteLevel = req.whiteLevel,
+                                        dynamicBlackLevel = req.dynamicBlackLevel,
+                                        noiseProfile = req.noiseProfile,
+                                        activeArray = req.activeArray,
+                                        lensShadingMap = req.lensShadingMap,
+                                        lensShadingRows = req.lensShadingRows,
+                                        lensShadingCols = req.lensShadingCols
                                     )
-                                    if (exportSuccessful) {
-                                        top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
-                                            top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
-                                                baseName = req.baseName,
-                                                dngPath = if (req.saveRaw) dngPathToUse else null,
-                                                jpgPath = null,
-                                                targetUri = pfdJpg.second.toString(),
-                                                zoomFactor = req.zoomFactor,
-                                                orientation = req.orientation,
-                                                saveJpg = req.saveJpg
-                                            )
+                                    jpgSuccess = (jpgExportRet == 0)
+                                } finally {
+                                    if (pfdJpg != null) {
+                                        top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
+                                            context = this@HdrPlusProcessingService,
+                                            pfdPair = pfdJpg,
+                                            success = jpgSuccess,
+                                            editConfig = req.editConfig,
+                                            captureMetadata = req.metadata
                                         )
+                                        if (jpgSuccess) {
+                                            top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
+                                                top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
+                                                    baseName = req.baseName,
+                                                    dngPath = if (req.saveRaw) dngPathToUse else null,
+                                                    jpgPath = null,
+                                                    targetUri = pfdJpg.second.toString(),
+                                                    zoomFactor = req.zoomFactor,
+                                                    orientation = req.orientation,
+                                                    saveJpg = true
+                                                )
+                                            )
+                                            notifyForegroundComplete()
+                                        }
                                     }
-                                }
-                                if (pfdDng != null) {
-                                    top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
-                                        context = this@HdrPlusProcessingService,
-                                        pfdPair = pfdDng,
-                                        success = exportSuccessful
-                                    )
-                                    if (pfdJpg == null && exportSuccessful) {
-                                        top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
-                                            top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
-                                                baseName = req.baseName,
-                                                dngPath = if (req.saveRaw) dngPathToUse else null,
-                                                jpgPath = null,
-                                                targetUri = pfdDng.second.toString(),
-                                                zoomFactor = req.zoomFactor,
-                                                orientation = req.orientation,
-                                                saveJpg = false
-                                            )
-                                        )
+                                    if (jpgSuccess && req.timing?.firstOutputWritten == 0L) {
+                                        req.timing?.firstOutputWritten = System.currentTimeMillis()
+                                    }
+                                    if (pfdJpg == null && jpgSuccess) {
+                                        notifyForegroundComplete()
                                     }
                                 }
                             }
 
-                            if (exportSuccessful && req.timing?.firstOutputWritten == 0L) {
-                                req.timing?.firstOutputWritten = System.currentTimeMillis()
+                            // Background Path: Export DNG asynchronously without blocking user feedback
+                            if (shouldSaveRaw) {
+                                try {
+                                    dngExportRet = ColorProcessor.exportHdrPlus(
+                                        tempRawPath = req.requestId,
+                                        width = req.width,
+                                        height = req.height,
+                                        orientation = req.orientation,
+                                        digitalGain = req.digitalGain,
+                                        targetLog = req.targetLogIndex,
+                                        lutPath = req.lutPath,
+                                        exposure = edit?.exposure ?: 0f,
+                                        contrast = edit?.contrast ?: 0f,
+                                        saturation = edit?.saturation ?: 0f,
+                                        highlights = edit?.highlights ?: 0f,
+                                        shadows = edit?.shadows ?: 0f,
+                                        whites = edit?.whites ?: 0f,
+                                        blacks = edit?.blacks ?: 0f,
+                                        jpgPath = null,
+                                        dngPath = if (pfdDng == null) dngPathToUse else null,
+                                        faithfulHighlights = req.isSingleFrame,
+                                        ccm = req.ccm,
+                                        whiteBalance = req.whiteBalance,
+                                        zoomFactor = req.zoomFactor,
+                                        mirror = req.mirror,
+                                        metadata = req.metadata,
+                                        enableMemoryColor = req.enableMemoryColor,
+                                        colorEngineMode = req.colorEngineMode,
+                                        colorMatrix1 = req.colorMatrix1,
+                                        colorMatrix2 = req.colorMatrix2,
+                                        forwardMatrix1 = req.forwardMatrix1,
+                                        forwardMatrix2 = req.forwardMatrix2,
+                                        calibrationIlluminant1 = req.calibrationIlluminant1,
+                                        calibrationIlluminant2 = req.calibrationIlluminant2,
+                                        neutralColorPoint = req.neutralColorPoint,
+                                        debugStats = dngDebugStats,
+                                        outJpgFd = -1,
+                                        outDngFd = pfdDng?.first?.fd ?: -1,
+                                        dngCompressionMode = req.dngCompressionMode,
+                                        rawOutputType = req.rawOutputType,
+                                        cfaPattern = req.cfaPattern,
+                                        blackLevelPattern = req.blackLevelPattern,
+                                        whiteLevel = req.whiteLevel,
+                                        dynamicBlackLevel = req.dynamicBlackLevel,
+                                        noiseProfile = req.noiseProfile,
+                                        activeArray = req.activeArray,
+                                        lensShadingMap = req.lensShadingMap,
+                                        lensShadingRows = req.lensShadingRows,
+                                        lensShadingCols = req.lensShadingCols
+                                    )
+                                    dngSuccess = (dngExportRet == 0)
+                                } finally {
+                                    if (pfdDng != null) {
+                                        top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
+                                            context = this@HdrPlusProcessingService,
+                                            pfdPair = pfdDng,
+                                            success = dngSuccess
+                                        )
+                                        if (pfdJpg == null && dngSuccess) {
+                                            top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
+                                                top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
+                                                    baseName = req.baseName,
+                                                    dngPath = dngPathToUse,
+                                                    jpgPath = null,
+                                                    targetUri = pfdDng.second.toString(),
+                                                    zoomFactor = req.zoomFactor,
+                                                    orientation = req.orientation,
+                                                    saveJpg = false
+                                                )
+                                            )
+                                        }
+                                        if (dngSuccess && !shouldSaveJpg) {
+                                            notifyForegroundComplete()
+                                        }
+                                    }
+                                    if (dngSuccess && req.timing?.firstOutputWritten == 0L) {
+                                        req.timing?.firstOutputWritten = System.currentTimeMillis()
+                                    }
+                                    if (pfdDng == null && dngSuccess && !shouldSaveJpg) {
+                                        notifyForegroundComplete()
+                                    }
+                                }
                             }
+
+                            val exportSuccessful = (!shouldSaveJpg || jpgSuccess) && (!shouldSaveRaw || dngSuccess)
+                            val exportRet = if (exportSuccessful) 0 else -1
+                            req.timing?.stage2ExportDone = System.currentTimeMillis()
+                            req.timing?.recordStage2Metrics(
+                                postMs = if (shouldSaveJpg) jpgDebugStats[2] else 0L,
+                                dngMs = if (shouldSaveRaw) dngDebugStats[3] else 0L,
+                                jpgMs = if (shouldSaveJpg) jpgDebugStats[4] else 0L
+                            )
+                            debugStats[2] = if (shouldSaveJpg) jpgDebugStats[2] else 0L
+                            debugStats[3] = if (shouldSaveRaw) dngDebugStats[3] else 0L
+                            debugStats[4] = if (shouldSaveJpg) jpgDebugStats[4] else 0L
 
                             if (exportRet == 0) {
                                 val totalTime = System.currentTimeMillis() - start
@@ -360,38 +452,37 @@ class HdrPlusProcessingService : LifecycleService() {
                                 Log.i(TAG, baselineReport)
                                 top.maary.darkbag.utils.DebugLogManager.addDiagnosticLog(baselineReport)
 
-                                if (req.saveJpg || req.saveRaw) {
-                                    val shouldSaveJpg = req.saveJpg
-                                    val shouldSaveRaw = req.saveRaw
+                                val needsSecondaryJpg = shouldSaveJpg && pfdJpg == null
+                                val needsSecondaryRaw = shouldSaveRaw && pfdDng == null
 
-                                    if (shouldSaveJpg || shouldSaveRaw) {
-                                        top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
-                                            context = this@HdrPlusProcessingService,
-                                            inputBitmap = null,
-                                            bmpPath = if (shouldSaveJpg) req.fullResJpgPath else null,
-                                            rotationDegrees = 0,
-                                            zoomFactor = req.zoomFactor,
-                                            baseName = req.baseName,
-                                            linearDngPath = if (shouldSaveRaw) dngPathToUse else null,
-                                            saveJpg = shouldSaveJpg,
-                                            saveRaw = shouldSaveRaw,
-                                            jpgFolderUri = req.jpgFolderUri,
-                                            rawFolderUri = req.rawFolderUri,
-                                            mirror = false,
-                                            isFastPath = false,
-                                            halfFrameMetadata = req.hfMetadata,
-                                            editConfig = req.editConfig,
-                                            digitalGain = req.digitalGain,
-                                            captureMetadata = req.metadata,
-                                            isAlreadyCropped = true,
-                                            motionPhotoMp4Path = req.motionPhotoMp4Path,
-                                            motionPhotoStillPtsUs = req.motionPhotoStillPtsUs
-                                        )
-                                    }
+                                if (needsSecondaryJpg || needsSecondaryRaw) {
+                                    top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
+                                        context = this@HdrPlusProcessingService,
+                                        inputBitmap = null,
+                                        bmpPath = if (needsSecondaryJpg) req.fullResJpgPath else null,
+                                        rotationDegrees = 0,
+                                        zoomFactor = req.zoomFactor,
+                                        baseName = req.baseName,
+                                        linearDngPath = if (needsSecondaryRaw) dngPathToUse else null,
+                                        saveJpg = needsSecondaryJpg,
+                                        saveRaw = needsSecondaryRaw,
+                                        jpgFolderUri = req.jpgFolderUri,
+                                        rawFolderUri = req.rawFolderUri,
+                                        mirror = false,
+                                        isFastPath = false,
+                                        halfFrameMetadata = req.hfMetadata,
+                                        editConfig = req.editConfig,
+                                        digitalGain = req.digitalGain,
+                                        captureMetadata = req.metadata,
+                                        isAlreadyCropped = true,
+                                        motionPhotoMp4Path = req.motionPhotoMp4Path,
+                                        motionPhotoStillPtsUs = req.motionPhotoStillPtsUs
+                                    )
                                 }
                                 if (req.timing?.firstOutputWritten == 0L) {
                                     req.timing?.firstOutputWritten = System.currentTimeMillis()
                                 }
+                                req.timing?.taskCompleted = System.currentTimeMillis()
 
                                 req.timing?.let { t ->
                                     val timingReport = t.buildSummaryReport()
@@ -404,9 +495,11 @@ class HdrPlusProcessingService : LifecycleService() {
                         } catch (e: Exception) {
                             Log.e(TAG, "Exception during Stage 2 export for ${req.requestId}", e)
                         } finally {
-                            req.timing?.taskCompleted = System.currentTimeMillis()
+                            if (req.timing?.taskCompleted == 0L) {
+                                req.timing?.taskCompleted = System.currentTimeMillis()
+                            }
                             exportSemaphore.release()
-                            finishTaskAndCheckStopService(req.requestId)
+                            finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
                         }
                     }
                     stage2HandedOff = true
@@ -415,11 +508,11 @@ class HdrPlusProcessingService : LifecycleService() {
                 }
 
                 if (!stage2HandedOff) {
-                    finishTaskAndCheckStopService(req.requestId)
+                    finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
                 }
             } else {
                 Log.e(TAG, "Stage 1 Halide processing failed for ${req.requestId}")
-                finishTaskAndCheckStopService(req.requestId)
+                finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception processing ${req.requestId}", e)
@@ -433,11 +526,11 @@ class HdrPlusProcessingService : LifecycleService() {
                     Log.w(TAG, "Error aborting streaming session ${req.streamingSessionHandle}", abortEx)
                 }
             }
-            finishTaskAndCheckStopService(req.requestId)
+            finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
         }
     }
 
-    private fun finishTaskAndCheckStopService(requestId: String? = null) {
+    private fun finishTaskAndCheckStopService(requestId: String? = null, foregroundAlreadyFinished: Boolean = false) {
         if (requestId != null) {
             try {
                 ColorProcessor.freeSharedRawMemory(requestId)
@@ -445,7 +538,7 @@ class HdrPlusProcessingService : LifecycleService() {
                 Log.e(TAG, "Error freeing shared raw memory for $requestId", e)
             }
         }
-        HdrPlusRequestManager.onTaskFinished()
+        HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = foregroundAlreadyFinished)
         val remaining = HdrPlusRequestManager.pendingTasksCount.value
         if (remaining == 0) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {

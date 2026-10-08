@@ -23,8 +23,8 @@ class HdrPlusRequestManagerTest {
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         // Reset pending tasks count to 0 and drain channel
-        while (HdrPlusRequestManager.pendingTasksCount.value > 0) {
-            HdrPlusRequestManager.onTaskFinished()
+        while (HdrPlusRequestManager.pendingTasksCount.value > 0 || HdrPlusRequestManager.pendingForegroundTasksCount.value > 0) {
+            HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = false)
         }
         while (HdrPlusRequestManager.requestChannel.tryReceive().isSuccess) {
             // Drain channel
@@ -227,8 +227,81 @@ class HdrPlusRequestManagerTest {
 
         // Clean up channel
         while (HdrPlusRequestManager.requestChannel.tryReceive().isSuccess) {
-            HdrPlusRequestManager.onTaskFinished()
+            HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = false)
         }
         assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+    }
+
+    @Test
+    fun testForegroundTaskLifecycle_SingleTask() {
+        assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Shutter clicked: task begins
+        HdrPlusRequestManager.onTaskStarted()
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(1, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Fast Path JPEG completes: foreground spinner dismisses immediately
+        HdrPlusRequestManager.onForegroundTaskFinished()
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Background DNG completes: task fully finishes without double-decrement
+        HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = true)
+        assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+    }
+
+    @Test
+    fun testMultiShotPipelining_NoPrematureForegroundDrop() {
+        assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Photo 1 starts
+        HdrPlusRequestManager.onTaskStarted()
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(1, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Photo 1 Fast Path completes
+        HdrPlusRequestManager.onForegroundTaskFinished()
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Photo 2 starts while Photo 1 DNG is still encoding in background
+        HdrPlusRequestManager.onTaskStarted()
+        assertEquals(2, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(1, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Photo 1 Background DNG finishes: must NOT steal Photo 2's foreground counter!
+        HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = true)
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(1, HdrPlusRequestManager.pendingForegroundTasksCount.value) // Photo 2 still actively computing!
+
+        // Photo 2 Fast Path completes
+        HdrPlusRequestManager.onForegroundTaskFinished()
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Photo 2 Background DNG finishes
+        HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = true)
+        assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+    }
+
+    @Test
+    fun testTaskFailure_CleansUpBothCounters() {
+        assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Task starts
+        HdrPlusRequestManager.onTaskStarted()
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(1, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Error occurs before foreground completes (e.g. HAL failure)
+        HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = false)
+        assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
     }
 }
