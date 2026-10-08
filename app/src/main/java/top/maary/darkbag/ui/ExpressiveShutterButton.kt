@@ -250,18 +250,31 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     }
 
     fun setProgress(value: Float) {
-        progress = value.coerceIn(0f, 1f)
-        invalidate()
+        val clamped = value.coerceIn(0f, 1f)
+        if (progress != clamped) {
+            progress = clamped
+            invalidate()
+        }
     }
 
     fun setDotRotation(degrees: Float) {
-        dotRotation = degrees
-        invalidate()
+        if (dotRotation != degrees) {
+            dotRotation = degrees
+            invalidate()
+        }
     }
 
     fun getDotRotation(): Float = dotRotation
 
+    fun cancelClickSpin() {
+        clickSpinAnimator.cancel()
+        clickRotation = 0f
+        invalidate()
+    }
+
     fun startRotation() {
+        clickSpinAnimator.cancel()
+        clickRotation = 0f
         if (!isRotating) {
             isRotating = true
             rotationAnimator.start()
@@ -269,11 +282,12 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     }
 
     fun stopRotation() {
+        clickSpinAnimator.cancel()
+        clickRotation = 0f
         if (isRotating) {
             isRotating = false
             rotationAnimator.cancel()
             continuousRotation = 0f
-            clickRotation = 0f
             invalidate()
         }
     }

@@ -285,6 +285,9 @@ class CameraFragment : Fragment() {
     private var halfFrameTempPath: String? = null
     private lateinit var halfFrameSessionStore: HalfFrameSessionStore
     private var isHalfFrameUiAnimating = false
+    private val hideBlackoutRunnable = Runnable {
+        _fragmentCameraBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
+    }
 
     enum class CaptureMode(val key: String) {
         NORMAL(SettingsFragment.MODE_NORMAL),
@@ -613,6 +616,7 @@ class CameraFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        _fragmentCameraBinding?.viewFinderBlackout?.removeCallbacks(hideBlackoutRunnable)
         _fragmentCameraBinding = null
         super.onDestroyView()
 
@@ -1560,6 +1564,12 @@ class CameraFragment : Fragment() {
                 if (isHdrPlusEnabled && isRawSupported) {
                     timing.captureMode = if (isHalfFrameModeEnabled) top.maary.darkbag.models.CaptureTimingMode.HALF_FRAME else top.maary.darkbag.models.CaptureTimingMode.HDR_BURST
                     isBurstActive = true
+                    cameraUiContainerBinding?.cameraCaptureButton?.apply {
+                        setProgress(0f)
+                        startRotation()
+                        isEnabled = false
+                    }
+                    showShutterBlackout()
                     val h = camera2Handler
                     if (h != null) {
                         h.post {
@@ -4654,10 +4664,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         hfMetadata: HalfFrameManager.Metadata? = null,
         timing: StandardTimingTracker? = null
     ) {
-        val device = camera2Device ?: run { isBurstActive = false; processingSemaphore.release(); return }
-        val session = camera2Session ?: run { isBurstActive = false; processingSemaphore.release(); return }
-        val reader = rawImageReader ?: run { isBurstActive = false; processingSemaphore.release(); return }
-        val handler = camera2Handler ?: run { isBurstActive = false; processingSemaphore.release(); return }
+        val device = camera2Device ?: run { isBurstActive = false; processingSemaphore.release(); lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }; return }
+        val session = camera2Session ?: run { isBurstActive = false; processingSemaphore.release(); lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }; return }
+        val reader = rawImageReader ?: run { isBurstActive = false; processingSemaphore.release(); lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }; return }
+        val handler = camera2Handler ?: run { isBurstActive = false; processingSemaphore.release(); lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }; return }
 
         isBurstActive = true
         val captureStartTime = hfMetadata?.captureTimeMillis ?: System.currentTimeMillis()
@@ -4789,6 +4799,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 Log.e(TAG, "Failed to create native streaming session")
                 isBurstActive = false
                 processingSemaphore.release()
+                lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }
                 return
             }
 
@@ -4847,7 +4858,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
                 cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
-                showShutterBlackout()
             }
 
             val burstRequests = mutableListOf<android.hardware.camera2.CaptureRequest>()
@@ -5545,18 +5555,24 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val vfBinding = _fragmentCameraBinding ?: return
         val blackout = vfBinding.viewFinderBlackout ?: return
         val vf = vfBinding.viewFinder
-        blackout.post {
+
+        val applyBlackout = Runnable {
             // Sync translation and scaling with the ViewFinder to ensure full coverage in Half-frame mode
             blackout.translationX = vf.translationX
             blackout.translationY = vf.translationY
             blackout.scaleX = vf.scaleX
             blackout.scaleY = vf.scaleY
+            blackout.elevation = vf.elevation + 4f
 
             blackout.visibility = View.VISIBLE
-            blackout.bringToFront()
-            blackout.postDelayed({
-                _fragmentCameraBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
-            }, 100L) // Use 100ms to ensure visibility during processing
+            blackout.removeCallbacks(hideBlackoutRunnable)
+            blackout.postDelayed(hideBlackoutRunnable, 100L) // Use 100ms to ensure visibility during processing
+        }
+
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            applyBlackout.run()
+        } else {
+            blackout.post(applyBlackout)
         }
     }
 
