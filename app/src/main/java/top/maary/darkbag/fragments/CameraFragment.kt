@@ -18,6 +18,10 @@
 package top.maary.darkbag.fragments
 
 import top.maary.darkbag.models.StandardTimingTracker
+import top.maary.darkbag.modes.CaptureMode
+import top.maary.darkbag.modes.CaptureModeCoordinator
+import top.maary.darkbag.modes.ModeCoordinatorFactory
+import top.maary.darkbag.modes.ModeExecutionContext
 import top.maary.darkbag.ui.ExpressiveShutterButton
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.LensInfo
@@ -33,6 +37,7 @@ import android.annotation.SuppressLint
 import android.content.*
 import android.content.ContentUris
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.SurfaceTexture
 import android.hardware.display.DisplayManager
@@ -289,14 +294,133 @@ class CameraFragment : Fragment() {
         _fragmentCameraBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
     }
 
-    enum class CaptureMode(val key: String) {
-        NORMAL(SettingsFragment.MODE_NORMAL),
-        HALF_FRAME_SBS(SettingsFragment.MODE_HALF_FRAME_SBS),
-        HALF_FRAME_TB(SettingsFragment.MODE_HALF_FRAME_TB),
-        MULTI_CAMERA(SettingsFragment.MODE_MULTI_CAMERA);
+    private var activeCoordinator: CaptureModeCoordinator? = null
 
-        companion object {
-            fun fromKey(key: String?): CaptureMode? = entries.find { it.key == key }
+    private fun updateActiveCoordinator(mode: CaptureMode) {
+        if (activeCoordinator?.mode != mode) {
+            activeCoordinator?.onDeactivated()
+            activeCoordinator = ModeCoordinatorFactory.create(mode, modeExecutionContext)
+            activeCoordinator?.onActivated()
+        }
+    }
+
+    private val modeExecutionContext by lazy {
+        object : ModeExecutionContext {
+            override val context: Context
+                get() = requireContext()
+
+            override val preferences: SharedPreferences
+                get() = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+
+            override val isHdrPlusEnabled: Boolean
+                get() = this@CameraFragment.isHdrPlusEnabled
+
+            override val isRawSupported: Boolean
+                get() = this@CameraFragment.isRawSupported
+
+            override val deviceOrientationDegrees: Int
+                get() = this@CameraFragment.deviceOrientationDegrees
+
+            override fun canTriggerCapture(): Boolean {
+                if (isBurstActive) return false
+                val prefs = preferences
+                val burstStrategy = prefs.getString(
+                    SettingsFragment.KEY_BURST_PROCESSING_STRATEGY,
+                    SettingsFragment.BURST_STRATEGY_BALANCED
+                )
+                val maxQueue = if (burstStrategy == SettingsFragment.BURST_STRATEGY_AGGRESSIVE) 8 else 3
+                if (!top.maary.darkbag.processor.HdrPlusRequestManager.canAcceptNewTask(maxQueue, requireContext())) {
+                    val pending = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value
+                    val msg = if (pending >= maxQueue) {
+                        "Queue full: processing $pending photos, please wait..."
+                    } else {
+                        "System memory low, waiting for processing to complete..."
+                    }
+                    Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+                    return false
+                }
+                return true
+            }
+
+            override fun showShutterVisuals() {
+                isBurstActive = true
+                cameraUiContainerBinding?.cameraCaptureButton?.apply {
+                    setProgress(0f)
+                    startRotation()
+                    isEnabled = false
+                }
+                showShutterBlackout()
+            }
+
+            override fun captureViewFinderSnapshot(): Bitmap? {
+                val bmp = _fragmentCameraBinding?.viewFinder?.bitmap
+                pendingVfSnapshot = bmp
+                return bmp
+            }
+
+            override fun showProcessingAnimation() {
+                this@CameraFragment.showProcessingAnimation()
+            }
+
+            override fun updateHalfFrameUi(animate: Boolean) {
+                this@CameraFragment.updateHalfFrameUI(animate = animate)
+            }
+
+            override fun clearThumbnailPlaceholder() {
+                cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
+                setGalleryThumbnail(null)
+            }
+
+            override fun triggerMotionPhotoSnapshot(timestamp: Long): CompletableDeferred<Pair<String?, Long>>? {
+                if (motionPhotoEncoder?.isEncoding == true) {
+                    val deferred = CompletableDeferred<Pair<String?, Long>>()
+                    pendingMotionPhotoTask = deferred
+                    val tempMp4 = java.io.File(requireContext().cacheDir, "motion_${timestamp}.mp4")
+                    val currentOrientation = deviceOrientationDegrees
+                    motionPhotoEncoder?.captureSnapshot(
+                        captureTimestampNs = System.nanoTime(),
+                        preDurationMs = 1500L,
+                        postDurationMs = 750L,
+                        outputFile = tempMp4,
+                        orientationDegrees = currentOrientation
+                    ) { file, stillPtsUs ->
+                        deferred.complete(Pair(file?.absolutePath, stillPtsUs))
+                    }
+                    return deferred
+                } else {
+                    pendingMotionPhotoTask = null
+                    return null
+                }
+            }
+
+            override fun triggerHdrPlusBurst(
+                sink: top.maary.darkbag.pipeline.sink.CaptureSink,
+                isFrame1: Boolean,
+                hfMetadata: HalfFrameManager.Metadata?,
+                timing: StandardTimingTracker
+            ) {
+                val h = camera2Handler
+                if (h != null) {
+                    h.post {
+                        triggerHdrPlusBurstCamera2(isFrame1, hfMetadata, timing)
+                    }
+                } else {
+                    triggerHdrPlusBurstCamera2(isFrame1, hfMetadata, timing)
+                }
+            }
+
+            override fun triggerSinglePicture(
+                sink: top.maary.darkbag.pipeline.sink.CaptureSink,
+                isFrame1: Boolean,
+                hfMetadata: HalfFrameManager.Metadata?,
+                timing: StandardTimingTracker
+            ) {
+                takeSinglePictureCamera2(timing, isFrame1, hfMetadata)
+            }
+
+            override fun triggerMultiCameraPicture(timing: StandardTimingTracker) {
+                takeMultiCameraPicture(timing)
+            }
         }
     }
 
@@ -332,6 +456,7 @@ class CameraFragment : Fragment() {
             prefs.edit().putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, validatedMode.key).apply()
         }
 
+        updateActiveCoordinator(validatedMode)
         return validatedMode
     }
 
@@ -585,6 +710,7 @@ class CameraFragment : Fragment() {
         val activeMode = resolveActiveCaptureMode(prefs)
         isHalfFrameModeEnabled = (activeMode == CaptureMode.HALF_FRAME_SBS || activeMode == CaptureMode.HALF_FRAME_TB)
         isMultiCameraModeActive = (activeMode == CaptureMode.MULTI_CAMERA)
+        updateActiveCoordinator(activeMode)
         if (isHalfFrameModeEnabled) {
             val layout = if (activeMode == CaptureMode.HALF_FRAME_TB) SettingsFragment.HALF_FRAME_LAYOUT_TB else SettingsFragment.HALF_FRAME_LAYOUT_SBS
             prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, layout).apply()
@@ -827,6 +953,7 @@ class CameraFragment : Fragment() {
         val activeMode = resolveActiveCaptureMode(prefs)
         isHalfFrameModeEnabled = (activeMode == CaptureMode.HALF_FRAME_SBS || activeMode == CaptureMode.HALF_FRAME_TB)
         isMultiCameraModeActive = (activeMode == CaptureMode.MULTI_CAMERA)
+        updateActiveCoordinator(activeMode)
         if (isHalfFrameModeEnabled) {
             val layout = if (activeMode == CaptureMode.HALF_FRAME_TB) SettingsFragment.HALF_FRAME_LAYOUT_TB else SettingsFragment.HALF_FRAME_LAYOUT_SBS
             prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, layout).apply()
@@ -1453,136 +1580,14 @@ class CameraFragment : Fragment() {
         }
 
         cameraUiContainerBinding?.cameraCaptureButton?.setOnClickListener {
-            if (isBurstActive) return@setOnClickListener
-
-            // Capture snapshot immediately for half-frame animation
-            if (isHalfFrameModeEnabled) {
-                pendingVfSnapshot = _fragmentCameraBinding?.viewFinder?.bitmap
-            }
-
-            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val burstStrategy = prefs.getString(SettingsFragment.KEY_BURST_PROCESSING_STRATEGY, SettingsFragment.BURST_STRATEGY_BALANCED)
-            val maxQueue = if (burstStrategy == SettingsFragment.BURST_STRATEGY_AGGRESSIVE) 8 else 3
-            if (!top.maary.darkbag.processor.HdrPlusRequestManager.canAcceptNewTask(maxQueue, requireContext())) {
-                val pending = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value
-                val msg = if (pending >= maxQueue) {
-                    "Queue full: processing $pending photos, please wait..."
-                } else {
-                    "System memory low, waiting for processing to complete..."
-                }
-                Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
             val timing = StandardTimingTracker(shutterClick = System.currentTimeMillis())
-
-            // Early Step Update for Half-frame to allow rapid follow-up
-            val isFrame1Trigger = isHalfFrameModeEnabled && halfFrameStep == 0
-            val isFrame2Trigger = isHalfFrameModeEnabled && halfFrameStep == 1
-
-            // Trigger Motion Photo snapshot if enabled and not in half-frame or multi-camera mode
-            val motionEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false) && !isHalfFrameModeEnabled && !isMultiCameraModeActive
-            if (motionEnabled && motionPhotoEncoder?.isEncoding == true) {
-                val deferred = CompletableDeferred<Pair<String?, Long>>()
-                pendingMotionPhotoTask = deferred
-                val tempMp4 = File(requireContext().cacheDir, "motion_${timing.shutterClick}.mp4")
-                val shutterNano = System.nanoTime()
-                val currentOrientation = deviceOrientationDegrees
-                motionPhotoEncoder?.captureSnapshot(
-                    captureTimestampNs = shutterNano,
-                    preDurationMs = 1500L,
-                    postDurationMs = 750L,
-                    outputFile = tempMp4,
-                    orientationDegrees = currentOrientation
-                ) { file, stillPtsUs ->
-                    deferred.complete(Pair(file?.absolutePath, stillPtsUs))
-                }
-            } else {
-                pendingMotionPhotoTask = null
+            val coordinator = activeCoordinator ?: run {
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val currentMode = resolveActiveCaptureMode(prefs)
+                updateActiveCoordinator(currentMode)
+                activeCoordinator
             }
-
-            val hfGroupId = if (isFrame2Trigger) {
-                halfFrameSessionStore.readSession().baseName
-            } else {
-                top.maary.darkbag.utils.ImageUtils.getBaseName(SimpleDateFormat(FILENAME, Locale.US).format(timing.shutterClick))
-            }
-
-            var resolvedFlare = -1
-            if (isHalfFrameModeEnabled) {
-                val flarePref = if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
-                resolvedFlare = if (flarePref == 0) Random().nextInt(2) + 1 else flarePref
-            }
-
-            if (isFrame1Trigger) {
-                halfFrameSessionStore.clearCurrentSession(deleteTempFile = false)
-                halfFrameSessionStore.setBaseName(hfGroupId)
-
-                // For Frame 1 trigger, we might not have a config yet, but writeScopedHalfFrameStep
-                // will be updated after capture with the actual digitalGain in takeSinglePicture/triggerHdrPlusBurst
-                writeScopedHalfFrameStep(prefs, 1, timing.shutterClick, flareType = resolvedFlare)
-                // Animate slightly faster to sync with blackout fade
-                fragmentCameraBinding.viewFinder.postDelayed({
-                    updateHalfFrameUI(animate = true)
-                }, 50)
-                showProcessingAnimation()
-            }
-
-            var hfMetadataForTrigger: HalfFrameManager.Metadata? = null
-            if (isHalfFrameModeEnabled) {
-                val session = halfFrameSessionStore.readSession()
-
-                hfMetadataForTrigger = HalfFrameManager.Metadata(
-                    profile = session.profile,
-                    dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false),
-                    captureTimeMillis = timing.shutterClick,
-                    frame1BaseName = if (isFrame2Trigger) session.baseName else null,
-                    frame1TempPath = if (isFrame2Trigger) session.tempPath else null,
-                    frame1CaptureTime = if (isFrame2Trigger) session.captureTimeMillis else 0L,
-                    frame1DigitalGain = if (isFrame2Trigger) session.digitalGain else 1.0f,
-                    flareType = if (isFrame2Trigger) session.flareType else resolvedFlare
-                )
-            } else {
-                hfMetadataForTrigger = null
-            }
-
-            if (isFrame2Trigger) {
-                writeScopedHalfFrameStep(prefs, 0)
-                // Animate slightly faster to sync with blackout fade
-                fragmentCameraBinding.viewFinder.postDelayed({
-                    updateHalfFrameUI(animate = true)
-                }, 50)
-
-                showProcessingAnimation() // Immediate indicator on click for second frame
-                cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE // Show thumbnail container for progress indicator
-                setGalleryThumbnail(null) // Clear previous thumbnail and show placeholder/indicator
-            }
-
-            if (isMultiCameraModeActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                timing.captureMode = top.maary.darkbag.models.CaptureTimingMode.MULTI_CAMERA
-                takeMultiCameraPicture(timing)
-            } else {
-                if (isHdrPlusEnabled && isRawSupported) {
-                    timing.captureMode = if (isHalfFrameModeEnabled) top.maary.darkbag.models.CaptureTimingMode.HALF_FRAME else top.maary.darkbag.models.CaptureTimingMode.HDR_BURST
-                    isBurstActive = true
-                    cameraUiContainerBinding?.cameraCaptureButton?.apply {
-                        setProgress(0f)
-                        startRotation()
-                        isEnabled = false
-                    }
-                    showShutterBlackout()
-                    val h = camera2Handler
-                    if (h != null) {
-                        h.post {
-                            triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, timing)
-                        }
-                    } else {
-                        triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, timing)
-                    }
-                } else {
-                    timing.captureMode = if (isHalfFrameModeEnabled) top.maary.darkbag.models.CaptureTimingMode.HALF_FRAME else top.maary.darkbag.models.CaptureTimingMode.SINGLE_RAW
-                    takeSinglePictureCamera2(timing, isFrame1Trigger, hfMetadataForTrigger)
-                }
-            }
+            coordinator?.onShutterTriggered(timing)
         }
         _fragmentCameraBinding?.cameraSwitchButtonAlt?.let {
 
@@ -5915,6 +5920,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val modeChanged = (currentActiveMode != nextMode)
         isHalfFrameModeEnabled = (nextMode == CaptureMode.HALF_FRAME_SBS || nextMode == CaptureMode.HALF_FRAME_TB)
         isMultiCameraModeActive = (nextMode == CaptureMode.MULTI_CAMERA)
+        updateActiveCoordinator(nextMode)
 
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateHalfFrameUI()
@@ -6001,21 +6007,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     }
 
     private fun getDotTargetRotation(): Float {
-        if (!isHalfFrameModeEnabled) {
-            return -deviceOrientationDegrees.toFloat()
-        }
-
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
-
-        // Half-frame forces output orientation. Dot points to the fixed "Up" of the output frame.
-        return if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) {
-            // Top-bottom forces Landscape. Right side is Up.
-            90f
-        } else {
-            // Side-by-side forces Portrait. Up is phone-top (0).
-            0f
-        }
+        return activeCoordinator?.getShutterDotRotation(deviceOrientationDegrees)
+            ?: if (!isHalfFrameModeEnabled) {
+                -deviceOrientationDegrees.toFloat()
+            } else {
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
+                if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) 90f else 0f
+            }
     }
 
     private fun resetBurstUi() {
