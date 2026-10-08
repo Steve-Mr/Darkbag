@@ -32,5 +32,9 @@ data class CaptureTaskSpec(
     val rawFolderUri: String? = null,
     val hfMetadata: HalfFrameManager.Metadata? = null,
     val motionPhotoMp4Path: String? = null,
-    val motionPhotoStillPtsUs: Long = 0L
-)
+    val motionPhotoStillPtsUs: Long = 0L,
+    val sink: top.maary.darkbag.pipeline.sink.CaptureSink? = null
+) {
+    fun getEffectiveSink(): top.maary.darkbag.pipeline.sink.CaptureSink =
+        sink ?: top.maary.darkbag.pipeline.sink.CaptureSinkFactory.createDefaultSink(this)
+}
