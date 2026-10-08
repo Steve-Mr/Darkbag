@@ -203,10 +203,12 @@ class HdrPlusProcessingService : LifecycleService() {
                         var exportSuccessful = false
                         try {
                             val edit = req.editConfig
+                            val isHalfFrameActive = (req.hfMetadata != null && req.hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL)
+                            val halfFrameManager = if (isHalfFrameActive) top.maary.darkbag.utils.HalfFrameManager(this@HdrPlusProcessingService) else null
                             val shouldSaveJpg = req.saveJpg
-                            val shouldSaveRaw = req.saveRaw
+                            val shouldSaveRaw = if (isHalfFrameActive) (halfFrameManager?.saveRaw ?: false) else req.saveRaw
 
-                            if (shouldSaveJpg && req.jpgFolderUri == null && req.motionPhotoMp4Path == null) {
+                            if (shouldSaveJpg && req.jpgFolderUri == null && req.motionPhotoMp4Path == null && !isHalfFrameActive) {
                                 pfdJpg = top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
                                     context = this@HdrPlusProcessingService,
                                     displayName = "${req.baseName}.jpg",
@@ -221,7 +223,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                 req.linearDngPath
                             }
 
-                            if (shouldSaveRaw && req.rawFolderUri == null) {
+                            if (shouldSaveRaw && req.rawFolderUri == null && !isHalfFrameActive) {
                                 pfdDng = top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
                                     context = this@HdrPlusProcessingService,
                                     displayName = dngFileName,
@@ -450,8 +452,8 @@ class HdrPlusProcessingService : LifecycleService() {
                                 Log.i(TAG, baselineReport)
                                 top.maary.darkbag.utils.DebugLogManager.addDiagnosticLog(baselineReport)
 
-                                val needsSecondaryJpg = req.saveJpg && pfdJpg == null
-                                val needsSecondaryRaw = req.saveRaw && pfdDng == null
+                                val needsSecondaryJpg = shouldSaveJpg && pfdJpg == null
+                                val needsSecondaryRaw = shouldSaveRaw && pfdDng == null
 
                                 if (needsSecondaryJpg || needsSecondaryRaw) {
                                     top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
