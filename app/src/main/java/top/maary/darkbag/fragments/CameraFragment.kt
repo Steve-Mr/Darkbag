@@ -17,6 +17,13 @@
 @file:SuppressLint("RestrictedApi")
 package top.maary.darkbag.fragments
 
+import androidx.fragment.app.viewModels
+import top.maary.darkbag.camera.session.Camera2SessionController
+import top.maary.darkbag.camera.session.CameraSessionState
+import top.maary.darkbag.viewmodel.CameraViewModel
+import top.maary.darkbag.viewmodel.CameraUiState
+import top.maary.darkbag.viewmodel.CameraEffect
+import top.maary.darkbag.viewmodel.CameraUserIntent
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.modes.CaptureModeCoordinator
@@ -149,9 +156,15 @@ class CameraFragment : Fragment() {
     private var lensFacing: Int = CameraCharacteristics.LENS_FACING_BACK
     private lateinit var windowMetricsCalculator: WindowMetricsCalculator
 
-    // Camera2 State
-    private var camera2Device: android.hardware.camera2.CameraDevice? = null
-    @Volatile private var camera2Session: android.hardware.camera2.CameraCaptureSession? = null
+    // Camera2 State & Controller
+    private val sessionController = Camera2SessionController()
+    private val cameraViewModel: CameraViewModel by viewModels()
+    private var camera2Device: android.hardware.camera2.CameraDevice?
+        get() = sessionController.cameraDevice
+        set(value) {}
+    private var camera2Session: android.hardware.camera2.CameraCaptureSession?
+        get() = sessionController.captureSession
+        set(value) {}
     private var camera2PreviewSurface: android.view.Surface? = null
     private var rawImageReader: android.media.ImageReader? = null
     private var analysisImageReader: android.media.ImageReader? = null
@@ -159,8 +172,8 @@ class CameraFragment : Fragment() {
         requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
     }
 
-    private var camera2Thread: HandlerThread? = null
-    private var camera2Handler: Handler? = null
+    private val camera2Handler: Handler?
+        get() = sessionController.backgroundHandler
     private val camera2Lock = kotlinx.coroutines.sync.Mutex()
 
     private var lutProcessor: LutSurfaceProcessor? = null
@@ -301,6 +314,7 @@ class CameraFragment : Fragment() {
             activeCoordinator?.onDeactivated()
             activeCoordinator = ModeCoordinatorFactory.create(mode, modeExecutionContext)
             activeCoordinator?.onActivated()
+            cameraViewModel.setMode(mode)
         }
     }
 
@@ -344,6 +358,8 @@ class CameraFragment : Fragment() {
 
             override fun showShutterVisuals() {
                 isBurstActive = true
+                cameraViewModel.setBurstActive(true)
+                cameraViewModel.emitEffect(CameraEffect.ShutterBlackout)
                 cameraUiContainerBinding?.cameraCaptureButton?.apply {
                     setProgress(0f)
                     startRotation()
@@ -748,6 +764,7 @@ class CameraFragment : Fragment() {
 
         lifecycleScope.launch(Dispatchers.Main.immediate + NonCancellable) {
             closeCamera2()
+            sessionController.release()
         }
 
         lutProcessor?.setEncoderSurface(null, 0, 0)
@@ -1005,9 +1022,41 @@ class CameraFragment : Fragment() {
 
         // Listen for HDR+/RAW foreground processing queue changes to drive loading animation
         viewLifecycleOwner.lifecycleScope.launch {
-            top.maary.darkbag.processor.HdrPlusRequestManager.pendingForegroundTasksCount.collect {
+            top.maary.darkbag.processor.HdrPlusRequestManager.pendingForegroundTasksCount.collect { foregroundCount ->
+                cameraViewModel.setTaskCounts(
+                    totalCount = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value,
+                    foregroundCount = foregroundCount
+                )
                 withContext(Dispatchers.Main) {
                     updateProcessingAnimationUi()
+                }
+            }
+        }
+
+        // Observe CameraViewModel StateFlow and SharedFlow (MVI / UDF)
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                launch {
+                    cameraViewModel.uiState.collect { state ->
+                        cameraUiContainerBinding?.cameraCaptureButton?.setDotRotation(state.shutterDotRotation)
+                    }
+                }
+                launch {
+                    cameraViewModel.effects.collect { effect ->
+                        when (effect) {
+                            is CameraEffect.ShutterBlackout -> showShutterBlackout()
+                            is CameraEffect.ResetShutterUi -> resetBurstUi()
+                            is CameraEffect.SetShutterProgress -> cameraUiContainerBinding?.cameraCaptureButton?.setProgress(effect.progress)
+                            is CameraEffect.ShowToast -> Toast.makeText(context, effect.message, Toast.LENGTH_SHORT).show()
+                            is CameraEffect.AnimateHalfFrame -> updateHalfFrameUI(animate = true)
+                            is CameraEffect.ClearThumbnailPlaceholder -> {
+                                cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
+                                setGalleryThumbnail(null)
+                            }
+                            is CameraEffect.PerformHapticFeedback -> view?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            is CameraEffect.PlayShutterClick -> {}
+                        }
+                    }
                 }
             }
         }
@@ -4097,59 +4146,51 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         Log.d(TAG, "Opening Camera2: $cameraId (retryCount: $camera2RetryCount)")
 
-        if (camera2Thread == null) {
-            camera2Thread = HandlerThread("Camera2Thread").apply { start() }
-            camera2Handler = Handler(camera2Thread!!.looper)
-        }
-
-        try {
-            camera2Manager.openCamera(cameraId, object : android.hardware.camera2.CameraDevice.StateCallback() {
-                override fun onOpened(device: android.hardware.camera2.CameraDevice) {
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        camera2Lock.withLock {
-                            camera2RetryCount = 0 // Reset on success
-                            camera2Device = device
-                            createCamera2CaptureSession()
-                        }
+        val opened = sessionController.openCamera(camera2Manager, cameraId, object : android.hardware.camera2.CameraDevice.StateCallback() {
+            override fun onOpened(device: android.hardware.camera2.CameraDevice) {
+                lifecycleScope.launch(Dispatchers.Main) {
+                    camera2Lock.withLock {
+                        camera2RetryCount = 0 // Reset on success
+                        createCamera2CaptureSession()
                     }
                 }
+            }
 
-                override fun onDisconnected(device: android.hardware.camera2.CameraDevice) {
-                    lensSwitchWatchdog?.cancel()
-                    lensSwitchWatchdog = null
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        isSwitchingLens = false
-                        _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
-                        closeCamera2()
-                    }
+            override fun onDisconnected(device: android.hardware.camera2.CameraDevice) {
+                lensSwitchWatchdog?.cancel()
+                lensSwitchWatchdog = null
+                lifecycleScope.launch(Dispatchers.Main) {
+                    isSwitchingLens = false
+                    _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                    closeCamera2()
+                }
+            }
+
+            override fun onError(device: android.hardware.camera2.CameraDevice, error: Int) {
+                Log.e(TAG, "Camera2 open error: $error for camera $cameraId")
+                lensSwitchWatchdog?.cancel()
+                lensSwitchWatchdog = null
+                lifecycleScope.launch(Dispatchers.Main) {
+                    isSwitchingLens = false
+                    _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                    closeCamera2()
                 }
 
-                override fun onError(device: android.hardware.camera2.CameraDevice, error: Int) {
-                    Log.e(TAG, "Camera2 open error: $error for camera $cameraId")
-                    lensSwitchWatchdog?.cancel()
-                    lensSwitchWatchdog = null
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        isSwitchingLens = false
-                        _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
-                        closeCamera2()
-                    }
-
-                    if (error == 2 && camera2RetryCount < 1) {
-                         camera2RetryCount++
-                         Log.i(TAG, "Retrying camera open after hardware error (attempt $camera2RetryCount)...")
-                         camera2Handler?.postDelayed({
-                             lifecycleScope.launch { openCamera2(cameraId) }
-                         }, 500)
-                         return
-                    }
-
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        Toast.makeText(requireContext(), getString(R.string.error_camera_hardware, error), Toast.LENGTH_LONG).show()
-                    }
+                if (error == 2 && camera2RetryCount < 1) {
+                     camera2RetryCount++
+                     Log.i(TAG, "Retrying camera open after hardware error (attempt $camera2RetryCount)...")
+                     camera2Handler?.postDelayed({
+                         lifecycleScope.launch { openCamera2(cameraId) }
+                     }, 500)
+                     return
                 }
-            }, camera2Handler)
-        } catch (e: android.hardware.camera2.CameraAccessException) {
-            Log.e(TAG, "Failed to open Camera2", e)
+
+                lifecycleScope.launch(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), getString(R.string.error_camera_hardware, error), Toast.LENGTH_LONG).show()
+                }
+            }
+        })
+        if (!opened) {
             lensSwitchWatchdog?.cancel()
             lensSwitchWatchdog = null
             lifecycleScope.launch(Dispatchers.Main) {
@@ -4239,7 +4280,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
 
                     try {
-                        device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
+                        sessionController.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: android.hardware.camera2.CameraCaptureSession) {
                         lifecycleScope.launch(Dispatchers.Main) {
                             camera2Lock.withLock {
@@ -5560,10 +5601,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 concurrentFrontCameraManager = null
                 isFrontPipActive = false
             }
-            camera2Session?.close()
-            camera2Session = null
-            camera2Device?.close()
-            camera2Device = null
+            sessionController.closeCamera()
             rawImageReader?.close()
             rawImageReader = null
             analysisImageReader?.close()
@@ -5576,9 +5614,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private suspend fun releaseCamera2Resources() {
         closeCamera2()
-        camera2Thread?.quitSafely()
-        camera2Thread = null
-        camera2Handler = null
+        sessionController.release()
     }
 
     private fun getDigitalGainAndUpdateStep(
@@ -6021,6 +6057,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
         cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
         isBurstActive = false
+        cameraViewModel.setBurstActive(false)
 
         if (processingSemaphore.availablePermits > 0) {
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
