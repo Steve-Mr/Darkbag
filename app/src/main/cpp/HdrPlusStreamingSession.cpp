@@ -78,7 +78,10 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
     // m_accumVal and m_accumWeight are lazily allocated on first CPU frame push to save ~200MB upfront heap
 
     // Initialize Sabre Super-Resolution Engine only if eligible
-    // Sabre is eligible if Force Sabre (mode == 2), or Auto (mode == 0) with zoom >= 1.25x
+    // Architectural Invariant 3 (Strategy isolation per SABRE_FULL_FIDELITY_SPEC.md):
+    // - Mode 0 (Auto): zoom >= 1.25x activates Sabre; zoom < 1.25x activates Spatial + RCD (NEVER CHANGED).
+    // - Mode 2 (Only Sabre): enables Sabre across ALL zoom levels (including 1x wide angle per Section 2.4 / Phase 3).
+    // Invariant 4: GPU Sabre executes headless compute with zero UI thread blocking.
     const bool isSabreEligible = (m_fusionMode == 2) || (m_fusionMode == 0 && m_zoomFactor >= 1.25f);
     if (isSabreEligible) {
         darkbag::sabre::SabreConfig sabreCfg;
@@ -103,20 +106,21 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
         if (darkbag::sabre::GpuSabreEngine::isAvailable()) {
             m_gpuSabreEngine = std::make_unique<darkbag::sabre::GpuSabreEngine>(sabreCfg);
             if (!m_gpuSabreEngine->isSessionActive()) {
-                LOGW("HdrPlusStreamingSession: GPU Sabre initialization failed, falling back to Spatial + RCD");
+                LOGW("HdrPlusStreamingSession: GPU Sabre initialization failed, falling back to Spatial + RCD (Invariant 3, SABRE_FULL_FIDELITY_SPEC.md)");
                 m_gpuSabreEngine.reset();
             } else {
-                LOGD("HdrPlusStreamingSession: GPU Sabre Super-Resolution engine initialized (zoom=%.2f, mode=%d)", m_zoomFactor, m_fusionMode);
+                LOGD("HdrPlusStreamingSession: GPU Sabre engine initialized (zoom=%.2fx, mode=%d) [SABRE_FULL_FIDELITY_SPEC.md]", m_zoomFactor, m_fusionMode);
             }
         } else {
             m_gpuSabreEngine = nullptr;
         }
 
         if (!m_gpuSabreEngine) {
-            // Smart Fallback: Avoid slow CPU Sabre (13s blowout). Fall back to Spatial + RCD (339ms).
+            // Smart Fallback (Invariant 3 & SABRE_FULL_FIDELITY_SPEC.md Section 3.2):
+            // Avoid slow CPU Sabre (13s blowout on mobile devices). Fall back gracefully to Spatial + RCD (339ms).
             m_sabreEngine = nullptr;
             m_tileAligner = nullptr;
-            LOGW("HdrPlusStreamingSession: GPU Sabre unavailable, falling back to Spatial + RCD (skipping slow CPU Sabre)");
+            LOGW("HdrPlusStreamingSession: GPU Sabre unavailable at init, falling back to Spatial + RCD (skipping slow CPU Sabre per SABRE_FULL_FIDELITY_SPEC.md)");
         } else {
             m_sabreEngine = nullptr;
             m_tileAligner = std::make_unique<darkbag::sabre::TileAligner>();
@@ -125,7 +129,7 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
         m_gpuSabreEngine = nullptr;
         m_sabreEngine = nullptr;
         m_tileAligner = nullptr;
-        LOGD("HdrPlusStreamingSession: Sabre skipped (zoom=%.2f, mode=%d), saving ~350MB RAM", m_zoomFactor, m_fusionMode);
+        LOGD("HdrPlusStreamingSession: Sabre skipped (zoom=%.2fx, mode=%d), saving ~350MB RAM", m_zoomFactor, m_fusionMode);
     }
 
     // Cap CPU Halide worker threads to prevent core thrashing across dual sessions
@@ -330,18 +334,28 @@ int HdrPlusStreamingSession::finish(
     outSharedResult->bayerBuf.resize(numPixels);
     outSharedResult->noiseProfile = m_noiseProfile;
 
-    // Determine effective fusion mode:
-    // 0: Auto (Spatial+RCD for zoom < 1.25x, Sabre for zoom >= 1.25x)
+    // Determine effective fusion mode (Invariant 3 & SABRE_FULL_FIDELITY_SPEC.md Section 3.1):
+    // 0: Auto (Spatial+RCD for zoom < 1.25x, Sabre for zoom >= 1.25x) - NEVER CHANGED
     // 1: Spatial + RCD
-    // 2: Sabre (Super-Resolution)
+    // 2: Sabre (Super-Resolution for zoom > 1.05x, Multi-Frame Demosaic for zoom <= 1.05x)
     // 3: Classic Wiener
     int effectiveMode = m_fusionMode;
     if (effectiveMode == 0) {
         effectiveMode = (m_zoomFactor >= 1.25f) ? 2 : 1;
     }
 
+    // Fallback Check 1: If Sabre mode requested but only 1 frame was pushed,
+    // multi-frame kernel regression / deghosting cannot operate.
+    // Release GPU Sabre engine immediately and gracefully fall back to single-frame RCD (Invariant 1 & 3).
+    if (effectiveMode == 2 && m_gpuSabreEngine && m_framesPushed <= 1) {
+        LOGW("HdrPlusStreamingSession: Sabre requested (mode=%d, zoom=%.2fx) but only %d frame pushed; gracefully falling back to reference Frame 0 + RCD demosaic (Invariant 1 & 3 per SABRE_FULL_FIDELITY_SPEC.md)",
+             effectiveMode, m_zoomFactor, m_framesPushed);
+        m_gpuSabreEngine.reset();
+        m_tileAligner.reset();
+    }
+
     if (effectiveMode == 2 && (m_gpuSabreEngine || m_sabreEngine) && m_framesPushed > 1) {
-        LOGD("HdrPlusStreamingSession: resolving with Sabre Super-Resolution (zoom=%.2fx, frames=%d, gpu=%d)",
+        LOGD("HdrPlusStreamingSession: resolving with Sabre (zoom=%.2fx, frames=%d, gpu=%d) [Invariant 3]",
              m_zoomFactor, m_framesPushed, m_gpuSabreEngine ? 1 : 0);
         outSharedResult->rgbBuf.resize(numPixels * 3);
         outSharedResult->bayerBuf.resize(numPixels);
@@ -365,13 +379,15 @@ int HdrPlusStreamingSession::finish(
                 outSharedResult->gpuTexWidth = m_width;
                 outSharedResult->gpuTexHeight = m_height;
                 m_fusionComputeMs = gpuComputeMs;
-                LOGD("HdrPlusStreamingSession: GPU Sabre resolve succeeded (%lld ms, tex=%u)",
-                     (long long)m_fusionComputeMs, outSharedResult->gpuRgbTexture);
+                LOGD("HdrPlusStreamingSession: GPU Sabre resolve succeeded (%lld ms, tex=%u, zoom=%.2fx)",
+                     (long long)m_fusionComputeMs, outSharedResult->gpuRgbTexture, m_zoomFactor);
             } else {
-                LOGW("HdrPlusStreamingSession: GPU Sabre resolve failed");
+                LOGW("HdrPlusStreamingSession: GPU Sabre resolve failed (sabreOk=%d, outTex=%u), releasing GPU resources and falling back to RCD (Invariant 1 & 3 per SABRE_FULL_FIDELITY_SPEC.md)",
+                     sabreOk ? 1 : 0, outTex);
                 sabreOk = false;
             }
             m_gpuSabreEngine.reset();
+            m_tileAligner.reset();
         } else if (m_sabreEngine) {
             sabreOk = m_sabreEngine->resolve(
                 outSharedResult->rgbBuf.data(),
@@ -381,20 +397,28 @@ int HdrPlusStreamingSession::finish(
                 m_fusionComputeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::high_resolution_clock::now() - fusionStart
                 ).count();
-                LOGD("HdrPlusStreamingSession: CPU Sabre Super-Resolution resolve succeeded (%lld ms)", (long long)m_fusionComputeMs);
+                LOGD("HdrPlusStreamingSession: CPU Sabre resolve succeeded (%lld ms)", (long long)m_fusionComputeMs);
+            } else {
+                LOGW("HdrPlusStreamingSession: CPU Sabre resolve failed, falling back to Spatial + RCD");
             }
         }
 
         if (sabreOk) {
             if (m_zoomFactor > 1.05f) {
                 outSharedResult->isZoomCropped = true;
+            } else {
+                outSharedResult->isZoomCropped = false;
             }
             outSharedResult->isWhiteBalanceApplied = false;
             outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
             outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
             return 0;
         }
-        LOGW("HdrPlusStreamingSession: Sabre resolve returned false, falling back to Spatial + RCD");
+
+        // Fallback Check 2: Sabre resolve failed -> clean up GPU resources and reset zoom crop
+        LOGW("HdrPlusStreamingSession: Sabre resolve failed or unviable, executing bulletproof fallback to RCD (Invariant 1 & 3 per SABRE_FULL_FIDELITY_SPEC.md)");
+        outSharedResult->releaseGpuResources();
+        outSharedResult->isZoomCropped = false;
     }
 
     const bool usedGpuAccumulation = m_useGpuAccumulation;
@@ -481,8 +505,10 @@ int HdrPlusStreamingSession::finish(
 
         std::copy(m_refFrame.begin(), m_refFrame.end(), outSharedResult->bayerBuf.begin());
     } else {
-        // Fallback to retained reference frame 0
-        LOGW("HdrPlusStreamingSession: Using reference Frame 0 for output bayer buffer");
+        // Fallback Check 3 & Fallback Buffer Restoration (Invariant 1):
+        // Revert cleanly to retained reference Frame 0 for output Bayer buffer.
+        // Guarantees an untainted, valid Bayer frame for downstream RCD demosaic and unified write_dng export.
+        LOGW("HdrPlusStreamingSession: Fallback to retained reference Frame 0 for output Bayer buffer (Invariant 1, SABRE_FULL_FIDELITY_SPEC.md)");
         std::copy(m_refFrame.begin(), m_refFrame.end(), outSharedResult->bayerBuf.begin());
     }
 

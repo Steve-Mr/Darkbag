@@ -231,5 +231,40 @@ class StandardTimingTrackerTest {
         assertTrue(report.contains("Mode: Single(RCD)"))
         assertFalse(report.contains("Auto(Sabre)"))
     }
+
+    @Test
+    fun testBuildSummaryReport_fusionModeFormatting() {
+        // fusionMode = 2 at zoom 1.0f -> Sabre 1x(Demosaic)
+        val timingSabre1x = StandardTimingTracker(shutterClick = 1000L).apply {
+            recordEnvironment(width = 4032, height = 3024, zoom = 1.0f, fusion = 2)
+        }
+        val reportSabre1x = timingSabre1x.buildSummaryReport()
+        assertTrue("Expected 'Mode: Sabre 1x(Demosaic)' at zoom 1.0f",
+            reportSabre1x.contains("Mode: Sabre 1x(Demosaic)"))
+
+        // fusionMode = 2 at zoom 2.0f -> Sabre SR
+        val timingSabreSr = StandardTimingTracker(shutterClick = 1000L).apply {
+            recordEnvironment(width = 4032, height = 3024, zoom = 2.0f, fusion = 2)
+        }
+        val reportSabreSr = timingSabreSr.buildSummaryReport()
+        assertTrue("Expected 'Mode: Sabre SR' at zoom 2.0f",
+            reportSabreSr.contains("Mode: Sabre SR"))
+
+        // fusionMode = 0 (Auto) at zoom 1.0f -> Auto(RCD)
+        val timingAutoRcd = StandardTimingTracker(shutterClick = 1000L).apply {
+            recordEnvironment(width = 4032, height = 3024, zoom = 1.0f, fusion = 0)
+        }
+        val reportAutoRcd = timingAutoRcd.buildSummaryReport()
+        assertTrue("Expected 'Mode: Auto(RCD)' at zoom 1.0f",
+            reportAutoRcd.contains("Mode: Auto(RCD)"))
+
+        // fusionMode = 0 (Auto) at zoom 1.5f -> Auto(Sabre)
+        val timingAutoSabre = StandardTimingTracker(shutterClick = 1000L).apply {
+            recordEnvironment(width = 4032, height = 3024, zoom = 1.5f, fusion = 0)
+        }
+        val reportAutoSabre = timingAutoSabre.buildSummaryReport()
+        assertTrue("Expected 'Mode: Auto(Sabre)' at zoom 1.5f",
+            reportAutoSabre.contains("Mode: Auto(Sabre)"))
+    }
 }
 
