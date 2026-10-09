@@ -5275,6 +5275,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             if (isTaskStarted.compareAndSet(false, true)) {
                                 top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
                             }
+                            isBurstActive = false
+                            cameraViewModel.setBurstActive(false)
                             resetBurstUi()
                             if (!isFrame1Trigger) {
                                 showProcessingAnimation()
@@ -6261,7 +6263,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
         cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
         isBurstActive = false
-        cameraViewModel.setBurstActive(false)
 
         if (processingSemaphore.availablePermits > 0) {
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true

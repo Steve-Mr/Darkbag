@@ -113,5 +113,17 @@ class CameraViewModelTest {
         val effect = viewModel.effects.first()
         assertTrue(effect is CameraEffect.ResetShutterUi)
     }
+
+    @Test
+    fun testProcessIntent_SetBurstActive_DoesNotEmitResetShutterUiWhenAlreadyFalse() = runBlocking {
+        assertFalse(viewModel.uiState.value.isBurstActive)
+        viewModel.setBurstActive(false)
+        assertFalse(viewModel.uiState.value.isBurstActive)
+        // Ensure no effect is emitted when already inactive
+        val channelEmpty = kotlinx.coroutines.withTimeoutOrNull(200) {
+            viewModel.effects.first()
+        } == null
+        assertTrue(channelEmpty)
+    }
 }
 
