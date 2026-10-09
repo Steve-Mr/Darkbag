@@ -1,6 +1,9 @@
 package top.maary.darkbag.processor
 
 import java.nio.ByteBuffer
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureResult
+import android.media.Image
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableSharedFlow
 import top.maary.darkbag.models.CaptureMetadata
@@ -395,4 +398,132 @@ object ColorProcessor {
         whiteBalanceGains: FloatArray?,
         rgbBuffer: ByteBuffer
     )
+
+    external fun nativeWriteRawImageDng(
+        rawBuffer: ByteBuffer,
+        bufferOffset: Int,
+        width: Int,
+        height: Int,
+        rowStrideBytes: Int,
+        pixelStrideBytes: Int,
+        outputPath: String?,
+        outFd: Int,
+        orientationDegrees: Int,
+        whiteLevel: Int,
+        blackLevelPattern: FloatArray?,
+        cfaPattern: Int,
+        colorMatrix1: FloatArray?,
+        colorMatrix2: FloatArray?,
+        forwardMatrix1: FloatArray?,
+        forwardMatrix2: FloatArray?,
+        calibrationIlluminant1: Int,
+        calibrationIlluminant2: Int,
+        neutralColorPoint: FloatArray?,
+        lensShadingMap: FloatArray?,
+        lensShadingRows: Int,
+        lensShadingCols: Int,
+        activeArea: IntArray?,
+        noiseProfile: DoubleArray?,
+        iso: Int,
+        exposureTimeNanos: Long,
+        focalLength: Float,
+        focalLength35mm: Int,
+        fNumber: Float,
+        dngCompressionMode: Int,
+        isHdrPlus: Boolean
+    ): Boolean
+
+    fun writeRawImageToDng(
+        rawImage: Image,
+        chars: CameraCharacteristics,
+        captureResult: CaptureResult?,
+        orientationDegrees: Int,
+        outputPath: String,
+        dngCompressionMode: Int = 0,
+        isHdrPlus: Boolean = false
+    ): Boolean {
+        val plane = rawImage.planes[0]
+        val buffer = plane.buffer
+        val width = rawImage.width
+        val height = rawImage.height
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+
+        val whiteLevel = chars.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
+        val cfaPattern = chars.get(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
+
+        val dynamicBl = captureResult?.get(CaptureResult.SENSOR_DYNAMIC_BLACK_LEVEL)
+        val blPattern = if (dynamicBl != null && dynamicBl.size >= 4) {
+            dynamicBl
+        } else {
+            val staticBl = chars.get(CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
+            if (staticBl != null) {
+                floatArrayOf(
+                    staticBl.getOffsetForIndex(0, 0).toFloat(),
+                    staticBl.getOffsetForIndex(1, 0).toFloat(),
+                    staticBl.getOffsetForIndex(0, 1).toFloat(),
+                    staticBl.getOffsetForIndex(1, 1).toFloat()
+                )
+            } else {
+                floatArrayOf(64f, 64f, 64f, 64f)
+            }
+        }
+
+        val calib = SensorCalibrationHelper.extractCalibration(chars, captureResult)
+        val lscTriple = SensorCalibrationHelper.extractLensShading(captureResult)
+
+        val activeRect = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+        val activeArea = if (activeRect != null) intArrayOf(activeRect.top, activeRect.left, activeRect.bottom, activeRect.right) else null
+
+        val noisePairs = captureResult?.get(CaptureResult.SENSOR_NOISE_PROFILE)
+        val noiseProfile = if (noisePairs != null && noisePairs.isNotEmpty()) {
+            val arr = DoubleArray(noisePairs.size * 2)
+            for (i in noisePairs.indices) {
+                arr[i * 2] = noisePairs[i].first
+                arr[i * 2 + 1] = noisePairs[i].second
+            }
+            arr
+        } else null
+
+        val iso = captureResult?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+        val exposureTime = captureResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+        val focalLength = captureResult?.get(CaptureResult.LENS_FOCAL_LENGTH) ?: 5.0f
+        val fNumber = captureResult?.get(CaptureResult.LENS_APERTURE) ?: 1.8f
+        val focalLengths35 = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+        val focalLength35mm = if (focalLengths35 != null && focalLengths35.isNotEmpty()) focalLengths35[0].toInt() else 24
+
+        return nativeWriteRawImageDng(
+            rawBuffer = buffer,
+            bufferOffset = buffer.position(),
+            width = width,
+            height = height,
+            rowStrideBytes = rowStride,
+            pixelStrideBytes = pixelStride,
+            outputPath = outputPath,
+            outFd = -1,
+            orientationDegrees = orientationDegrees,
+            whiteLevel = whiteLevel,
+            blackLevelPattern = blPattern,
+            cfaPattern = cfaPattern,
+            colorMatrix1 = calib.colorMatrix1,
+            colorMatrix2 = calib.colorMatrix2,
+            forwardMatrix1 = calib.forwardMatrix1,
+            forwardMatrix2 = calib.forwardMatrix2,
+            calibrationIlluminant1 = calib.calibrationIlluminant1,
+            calibrationIlluminant2 = calib.calibrationIlluminant2,
+            neutralColorPoint = calib.neutralColorPoint,
+            lensShadingMap = lscTriple.first,
+            lensShadingRows = lscTriple.second,
+            lensShadingCols = lscTriple.third,
+            activeArea = activeArea,
+            noiseProfile = noiseProfile,
+            iso = iso,
+            exposureTimeNanos = exposureTime,
+            focalLength = focalLength,
+            focalLength35mm = focalLength35mm,
+            fNumber = fNumber,
+            dngCompressionMode = dngCompressionMode,
+            isHdrPlus = isHdrPlus
+        )
+    }
 }

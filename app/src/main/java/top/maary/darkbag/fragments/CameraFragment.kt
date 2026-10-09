@@ -359,7 +359,6 @@ class CameraFragment : Fragment() {
             override fun showShutterVisuals() {
                 isBurstActive = true
                 cameraViewModel.setBurstActive(true)
-                cameraViewModel.emitEffect(CameraEffect.ShutterBlackout)
                 cameraUiContainerBinding?.cameraCaptureButton?.apply {
                     setProgress(0f)
                     startRotation()
@@ -369,9 +368,17 @@ class CameraFragment : Fragment() {
             }
 
             override fun captureViewFinderSnapshot(): Bitmap? {
-                val bmp = _fragmentCameraBinding?.viewFinder?.bitmap
-                pendingVfSnapshot = bmp
-                return bmp
+                val vf = _fragmentCameraBinding?.viewFinder ?: return null
+                if (vf.width <= 0 || vf.height <= 0) return null
+                val targetW = (vf.width / 4).coerceAtLeast(1)
+                val targetH = (vf.height / 4).coerceAtLeast(1)
+                return try {
+                    vf.getBitmap(targetW, targetH).also { bmp ->
+                        pendingVfSnapshot = bmp
+                    }
+                } catch (e: Exception) {
+                    null
+                }
             }
 
             override fun showProcessingAnimation() {
@@ -431,7 +438,14 @@ class CameraFragment : Fragment() {
                 hfMetadata: HalfFrameManager.Metadata?,
                 timing: StandardTimingTracker
             ) {
-                takeSinglePictureCamera2(timing, isFrame1, hfMetadata)
+                val h = camera2Handler
+                if (h != null) {
+                    h.post {
+                        takeSinglePictureCamera2(timing, isFrame1, hfMetadata)
+                    }
+                } else {
+                    takeSinglePictureCamera2(timing, isFrame1, hfMetadata)
+                }
             }
 
             override fun triggerMultiCameraPicture(timing: StandardTimingTracker) {
@@ -4454,6 +4468,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
 
         showShutterBlackout()
+        top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
         showProcessingAnimation()
 
         val orientation = getCombinedOrientation()
@@ -4495,8 +4510,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             },
             onError = { errorMsg ->
                 Log.e(TAG, "Multi-camera capture error: $errorMsg")
+                top.maary.darkbag.processor.HdrPlusRequestManager.onForegroundTaskFinished()
+                top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
                 lifecycleScope.launch(Dispatchers.Main) {
                     processingSemaphore.release()
+                    resetBurstUi()
                     hideProcessingAnimation()
                     Toast.makeText(requireContext(), getString(R.string.error_multi_camera_capture_failed, errorMsg), Toast.LENGTH_SHORT).show()
                 }
@@ -4655,6 +4673,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     setGalleryThumbnail(primarySavedUri.toString())
                 }
             }
+            top.maary.darkbag.processor.HdrPlusRequestManager.onForegroundTaskFinished()
+
             timing?.firstOutputWritten = System.currentTimeMillis()
             timing?.taskCompleted = System.currentTimeMillis()
             timing?.let { t ->
@@ -4665,9 +4685,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         } catch (e: Exception) {
             Log.e(TAG, "Error saving multi-camera result", e)
         } finally {
+            top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
             processingSemaphore.release()
             withContext(Dispatchers.Main) {
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                resetBurstUi()
                 hideProcessingAnimation()
             }
         }

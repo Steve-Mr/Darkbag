@@ -8,16 +8,17 @@ Welcome to Darkbag! This file serves as the definitive reference and strict arch
 
 Darkbag has undergone a comprehensive architectural decoupling to eliminate God-Fragment antipatterns, primitive parameter explosion, and pipeline-mode coupling. When implementing features, refactoring code, or fixing bugs, **you MUST strictly adhere to the following four architectural invariants without exception**:
 
-### Invariant 1: Pipeline-Agnostic Output (`CaptureSink` Contract)
-* **Rule**: The computational photography and color pipelines (`HdrPlusProcessingService`, `ColorProcessor`, and native C++ `ColorPipe`) **MUST NEVER** have knowledge of output destinations.
+### Invariant 1: Pipeline-Agnostic Output (`CaptureSink` Contract) & Unified Compressed DNG
+* **Rule**: The computational photography and color pipelines (`HdrPlusProcessingService`, `ColorProcessor`, and native C++ `ColorPipe`) **MUST NEVER** have knowledge of output destinations. Furthermore, all DNG exports across the entire codebase MUST route through the unified native `write_dng` engine.
 * **Prohibitions**:
   - **NEVER** directly query or insert into `MediaStore` or `ContentResolver` inside processing services or the native pipeline.
   - **NEVER** hardcode mode-specific file branching (e.g., `if (isHalfFrame) ... else ...`) inside `HdrPlusProcessingService`.
+  - **NEVER** instantiate platform `android.hardware.camera2.DngCreator` for saving RAW files. `DngCreator` writes uncompressed 24MB+ sensor data and lacks Darkbag's OpcodeList2 GainMap calibration.
 * **Standard Pattern**:
   - Output handling is delegated entirely through the `CaptureSink` interface (`prepareTargets`, `onImageExported`, `onRawExported`, `onComplete`, `onError`).
   - Standard single/burst captures use `DirectMediaStoreSink` for zero-copy sub-second T2 delivery.
   - Staged captures (e.g., Half-Frame Frame 1) use `HalfFrameCacheSink` to stage temporary files without polluting `MediaStore`.
-  - Custom output workflows must provide a dedicated `CaptureSink` implementation injected via `CaptureTaskSpec`.
+  - All RAW/DNG file exports (Single RAW, Burst, Half-Frame, Multi-Camera) MUST use `ColorProcessor.writeRawImageToDng` / native `write_dng` with 16-bit Lossless JPEG compression (`dngCompressionMode = 0`), halving storage size and disk I/O latency.
 
 ### Invariant 2: Domain Parameter Orthogonalization (`CaptureTaskSpec`)
 * **Rule**: Inter-layer invocations (UI → Coordinator → Service → JNI → C++) must pass cohesive, orthogonal domain aggregates instead of loose primitive parameter lists.
@@ -35,18 +36,23 @@ Darkbag has undergone a comprehensive architectural decoupling to eliminate God-
   - **NEVER** write mode-checking branches inside `CameraFragment` (e.g., `if (isHalfFrameMode) ... else if (isMultiCameraMode) ...`).
 * **Standard Pattern**:
   - Shutter button taps dispatch directly to `activeCoordinator?.onShutterTriggered(timing)`.
+  - All coordinators MUST trigger `host.showShutterVisuals()` and notify `HdrPlusRequestManager` (`onTaskStarted` / `onForegroundTaskFinished` / `onTaskFinished`) to guarantee synchronized shutter dot rotation, tactile locking, and gallery thumbnail loading animations.
   - Dynamic button rotation dispatches to `activeCoordinator?.getShutterDotRotation(deviceOrientationDegrees)`.
   - Mode switches and multi-step state machines (e.g., Half-Frame step 0 → step 1 → step 0) live entirely inside the respective coordinator (`NormalModeCoordinator`, `HalfFrameModeCoordinator`, `MultiCameraModeCoordinator`).
   - New modes must be added by implementing `CaptureModeCoordinator` and registering with `ModeCoordinatorFactory`.
 
-### Invariant 4: Headless Camera Session & State-Driven MVI UI
+### Invariant 4: Headless Camera Session & State-Driven MVI UI (Zero UI Thread Blocking)
 * **Rule**: Camera2 hardware stream lifecycle is strictly encapsulated in `Camera2SessionController`. The UI is purely passive and state-driven.
 * **Prohibitions**:
+  - **NEVER** execute Camera2 hardware IPC (`session.capture`, `session.captureBurst`, or `createCaptureRequest`) synchronously on the UI / Main Thread.
+  - **NEVER** execute synchronous GPU frame buffer readback (`viewFinder.bitmap` or full-resolution `TextureView.getBitmap()`) on the UI thread.
   - **NEVER** manipulate camera device opening/closing or session configuration directly from UI event handlers without concurrency synchronization.
   - **NEVER** mutate shared state directly from Fragment Views.
 * **Standard Pattern**:
+  - All capture requests (Single RAW, Burst, Multi-Camera) MUST be dispatched on the dedicated background `camera2Handler` thread (`Camera2Background`).
+  - Intermediate viewfinder snapshots (e.g. Half-frame stage 1) must use downsampled dimensions (e.g. 1/4 resolution) or asynchronous `PixelCopy` to guarantee sub-millisecond execution.
   - `Camera2SessionController` manages the dedicated background `HandlerThread`, Camera2 callbacks, and state transitions (`Closed`, `Opening`, `Configuring`, `Active`, `Closing`), protected by `openCloseLock` (Semaphore).
-  - `CameraViewModel` exposes immutable `StateFlow<CameraUiState>` for persistent UI state and `SharedFlow<CameraEffect>` for transient one-shot events (e.g., shutter animation, toast notifications).
+  - `CameraViewModel` exposes immutable `StateFlow<CameraUiState>` for persistent UI state and `SharedFlow<CameraEffect>` for transient one-shot events.
   - `CameraFragment` observes state using `viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED)` and sends user actions via `CameraUserIntent`.
 
 ---

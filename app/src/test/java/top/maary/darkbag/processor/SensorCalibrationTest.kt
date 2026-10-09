@@ -231,4 +231,28 @@ class SensorCalibrationTest {
         )
         assertNull("renderCcm must be null when ForwardMatrix is not available", renderCcm)
     }
+
+    @Test
+    fun testExtractCalibration_NullInputs() {
+        val calib = SensorCalibrationHelper.extractCalibration(
+            characteristics = null,
+            result = null,
+            wb = null
+        )
+        assertNotNull(calib)
+        assertEquals(9, calib.colorMatrix1.size)
+        assertEquals(1f, calib.colorMatrix1[0], 0.001f)
+        assertEquals(1f, calib.colorMatrix1[4], 0.001f)
+        assertEquals(1f, calib.colorMatrix1[8], 0.001f)
+        assertNull(calib.forwardMatrix1)
+        assertNull(calib.neutralColorPoint)
+    }
+
+    @Test
+    fun testExtractLensShading_NullResult() {
+        val (map, rows, cols) = SensorCalibrationHelper.extractLensShading(null)
+        assertNull(map)
+        assertEquals(0, rows)
+        assertEquals(0, cols)
+    }
 }

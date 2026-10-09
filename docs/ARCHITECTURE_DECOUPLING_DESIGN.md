@@ -53,6 +53,7 @@ Darkbag 经历了 GPU 计算管线迁移、Fast Path JPEG 优化以及多种自�
 ### 原则 1：拍摄不关心产出（Pipeline Agnostic Output）
 - **核心契约**：计算与调色管线（无论是 HDR+ 多帧、Single RAW 还是 Sabre 超分辨率）只负责将传感器数据解算并调色为高质量图像数据（`RenderedFrame` / `RawBundle`）。
 - **完全解耦**：管线绝对不直接依赖 `MediaStore`、`ContentResolver`、私有缓存文件路径或任何特定拍摄模式的标志。产物的落盘、拼接、多摄同步完全由外部注入的 **`CaptureSink`** 策略消费。
+- **统一原生无损压缩 DNG 导出**：严禁在任何模式（包括多摄同拍）中实例化系统平台 `android.hardware.camera2.DngCreator`（其写入未压缩 24MB+ 裸数据且缺失 Darkbag 标定）。所有 RAW/DNG 导出统一走原生 C++ `ColorPipe` 的 `write_dng`，采用 Lossless JPEG 16-bit 压缩模式（Mode 0）与完整的 OpcodeList2 GainMap 封装，实现体积减半（~12MB）与亚秒级落盘。
 
 ### 原则 2：参数生命周期正交化（Three-Tier Context Aggregation）
 将 35+ 个散装参数按其**物理生命周期与所属领域**正交化拆解为 3 个聚合对象：
@@ -63,10 +64,15 @@ Darkbag 经历了 GPU 计算管线迁移、Fast Path JPEG 优化以及多种自�
 ### 原则 3：模式协调器策略模式（Mode Coordinator Engine）
 - 半格模式、多摄模式、连拍模式各为独立的 **`CaptureModeCoordinator`**。
 - 所有模式特异的状态转移（例如半格模式的 `Frame 1 缓存 -> Frame 2 触发 -> 双帧拼合`）完全由对应的协调器自包含驱动。UI 控件与计算管线无需关心也不允许存在 `if (isHalfFrame)` 侵入式判断。
+- **生命周期与反馈同步**：所有协调器必须统一触发宿主 `host.showShutterVisuals()` 并协同 `HdrPlusRequestManager`（`onTaskStarted` / `onForegroundTaskFinished` / `onTaskFinished`），保证快门视觉锁定与缩略图加载动画（Loading Spinner）精确受控。
 
-### 原则 4：单向数据流与硬件无头化（UDF & Headless Engine）
+### 原则 4：单向数据流与硬件无头化（UDF & Headless Engine / 零主线程阻塞）
 - **View 层纯被动**：`CameraFragment` 仅作为 Passive View，仅负责将触摸/按键转化为 `CameraIntent`，并根据 `StateFlow<CameraUiState>` 渲染控件，根据 `SharedFlow<CameraEffect>` 执行瞬态动画。
 - **硬件流无头化**：Camera2 的设备打开、会话配置、Repeating Request 循环抽取为无头的 `Camera2SessionController`，不持有 View 引用，彻底规避配置变更（旋转屏幕）时的生命周期泄漏。
+- **零主线程硬件与 GPU 阻塞 (Zero UI Thread Hardware & GPU Blocking)**：
+  - Camera2 拍照请求构建与提交（`takeSinglePictureCamera2`、Burst 等）严禁在 UI / Main 线程执行，统一调度至后台 `camera2Handler` 线程，消除 15~30ms 的 Binder IPC 卡顿。
+  - 严禁在 UI 线程执行全分辨率同步 GPU 帧缓存回读（如半格模式原先在 UI 线程执行 `viewFinder.bitmap` 导致 30~80ms 冻结），必须降采样回读（如 1/4 宽高）或异步处理。
+  - 优化 UI 自定义控件（如 `ExpressiveShutterButton`），消除冗余 `invalidate()` 抖动并在绘制前预计算几何区域，消除触摸时的临时对象堆分配。
 
 ---
 

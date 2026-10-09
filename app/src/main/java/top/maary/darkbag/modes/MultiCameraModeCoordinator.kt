@@ -24,6 +24,7 @@ class MultiCameraModeCoordinator(
     override fun onShutterTriggered(timing: StandardTimingTracker) {
         if (!host.canTriggerCapture()) return
         timing.captureMode = CaptureTimingMode.MULTI_CAMERA
+        host.showShutterVisuals()
         host.triggerMultiCameraPicture(timing)
     }
 
