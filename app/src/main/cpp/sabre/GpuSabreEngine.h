@@ -119,6 +119,7 @@ private:
     int flowTexHeight_ = 0;
     GLuint accumTex_[2] = {0, 0};
     GLuint weightTex_[2] = {0, 0};
+    GLuint resolvedRgbTex_ = 0;
     GLuint outputRgbTex_ = 0;
     bool reusedFromCache_ = false;
 };

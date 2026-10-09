@@ -13,6 +13,7 @@ namespace sabre {
  * - Pass 1: Green Quad Gradient & Anisotropic Steering Covariance Estimation
  * - Pass 2: Continuous Subpixel Gather Accumulation & Motion Rejection
  * - Pass 3: Dehomogenization, Guided Chrominance Recovery & Linear RGB Normalization
+ * - Pass 4: Physical MTF Inverse Restoration via Noise-Gated Deconvolution
  */
 
 // Pass 1: Structure Tensor & Steering Covariance Compute Shader (Half-resolution Quad Grid)
@@ -422,6 +423,82 @@ void main() {
     float finalB = clamp((bOut - bl_b) * scale_b, 0.0, 1.0);
 
     imageStore(uOutRgbImg, coord, vec4(finalR, finalG, finalB, 1.0));
+}
+)glsl";
+
+// Pass 4: Physical MTF Inverse Restoration Compute Shader (Noise-Gated Deconvolution)
+static const char* kSabreMtfRestorationComputeShader = R"glsl(#version 310 es
+layout(local_size_x = 16, local_size_y = 16) in;
+
+precision highp float;
+precision highp int;
+
+layout(rgba16f, binding = 0) uniform highp readonly image2D uInRgbImg;
+layout(rgba16f, binding = 1) uniform highp writeonly image2D uOutRgbImg;
+
+uniform int uWidth;
+uniform int uHeight;
+uniform vec2 uNoiseModel; // x = normalized S (shot noise slope), y = normalized O (read noise floor)
+uniform float uSharpenStrength; // default 1.25
+uniform float uCoringThreshold; // default 2.0
+
+const vec3 kRec709 = vec3(0.2126, 0.7152, 0.0722);
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= uWidth || coord.y >= uHeight) {
+        return;
+    }
+
+    vec4 centerPixel = imageLoad(uInRgbImg, coord);
+    vec3 centerRgb = centerPixel.rgb;
+    float Y = dot(centerRgb, kRec709);
+
+    float yBlur = 0.0;
+    float yMin = Y;
+    float yMax = Y;
+
+    // 3x3 local Gaussian blur filter ([1, 2, 1] / 4 separable filter, normalized by 16.0)
+    for (int dy = -1; dy <= 1; ++dy) {
+        float wy = (dy == 0) ? 2.0 : 1.0;
+        for (int dx = -1; dx <= 1; ++dx) {
+            float wx = (dx == 0) ? 2.0 : 1.0;
+            float w = (wx * wy) * 0.0625; // (wx * wy) / 16.0
+
+            ivec2 nc = clamp(coord + ivec2(dx, dy), ivec2(0), ivec2(uWidth - 1, uHeight - 1));
+            vec3 rgb = imageLoad(uInRgbImg, nc).rgb;
+            float yVal = dot(rgb, kRec709);
+
+            yBlur += w * yVal;
+            yMin = min(yMin, yVal);
+            yMax = max(yMax, yVal);
+        }
+    }
+
+    // High-frequency detail Delta Y = Y - Y_blur
+    float deltaY = Y - yBlur;
+
+    // Physical noise standard deviation: sigma = sqrt(max(10^-7, S * Y + O))
+    float sigma = sqrt(max(1e-7, uNoiseModel.x * Y + uNoiseModel.y));
+
+    // Continuous noise coring: Delta Y_cored = sign(Delta Y) * max(0.0, |Delta Y| - uCoringThreshold * sigma)
+    float deltaYCored = sign(deltaY) * max(0.0, abs(deltaY) - uCoringThreshold * sigma);
+
+    // Wiener regularization damping: gain = Delta Y^2 / (Delta Y^2 + sigma^2 + 10^-6)
+    float deltaYSq = deltaY * deltaY;
+    float gain = deltaYSq / (deltaYSq + sigma * sigma + 1e-6);
+
+    // Clamped luminance boost Delta Y_final = uSharpenStrength * gain * Delta Y_cored
+    float deltaYFinal = uSharpenStrength * gain * deltaYCored;
+
+    // Clamp Y_new to [Y_min, Y_max] of 3x3 neighborhood to strictly prevent halos/ringing
+    float yNew = clamp(Y + deltaYFinal, yMin, yMax);
+
+    // Scale RGB preserving chrominance: factor = Y_new / max(10^-4, Y)
+    float factor = yNew / max(1e-4, Y);
+    vec3 outRgb = clamp(centerRgb * factor, 0.0, 1.0);
+
+    imageStore(uOutRgbImg, coord, vec4(outRgb, 1.0));
 }
 )glsl";
 

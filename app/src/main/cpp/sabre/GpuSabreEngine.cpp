@@ -146,6 +146,7 @@ struct CachedSabreTextures {
     GLuint covTex = 0;
     GLuint accumTex[2] = {0, 0};
     GLuint weightTex[2] = {0, 0};
+    GLuint resolvedRgbTex = 0;
     bool inUse = false;
 };
 
@@ -157,6 +158,7 @@ static std::mutex s_cacheMutex;
 static GLuint s_programStructureTensor = 0;
 static GLuint s_programAccumulate = 0;
 static GLuint s_programResolve = 0;
+static GLuint s_programMtf = 0;
 static std::mutex s_shaderMutex;
 static int s_shaderRefCount = 0;
 
@@ -242,15 +244,17 @@ bool GpuSabreEngine::ensureShaders() {
         s_programStructureTensor = compileComputeShader(kSabreStructureTensorComputeShader);
         s_programAccumulate = compileComputeShader(kSabreAccumulateComputeShader);
         s_programResolve = compileComputeShader(kSabreResolveComputeShader);
+        s_programMtf = compileComputeShader(kSabreMtfRestorationComputeShader);
 
-        if (!s_programStructureTensor || !s_programAccumulate || !s_programResolve) {
+        if (!s_programStructureTensor || !s_programAccumulate || !s_programResolve || !s_programMtf) {
             LOGE("GpuSabreEngine: failed to build one or more compute shaders");
             if (s_programStructureTensor != 0) { glDeleteProgram(s_programStructureTensor); s_programStructureTensor = 0; }
             if (s_programAccumulate != 0) { glDeleteProgram(s_programAccumulate); s_programAccumulate = 0; }
             if (s_programResolve != 0) { glDeleteProgram(s_programResolve); s_programResolve = 0; }
+            if (s_programMtf != 0) { glDeleteProgram(s_programMtf); s_programMtf = 0; }
             return false;
         }
-        LOGD("GpuSabreEngine: all 3 compute shaders built successfully (shared)");
+        LOGD("GpuSabreEngine: all 4 compute shaders built successfully (shared)");
     }
     s_shaderRefCount++;
     return true;
@@ -276,8 +280,12 @@ void GpuSabreEngine::releaseShaders() {
                     glDeleteProgram(s_programResolve);
                     s_programResolve = 0;
                 }
+                if (s_programMtf != 0) {
+                    glDeleteProgram(s_programMtf);
+                    s_programMtf = 0;
+                }
             }
-            LOGD("GpuSabreEngine: all 3 compute shaders released");
+            LOGD("GpuSabreEngine: all 4 compute shaders released");
         }
     }
 }
@@ -314,13 +322,14 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
             accumTex_[1] = s_cachedTextures.accumTex[1];
             weightTex_[0] = s_cachedTextures.weightTex[0];
             weightTex_[1] = s_cachedTextures.weightTex[1];
+            resolvedRgbTex_ = s_cachedTextures.resolvedRgbTex;
             s_cachedTextures.inUse = true;
             reusedFromCache_ = true;
             gotFromCache = true;
-            LOGD("GpuSabreEngine: reused cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=[%u,%u], weight=[%u,%u] (this=%p)",
+            LOGD("GpuSabreEngine: reused cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=[%u,%u], weight=[%u,%u], resolved=%u (this=%p)",
                  width_, height_, quadWidth_, quadHeight_,
                  refBayerTex_, candBayerTex_, covTex_,
-                 accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1], this);
+                 accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1], resolvedRgbTex_, this);
         } else if (s_cachedTextures.refBayerTex != 0 && !s_cachedTextures.inUse) {
             // Dimension changed or stale cache: release old cached textures
             glDeleteTextures(1, &s_cachedTextures.refBayerTex);
@@ -330,6 +339,7 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
             glDeleteTextures(1, &s_cachedTextures.accumTex[1]);
             glDeleteTextures(1, &s_cachedTextures.weightTex[0]);
             glDeleteTextures(1, &s_cachedTextures.weightTex[1]);
+            glDeleteTextures(1, &s_cachedTextures.resolvedRgbTex);
             s_cachedTextures = CachedSabreTextures();
             LOGD("GpuSabreEngine: destroyed stale cached textures of different dimensions");
         }
@@ -343,7 +353,8 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
             !createTexWithFallback(accumTex_[0], GL_RGBA32F, width_, height_) ||
             !createTexWithFallback(accumTex_[1], GL_RGBA32F, width_, height_) ||
             !createTexWithFallback(weightTex_[0], GL_RGBA32F, width_, height_) ||
-            !createTexWithFallback(weightTex_[1], GL_RGBA32F, width_, height_)) {
+            !createTexWithFallback(weightTex_[1], GL_RGBA32F, width_, height_) ||
+            !createTexWithFallback(resolvedRgbTex_, GL_RGBA16F, width_, height_)) {
             LOGE("GpuSabreEngine: failed to allocate storage textures");
             releaseTextures();
             return false;
@@ -361,12 +372,13 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
             s_cachedTextures.accumTex[1] = accumTex_[1];
             s_cachedTextures.weightTex[0] = weightTex_[0];
             s_cachedTextures.weightTex[1] = weightTex_[1];
+            s_cachedTextures.resolvedRgbTex = resolvedRgbTex_;
             s_cachedTextures.inUse = true;
             reusedFromCache_ = true;
-            LOGD("GpuSabreEngine: newly allocated and cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=[%u,%u], weight=[%u,%u] (this=%p)",
+            LOGD("GpuSabreEngine: newly allocated and cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=[%u,%u], weight=[%u,%u], resolved=%u (this=%p)",
                  width_, height_, quadWidth_, quadHeight_,
                  refBayerTex_, candBayerTex_, covTex_,
-                 accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1], this);
+                 accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1], resolvedRgbTex_, this);
         }
     }
 
@@ -399,8 +411,8 @@ void GpuSabreEngine::releaseTextures() {
     if (!ctxScope.isAcquired()) {
         return;
     }
-    LOGD("GpuSabreEngine::releaseTextures (this=%p): ref=%u, outRgb=%u, reusedFromCache=%d",
-         this, refBayerTex_, outputRgbTex_, reusedFromCache_);
+    LOGD("GpuSabreEngine::releaseTextures (this=%p): ref=%u, resolvedRgb=%u, outRgb=%u, reusedFromCache=%d",
+         this, refBayerTex_, resolvedRgbTex_, outputRgbTex_, reusedFromCache_);
 
     {
         std::lock_guard<std::mutex> cacheLock(s_cacheMutex);
@@ -413,6 +425,7 @@ void GpuSabreEngine::releaseTextures() {
             accumTex_[1] = 0;
             weightTex_[0] = 0;
             weightTex_[1] = 0;
+            resolvedRgbTex_ = 0;
             reusedFromCache_ = false;
             LOGD("GpuSabreEngine: returned intermediate textures to cache");
         }
@@ -425,6 +438,7 @@ void GpuSabreEngine::releaseTextures() {
     if (accumTex_[1] != 0) { glDeleteTextures(1, &accumTex_[1]); accumTex_[1] = 0; }
     if (weightTex_[0] != 0) { glDeleteTextures(1, &weightTex_[0]); weightTex_[0] = 0; }
     if (weightTex_[1] != 0) { glDeleteTextures(1, &weightTex_[1]); weightTex_[1] = 0; }
+    if (resolvedRgbTex_ != 0) { glDeleteTextures(1, &resolvedRgbTex_); resolvedRgbTex_ = 0; }
     if (flowTex_ != 0) { glDeleteTextures(1, &flowTex_); flowTex_ = 0; }
     if (outputRgbTex_ != 0) { glDeleteTextures(1, &outputRgbTex_); outputRgbTex_ = 0; }
 
@@ -446,6 +460,7 @@ void GpuSabreEngine::clearTexturePool() {
         glDeleteTextures(1, &s_cachedTextures.accumTex[1]);
         glDeleteTextures(1, &s_cachedTextures.weightTex[0]);
         glDeleteTextures(1, &s_cachedTextures.weightTex[1]);
+        glDeleteTextures(1, &s_cachedTextures.resolvedRgbTex);
         LOGD("GpuSabreEngine: cleared cached intermediate textures");
     }
     s_cachedTextures = CachedSabreTextures();
@@ -668,14 +683,14 @@ bool GpuSabreEngine::resolve(
 ) {
     auto startTime = std::chrono::high_resolution_clock::now();
     std::lock_guard<std::mutex> lock(mutex_);
-    LOGD("GpuSabreEngine::resolve: this=%p, sessionActive=%d, framesAccumulated=%d, ref=%u, cand=%u, cov=%u, flow=%u, accum=[%u,%u], weight=[%u,%u], outRgb=%u, width=%d, height=%d",
+    LOGD("GpuSabreEngine::resolve: this=%p, sessionActive=%d, framesAccumulated=%d, ref=%u, cand=%u, cov=%u, flow=%u, accum=[%u,%u], weight=[%u,%u], resolved=%u, outRgb=%u, width=%d, height=%d",
          this, sessionActive_ ? 1 : 0, framesAccumulated_,
          refBayerTex_, candBayerTex_, covTex_, flowTex_,
          accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1],
-         outputRgbTex_, width_, height_);
-    if (!sessionActive_ || framesAccumulated_ == 0 || outputRgbTex_ == 0) {
-        LOGE("GpuSabreEngine::resolve: failed check (this=%p): sessionActive=%d, framesAccumulated=%d, outputRgbTex=%u",
-             this, sessionActive_ ? 1 : 0, framesAccumulated_, outputRgbTex_);
+         resolvedRgbTex_, outputRgbTex_, width_, height_);
+    if (!sessionActive_ || framesAccumulated_ == 0 || outputRgbTex_ == 0 || resolvedRgbTex_ == 0) {
+        LOGE("GpuSabreEngine::resolve: failed check (this=%p): sessionActive=%d, framesAccumulated=%d, outputRgbTex=%u, resolvedRgbTex=%u",
+             this, sessionActive_ ? 1 : 0, framesAccumulated_, outputRgbTex_, resolvedRgbTex_);
         return false;
     }
 
@@ -686,7 +701,11 @@ bool GpuSabreEngine::resolve(
         return false;
     }
 
+    GLuint numGroupsX = (width_ + 15) / 16;
+    GLuint numGroupsY = (height_ + 15) / 16;
+
     // Dispatch Pass 3: Resolve & Guided Color Difference Recovery
+    // (outputs intermediate linear RGB into resolvedRgbTex_)
     glUseProgram(s_programResolve);
 
     // Image unit 0: Input Accumulation (readonly, RGBA32F)
@@ -697,11 +716,11 @@ bool GpuSabreEngine::resolve(
     glBindImageTexture(1, weightTex_[accumIdx_], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glUniform1i(glGetUniformLocation(s_programResolve, "uInWeightImg"), 1);
 
-    // Image unit 2: Output RGB Texture (writeonly, RGBA16F)
-    glBindImageTexture(2, outputRgbTex_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    // Image unit 2: Intermediate Resolved RGB Texture (writeonly, RGBA16F)
+    glBindImageTexture(2, resolvedRgbTex_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
     glUniform1i(glGetUniformLocation(s_programResolve, "uOutRgbImg"), 2);
 
-    const float wl = static_cast<float>(config_.whiteLevel);
+    const float wl = std::max(1.0f, static_cast<float>(config_.whiteLevel));
     const float bl_r = static_cast<float>(config_.blackLevel[0]);
     const float bl_g = 0.5f * (static_cast<float>(config_.blackLevel[1]) + static_cast<float>(config_.blackLevel[2]));
     const float bl_b = static_cast<float>(config_.blackLevel[3]);
@@ -711,17 +730,50 @@ bool GpuSabreEngine::resolve(
     glUniform1f(glGetUniformLocation(s_programResolve, "uWhiteLevel"), wl);
     glUniform4f(glGetUniformLocation(s_programResolve, "uBlackLevel"), bl_r, bl_g, bl_b, 0.0f);
 
-    GLuint numGroupsX = (width_ + 15) / 16;
-    GLuint numGroupsY = (height_ + 15) / 16;
     glDispatchCompute(numGroupsX, numGroupsY, 1);
 
-    // Memory barrier: texture fetch and framebuffer attachment barrier
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
+    // Memory barrier: wait for Pass 3 writes to complete before Pass 4 reads
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
-    // Explicitly unbind image units
+    // Explicitly unbind Pass 3 image units
     glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glBindImageTexture(1, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glBindImageTexture(2, 0, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    glUseProgram(0);
+
+    // Dispatch Pass 4: Physical MTF Inverse Restoration via Noise-Gated Deconvolution
+    // (reads resolvedRgbTex_ and writes restored RGB to outputRgbTex_)
+    glUseProgram(s_programMtf);
+
+    // Image unit 0: Input Resolved RGB (readonly, RGBA16F)
+    glBindImageTexture(0, resolvedRgbTex_, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+    glUniform1i(glGetUniformLocation(s_programMtf, "uInRgbImg"), 0);
+
+    // Image unit 1: Output Restored RGB (writeonly, RGBA16F)
+    glBindImageTexture(1, outputRgbTex_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    glUniform1i(glGetUniformLocation(s_programMtf, "uOutRgbImg"), 1);
+
+    glUniform1i(glGetUniformLocation(s_programMtf, "uWidth"), width_);
+    glUniform1i(glGetUniformLocation(s_programMtf, "uHeight"), height_);
+
+    // Normalized noise model: S / wl, O / (wl * wl)
+    const float normNoiseS = config_.noiseModelS / wl;
+    const float normNoiseO = config_.noiseModelO / (wl * wl);
+    glUniform2f(glGetUniformLocation(s_programMtf, "uNoiseModel"), normNoiseS, normNoiseO);
+
+    const float sharpenStrength = (config_.sharpenStrength > 0.0f) ? config_.sharpenStrength : 1.25f;
+    const float coringThreshold = (config_.coringThreshold > 0.0f) ? config_.coringThreshold : 2.0f;
+    glUniform1f(glGetUniformLocation(s_programMtf, "uSharpenStrength"), sharpenStrength);
+    glUniform1f(glGetUniformLocation(s_programMtf, "uCoringThreshold"), coringThreshold);
+
+    glDispatchCompute(numGroupsX, numGroupsY, 1);
+
+    // Memory barrier: wait for Pass 4 writes to complete for subsequent readback or texture fetch
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
+
+    // Explicitly unbind Pass 4 image units
+    glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+    glBindImageTexture(1, 0, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
     glUseProgram(0);
 
     if (outRgbTex) {
