@@ -646,7 +646,10 @@ bool GpuSabreEngine::accumulateFrameLocked(
     glUniform1f(glGetUniformLocation(s_programAccumulate, "uZoomFactor"), config_.zoomFactor);
     glUniform1f(glGetUniformLocation(s_programAccumulate, "uCropXStart"), cropXStart_);
     glUniform1f(glGetUniformLocation(s_programAccumulate, "uCropYStart"), cropYStart_);
-    glUniform2f(glGetUniformLocation(s_programAccumulate, "uNoiseModel"), config_.noiseModelS, config_.noiseModelO);
+    const float wl = std::max(1.0f, static_cast<float>(config_.whiteLevel));
+    const float dnNoiseS = config_.noiseModelS * wl;
+    const float dnNoiseO = config_.noiseModelO * (wl * wl);
+    glUniform2f(glGetUniformLocation(s_programAccumulate, "uNoiseModel"), dnNoiseS, dnNoiseO);
     glUniform1i(glGetUniformLocation(s_programAccumulate, "uIsRef"), isRef ? 1 : 0);
     glUniform1i(glGetUniformLocation(s_programAccumulate, "uIsFirstFrame"), (framesAccumulated_ == 0) ? 1 : 0);
     glUniform1i(glGetUniformLocation(s_programAccumulate, "uHasFlow"), hasFlow ? 1 : 0);
@@ -741,6 +744,7 @@ bool GpuSabreEngine::resolve(
     glUniform1i(glGetUniformLocation(s_programResolve, "uCfaPattern"), static_cast<int>(config_.cfa));
     glUniform1f(glGetUniformLocation(s_programResolve, "uWhiteLevel"), wl);
     glUniform4f(glGetUniformLocation(s_programResolve, "uBlackLevel"), bl_r, bl_g, bl_b, 0.0f);
+    glUniform1f(glGetUniformLocation(s_programResolve, "uZoomFactor"), config_.zoomFactor);
 
     glDispatchCompute(numGroupsX, numGroupsY, 1);
 
@@ -770,10 +774,8 @@ bool GpuSabreEngine::resolve(
     glUniform1i(glGetUniformLocation(s_programMtf, "uWidth"), width_);
     glUniform1i(glGetUniformLocation(s_programMtf, "uHeight"), height_);
 
-    // Normalized noise model: S / wl, O / (wl * wl)
-    const float normNoiseS = config_.noiseModelS / wl;
-    const float normNoiseO = config_.noiseModelO / (wl * wl);
-    glUniform2f(glGetUniformLocation(s_programMtf, "uNoiseModel"), normNoiseS, normNoiseO);
+    // Pass 4 operates in normalized [0, 1] luminance; config_ noise parameters are already normalized Camera2 values
+    glUniform2f(glGetUniformLocation(s_programMtf, "uNoiseModel"), config_.noiseModelS, config_.noiseModelO);
 
     const float sharpenStrength = (config_.sharpenStrength > 0.0f) ? config_.sharpenStrength : 1.25f;
     const float coringThreshold = (config_.coringThreshold > 0.0f) ? config_.coringThreshold : 2.0f;
