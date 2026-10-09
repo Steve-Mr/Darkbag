@@ -37,7 +37,11 @@ data class PhysicalCapturedFrame(
     val height: Int,
     val orientation: Int,
     val captureMetadata: CaptureMetadata?,
-    val timestamp: Long
+    val timestamp: Long,
+    val digitalGain: Float = 1.0f,
+    val lensShadingMap: FloatArray? = null,
+    val lensShadingRows: Int = 0,
+    val lensShadingCols: Int = 0
 )
 
 data class MultiCameraCaptureResult(
@@ -752,7 +756,11 @@ class MultiCameraCaptureManager(
                 val dngPath = collectedDngPaths[lens.physicalId]
                 if (jpegPair == null && dngPath == null) return
 
-                val metadata = createMetadataFromCaptureResult(physicalCaptureResults[lens.physicalId], lens)
+                val captureRes = physicalCaptureResults[lens.physicalId]
+                val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
+                val metadata = createMetadataFromCaptureResult(captureRes, lens, captureTimestamp)
+                val digitalGain = calculateDigitalGain(captureRes, chars)
+                val lscTriple = top.maary.darkbag.processor.SensorCalibrationHelper.extractLensShading(captureRes)
                 val frame = PhysicalCapturedFrame(
                     lens = lens,
                     jpegData = jpegPair?.first,
@@ -761,7 +769,11 @@ class MultiCameraCaptureManager(
                     height = jpegPair?.second?.height ?: 3000,
                     orientation = orientationDegrees,
                     captureMetadata = metadata,
-                    timestamp = captureTimestamp
+                    timestamp = captureTimestamp,
+                    digitalGain = digitalGain,
+                    lensShadingMap = lscTriple.first,
+                    lensShadingRows = lscTriple.second,
+                    lensShadingCols = lscTriple.third
                 )
                 collectedFrames[lens.physicalId] = frame
             }
@@ -788,7 +800,18 @@ class MultiCameraCaptureManager(
                             val captureRes = withTimeoutOrNull(2500L) { resultDeferredMap[lens.physicalId]?.await() }
                             if (captureRes != null) {
                                 val isPrimary = lens.physicalId == (currentPrimaryLens?.physicalId ?: expectedLenses.first().physicalId)
-                                val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId, isHdrPlus = isHdrPlusActive && isPrimary)
+                                val digitalGain = calculateDigitalGain(captureRes, chars)
+                                val metadata = createMetadataFromCaptureResult(captureRes, lens, captureTimestamp)
+                                val tempPath = writeDngToFile(
+                                    rawImage = image,
+                                    chars = chars,
+                                    captureResult = captureRes,
+                                    orientationDegrees = orientationDegrees,
+                                    lens = lens,
+                                    isHdrPlus = isHdrPlusActive && isPrimary,
+                                    metadata = metadata,
+                                    digitalGain = digitalGain
+                                )
                                 if (tempPath != null) {
                                     collectedDngPaths[lens.physicalId] = tempPath
                                 }
@@ -900,7 +923,10 @@ class MultiCameraCaptureManager(
                     if (jpegPair == null && dngPath == null) return
 
                     val result = resultDeferredMap[l.physicalId]?.let { if (it.isCompleted) it.getCompleted() else null }
-                    val metadata = createMetadataFromCaptureResult(result, l)
+                    val chars = l.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, l.physicalId)
+                    val metadata = createMetadataFromCaptureResult(result, l, captureTimestamp)
+                    val digitalGain = calculateDigitalGain(result, chars)
+                    val lscTriple = top.maary.darkbag.processor.SensorCalibrationHelper.extractLensShading(result)
                     val frame = PhysicalCapturedFrame(
                         lens = l,
                         jpegData = jpegPair?.first,
@@ -909,7 +935,11 @@ class MultiCameraCaptureManager(
                         height = jpegPair?.second?.height ?: 3000,
                         orientation = orientationDegrees,
                         captureMetadata = metadata,
-                        timestamp = captureTimestamp
+                        timestamp = captureTimestamp,
+                        digitalGain = digitalGain,
+                        lensShadingMap = lscTriple.first,
+                        lensShadingRows = lscTriple.second,
+                        lensShadingCols = lscTriple.third
                     )
                     collectedFrames[l.physicalId] = frame
                 }
@@ -934,7 +964,17 @@ class MultiCameraCaptureManager(
                             val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
                             val captureRes = withTimeoutOrNull(2500L) { resultDeferredMap[lens.physicalId]?.await() }
                             if (captureRes != null) {
-                                val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId)
+                                val digitalGain = calculateDigitalGain(captureRes, chars)
+                                val metadata = createMetadataFromCaptureResult(captureRes, lens, captureTimestamp)
+                                val tempPath = writeDngToFile(
+                                    rawImage = image,
+                                    chars = chars,
+                                    captureResult = captureRes,
+                                    orientationDegrees = orientationDegrees,
+                                    lens = lens,
+                                    metadata = metadata,
+                                    digitalGain = digitalGain
+                                )
                                 if (tempPath != null) {
                                     collectedDngPaths[lens.physicalId] = tempPath
                                 }
@@ -1025,7 +1065,18 @@ class MultiCameraCaptureManager(
                                     val chars = primaryLens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, primaryLens.physicalId)
                                     val captureRes = withTimeoutOrNull(2500L) { resultDeferred.await() }
                                     if (captureRes != null) {
-                                        val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, primaryLens.physicalId, isHdrPlus = isHdrPlusActive)
+                                        val digitalGain = calculateDigitalGain(captureRes, chars)
+                                        val metadata = createMetadataFromCaptureResult(captureRes, primaryLens, captureTimestamp)
+                                        val tempPath = writeDngToFile(
+                                            rawImage = image,
+                                            chars = chars,
+                                            captureResult = captureRes,
+                                            orientationDegrees = orientationDegrees,
+                                            lens = primaryLens,
+                                            isHdrPlus = isHdrPlusActive,
+                                            metadata = metadata,
+                                            digitalGain = digitalGain
+                                        )
                                         dngDeferred.complete(tempPath)
                                     } else {
                                         Log.e(TAG, "Primary captureResult timed out")
@@ -1062,7 +1113,10 @@ class MultiCameraCaptureManager(
                     val dngPath = if (primaryRawReader != null) withTimeoutOrNull(3000L) { dngDeferred.await() } else null
 
                     if (jpegDataPair != null || dngPath != null) {
-                        val metadata = createMetadataFromCaptureResult(captureRes, primaryLens)
+                        val chars = primaryLens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, primaryLens.physicalId)
+                        val metadata = createMetadataFromCaptureResult(captureRes, primaryLens, captureTimestamp)
+                        val digitalGain = calculateDigitalGain(captureRes, chars)
+                        val lscTriple = top.maary.darkbag.processor.SensorCalibrationHelper.extractLensShading(captureRes)
                         collectedFrames.add(
                             PhysicalCapturedFrame(
                                 lens = primaryLens,
@@ -1072,7 +1126,11 @@ class MultiCameraCaptureManager(
                                 height = jpegDataPair?.second?.height ?: 3000,
                                 orientation = orientationDegrees,
                                 captureMetadata = metadata,
-                                timestamp = captureTimestamp
+                                timestamp = captureTimestamp,
+                                digitalGain = digitalGain,
+                                lensShadingMap = lscTriple.first,
+                                lensShadingRows = lscTriple.second,
+                                lensShadingCols = lscTriple.third
                             )
                         )
                     }
@@ -1209,7 +1267,17 @@ class MultiCameraCaptureManager(
                             val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
                             val captureRes = withTimeoutOrNull(2500L) { resultDeferred.await() }
                             if (captureRes != null) {
-                                val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId)
+                                val digitalGain = calculateDigitalGain(captureRes, chars)
+                                val metadata = createMetadataFromCaptureResult(captureRes, lens, System.currentTimeMillis())
+                                val tempPath = writeDngToFile(
+                                    rawImage = image,
+                                    chars = chars,
+                                    captureResult = captureRes,
+                                    orientationDegrees = orientationDegrees,
+                                    lens = lens,
+                                    metadata = metadata,
+                                    digitalGain = digitalGain
+                                )
                                 dngDeferred.complete(tempPath)
                             } else {
                                 Log.e(TAG, "CaptureResult timed out for relay lens ${lens.name}")
@@ -1296,7 +1364,10 @@ class MultiCameraCaptureManager(
             val dngPath = if (rawReader != null) withTimeoutOrNull(3000L) { dngDeferred.await() } else null
 
             if (jpegDataPair != null || dngPath != null) {
-                val metadata = createMetadataFromCaptureResult(captureRes, lens)
+                val captureTime = System.currentTimeMillis()
+                val metadata = createMetadataFromCaptureResult(captureRes, lens, captureTime)
+                val digitalGain = calculateDigitalGain(captureRes, chars)
+                val lscTriple = top.maary.darkbag.processor.SensorCalibrationHelper.extractLensShading(captureRes)
                 PhysicalCapturedFrame(
                     lens = lens,
                     jpegData = jpegDataPair?.first,
@@ -1305,7 +1376,11 @@ class MultiCameraCaptureManager(
                     height = jpegDataPair?.second?.height ?: 3000,
                     orientation = orientationDegrees,
                     captureMetadata = metadata,
-                    timestamp = System.currentTimeMillis()
+                    timestamp = captureTime,
+                    digitalGain = digitalGain,
+                    lensShadingMap = lscTriple.first,
+                    lensShadingRows = lscTriple.second,
+                    lensShadingCols = lscTriple.third
                 )
             } else {
                 null
@@ -1322,20 +1397,35 @@ class MultiCameraCaptureManager(
         }
     }
 
+    private fun calculateDigitalGain(result: CaptureResult?, chars: CameraCharacteristics?): Float {
+        val postRawBoost = result?.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST)
+        val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+        val validIsoRange = chars?.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE) ?: android.util.Range(100, 3200)
+        return if (postRawBoost != null && postRawBoost > 100) {
+            postRawBoost / 100.0f
+        } else if (curIso > validIsoRange.upper && validIsoRange.upper > 0) {
+            curIso.toFloat() / validIsoRange.upper.toFloat()
+        } else {
+            1.0f
+        }
+    }
+
     private fun writeDngToFile(
         rawImage: Image,
         chars: CameraCharacteristics,
         captureResult: TotalCaptureResult?,
         orientationDegrees: Int,
-        lensId: String,
-        isHdrPlus: Boolean = false
+        lens: PhysicalLensInfo,
+        isHdrPlus: Boolean = false,
+        metadata: CaptureMetadata? = null,
+        digitalGain: Float = 1.0f
     ): String? {
         return try {
             if (captureResult == null) {
-                Log.e(TAG, "Cannot create DNG: captureResult is null for lens $lensId")
+                Log.e(TAG, "Cannot create DNG: captureResult is null for lens ${lens.name}")
                 return null
             }
-            val tempFile = File(context.cacheDir, "dng_${lensId}_${System.currentTimeMillis()}.dng")
+            val tempFile = File(context.cacheDir, "dng_${lens.physicalId}_${System.currentTimeMillis()}.dng")
             val success = top.maary.darkbag.processor.ColorProcessor.writeRawImageToDng(
                 rawImage = rawImage,
                 chars = chars,
@@ -1343,17 +1433,19 @@ class MultiCameraCaptureManager(
                 orientationDegrees = orientationDegrees,
                 outputPath = tempFile.absolutePath,
                 dngCompressionMode = 0, // Lossless JPEG 16-bit compression
-                isHdrPlus = isHdrPlus
+                isHdrPlus = isHdrPlus,
+                metadata = metadata,
+                digitalGain = digitalGain
             )
             if (success) {
                 Log.i(TAG, "Successfully written compressed DNG via native write_dng to ${tempFile.absolutePath} (${tempFile.length()} bytes)")
                 tempFile.absolutePath
             } else {
-                Log.e(TAG, "Native write_dng failed for lens $lensId")
+                Log.e(TAG, "Native write_dng failed for lens ${lens.name}")
                 null
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to write DNG file for lens $lensId", e)
+            Log.e(TAG, "Failed to write DNG file for lens ${lens.name}", e)
             null
         }
     }
@@ -1371,13 +1463,18 @@ class MultiCameraCaptureManager(
         return sizes?.maxByOrNull { it.width * it.height } ?: Size(4000, 3000)
     }
 
-    private fun createMetadataFromCaptureResult(result: CaptureResult?, lens: PhysicalLensInfo): CaptureMetadata {
+    private fun createMetadataFromCaptureResult(
+        result: CaptureResult?,
+        lens: PhysicalLensInfo,
+        captureTime: Long = System.currentTimeMillis()
+    ): CaptureMetadata {
         val chars = lens.characteristics
         val focalLength = lens.focalLength
         val focalLength35mm = lens.equivalentFocalLength.toInt()
         val iso = result?.get(CaptureResult.SENSOR_SENSITIVITY)
         val expTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME)
         val fNumber = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.firstOrNull()
+        val offset = SimpleDateFormat("XXX", Locale.US).format(Date(captureTime))
 
         return CaptureMetadata(
             iso = iso,
@@ -1385,9 +1482,16 @@ class MultiCameraCaptureManager(
             fNumber = fNumber,
             focalLength = focalLength,
             focalLengthIn35mmFilm = focalLength35mm,
-            dateTimeOriginal = System.currentTimeMillis(),
-            make = Build.MANUFACTURER,
-            model = Build.MODEL,
+            dateTimeOriginal = captureTime,
+            dateTimeDigitized = captureTime,
+            offsetTime = offset,
+            offsetTimeOriginal = offset,
+            offsetTimeDigitized = offset,
+            make = DarkbagIdentity.normalizedManufacturer(),
+            model = DarkbagIdentity.normalizedModel(),
+            uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(lens.physicalId),
+            software = DarkbagIdentity.softwareString(isHdrPlus = false),
+            imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = false),
             lensModel = "${lens.name} (${lens.type})"
         )
     }

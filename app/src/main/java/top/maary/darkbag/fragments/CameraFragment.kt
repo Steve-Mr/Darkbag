@@ -4544,6 +4544,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             onResult = { result ->
                 timing?.recordFrameArrival()
                 timing?.recordShutterReady()
+                lifecycleScope.launch(Dispatchers.Main) {
+                    isBurstActive = false
+                    cameraViewModel.setBurstActive(false)
+                    resetBurstUi()
+                }
                 lifecycleScope.launch(Dispatchers.IO) {
                     val frontJpeg = withTimeoutOrNull(2000L) { frontJpegDeferred.await() }
                     processAndSaveMultiCameraResult(result, saveRaw, frontJpeg, timing)
@@ -4597,16 +4602,18 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 if (f.exists()) f.absolutePath else null
             } else null
 
+            val colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
             val currentEditConfig = top.maary.darkbag.models.EditConfig(
                 log = currentLog,
-                lut = currentLut
+                lut = currentLut,
+                colorEngineMode = colorEngineMode
             )
 
             for (frame in result.frames) {
                 val frameBaseName = "${result.baseName}_MULTI_${frame.lens.name}"
                 var jpgPathToSave: String? = null
 
-                // 1. If we have a valid DNG, render it through ColorProcessor (LibRaw + LOG + 3D LUT)
+                // 1. If we have a valid DNG, render it through ColorProcessor (LibRaw + LOG + 3D LUT + LensShading)
                 if (frame.tempDngPath != null) {
                     val dngFile = File(frame.tempDngPath)
                     if (dngFile.exists() && dngFile.length() > 0) {
@@ -4623,7 +4630,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             shadows = 0f,
                             whites = 0f,
                             blacks = 0f,
-                            digitalGain = 1.0f,
+                            digitalGain = frame.digitalGain,
                             outputJpgPath = renderedFile.absolutePath,
                             outputTiffPath = null,
                             useGpu = true,
@@ -4634,7 +4641,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             zoomFactor = 1.0f,
                             metadata = frame.captureMetadata,
                             enableMemoryColor = false,
-                            colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
+                            colorEngineMode = colorEngineMode,
+                            lensShadingMap = frame.lensShadingMap,
+                            lensShadingRows = frame.lensShadingRows,
+                            lensShadingCols = frame.lensShadingCols
                         )
                         if (ret >= 0 && renderedFile.exists() && renderedFile.length() > 0) {
                             jpgPathToSave = renderedFile.absolutePath

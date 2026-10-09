@@ -1658,7 +1658,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
     jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols,
     jintArray activeArea, jdoubleArray noiseProfile,
     jint iso, jlong exposureTimeNanos, jfloat focalLength, jint focalLength35mm, jfloat fNumber,
-    jint dngCompressionMode, jboolean isHdrPlus
+    jint dngCompressionMode, jboolean isHdrPlus,
+    jobject metadataObj, jfloat digitalGain
 ) {
     if (!rawBuffer || width <= 0 || height <= 0 || bufferOffset < 0) return JNI_FALSE;
     jlong capacity = env->GetDirectBufferCapacity(rawBuffer);
@@ -1748,12 +1749,17 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
     }
 
     ImageMetadata meta;
-    meta.iso = iso;
-    meta.exposureTime = exposureTimeNanos;
-    meta.focalLength = focalLength;
-    meta.focalLengthIn35mmFilm = focalLength35mm;
-    meta.fNumber = fNumber;
-    meta.uniqueCameraModel = "Darkbag";
+    if (metadataObj) {
+        meta = metadataFromJava(env, metadataObj);
+    }
+    if (meta.iso == 0) meta.iso = iso;
+    if (meta.exposureTime == 0) meta.exposureTime = exposureTimeNanos;
+    if (meta.focalLength == 0.0f) meta.focalLength = focalLength;
+    if (meta.focalLengthIn35mmFilm == 0) meta.focalLengthIn35mmFilm = focalLength35mm;
+    if (meta.fNumber == 0.0f) meta.fNumber = fNumber;
+    if (meta.uniqueCameraModel.empty() || meta.uniqueCameraModel == "Unknown") {
+        meta.uniqueCameraModel = "Darkbag";
+    }
 
     std::vector<float> ccmVec(9, 0.0f);
     if (fm1Ptr) {
@@ -1778,7 +1784,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
         ccmVec = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
     }
 
-    float baselineExposure = 0.0f;
+    float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
     std::vector<float> wbVec = {1.0f, 1.0f, 1.0f, 1.0f};
     if (neutralPtr) {
         wbVec[0] = 1.0f / std::max(1e-4f, neutralPtr[0]);

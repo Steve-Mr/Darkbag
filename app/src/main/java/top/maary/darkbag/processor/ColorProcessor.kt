@@ -107,7 +107,10 @@ object ColorProcessor {
         zoomFactor: Float = 1.0f,
         metadata: CaptureMetadata? = null,
         enableMemoryColor: Boolean = false,
-        colorEngineMode: Int = 0
+        colorEngineMode: Int = 0,
+        lensShadingMap: FloatArray? = null,
+        lensShadingRows: Int = 0,
+        lensShadingCols: Int = 0
     ): Int
 
     /**
@@ -430,7 +433,9 @@ object ColorProcessor {
         focalLength35mm: Int,
         fNumber: Float,
         dngCompressionMode: Int,
-        isHdrPlus: Boolean
+        isHdrPlus: Boolean,
+        metadata: CaptureMetadata? = null,
+        digitalGain: Float = 1.0f
     ): Boolean
 
     fun writeRawImageToDng(
@@ -440,7 +445,9 @@ object ColorProcessor {
         orientationDegrees: Int,
         outputPath: String,
         dngCompressionMode: Int = 0,
-        isHdrPlus: Boolean = false
+        isHdrPlus: Boolean = false,
+        metadata: CaptureMetadata? = null,
+        digitalGain: Float = 1.0f
     ): Boolean {
         val plane = rawImage.planes[0]
         val buffer = plane.buffer
@@ -525,7 +532,9 @@ object ColorProcessor {
             focalLength35mm = focalLength35mm,
             fNumber = fNumber,
             dngCompressionMode = dngCompressionMode,
-            isHdrPlus = isHdrPlus
+            isHdrPlus = isHdrPlus,
+            metadata = metadata,
+            digitalGain = digitalGain
         )
     }
 }
