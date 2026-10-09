@@ -1,4 +1,5 @@
 #include "GpuInputTexture.h"
+#include "GpuContext.h"
 #include <android/log.h>
 #include <vector>
 
@@ -133,6 +134,8 @@ void GpuInputTexture::bind(GLint locR, GLint locG, GLint locB, int baseUnit) {
 }
 
 void GpuInputTexture::release() {
+    GpuContext& ctx = GpuContext::instance();
+    GpuContextScope ctxScope(ctx);
     if (texR_ != 0) { glDeleteTextures(1, &texR_); texR_ = 0; }
     if (texG_ != 0) { glDeleteTextures(1, &texG_); texG_ = 0; }
     if (texB_ != 0) { glDeleteTextures(1, &texB_); texB_ = 0; }

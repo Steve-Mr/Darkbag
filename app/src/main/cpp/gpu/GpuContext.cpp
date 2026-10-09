@@ -141,10 +141,12 @@ bool GpuContext::initExtensions() {
     glGetIntegerv(GL_MINOR_VERSION, &minor);
     glMajorVersion_ = major;
     glMinorVersion_ = minor;
-    hasComputeSupport_ = (major > 3 || (major == 3 && minor >= 1));
-
-    if (hasComputeSupport_) {
+    bool glesCompute = (major > 3 || (major == 3 && minor >= 1));
+    if (glesCompute) {
         glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS, &maxWorkGroupInvocations_);
+        hasComputeSupport_ = (maxWorkGroupInvocations_ >= 256);
+    } else {
+        hasComputeSupport_ = false;
     }
 
     LOGD("EGL & AHB Extension Status: AHB Direct EGLImage=%s, SyncFence=%s",

@@ -623,9 +623,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                     LOGD("Lazy readback of GPU unified texture %u for Bayer fallback DNG export (%dx%d)",
                          sharedResult->gpuRgbTexture, width, height);
                     sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
-                    darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                    bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
                         sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
                     );
+                    if (!okRb) {
+                        LOGE("GPU readback failed for Bayer fallback DNG export");
+                        sharedResult->rgbBuf.clear();
+                    }
                 }
                 dngRawData = sharedResult->rgbBuf.data();
                 dngStrideX = 1;
@@ -640,9 +644,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                 LOGD("Lazy readback of GPU unified texture %u for Linear DNG export (%dx%d)",
                      sharedResult->gpuRgbTexture, width, height);
                 sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
-                darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
                     sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
                 );
+                if (!okRb) {
+                    LOGE("GPU readback failed for Linear DNG export");
+                    sharedResult->rgbBuf.clear();
+                }
             }
             dngRawData = sharedResult->rgbBuf.data();
             dngStrideX = 1;
@@ -678,6 +686,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         LOGD("Exporting JPG: JPG=%s (outJpgFd=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd);
         auto jpgStart = std::chrono::high_resolution_clock::now();
         float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
+        float physicalZoom = zoomFactor;
         const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : wbVec.data();
         int64_t measuredColorPipe = 0;
         int64_t measuredJpegEncode = 0;
@@ -699,7 +708,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                     orientation, (bool)mirror, effectiveZoom,
                     (int)colorEngineMode, faithfulHighlights,
                     &measuredColorPipe, &measuredJpegEncode,
-                    lens_shading_ptr, lensShadingRows, lensShadingCols
+                    lens_shading_ptr, lensShadingRows, lensShadingCols,
+                    physicalZoom
                 );
             } else if (sharedResult && !sharedResult->rgbBuf.empty()) {
                 gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImage(
@@ -715,7 +725,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                     orientation, (bool)mirror, effectiveZoom,
                     (int)colorEngineMode, faithfulHighlights,
                     &measuredColorPipe, &measuredJpegEncode,
-                    lens_shading_ptr, lensShadingRows, lensShadingCols
+                    lens_shading_ptr, lensShadingRows, lensShadingCols,
+                    physicalZoom
                 );
             }
             if (gpuAttemptSuccess) {
@@ -733,9 +744,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                 LOGW("Lazy readback of GPU unified texture %u for CPU ColorPipe fallback (%dx%d)",
                      sharedResult->gpuRgbTexture, width, height);
                 sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
-                darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
                     sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
                 );
+                if (!okRb) {
+                    LOGE("GPU readback failed for CPU ColorPipe fallback");
+                    sharedResult->rgbBuf.clear();
+                }
             }
             if (sharedResult && !sharedResult->rgbBuf.empty()) {
                 saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height,
@@ -1495,9 +1510,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
                 LOGD("Lazy readback of GPU unified texture %u for streaming finish outputBitmap preview (%dx%d)",
                      sharedResult->gpuRgbTexture, width, height);
                 sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
-                darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
                     sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
                 );
+                if (!okRb) {
+                    LOGE("GPU readback failed for streaming finish outputBitmap preview");
+                    sharedResult->rgbBuf.clear();
+                }
             }
             uint16_t* raw_ptr = sharedResult->rgbBuf.data();
             int stride_x = 1;
@@ -1728,7 +1747,23 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
     meta.uniqueCameraModel = "Darkbag";
 
     std::vector<float> ccmVec(9, 0.0f);
-    if (cm1Ptr) {
+    if (fm1Ptr) {
+        // D50 XYZ -> sRGB Bradford adaptation matrix to map ForwardMatrix1 to sRGB
+        const float M_XYZ_D50_TO_SRGB[9] = {
+             3.1338561f, -1.6168667f, -0.4906146f,
+            -0.9787684f,  1.9161415f,  0.0334540f,
+             0.0719453f, -0.2289914f,  1.4052427f
+        };
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) {
+                float sum = 0.0f;
+                for (int k = 0; k < 3; ++k) {
+                    sum += M_XYZ_D50_TO_SRGB[r * 3 + k] * fm1Ptr[k * 3 + c];
+                }
+                ccmVec[r * 3 + c] = sum;
+            }
+        }
+    } else if (cm1Ptr) {
         for (int i = 0; i < 9; ++i) ccmVec[i] = cm1Ptr[i];
     } else {
         ccmVec = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};

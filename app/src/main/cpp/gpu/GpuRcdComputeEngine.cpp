@@ -553,6 +553,8 @@ bool GpuRcdComputeEngine::demosaicToCpuBuffer(
 }
 
 void GpuRcdComputeEngine::release() {
+    GpuContext& ctx = GpuContext::instance();
+    GpuContextScope ctxScope(ctx);
     releaseTextures();
     if (programPassA_ != 0) {
         glDeleteProgram(programPassA_);

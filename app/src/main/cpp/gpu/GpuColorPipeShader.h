@@ -10,8 +10,10 @@ layout(location = 1) in vec2 aTexCoord;
 uniform int uOrientation;
 uniform int uMirror;
 uniform float uZoomFactor;
+uniform float uPhysicalZoomFactor;
 
 out vec2 vTexCoord;
+out vec2 vLscTexCoord;
 
 void main() {
     gl_Position = vec4(aPosition, 0.0, 1.0);
@@ -31,7 +33,14 @@ void main() {
         tc = vec2(1.0 - tc.y, tc.x);
     }
 
-    // Apply zoom crop around center
+    // Physical lens shading coordinates (tied to sensor optics geometry)
+    vec2 lscTc = tc;
+    if (uPhysicalZoomFactor > 1.001) {
+        lscTc = (lscTc - 0.5) / uPhysicalZoomFactor + 0.5;
+    }
+    vLscTexCoord = lscTc;
+
+    // Apply zoom crop around center for input texture
     if (uZoomFactor > 1.001) {
         tc = (tc - 0.5) / uZoomFactor + 0.5;
     }
@@ -75,6 +84,7 @@ uniform float uWhites;
 uniform float uBlacks;
 
 in vec2 vTexCoord;
+in vec2 vLscTexCoord;
 out vec4 fragColor;
 
 // 1. High-precision base-10 log helper
@@ -289,7 +299,7 @@ void main() {
     }
     // 1.5 Lens Shading Correction (Hardware Sensor GainMap)
     if (uHasLsc != 0) {
-        vec4 lscGain = texture(uTexLsc, vTexCoord);
+        vec4 lscGain = texture(uTexLsc, vLscTexCoord);
         rawR *= lscGain.r;
         rawG *= lscGain.g;
         rawB *= lscGain.b;

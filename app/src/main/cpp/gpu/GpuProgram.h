@@ -32,6 +32,7 @@ struct ColorPipeUniforms {
     GLint uOrientation = -1;
     GLint uMirror = -1;
     GLint uZoomFactor = -1;
+    GLint uPhysicalZoomFactor = -1;
 };
 
 class GpuProgram {
