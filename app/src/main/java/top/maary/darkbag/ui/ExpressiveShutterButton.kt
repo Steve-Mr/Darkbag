@@ -42,6 +42,8 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     }
 
     private var shapePath = Path()
+    private val shapeRegion = Region()
+    private val shapeBounds = RectF()
     private var progress = 0f
     private var dotRotation = 0f
     private var isRotating = false
@@ -105,6 +107,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     }
 
     override fun setEnabled(enabled: Boolean) {
+        if (isEnabled == enabled) return
         super.setEnabled(enabled)
         updatePaintColors()
         invalidate()
@@ -135,6 +138,8 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         )
 
         shapePath = polygon.toPath()
+        shapePath.computeBounds(shapeBounds, true)
+        shapeRegion.setPath(shapePath, Region(shapeBounds.left.toInt(), shapeBounds.top.toInt(), shapeBounds.right.toInt(), shapeBounds.bottom.toInt()))
 
         // Create Ripple with Star Mask
         val rippleColor = MaterialColors.getColor(this, android.R.attr.colorControlHighlight)
@@ -242,11 +247,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
 
     private fun isPointInsidePath(x: Float, y: Float): Boolean {
         if (shapePath.isEmpty) return false
-        val rectF = RectF()
-        shapePath.computeBounds(rectF, true)
-        val region = Region()
-        region.setPath(shapePath, Region(rectF.left.toInt(), rectF.top.toInt(), rectF.right.toInt(), rectF.bottom.toInt()))
-        return region.contains(x.toInt(), y.toInt())
+        return shapeRegion.contains(x.toInt(), y.toInt())
     }
 
     fun setProgress(value: Float) {

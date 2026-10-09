@@ -17,7 +17,18 @@
 @file:SuppressLint("RestrictedApi")
 package top.maary.darkbag.fragments
 
+import androidx.fragment.app.viewModels
+import top.maary.darkbag.camera.session.Camera2SessionController
+import top.maary.darkbag.camera.session.CameraSessionState
+import top.maary.darkbag.viewmodel.CameraViewModel
+import top.maary.darkbag.viewmodel.CameraUiState
+import top.maary.darkbag.viewmodel.CameraEffect
+import top.maary.darkbag.viewmodel.CameraUserIntent
 import top.maary.darkbag.models.StandardTimingTracker
+import top.maary.darkbag.modes.CaptureMode
+import top.maary.darkbag.modes.CaptureModeCoordinator
+import top.maary.darkbag.modes.ModeCoordinatorFactory
+import top.maary.darkbag.modes.ModeExecutionContext
 import top.maary.darkbag.ui.ExpressiveShutterButton
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.LensInfo
@@ -33,6 +44,7 @@ import android.annotation.SuppressLint
 import android.content.*
 import android.content.ContentUris
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.SurfaceTexture
 import android.hardware.display.DisplayManager
@@ -144,9 +156,15 @@ class CameraFragment : Fragment() {
     private var lensFacing: Int = CameraCharacteristics.LENS_FACING_BACK
     private lateinit var windowMetricsCalculator: WindowMetricsCalculator
 
-    // Camera2 State
-    private var camera2Device: android.hardware.camera2.CameraDevice? = null
-    @Volatile private var camera2Session: android.hardware.camera2.CameraCaptureSession? = null
+    // Camera2 State & Controller
+    private val sessionController = Camera2SessionController()
+    private val cameraViewModel: CameraViewModel by viewModels()
+    private var camera2Device: android.hardware.camera2.CameraDevice?
+        get() = sessionController.cameraDevice
+        set(value) {}
+    private var camera2Session: android.hardware.camera2.CameraCaptureSession?
+        get() = sessionController.captureSession
+        set(value) {}
     private var camera2PreviewSurface: android.view.Surface? = null
     private var rawImageReader: android.media.ImageReader? = null
     private var analysisImageReader: android.media.ImageReader? = null
@@ -154,8 +172,8 @@ class CameraFragment : Fragment() {
         requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
     }
 
-    private var camera2Thread: HandlerThread? = null
-    private var camera2Handler: Handler? = null
+    private val camera2Handler: Handler?
+        get() = sessionController.backgroundHandler
     private val camera2Lock = kotlinx.coroutines.sync.Mutex()
 
     private var lutProcessor: LutSurfaceProcessor? = null
@@ -289,14 +307,150 @@ class CameraFragment : Fragment() {
         _fragmentCameraBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
     }
 
-    enum class CaptureMode(val key: String) {
-        NORMAL(SettingsFragment.MODE_NORMAL),
-        HALF_FRAME_SBS(SettingsFragment.MODE_HALF_FRAME_SBS),
-        HALF_FRAME_TB(SettingsFragment.MODE_HALF_FRAME_TB),
-        MULTI_CAMERA(SettingsFragment.MODE_MULTI_CAMERA);
+    private var activeCoordinator: CaptureModeCoordinator? = null
 
-        companion object {
-            fun fromKey(key: String?): CaptureMode? = entries.find { it.key == key }
+    private fun updateActiveCoordinator(mode: CaptureMode) {
+        if (activeCoordinator?.mode != mode) {
+            activeCoordinator?.onDeactivated()
+            activeCoordinator = ModeCoordinatorFactory.create(mode, modeExecutionContext)
+            activeCoordinator?.onActivated()
+            cameraViewModel.setMode(mode)
+        }
+    }
+
+    private val modeExecutionContext by lazy {
+        object : ModeExecutionContext {
+            override val context: Context
+                get() = requireContext()
+
+            override val preferences: SharedPreferences
+                get() = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+
+            override val isHdrPlusEnabled: Boolean
+                get() = this@CameraFragment.isHdrPlusEnabled
+
+            override val isRawSupported: Boolean
+                get() = this@CameraFragment.isRawSupported
+
+            override val deviceOrientationDegrees: Int
+                get() = this@CameraFragment.deviceOrientationDegrees
+
+            override fun canTriggerCapture(): Boolean {
+                if (isBurstActive) return false
+                val prefs = preferences
+                val burstStrategy = prefs.getString(
+                    SettingsFragment.KEY_BURST_PROCESSING_STRATEGY,
+                    SettingsFragment.BURST_STRATEGY_BALANCED
+                )
+                val maxQueue = if (burstStrategy == SettingsFragment.BURST_STRATEGY_AGGRESSIVE) 8 else 3
+                if (!top.maary.darkbag.processor.HdrPlusRequestManager.canAcceptNewTask(maxQueue, requireContext())) {
+                    val pending = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value
+                    val msg = if (pending >= maxQueue) {
+                        "Queue full: processing $pending photos, please wait..."
+                    } else {
+                        "System memory low, waiting for processing to complete..."
+                    }
+                    Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+                    return false
+                }
+                return true
+            }
+
+            override fun showShutterVisuals() {
+                isBurstActive = true
+                cameraViewModel.setBurstActive(true)
+                cameraUiContainerBinding?.cameraCaptureButton?.apply {
+                    setProgress(0f)
+                    startRotation()
+                    isEnabled = false
+                }
+                showShutterBlackout()
+            }
+
+            override fun captureViewFinderSnapshot(): Bitmap? {
+                val vf = _fragmentCameraBinding?.viewFinder ?: return null
+                if (vf.width <= 0 || vf.height <= 0) return null
+                val targetW = (vf.width / 4).coerceAtLeast(1)
+                val targetH = (vf.height / 4).coerceAtLeast(1)
+                return try {
+                    vf.getBitmap(targetW, targetH).also { bmp ->
+                        pendingVfSnapshot = bmp
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+            }
+
+            override fun showProcessingAnimation() {
+                this@CameraFragment.showProcessingAnimation()
+            }
+
+            override fun updateHalfFrameUi(animate: Boolean) {
+                this@CameraFragment.updateHalfFrameUI(animate = animate)
+            }
+
+            override fun clearThumbnailPlaceholder() {
+                cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
+                setGalleryThumbnail(null)
+            }
+
+            override fun triggerMotionPhotoSnapshot(timestamp: Long): CompletableDeferred<Pair<String?, Long>>? {
+                if (motionPhotoEncoder?.isEncoding == true) {
+                    val deferred = CompletableDeferred<Pair<String?, Long>>()
+                    pendingMotionPhotoTask = deferred
+                    val tempMp4 = java.io.File(requireContext().cacheDir, "motion_${timestamp}.mp4")
+                    val currentOrientation = deviceOrientationDegrees
+                    motionPhotoEncoder?.captureSnapshot(
+                        captureTimestampNs = System.nanoTime(),
+                        preDurationMs = 1500L,
+                        postDurationMs = 750L,
+                        outputFile = tempMp4,
+                        orientationDegrees = currentOrientation
+                    ) { file, stillPtsUs ->
+                        deferred.complete(Pair(file?.absolutePath, stillPtsUs))
+                    }
+                    return deferred
+                } else {
+                    pendingMotionPhotoTask = null
+                    return null
+                }
+            }
+
+            override fun triggerHdrPlusBurst(
+                sink: top.maary.darkbag.pipeline.sink.CaptureSink,
+                isFrame1: Boolean,
+                hfMetadata: HalfFrameManager.Metadata?,
+                timing: StandardTimingTracker
+            ) {
+                val h = camera2Handler
+                if (h != null) {
+                    h.post {
+                        triggerHdrPlusBurstCamera2(isFrame1, hfMetadata, timing)
+                    }
+                } else {
+                    triggerHdrPlusBurstCamera2(isFrame1, hfMetadata, timing)
+                }
+            }
+
+            override fun triggerSinglePicture(
+                sink: top.maary.darkbag.pipeline.sink.CaptureSink,
+                isFrame1: Boolean,
+                hfMetadata: HalfFrameManager.Metadata?,
+                timing: StandardTimingTracker
+            ) {
+                val h = camera2Handler
+                if (h != null) {
+                    h.post {
+                        takeSinglePictureCamera2(timing, isFrame1, hfMetadata)
+                    }
+                } else {
+                    takeSinglePictureCamera2(timing, isFrame1, hfMetadata)
+                }
+            }
+
+            override fun triggerMultiCameraPicture(timing: StandardTimingTracker) {
+                takeMultiCameraPicture(timing)
+            }
         }
     }
 
@@ -332,6 +486,7 @@ class CameraFragment : Fragment() {
             prefs.edit().putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, validatedMode.key).apply()
         }
 
+        updateActiveCoordinator(validatedMode)
         return validatedMode
     }
 
@@ -585,6 +740,7 @@ class CameraFragment : Fragment() {
         val activeMode = resolveActiveCaptureMode(prefs)
         isHalfFrameModeEnabled = (activeMode == CaptureMode.HALF_FRAME_SBS || activeMode == CaptureMode.HALF_FRAME_TB)
         isMultiCameraModeActive = (activeMode == CaptureMode.MULTI_CAMERA)
+        updateActiveCoordinator(activeMode)
         if (isHalfFrameModeEnabled) {
             val layout = if (activeMode == CaptureMode.HALF_FRAME_TB) SettingsFragment.HALF_FRAME_LAYOUT_TB else SettingsFragment.HALF_FRAME_LAYOUT_SBS
             prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, layout).apply()
@@ -622,6 +778,7 @@ class CameraFragment : Fragment() {
 
         lifecycleScope.launch(Dispatchers.Main.immediate + NonCancellable) {
             closeCamera2()
+            sessionController.release()
         }
 
         lutProcessor?.setEncoderSurface(null, 0, 0)
@@ -827,6 +984,7 @@ class CameraFragment : Fragment() {
         val activeMode = resolveActiveCaptureMode(prefs)
         isHalfFrameModeEnabled = (activeMode == CaptureMode.HALF_FRAME_SBS || activeMode == CaptureMode.HALF_FRAME_TB)
         isMultiCameraModeActive = (activeMode == CaptureMode.MULTI_CAMERA)
+        updateActiveCoordinator(activeMode)
         if (isHalfFrameModeEnabled) {
             val layout = if (activeMode == CaptureMode.HALF_FRAME_TB) SettingsFragment.HALF_FRAME_LAYOUT_TB else SettingsFragment.HALF_FRAME_LAYOUT_SBS
             prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, layout).apply()
@@ -878,9 +1036,41 @@ class CameraFragment : Fragment() {
 
         // Listen for HDR+/RAW foreground processing queue changes to drive loading animation
         viewLifecycleOwner.lifecycleScope.launch {
-            top.maary.darkbag.processor.HdrPlusRequestManager.pendingForegroundTasksCount.collect {
+            top.maary.darkbag.processor.HdrPlusRequestManager.pendingForegroundTasksCount.collect { foregroundCount ->
+                cameraViewModel.setTaskCounts(
+                    totalCount = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value,
+                    foregroundCount = foregroundCount
+                )
                 withContext(Dispatchers.Main) {
                     updateProcessingAnimationUi()
+                }
+            }
+        }
+
+        // Observe CameraViewModel StateFlow and SharedFlow (MVI / UDF)
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                launch {
+                    cameraViewModel.uiState.collect { state ->
+                        cameraUiContainerBinding?.cameraCaptureButton?.setDotRotation(state.shutterDotRotation)
+                    }
+                }
+                launch {
+                    cameraViewModel.effects.collect { effect ->
+                        when (effect) {
+                            is CameraEffect.ShutterBlackout -> showShutterBlackout()
+                            is CameraEffect.ResetShutterUi -> resetBurstUi()
+                            is CameraEffect.SetShutterProgress -> cameraUiContainerBinding?.cameraCaptureButton?.setProgress(effect.progress)
+                            is CameraEffect.ShowToast -> Toast.makeText(context, effect.message, Toast.LENGTH_SHORT).show()
+                            is CameraEffect.AnimateHalfFrame -> updateHalfFrameUI(animate = true)
+                            is CameraEffect.ClearThumbnailPlaceholder -> {
+                                cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
+                                setGalleryThumbnail(null)
+                            }
+                            is CameraEffect.PerformHapticFeedback -> view?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            is CameraEffect.PlayShutterClick -> {}
+                        }
+                    }
                 }
             }
         }
@@ -1453,136 +1643,14 @@ class CameraFragment : Fragment() {
         }
 
         cameraUiContainerBinding?.cameraCaptureButton?.setOnClickListener {
-            if (isBurstActive) return@setOnClickListener
-
-            // Capture snapshot immediately for half-frame animation
-            if (isHalfFrameModeEnabled) {
-                pendingVfSnapshot = _fragmentCameraBinding?.viewFinder?.bitmap
-            }
-
-            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val burstStrategy = prefs.getString(SettingsFragment.KEY_BURST_PROCESSING_STRATEGY, SettingsFragment.BURST_STRATEGY_BALANCED)
-            val maxQueue = if (burstStrategy == SettingsFragment.BURST_STRATEGY_AGGRESSIVE) 8 else 3
-            if (!top.maary.darkbag.processor.HdrPlusRequestManager.canAcceptNewTask(maxQueue, requireContext())) {
-                val pending = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value
-                val msg = if (pending >= maxQueue) {
-                    "Queue full: processing $pending photos, please wait..."
-                } else {
-                    "System memory low, waiting for processing to complete..."
-                }
-                Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
             val timing = StandardTimingTracker(shutterClick = System.currentTimeMillis())
-
-            // Early Step Update for Half-frame to allow rapid follow-up
-            val isFrame1Trigger = isHalfFrameModeEnabled && halfFrameStep == 0
-            val isFrame2Trigger = isHalfFrameModeEnabled && halfFrameStep == 1
-
-            // Trigger Motion Photo snapshot if enabled and not in half-frame or multi-camera mode
-            val motionEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false) && !isHalfFrameModeEnabled && !isMultiCameraModeActive
-            if (motionEnabled && motionPhotoEncoder?.isEncoding == true) {
-                val deferred = CompletableDeferred<Pair<String?, Long>>()
-                pendingMotionPhotoTask = deferred
-                val tempMp4 = File(requireContext().cacheDir, "motion_${timing.shutterClick}.mp4")
-                val shutterNano = System.nanoTime()
-                val currentOrientation = deviceOrientationDegrees
-                motionPhotoEncoder?.captureSnapshot(
-                    captureTimestampNs = shutterNano,
-                    preDurationMs = 1500L,
-                    postDurationMs = 750L,
-                    outputFile = tempMp4,
-                    orientationDegrees = currentOrientation
-                ) { file, stillPtsUs ->
-                    deferred.complete(Pair(file?.absolutePath, stillPtsUs))
-                }
-            } else {
-                pendingMotionPhotoTask = null
+            val coordinator = activeCoordinator ?: run {
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val currentMode = resolveActiveCaptureMode(prefs)
+                updateActiveCoordinator(currentMode)
+                activeCoordinator
             }
-
-            val hfGroupId = if (isFrame2Trigger) {
-                halfFrameSessionStore.readSession().baseName
-            } else {
-                top.maary.darkbag.utils.ImageUtils.getBaseName(SimpleDateFormat(FILENAME, Locale.US).format(timing.shutterClick))
-            }
-
-            var resolvedFlare = -1
-            if (isHalfFrameModeEnabled) {
-                val flarePref = if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
-                resolvedFlare = if (flarePref == 0) Random().nextInt(2) + 1 else flarePref
-            }
-
-            if (isFrame1Trigger) {
-                halfFrameSessionStore.clearCurrentSession(deleteTempFile = false)
-                halfFrameSessionStore.setBaseName(hfGroupId)
-
-                // For Frame 1 trigger, we might not have a config yet, but writeScopedHalfFrameStep
-                // will be updated after capture with the actual digitalGain in takeSinglePicture/triggerHdrPlusBurst
-                writeScopedHalfFrameStep(prefs, 1, timing.shutterClick, flareType = resolvedFlare)
-                // Animate slightly faster to sync with blackout fade
-                fragmentCameraBinding.viewFinder.postDelayed({
-                    updateHalfFrameUI(animate = true)
-                }, 50)
-                showProcessingAnimation()
-            }
-
-            var hfMetadataForTrigger: HalfFrameManager.Metadata? = null
-            if (isHalfFrameModeEnabled) {
-                val session = halfFrameSessionStore.readSession()
-
-                hfMetadataForTrigger = HalfFrameManager.Metadata(
-                    profile = session.profile,
-                    dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false),
-                    captureTimeMillis = timing.shutterClick,
-                    frame1BaseName = if (isFrame2Trigger) session.baseName else null,
-                    frame1TempPath = if (isFrame2Trigger) session.tempPath else null,
-                    frame1CaptureTime = if (isFrame2Trigger) session.captureTimeMillis else 0L,
-                    frame1DigitalGain = if (isFrame2Trigger) session.digitalGain else 1.0f,
-                    flareType = if (isFrame2Trigger) session.flareType else resolvedFlare
-                )
-            } else {
-                hfMetadataForTrigger = null
-            }
-
-            if (isFrame2Trigger) {
-                writeScopedHalfFrameStep(prefs, 0)
-                // Animate slightly faster to sync with blackout fade
-                fragmentCameraBinding.viewFinder.postDelayed({
-                    updateHalfFrameUI(animate = true)
-                }, 50)
-
-                showProcessingAnimation() // Immediate indicator on click for second frame
-                cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE // Show thumbnail container for progress indicator
-                setGalleryThumbnail(null) // Clear previous thumbnail and show placeholder/indicator
-            }
-
-            if (isMultiCameraModeActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                timing.captureMode = top.maary.darkbag.models.CaptureTimingMode.MULTI_CAMERA
-                takeMultiCameraPicture(timing)
-            } else {
-                if (isHdrPlusEnabled && isRawSupported) {
-                    timing.captureMode = if (isHalfFrameModeEnabled) top.maary.darkbag.models.CaptureTimingMode.HALF_FRAME else top.maary.darkbag.models.CaptureTimingMode.HDR_BURST
-                    isBurstActive = true
-                    cameraUiContainerBinding?.cameraCaptureButton?.apply {
-                        setProgress(0f)
-                        startRotation()
-                        isEnabled = false
-                    }
-                    showShutterBlackout()
-                    val h = camera2Handler
-                    if (h != null) {
-                        h.post {
-                            triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, timing)
-                        }
-                    } else {
-                        triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, timing)
-                    }
-                } else {
-                    timing.captureMode = if (isHalfFrameModeEnabled) top.maary.darkbag.models.CaptureTimingMode.HALF_FRAME else top.maary.darkbag.models.CaptureTimingMode.SINGLE_RAW
-                    takeSinglePictureCamera2(timing, isFrame1Trigger, hfMetadataForTrigger)
-                }
-            }
+            coordinator?.onShutterTriggered(timing)
         }
         _fragmentCameraBinding?.cameraSwitchButtonAlt?.let {
 
@@ -1902,73 +1970,99 @@ class CameraFragment : Fragment() {
                 } else null
 
                 val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
-                val request = top.maary.darkbag.processor.HdrPlusRequest(
-                    requestId = java.util.UUID.randomUUID().toString(),
-                    megaBuffer = image.data!!,
-                    numFrames = 1,
-                    width = image.width,
-                    height = image.height,
-                    orientation = image.combinedOrientation,
-                    whiteLevel = whiteLevel,
-                    blackLevelPattern = blackLevelPattern ?: intArrayOf(64,64,64,64),
-                    lensShadingMap = lensShadingMapData,
-                    lensShadingRows = lensShadingRows,
-                    lensShadingCols = lensShadingCols,
-                    useSensorColorMatrix = useSensorColorMatrix,
-                    whiteBalance = wb,
-                    ccm = finalCcm,
-                    ccmAlt = null,
-                    exportMatrixAB = false,
+                val hwProfile = top.maary.darkbag.pipeline.model.HardwareProfile(
+                    lensId = targetCharId,
                     cfaPattern = cfa,
-                    targetLogIndex = targetLogIndex,
-                    lutPath = nativeLutPath,
-                    digitalGain = image.digitalGain,
-                    zoomFactor = image.zoomRatio,
-                    mirror = mirror,
-                    metadata = captureMetadata,
-                    isSingleFrame = true,
-                    saveJpg = saveJpg,
-                    saveRaw = saveRaw,
-                    baseName = dngName,
-                    fullResJpgPath = fullResJpgFile.absolutePath,
-                    linearDngPath = linearDngFile.absolutePath,
-                    zslTargetUriStr = fastOutputUri?.toString(),
-                    jpgFolderUri = jpgFolderUri,
-                    rawFolderUri = rawFolderUri,
-                    hfMetadata = image.halfFrameMetadata,
-                    editConfig = top.maary.darkbag.models.EditConfig(
-                        log = targetLogName ?: "None",
-                        lut = activeLutName ?: "None",
-                        digitalGain = image.digitalGain,
-                        adjustments = if (image.halfFrameMetadata?.profile != null && image.halfFrameMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
-                            listOf(
-                                top.maary.darkbag.models.BasicAdjustments(digitalGain = image.halfFrameMetadata.frame1DigitalGain),
-                                top.maary.darkbag.models.BasicAdjustments(digitalGain = image.digitalGain)
-                            )
-                        } else null,
-                        hfLayout = if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
-                        showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
-                        zoomFactor = image.zoomRatio,
-                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
-                    ),
-                    runAblationTest = false,
-                    motionPhotoMp4Path = motionMp4Path,
-                    motionPhotoStillPtsUs = motionStillPtsUs,
-                    enableMemoryColor = false,
-                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                    whiteLevel = whiteLevel,
+                    blackLevelPattern = blackLevelPattern ?: intArrayOf(64, 64, 64, 64),
+                    dynamicBlackLevel = dynamicBlackLevel,
                     colorMatrix1 = singleCalib.colorMatrix1,
                     colorMatrix2 = singleCalib.colorMatrix2,
                     forwardMatrix1 = singleCalib.forwardMatrix1,
                     forwardMatrix2 = singleCalib.forwardMatrix2,
                     calibrationIlluminant1 = singleCalib.calibrationIlluminant1,
                     calibrationIlluminant2 = singleCalib.calibrationIlluminant2,
+                    activeArray = activeArray,
+                    noiseProfile = noiseProfileFlat,
+                    useSensorColorMatrix = useSensorColorMatrix
+                )
+                val frameMeta = top.maary.darkbag.pipeline.model.CaptureFrameMetadata(
+                    timestamp = image.timestamp,
+                    iso = captureMetadata.iso ?: 100,
+                    exposureTimeNs = captureMetadata.exposureTime ?: 10_000_000L,
+                    lensShadingMap = lensShadingMapData,
+                    lensShadingRows = lensShadingRows,
+                    lensShadingCols = lensShadingCols,
+                    whiteBalance = wb,
+                    ccm = finalCcm,
+                    ccmAlt = null,
+                    exportMatrixAB = false,
                     neutralColorPoint = singleCalib.neutralColorPoint,
+                    postRawSensitivityBoost = 1.0f,
+                    captureMetadata = captureMetadata
+                )
+                val editConfig = top.maary.darkbag.models.EditConfig(
+                    log = targetLogName ?: "None",
+                    lut = activeLutName ?: "None",
+                    digitalGain = image.digitalGain,
+                    adjustments = if (image.halfFrameMetadata?.profile != null && image.halfFrameMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
+                        listOf(
+                            top.maary.darkbag.models.BasicAdjustments(digitalGain = image.halfFrameMetadata.frame1DigitalGain),
+                            top.maary.darkbag.models.BasicAdjustments(digitalGain = image.digitalGain)
+                        )
+                    } else null,
+                    hfLayout = if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
+                    showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
+                    flareType = image.halfFrameMetadata?.flareType ?: -1,
+                    zoomFactor = image.zoomRatio,
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
+                )
+                val renderRecipe = top.maary.darkbag.pipeline.model.RenderRecipe(
+                    targetLogIndex = targetLogIndex,
+                    lutPath = nativeLutPath,
+                    digitalGain = image.digitalGain,
+                    exposure = editConfig.exposure,
+                    contrast = editConfig.contrast,
+                    saturation = editConfig.saturation,
+                    highlights = editConfig.highlights,
+                    shadows = editConfig.shadows,
+                    whites = editConfig.whites,
+                    blacks = editConfig.blacks,
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                    faithfulHighlights = true,
+                    enableMemoryColor = false,
+                    editConfig = editConfig
+                )
+                val spec = top.maary.darkbag.pipeline.model.CaptureTaskSpec(
+                    taskId = java.util.UUID.randomUUID().toString(),
+                    width = image.width,
+                    height = image.height,
+                    orientation = image.combinedOrientation,
+                    zoomFactor = image.zoomRatio,
+                    mirror = mirror,
+                    isSingleFrame = true,
+                    hardwareProfile = hwProfile,
+                    frameMetadata = frameMeta,
+                    renderRecipe = renderRecipe,
                     timing = timing,
                     dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
                     rawOutputType = rawOutputType,
-                    dynamicBlackLevel = dynamicBlackLevel,
-                    noiseProfile = noiseProfileFlat,
-                    activeArray = activeArray
+                    fusionMode = 0,
+                    baseName = dngName,
+                    fullResJpgPath = fullResJpgFile.absolutePath,
+                    linearDngPath = linearDngFile.absolutePath,
+                    saveJpg = saveJpg,
+                    saveRaw = saveRaw,
+                    jpgFolderUri = jpgFolderUri,
+                    rawFolderUri = rawFolderUri,
+                    hfMetadata = image.halfFrameMetadata,
+                    motionPhotoMp4Path = motionMp4Path,
+                    motionPhotoStillPtsUs = motionStillPtsUs
+                )
+                val request = top.maary.darkbag.processor.HdrPlusRequest.fromSpec(
+                    spec = spec,
+                    megaBuffer = image.data!!,
+                    numFrames = 1
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request, alreadyTracked = true)
                 enqueued = true
@@ -3569,74 +3663,99 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
 
                     val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
-                    val request = top.maary.darkbag.processor.HdrPlusRequest(
-                        requestId = java.util.UUID.randomUUID().toString(),
-                        megaBuffer = megaBuffer,
-                        numFrames = burstResult.frames.size,
-                        width = width,
-                        height = height,
-                        orientation = combinedOrientation,
-                        whiteLevel = whiteLevel,
-                        blackLevelPattern = blackLevelPattern ?: intArrayOf(64,64,64,64),
-                        lensShadingMap = lensShadingMapData,
-                        lensShadingRows = lensShadingRows,
-                        lensShadingCols = lensShadingCols,
-                        useSensorColorMatrix = useSensorColorMatrix,
-                        whiteBalance = wb,
-                        ccm = ccm,
-                        ccmAlt = ccmAlt,
-                        exportMatrixAB = exportMatrixAB,
+                    val hwProfile = top.maary.darkbag.pipeline.model.HardwareProfile(
+                        lensId = targetCharId,
                         cfaPattern = cfa,
-                        targetLogIndex = targetLogIndex,
-                        lutPath = nativeLutPath,
-                        digitalGain = digitalGain,
-                        zoomFactor = currentZoom,
-                        mirror = mirror,
-                        metadata = captureMetadata,
-                        isSingleFrame = false,
-                        saveJpg = saveJpg,
-                        saveRaw = saveRaw,
-                        baseName = dngName,
-                        fullResJpgPath = fullResJpgFile.absolutePath,
-                        linearDngPath = linearDngFile.absolutePath,
-                        zslTargetUriStr = fastJpegUri?.toString(),
-                        jpgFolderUri = jpgFolderUri,
-                        rawFolderUri = rawFolderUri,
-                        hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
-                        editConfig = top.maary.darkbag.models.EditConfig(
-                            log = targetLogName ?: "None",
-                            lut = activeLutName ?: "None",
-                            digitalGain = digitalGain,
-                            adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
-                                listOf(
-                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
-                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
-                                )
-                            } else null,
-                            hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
-                            showTimestamp = hfMetadata?.dateStamp ?: false,
-                            flareType = hfMetadata?.flareType ?: -1,
-                            zoomFactor = currentZoom,
-                            colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
-                        ),
-                        runAblationTest = false,
-                        motionPhotoMp4Path = motionMp4Path,
-                        motionPhotoStillPtsUs = motionStillPtsUs,
-                        enableMemoryColor = false,
-                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                        whiteLevel = whiteLevel,
+                        blackLevelPattern = blackLevelPattern ?: intArrayOf(64, 64, 64, 64),
+                        dynamicBlackLevel = dynamicBlackLevel,
                         colorMatrix1 = burstCalib.colorMatrix1,
                         colorMatrix2 = burstCalib.colorMatrix2,
                         forwardMatrix1 = burstCalib.forwardMatrix1,
                         forwardMatrix2 = burstCalib.forwardMatrix2,
                         calibrationIlluminant1 = burstCalib.calibrationIlluminant1,
                         calibrationIlluminant2 = burstCalib.calibrationIlluminant2,
+                        activeArray = activeArray,
+                        noiseProfile = noiseProfileFlat,
+                        useSensorColorMatrix = useSensorColorMatrix
+                    )
+                    val frameMeta = top.maary.darkbag.pipeline.model.CaptureFrameMetadata(
+                        timestamp = captureMetadata.dateTimeOriginal ?: captureTime,
+                        iso = captureMetadata.iso ?: 100,
+                        exposureTimeNs = captureMetadata.exposureTime ?: 10_000_000L,
+                        lensShadingMap = lensShadingMapData,
+                        lensShadingRows = lensShadingRows,
+                        lensShadingCols = lensShadingCols,
+                        whiteBalance = wb,
+                        ccm = ccm,
+                        ccmAlt = ccmAlt,
+                        exportMatrixAB = exportMatrixAB,
                         neutralColorPoint = burstCalib.neutralColorPoint,
+                        postRawSensitivityBoost = 1.0f,
+                        captureMetadata = captureMetadata
+                    )
+                    val editConfig = top.maary.darkbag.models.EditConfig(
+                        log = targetLogName ?: "None",
+                        lut = activeLutName ?: "None",
+                        digitalGain = digitalGain,
+                        adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
+                            listOf(
+                                top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
+                                top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
+                            )
+                        } else null,
+                        hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
+                        showTimestamp = hfMetadata?.dateStamp ?: false,
+                        flareType = hfMetadata?.flareType ?: -1,
+                        zoomFactor = currentZoom,
+                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
+                    )
+                    val renderRecipe = top.maary.darkbag.pipeline.model.RenderRecipe(
+                        targetLogIndex = targetLogIndex,
+                        lutPath = nativeLutPath,
+                        digitalGain = digitalGain,
+                        exposure = editConfig.exposure,
+                        contrast = editConfig.contrast,
+                        saturation = editConfig.saturation,
+                        highlights = editConfig.highlights,
+                        shadows = editConfig.shadows,
+                        whites = editConfig.whites,
+                        blacks = editConfig.blacks,
+                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                        faithfulHighlights = false,
+                        enableMemoryColor = false,
+                        editConfig = editConfig
+                    )
+                    val spec = top.maary.darkbag.pipeline.model.CaptureTaskSpec(
+                        taskId = java.util.UUID.randomUUID().toString(),
+                        width = width,
+                        height = height,
+                        orientation = combinedOrientation,
+                        zoomFactor = currentZoom,
+                        mirror = mirror,
+                        isSingleFrame = false,
+                        hardwareProfile = hwProfile,
+                        frameMetadata = frameMeta,
+                        renderRecipe = renderRecipe,
                         timing = timing,
                         dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
                         rawOutputType = rawOutputType,
-                        dynamicBlackLevel = dynamicBlackLevel,
-                        noiseProfile = noiseProfileFlat,
-                        activeArray = activeArray
+                        fusionMode = 0,
+                        baseName = dngName,
+                        fullResJpgPath = fullResJpgFile.absolutePath,
+                        linearDngPath = linearDngFile.absolutePath,
+                        saveJpg = saveJpg,
+                        saveRaw = saveRaw,
+                        jpgFolderUri = jpgFolderUri,
+                        rawFolderUri = rawFolderUri,
+                        hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
+                        motionPhotoMp4Path = motionMp4Path,
+                        motionPhotoStillPtsUs = motionStillPtsUs
+                    )
+                    val request = top.maary.darkbag.processor.HdrPlusRequest.fromSpec(
+                        spec = spec,
+                        megaBuffer = megaBuffer,
+                        numFrames = burstResult.frames.size
                     )
 
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
@@ -3837,81 +3956,106 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
 
                 val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
-                val request = top.maary.darkbag.processor.HdrPlusRequest(
-                    requestId = java.util.UUID.randomUUID().toString(),
-                    megaBuffer = null,
-                    streamingSessionHandle = streamingResult.sessionHandle,
-                    numFrames = frames.size,
-                    width = width,
-                    height = height,
-                    orientation = combinedOrientation,
+                val fusionMode = when (prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_AUTO)) {
+                    SettingsFragment.HDR_FUSION_SPATIAL_RCD -> 1
+                    SettingsFragment.HDR_FUSION_SABRE -> 2
+                    SettingsFragment.HDR_FUSION_CLASSIC -> 3
+                    else -> 0
+                }
+                val hwProfile = top.maary.darkbag.pipeline.model.HardwareProfile(
+                    lensId = targetCharId,
+                    cfaPattern = cfa,
                     whiteLevel = whiteLevel,
                     blackLevelPattern = blackLevelPattern,
-                    lensShadingMap = effectiveLsc,
-                    lensShadingRows = effectiveRows,
-                    lensShadingCols = effectiveCols,
-                    useSensorColorMatrix = useSensorColorMatrix,
-                    whiteBalance = wb,
-                    ccm = ccm,
-                    ccmAlt = ccmAlt,
-                    exportMatrixAB = exportMatrixAB,
-                    cfaPattern = cfa,
-                    targetLogIndex = targetLogIndex,
-                    lutPath = nativeLutPath,
-                    digitalGain = digitalGain,
-                    zoomFactor = currentZoom,
-                    mirror = mirror,
-                    metadata = captureMetadata,
-                    isSingleFrame = false,
-                    saveJpg = saveJpg,
-                    saveRaw = saveRaw,
-                    baseName = dngName,
-                    fullResJpgPath = fullResJpgFile.absolutePath,
-                    linearDngPath = linearDngFile.absolutePath,
-                    zslTargetUriStr = null,
-                    jpgFolderUri = jpgFolderUri,
-                    rawFolderUri = rawFolderUri,
-                    hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
-                    editConfig = top.maary.darkbag.models.EditConfig(
-                        log = targetLogName ?: "None",
-                        lut = activeLutName ?: "None",
-                        digitalGain = digitalGain,
-                        adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
-                            listOf(
-                                top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
-                                top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
-                            )
-                        } else null,
-                        hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
-                        showTimestamp = hfMetadata?.dateStamp ?: false,
-                        flareType = hfMetadata?.flareType ?: -1,
-                        zoomFactor = currentZoom,
-                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
-                    ),
-                    runAblationTest = false,
-                    motionPhotoMp4Path = motionMp4Path,
-                    motionPhotoStillPtsUs = motionStillPtsUs,
-                    enableMemoryColor = false,
-                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                    dynamicBlackLevel = dynamicBlackLevel,
                     colorMatrix1 = burstCalib.colorMatrix1,
                     colorMatrix2 = burstCalib.colorMatrix2,
                     forwardMatrix1 = burstCalib.forwardMatrix1,
                     forwardMatrix2 = burstCalib.forwardMatrix2,
                     calibrationIlluminant1 = burstCalib.calibrationIlluminant1,
                     calibrationIlluminant2 = burstCalib.calibrationIlluminant2,
+                    activeArray = activeArray,
+                    noiseProfile = noiseProfileFlat,
+                    useSensorColorMatrix = useSensorColorMatrix
+                )
+                val frameMeta = top.maary.darkbag.pipeline.model.CaptureFrameMetadata(
+                    timestamp = captureMetadata.dateTimeOriginal ?: System.currentTimeMillis(),
+                    iso = captureMetadata.iso ?: 100,
+                    exposureTimeNs = captureMetadata.exposureTime ?: 10_000_000L,
+                    lensShadingMap = effectiveLsc,
+                    lensShadingRows = effectiveRows,
+                    lensShadingCols = effectiveCols,
+                    whiteBalance = wb,
+                    ccm = ccm,
+                    ccmAlt = ccmAlt,
+                    exportMatrixAB = exportMatrixAB,
                     neutralColorPoint = burstCalib.neutralColorPoint,
+                    postRawSensitivityBoost = 1.0f,
+                    captureMetadata = captureMetadata
+                )
+                val editConfig = top.maary.darkbag.models.EditConfig(
+                    log = targetLogName ?: "None",
+                    lut = activeLutName ?: "None",
+                    digitalGain = digitalGain,
+                    adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
+                        listOf(
+                            top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
+                            top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
+                        )
+                    } else null,
+                    hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
+                    showTimestamp = hfMetadata?.dateStamp ?: false,
+                    flareType = hfMetadata?.flareType ?: -1,
+                    zoomFactor = currentZoom,
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
+                )
+                val renderRecipe = top.maary.darkbag.pipeline.model.RenderRecipe(
+                    targetLogIndex = targetLogIndex,
+                    lutPath = nativeLutPath,
+                    digitalGain = digitalGain,
+                    exposure = editConfig.exposure,
+                    contrast = editConfig.contrast,
+                    saturation = editConfig.saturation,
+                    highlights = editConfig.highlights,
+                    shadows = editConfig.shadows,
+                    whites = editConfig.whites,
+                    blacks = editConfig.blacks,
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                    faithfulHighlights = false,
+                    enableMemoryColor = false,
+                    editConfig = editConfig
+                )
+                val spec = top.maary.darkbag.pipeline.model.CaptureTaskSpec(
+                    taskId = java.util.UUID.randomUUID().toString(),
+                    width = width,
+                    height = height,
+                    orientation = combinedOrientation,
+                    zoomFactor = currentZoom,
+                    mirror = mirror,
+                    isSingleFrame = false,
+                    hardwareProfile = hwProfile,
+                    frameMetadata = frameMeta,
+                    renderRecipe = renderRecipe,
                     timing = timing,
                     dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
                     rawOutputType = rawOutputType,
-                    dynamicBlackLevel = dynamicBlackLevel,
-                    noiseProfile = noiseProfileFlat,
-                    activeArray = activeArray,
-                    fusionMode = when (prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_AUTO)) {
-                        SettingsFragment.HDR_FUSION_SPATIAL_RCD -> 1
-                        SettingsFragment.HDR_FUSION_SABRE -> 2
-                        SettingsFragment.HDR_FUSION_CLASSIC -> 3
-                        else -> 0
-                    }
+                    fusionMode = fusionMode,
+                    baseName = dngName,
+                    fullResJpgPath = fullResJpgFile.absolutePath,
+                    linearDngPath = linearDngFile.absolutePath,
+                    saveJpg = saveJpg,
+                    saveRaw = saveRaw,
+                    jpgFolderUri = jpgFolderUri,
+                    rawFolderUri = rawFolderUri,
+                    hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
+                    motionPhotoMp4Path = motionMp4Path,
+                    motionPhotoStillPtsUs = motionStillPtsUs
+                )
+                val request = top.maary.darkbag.processor.HdrPlusRequest.fromSpec(
+                    spec = spec,
+                    megaBuffer = null,
+                    streamingSessionHandle = streamingResult.sessionHandle,
+                    numFrames = frames.size
                 )
 
 
@@ -4016,59 +4160,51 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         Log.d(TAG, "Opening Camera2: $cameraId (retryCount: $camera2RetryCount)")
 
-        if (camera2Thread == null) {
-            camera2Thread = HandlerThread("Camera2Thread").apply { start() }
-            camera2Handler = Handler(camera2Thread!!.looper)
-        }
-
-        try {
-            camera2Manager.openCamera(cameraId, object : android.hardware.camera2.CameraDevice.StateCallback() {
-                override fun onOpened(device: android.hardware.camera2.CameraDevice) {
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        camera2Lock.withLock {
-                            camera2RetryCount = 0 // Reset on success
-                            camera2Device = device
-                            createCamera2CaptureSession()
-                        }
+        val opened = sessionController.openCamera(camera2Manager, cameraId, object : android.hardware.camera2.CameraDevice.StateCallback() {
+            override fun onOpened(device: android.hardware.camera2.CameraDevice) {
+                lifecycleScope.launch(Dispatchers.Main) {
+                    camera2Lock.withLock {
+                        camera2RetryCount = 0 // Reset on success
+                        createCamera2CaptureSession()
                     }
                 }
+            }
 
-                override fun onDisconnected(device: android.hardware.camera2.CameraDevice) {
-                    lensSwitchWatchdog?.cancel()
-                    lensSwitchWatchdog = null
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        isSwitchingLens = false
-                        _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
-                        closeCamera2()
-                    }
+            override fun onDisconnected(device: android.hardware.camera2.CameraDevice) {
+                lensSwitchWatchdog?.cancel()
+                lensSwitchWatchdog = null
+                lifecycleScope.launch(Dispatchers.Main) {
+                    isSwitchingLens = false
+                    _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                    closeCamera2()
+                }
+            }
+
+            override fun onError(device: android.hardware.camera2.CameraDevice, error: Int) {
+                Log.e(TAG, "Camera2 open error: $error for camera $cameraId")
+                lensSwitchWatchdog?.cancel()
+                lensSwitchWatchdog = null
+                lifecycleScope.launch(Dispatchers.Main) {
+                    isSwitchingLens = false
+                    _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
+                    closeCamera2()
                 }
 
-                override fun onError(device: android.hardware.camera2.CameraDevice, error: Int) {
-                    Log.e(TAG, "Camera2 open error: $error for camera $cameraId")
-                    lensSwitchWatchdog?.cancel()
-                    lensSwitchWatchdog = null
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        isSwitchingLens = false
-                        _fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
-                        closeCamera2()
-                    }
-
-                    if (error == 2 && camera2RetryCount < 1) {
-                         camera2RetryCount++
-                         Log.i(TAG, "Retrying camera open after hardware error (attempt $camera2RetryCount)...")
-                         camera2Handler?.postDelayed({
-                             lifecycleScope.launch { openCamera2(cameraId) }
-                         }, 500)
-                         return
-                    }
-
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        Toast.makeText(requireContext(), getString(R.string.error_camera_hardware, error), Toast.LENGTH_LONG).show()
-                    }
+                if (error == 2 && camera2RetryCount < 1) {
+                     camera2RetryCount++
+                     Log.i(TAG, "Retrying camera open after hardware error (attempt $camera2RetryCount)...")
+                     camera2Handler?.postDelayed({
+                         lifecycleScope.launch { openCamera2(cameraId) }
+                     }, 500)
+                     return
                 }
-            }, camera2Handler)
-        } catch (e: android.hardware.camera2.CameraAccessException) {
-            Log.e(TAG, "Failed to open Camera2", e)
+
+                lifecycleScope.launch(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), getString(R.string.error_camera_hardware, error), Toast.LENGTH_LONG).show()
+                }
+            }
+        })
+        if (!opened) {
             lensSwitchWatchdog?.cancel()
             lensSwitchWatchdog = null
             lifecycleScope.launch(Dispatchers.Main) {
@@ -4158,7 +4294,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
 
                     try {
-                        device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
+                        sessionController.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: android.hardware.camera2.CameraCaptureSession) {
                         lifecycleScope.launch(Dispatchers.Main) {
                             camera2Lock.withLock {
@@ -4332,6 +4468,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
 
         showShutterBlackout()
+        top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
         showProcessingAnimation()
 
         val orientation = getCombinedOrientation()
@@ -4373,10 +4510,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             },
             onError = { errorMsg ->
                 Log.e(TAG, "Multi-camera capture error: $errorMsg")
+                top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = false)
                 lifecycleScope.launch(Dispatchers.Main) {
                     processingSemaphore.release()
+                    resetBurstUi()
                     hideProcessingAnimation()
-                    Toast.makeText(requireContext(), getString(R.string.error_multi_camera_capture_failed, errorMsg), Toast.LENGTH_SHORT).show()
+                    context?.let { ctx ->
+                        Toast.makeText(ctx, getString(R.string.error_multi_camera_capture_failed, errorMsg), Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         )
@@ -4388,27 +4529,38 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         frontJpegData: ByteArray? = null,
         timing: top.maary.darkbag.models.StandardTimingTracker? = null
     ) {
-        val appContext = requireContext().applicationContext
-        val prefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-        val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
-
-        var primarySavedUri: Uri? = null
-
-        val currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
-        val currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None") ?: "None"
-        val logIndex = SettingsFragment.LOG_CURVES.indexOf(currentLog)
-        val lutPath = if (currentLut != "None" && currentLut.isNotBlank()) {
-            val f = File(lutManager.lutDir, currentLut)
-            if (f.exists()) f.absolutePath else null
-        } else null
-
-        val currentEditConfig = top.maary.darkbag.models.EditConfig(
-            log = currentLog,
-            lut = currentLut
-        )
+        var foregroundFinished = false
+        fun notifyForegroundFinished() {
+            if (!foregroundFinished) {
+                foregroundFinished = true
+                top.maary.darkbag.processor.HdrPlusRequestManager.onForegroundTaskFinished()
+            }
+        }
 
         try {
+            val appContext = context?.applicationContext ?: run {
+                Log.e(TAG, "processAndSaveMultiCameraResult: Context is null (fragment detached)")
+                return
+            }
+            val prefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+            val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+
+            var primarySavedUri: Uri? = null
+
+            val currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
+            val currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None") ?: "None"
+            val logIndex = SettingsFragment.LOG_CURVES.indexOf(currentLog)
+            val lutPath = if (currentLut != "None" && currentLut.isNotBlank()) {
+                val f = File(lutManager.lutDir, currentLut)
+                if (f.exists()) f.absolutePath else null
+            } else null
+
+            val currentEditConfig = top.maary.darkbag.models.EditConfig(
+                log = currentLog,
+                lut = currentLut
+            )
+
             for (frame in result.frames) {
                 val frameBaseName = "${result.baseName}_MULTI_${frame.lens.name}"
                 var jpgPathToSave: String? = null
@@ -4477,6 +4629,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     )
                     if (primarySavedUri == null && savedUri != null) {
                         primarySavedUri = savedUri
+                        if (timing?.firstOutputWritten == 0L) {
+                            timing?.firstOutputWritten = System.currentTimeMillis()
+                        }
                     }
                 }
 
@@ -4523,6 +4678,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 )
                 if (primarySavedUri == null && frontUri != null) {
                     primarySavedUri = frontUri
+                    if (timing?.firstOutputWritten == 0L) {
+                        timing?.firstOutputWritten = System.currentTimeMillis()
+                    }
                 }
             }
 
@@ -4533,7 +4691,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     setGalleryThumbnail(primarySavedUri.toString())
                 }
             }
-            timing?.firstOutputWritten = System.currentTimeMillis()
+            notifyForegroundFinished()
+
+            if (timing?.firstOutputWritten == 0L) {
+                timing?.firstOutputWritten = System.currentTimeMillis()
+            }
             timing?.taskCompleted = System.currentTimeMillis()
             timing?.let { t ->
                 val report = t.buildSummaryReport()
@@ -4543,9 +4705,18 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         } catch (e: Exception) {
             Log.e(TAG, "Error saving multi-camera result", e)
         } finally {
+            if (!saveRaw) {
+                for (frame in result.frames) {
+                    frame.tempDngPath?.let { path ->
+                        try { File(path).delete() } catch (ignored: Exception) {}
+                    }
+                }
+            }
+            top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = foregroundFinished)
             processingSemaphore.release()
             withContext(Dispatchers.Main) {
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                resetBurstUi()
                 hideProcessingAnimation()
             }
         }
@@ -5479,10 +5650,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 concurrentFrontCameraManager = null
                 isFrontPipActive = false
             }
-            camera2Session?.close()
-            camera2Session = null
-            camera2Device?.close()
-            camera2Device = null
+            sessionController.closeCamera()
             rawImageReader?.close()
             rawImageReader = null
             analysisImageReader?.close()
@@ -5495,9 +5663,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private suspend fun releaseCamera2Resources() {
         closeCamera2()
-        camera2Thread?.quitSafely()
-        camera2Thread = null
-        camera2Handler = null
+        sessionController.release()
     }
 
     private fun getDigitalGainAndUpdateStep(
@@ -5839,6 +6005,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val modeChanged = (currentActiveMode != nextMode)
         isHalfFrameModeEnabled = (nextMode == CaptureMode.HALF_FRAME_SBS || nextMode == CaptureMode.HALF_FRAME_TB)
         isMultiCameraModeActive = (nextMode == CaptureMode.MULTI_CAMERA)
+        updateActiveCoordinator(nextMode)
 
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateHalfFrameUI()
@@ -5925,52 +6092,27 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     }
 
     private fun getDotTargetRotation(): Float {
-        if (!isHalfFrameModeEnabled) {
-            return -deviceOrientationDegrees.toFloat()
-        }
-
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
-
-        // Half-frame forces output orientation. Dot points to the fixed "Up" of the output frame.
-        return if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) {
-            // Top-bottom forces Landscape. Right side is Up.
-            90f
-        } else {
-            // Side-by-side forces Portrait. Up is phone-top (0).
-            0f
-        }
+        return activeCoordinator?.getShutterDotRotation(deviceOrientationDegrees)
+            ?: if (!isHalfFrameModeEnabled) {
+                -deviceOrientationDegrees.toFloat()
+            } else {
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
+                if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) 90f else 0f
+            }
     }
 
     private fun resetBurstUi() {
         cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
         cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
         isBurstActive = false
+        cameraViewModel.setBurstActive(false)
 
         if (processingSemaphore.availablePermits > 0) {
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
         } else {
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
         }
-    }
-
-    private fun writeDngToStream(
-        dngCreator: android.hardware.camera2.DngCreator,
-        image: RawImageHolder,
-        outputStream: java.io.OutputStream
-    ) {
-        val bytes = ByteArray(image.data.remaining())
-        val originalPos = image.data.position()
-        image.data.get(bytes)
-        image.data.position(originalPos)
-
-        val inputStream = java.io.ByteArrayInputStream(bytes)
-        dngCreator.writeInputStream(
-            outputStream,
-            android.util.Size(image.width, image.height),
-            inputStream,
-            0
-        )
     }
 
     private fun createDngThumbnailBitmap(sourceJpeg: File, maxDimension: Int = 240): android.graphics.Bitmap? {

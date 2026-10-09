@@ -1,5 +1,8 @@
 package top.maary.darkbag.processor
 
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureResult
+
 object SensorCalibrationHelper {
     val M_XYZ_D50_TO_SRGB = floatArrayOf(
         3.1338561f, -1.6168667f, -0.4906146f,
@@ -315,5 +318,145 @@ object SensorCalibrationHelper {
             - White Balance: $wbStr
             - Digital Gain: ${String.format(java.util.Locale.US, "%.4f", digitalGain)}
         """.trimIndent()
+    }
+
+    data class CalibrationData(
+        val colorMatrix1: FloatArray,
+        val colorMatrix2: FloatArray,
+        val forwardMatrix1: FloatArray?,
+        val forwardMatrix2: FloatArray?,
+        val calibrationIlluminant1: Int,
+        val calibrationIlluminant2: Int,
+        val neutralColorPoint: FloatArray?,
+        val renderCcm: FloatArray? = null
+    )
+
+    fun extractCalibration(
+        characteristics: CameraCharacteristics?,
+        result: CaptureResult?,
+        wb: FloatArray? = null
+    ): CalibrationData {
+        val colorMatrix1 = FloatArray(9) { 0f }
+        val cm1 = characteristics?.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
+        if (cm1 != null) {
+            for (r in 0 until 3) {
+                for (c in 0 until 3) {
+                    val rational = cm1.getElement(c, r)
+                    colorMatrix1[r * 3 + c] = rational.numerator.toFloat() / rational.denominator.toFloat()
+                }
+            }
+        } else {
+            colorMatrix1[0] = 1f; colorMatrix1[4] = 1f; colorMatrix1[8] = 1f
+        }
+
+        val colorMatrix2 = FloatArray(9) { 0f }
+        val cm2 = characteristics?.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM2)
+        if (cm2 != null) {
+            for (r in 0 until 3) {
+                for (c in 0 until 3) {
+                    val rational = cm2.getElement(c, r)
+                    colorMatrix2[r * 3 + c] = rational.numerator.toFloat() / rational.denominator.toFloat()
+                }
+            }
+        } else {
+            System.arraycopy(colorMatrix1, 0, colorMatrix2, 0, 9)
+        }
+
+        var forwardMatrix1: FloatArray? = null
+        val fm1 = characteristics?.get(CameraCharacteristics.SENSOR_FORWARD_MATRIX1)
+        if (fm1 != null) {
+            val f1 = FloatArray(9) { 0f }
+            for (r in 0 until 3) {
+                for (c in 0 until 3) {
+                    val rational = fm1.getElement(c, r)
+                    f1[r * 3 + c] = rational.numerator.toFloat() / rational.denominator.toFloat()
+                }
+            }
+            forwardMatrix1 = f1
+        }
+
+        var forwardMatrix2: FloatArray? = null
+        val fm2 = characteristics?.get(CameraCharacteristics.SENSOR_FORWARD_MATRIX2)
+        if (fm2 != null) {
+            val f2 = FloatArray(9) { 0f }
+            for (r in 0 until 3) {
+                for (c in 0 until 3) {
+                    val rational = fm2.getElement(c, r)
+                    f2[r * 3 + c] = rational.numerator.toFloat() / rational.denominator.toFloat()
+                }
+            }
+            forwardMatrix2 = f2
+        } else if (forwardMatrix1 != null) {
+            forwardMatrix2 = forwardMatrix1.copyOf()
+        }
+
+        val calibrationIlluminant1 = (characteristics?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21).toInt()
+        val calibrationIlluminant2 = (characteristics?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2) ?: 17).toInt()
+
+        var neutralColorPoint: FloatArray? = null
+        val np = result?.get(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
+        if (np != null && np.size >= 3 && np[0].numerator > 0 && np[1].numerator > 0 && np[2].numerator > 0) {
+            neutralColorPoint = floatArrayOf(
+                np[0].numerator.toFloat() / np[0].denominator.toFloat(),
+                np[1].numerator.toFloat() / np[1].denominator.toFloat(),
+                np[2].numerator.toFloat() / np[2].denominator.toFloat()
+            )
+        } else if (wb != null && wb.size >= 4 && wb[0] > 0.001f && wb[1] > 0.001f && wb[3] > 0.001f) {
+            neutralColorPoint = floatArrayOf(
+                1.0f / wb[0],
+                1.0f / wb[1],
+                1.0f / wb[3]
+            )
+        } else {
+            val wbGains = result?.get(CaptureResult.COLOR_CORRECTION_GAINS)
+            if (wbGains != null && wbGains.red > 0.001f && wbGains.blue > 0.001f) {
+                neutralColorPoint = floatArrayOf(
+                    1.0f / wbGains.red,
+                    1.0f / wbGains.greenEven,
+                    1.0f / wbGains.blue
+                )
+            }
+        }
+
+        val renderCcm = computeRenderCcm(
+            forwardMatrix1 = forwardMatrix1,
+            forwardMatrix2 = forwardMatrix2,
+            calibrationIlluminant1 = calibrationIlluminant1,
+            calibrationIlluminant2 = calibrationIlluminant2,
+            neutralColorPoint = neutralColorPoint,
+            wb = wb,
+            colorMatrix1 = colorMatrix1,
+            colorMatrix2 = colorMatrix2
+        )
+
+        return CalibrationData(
+            colorMatrix1 = colorMatrix1,
+            colorMatrix2 = colorMatrix2,
+            forwardMatrix1 = forwardMatrix1,
+            forwardMatrix2 = forwardMatrix2,
+            calibrationIlluminant1 = calibrationIlluminant1,
+            calibrationIlluminant2 = calibrationIlluminant2,
+            neutralColorPoint = neutralColorPoint,
+            renderCcm = renderCcm
+        )
+    }
+
+    fun extractLensShading(result: CaptureResult?): Triple<FloatArray?, Int, Int> {
+        if (result == null) return Triple(null, 0, 0)
+        val lsc = result.get(CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP) ?: return Triple(null, 0, 0)
+        val rows = lsc.rowCount
+        val cols = lsc.columnCount
+        if (rows <= 1 || cols <= 1) return Triple(null, 0, 0)
+        val out = FloatArray(4 * rows * cols)
+        fun idx(ch: Int, row: Int, col: Int): Int = ch * rows * cols + row * cols + col
+        for (row in 0 until rows) {
+            for (col in 0 until cols) {
+                out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
+                out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
+                out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
+                out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
+            }
+        }
+        return Triple(out, rows, cols)
     }
 }

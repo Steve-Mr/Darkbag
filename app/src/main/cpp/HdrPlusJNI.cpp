@@ -1613,3 +1613,150 @@ Java_top_maary_darkbag_processor_ColorProcessor_rcdDemosaicNative(
         );
     }
 }
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
+    JNIEnv* env, jobject /* this */,
+    jobject rawBuffer, jint bufferOffset,
+    jint width, jint height,
+    jint rowStrideBytes, jint pixelStrideBytes,
+    jstring outputPath, jint outFd,
+    jint orientationDegrees, jint whiteLevel,
+    jfloatArray blackLevelPattern, jint cfaPattern,
+    jfloatArray colorMatrix1, jfloatArray colorMatrix2,
+    jfloatArray forwardMatrix1, jfloatArray forwardMatrix2,
+    jint calibrationIlluminant1, jint calibrationIlluminant2,
+    jfloatArray neutralColorPoint,
+    jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols,
+    jintArray activeArea, jdoubleArray noiseProfile,
+    jint iso, jlong exposureTimeNanos, jfloat focalLength, jint focalLength35mm, jfloat fNumber,
+    jint dngCompressionMode, jboolean isHdrPlus
+) {
+    if (!rawBuffer || width <= 0 || height <= 0 || bufferOffset < 0) return JNI_FALSE;
+    jlong capacity = env->GetDirectBufferCapacity(rawBuffer);
+    uint8_t* rawBase = static_cast<uint8_t*>(env->GetDirectBufferAddress(rawBuffer));
+    if (!rawBase || capacity <= 0) return JNI_FALSE;
+
+    int stride_x = (pixelStrideBytes > 0) ? (pixelStrideBytes / 2) : 1;
+    int stride_y = (rowStrideBytes > 0) ? (rowStrideBytes / 2) : width;
+    int stride_c = 0;
+
+    size_t requiredBytes = static_cast<size_t>(bufferOffset) +
+        (static_cast<size_t>(height - 1) * stride_y + static_cast<size_t>(width) * stride_x) * sizeof(unsigned short);
+    if (static_cast<size_t>(capacity) < requiredBytes) {
+        LOGE("nativeWriteRawImageDng: Direct buffer capacity %lld < required %zu",
+             (long long)capacity, requiredBytes);
+        return JNI_FALSE;
+    }
+
+    const unsigned short* planarData = reinterpret_cast<const unsigned short*>(rawBase + bufferOffset);
+
+    const char* outPathCStr = outputPath ? env->GetStringUTFChars(outputPath, nullptr) : nullptr;
+
+    float bl_pattern[4] = {64.0f, 64.0f, 64.0f, 64.0f};
+    bool has_bl = false;
+    if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
+        env->GetFloatArrayRegion(blackLevelPattern, 0, 4, bl_pattern);
+        has_bl = true;
+    }
+
+    std::vector<float> cm1Vec, cm2Vec, fm1Vec, fm2Vec, neutralVec;
+    const float* cm1Ptr = nullptr;
+    const float* cm2Ptr = nullptr;
+    const float* fm1Ptr = nullptr;
+    const float* fm2Ptr = nullptr;
+    const float* neutralPtr = nullptr;
+
+    if (colorMatrix1 && env->GetArrayLength(colorMatrix1) >= 9) {
+        cm1Vec.resize(9);
+        env->GetFloatArrayRegion(colorMatrix1, 0, 9, cm1Vec.data());
+        cm1Ptr = cm1Vec.data();
+    }
+    if (colorMatrix2 && env->GetArrayLength(colorMatrix2) >= 9) {
+        cm2Vec.resize(9);
+        env->GetFloatArrayRegion(colorMatrix2, 0, 9, cm2Vec.data());
+        cm2Ptr = cm2Vec.data();
+    }
+    if (forwardMatrix1 && env->GetArrayLength(forwardMatrix1) >= 9) {
+        fm1Vec.resize(9);
+        env->GetFloatArrayRegion(forwardMatrix1, 0, 9, fm1Vec.data());
+        fm1Ptr = fm1Vec.data();
+    }
+    if (forwardMatrix2 && env->GetArrayLength(forwardMatrix2) >= 9) {
+        fm2Vec.resize(9);
+        env->GetFloatArrayRegion(forwardMatrix2, 0, 9, fm2Vec.data());
+        fm2Ptr = fm2Vec.data();
+    }
+    if (neutralColorPoint && env->GetArrayLength(neutralColorPoint) >= 3) {
+        neutralVec.resize(3);
+        env->GetFloatArrayRegion(neutralColorPoint, 0, 3, neutralVec.data());
+        neutralPtr = neutralVec.data();
+    }
+
+    std::vector<float> lensShadingVec;
+    const float* lens_shading_ptr = nullptr;
+    if (lensShadingMap && lensShadingRows > 0 && lensShadingCols > 0) {
+        int lsSize = env->GetArrayLength(lensShadingMap);
+        int expected = 4 * lensShadingRows * lensShadingCols;
+        if (lsSize >= expected) {
+            lensShadingVec.resize(expected);
+            env->GetFloatArrayRegion(lensShadingMap, 0, expected, lensShadingVec.data());
+            lens_shading_ptr = lensShadingVec.data();
+        }
+    }
+
+    int active_area[4] = {0};
+    const int* active_area_ptr = nullptr;
+    if (activeArea && env->GetArrayLength(activeArea) >= 4) {
+        env->GetIntArrayRegion(activeArea, 0, 4, active_area);
+        active_area_ptr = active_area;
+    }
+
+    double noise_prof[8] = {0};
+    const double* noise_ptr = nullptr;
+    if (noiseProfile && env->GetArrayLength(noiseProfile) >= 8) {
+        env->GetDoubleArrayRegion(noiseProfile, 0, 8, noise_prof);
+        noise_ptr = noise_prof;
+    }
+
+    ImageMetadata meta;
+    meta.iso = iso;
+    meta.exposureTime = exposureTimeNanos;
+    meta.focalLength = focalLength;
+    meta.focalLengthIn35mmFilm = focalLength35mm;
+    meta.fNumber = fNumber;
+    meta.uniqueCameraModel = "Darkbag";
+
+    std::vector<float> ccmVec(9, 0.0f);
+    if (cm1Ptr) {
+        for (int i = 0; i < 9; ++i) ccmVec[i] = cm1Ptr[i];
+    } else {
+        ccmVec = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    }
+
+    float baselineExposure = 0.0f;
+    std::vector<float> wbVec = {1.0f, 1.0f, 1.0f, 1.0f};
+    if (neutralPtr) {
+        wbVec[0] = 1.0f / std::max(1e-4f, neutralPtr[0]);
+        wbVec[1] = 1.0f / std::max(1e-4f, neutralPtr[1]);
+        wbVec[2] = 1.0f / std::max(1e-4f, neutralPtr[1]);
+        wbVec[3] = 1.0f / std::max(1e-4f, neutralPtr[2]);
+    }
+
+    bool ok = write_dng(
+        outPathCStr, width, height, planarData,
+        stride_x, stride_y, stride_c,
+        whiteLevel,
+        ccmVec, meta, orientationDegrees, false, baselineExposure, wbVec.data(),
+        cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr,
+        calibrationIlluminant1, calibrationIlluminant2, neutralPtr,
+        outFd, dngCompressionMode,
+        /*isBayer=*/true, cfaPattern, has_bl ? bl_pattern : nullptr,
+        noise_ptr, active_area_ptr, lens_shading_ptr, lensShadingRows, lensShadingCols
+    );
+
+    if (outPathCStr) {
+        env->ReleaseStringUTFChars(outputPath, outPathCStr);
+    }
+    return ok ? JNI_TRUE : JNI_FALSE;
+}

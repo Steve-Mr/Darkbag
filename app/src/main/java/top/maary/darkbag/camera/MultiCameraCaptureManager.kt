@@ -1335,23 +1335,23 @@ class MultiCameraCaptureManager(
                 Log.e(TAG, "Cannot create DNG: captureResult is null for lens $lensId")
                 return null
             }
-            val dngOrientation = when (orientationDegrees) {
-                90 -> ExifInterface.ORIENTATION_ROTATE_90
-                180 -> ExifInterface.ORIENTATION_ROTATE_180
-                270 -> ExifInterface.ORIENTATION_ROTATE_270
-                else -> ExifInterface.ORIENTATION_NORMAL
-            }
-
             val tempFile = File(context.cacheDir, "dng_${lensId}_${System.currentTimeMillis()}.dng")
-            val dngCreator = DngCreator(chars, captureResult)
-            dngCreator.setOrientation(dngOrientation)
-            dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = isHdrPlus))
-            FileOutputStream(tempFile).use { out ->
-                dngCreator.writeImage(out, rawImage)
+            val success = top.maary.darkbag.processor.ColorProcessor.writeRawImageToDng(
+                rawImage = rawImage,
+                chars = chars,
+                captureResult = captureResult,
+                orientationDegrees = orientationDegrees,
+                outputPath = tempFile.absolutePath,
+                dngCompressionMode = 0, // Lossless JPEG 16-bit compression
+                isHdrPlus = isHdrPlus
+            )
+            if (success) {
+                Log.i(TAG, "Successfully written compressed DNG via native write_dng to ${tempFile.absolutePath} (${tempFile.length()} bytes)")
+                tempFile.absolutePath
+            } else {
+                Log.e(TAG, "Native write_dng failed for lens $lensId")
+                null
             }
-            dngCreator.close()
-            Log.i(TAG, "Successfully written valid DNG to ${tempFile.absolutePath} (${tempFile.length()} bytes)")
-            tempFile.absolutePath
         } catch (e: Exception) {
             Log.e(TAG, "Failed to write DNG file for lens $lensId", e)
             null
