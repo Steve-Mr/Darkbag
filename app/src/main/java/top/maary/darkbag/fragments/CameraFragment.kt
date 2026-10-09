@@ -4510,13 +4510,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             },
             onError = { errorMsg ->
                 Log.e(TAG, "Multi-camera capture error: $errorMsg")
-                top.maary.darkbag.processor.HdrPlusRequestManager.onForegroundTaskFinished()
-                top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
+                top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = false)
                 lifecycleScope.launch(Dispatchers.Main) {
                     processingSemaphore.release()
                     resetBurstUi()
                     hideProcessingAnimation()
-                    Toast.makeText(requireContext(), getString(R.string.error_multi_camera_capture_failed, errorMsg), Toast.LENGTH_SHORT).show()
+                    context?.let { ctx ->
+                        Toast.makeText(ctx, getString(R.string.error_multi_camera_capture_failed, errorMsg), Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         )
@@ -4528,27 +4529,38 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         frontJpegData: ByteArray? = null,
         timing: top.maary.darkbag.models.StandardTimingTracker? = null
     ) {
-        val appContext = requireContext().applicationContext
-        val prefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-        val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
-
-        var primarySavedUri: Uri? = null
-
-        val currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
-        val currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None") ?: "None"
-        val logIndex = SettingsFragment.LOG_CURVES.indexOf(currentLog)
-        val lutPath = if (currentLut != "None" && currentLut.isNotBlank()) {
-            val f = File(lutManager.lutDir, currentLut)
-            if (f.exists()) f.absolutePath else null
-        } else null
-
-        val currentEditConfig = top.maary.darkbag.models.EditConfig(
-            log = currentLog,
-            lut = currentLut
-        )
+        var foregroundFinished = false
+        fun notifyForegroundFinished() {
+            if (!foregroundFinished) {
+                foregroundFinished = true
+                top.maary.darkbag.processor.HdrPlusRequestManager.onForegroundTaskFinished()
+            }
+        }
 
         try {
+            val appContext = context?.applicationContext ?: run {
+                Log.e(TAG, "processAndSaveMultiCameraResult: Context is null (fragment detached)")
+                return
+            }
+            val prefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+            val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+
+            var primarySavedUri: Uri? = null
+
+            val currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
+            val currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None") ?: "None"
+            val logIndex = SettingsFragment.LOG_CURVES.indexOf(currentLog)
+            val lutPath = if (currentLut != "None" && currentLut.isNotBlank()) {
+                val f = File(lutManager.lutDir, currentLut)
+                if (f.exists()) f.absolutePath else null
+            } else null
+
+            val currentEditConfig = top.maary.darkbag.models.EditConfig(
+                log = currentLog,
+                lut = currentLut
+            )
+
             for (frame in result.frames) {
                 val frameBaseName = "${result.baseName}_MULTI_${frame.lens.name}"
                 var jpgPathToSave: String? = null
@@ -4617,6 +4629,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     )
                     if (primarySavedUri == null && savedUri != null) {
                         primarySavedUri = savedUri
+                        if (timing?.firstOutputWritten == 0L) {
+                            timing?.firstOutputWritten = System.currentTimeMillis()
+                        }
                     }
                 }
 
@@ -4663,6 +4678,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 )
                 if (primarySavedUri == null && frontUri != null) {
                     primarySavedUri = frontUri
+                    if (timing?.firstOutputWritten == 0L) {
+                        timing?.firstOutputWritten = System.currentTimeMillis()
+                    }
                 }
             }
 
@@ -4673,9 +4691,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     setGalleryThumbnail(primarySavedUri.toString())
                 }
             }
-            top.maary.darkbag.processor.HdrPlusRequestManager.onForegroundTaskFinished()
+            notifyForegroundFinished()
 
-            timing?.firstOutputWritten = System.currentTimeMillis()
+            if (timing?.firstOutputWritten == 0L) {
+                timing?.firstOutputWritten = System.currentTimeMillis()
+            }
             timing?.taskCompleted = System.currentTimeMillis()
             timing?.let { t ->
                 val report = t.buildSummaryReport()
@@ -4685,7 +4705,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         } catch (e: Exception) {
             Log.e(TAG, "Error saving multi-camera result", e)
         } finally {
-            top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
+            if (!saveRaw) {
+                for (frame in result.frames) {
+                    frame.tempDngPath?.let { path ->
+                        try { File(path).delete() } catch (ignored: Exception) {}
+                    }
+                }
+            }
+            top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = foregroundFinished)
             processingSemaphore.release()
             withContext(Dispatchers.Main) {
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
@@ -6086,25 +6113,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         } else {
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
         }
-    }
-
-    private fun writeDngToStream(
-        dngCreator: android.hardware.camera2.DngCreator,
-        image: RawImageHolder,
-        outputStream: java.io.OutputStream
-    ) {
-        val bytes = ByteArray(image.data.remaining())
-        val originalPos = image.data.position()
-        image.data.get(bytes)
-        image.data.position(originalPos)
-
-        val inputStream = java.io.ByteArrayInputStream(bytes)
-        dngCreator.writeInputStream(
-            outputStream,
-            android.util.Size(image.width, image.height),
-            inputStream,
-            0
-        )
     }
 
     private fun createDngThumbnailBitmap(sourceJpeg: File, maxDimension: Int = 240): android.graphics.Bitmap? {

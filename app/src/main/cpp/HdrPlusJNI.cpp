@@ -1632,14 +1632,24 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
     jint iso, jlong exposureTimeNanos, jfloat focalLength, jint focalLength35mm, jfloat fNumber,
     jint dngCompressionMode, jboolean isHdrPlus
 ) {
-    if (!rawBuffer) return JNI_FALSE;
+    if (!rawBuffer || width <= 0 || height <= 0 || bufferOffset < 0) return JNI_FALSE;
+    jlong capacity = env->GetDirectBufferCapacity(rawBuffer);
     uint8_t* rawBase = static_cast<uint8_t*>(env->GetDirectBufferAddress(rawBuffer));
-    if (!rawBase) return JNI_FALSE;
+    if (!rawBase || capacity <= 0) return JNI_FALSE;
 
-    const unsigned short* planarData = reinterpret_cast<const unsigned short*>(rawBase + bufferOffset);
     int stride_x = (pixelStrideBytes > 0) ? (pixelStrideBytes / 2) : 1;
     int stride_y = (rowStrideBytes > 0) ? (rowStrideBytes / 2) : width;
     int stride_c = 0;
+
+    size_t requiredBytes = static_cast<size_t>(bufferOffset) +
+        (static_cast<size_t>(height - 1) * stride_y + static_cast<size_t>(width) * stride_x) * sizeof(unsigned short);
+    if (static_cast<size_t>(capacity) < requiredBytes) {
+        LOGE("nativeWriteRawImageDng: Direct buffer capacity %lld < required %zu",
+             (long long)capacity, requiredBytes);
+        return JNI_FALSE;
+    }
+
+    const unsigned short* planarData = reinterpret_cast<const unsigned short*>(rawBase + bufferOffset);
 
     const char* outPathCStr = outputPath ? env->GetStringUTFChars(outputPath, nullptr) : nullptr;
 

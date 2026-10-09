@@ -489,8 +489,10 @@ object ColorProcessor {
         val exposureTime = captureResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
         val focalLength = captureResult?.get(CaptureResult.LENS_FOCAL_LENGTH) ?: 5.0f
         val fNumber = captureResult?.get(CaptureResult.LENS_APERTURE) ?: 1.8f
-        val focalLengths35 = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-        val focalLength35mm = if (focalLengths35 != null && focalLengths35.isNotEmpty()) focalLengths35[0].toInt() else 24
+        val sensorPhysicalSize = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+        val focalLength35mm = if (sensorPhysicalSize != null && sensorPhysicalSize.width > 0f) {
+            (focalLength * 36f / sensorPhysicalSize.width).toInt()
+        } else 24
 
         return nativeWriteRawImageDng(
             rawBuffer = buffer,
