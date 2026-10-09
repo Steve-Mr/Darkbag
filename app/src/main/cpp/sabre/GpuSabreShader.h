@@ -29,6 +29,7 @@ layout(rgba16f, binding = 0) uniform highp writeonly image2D uCovImg;
 uniform int uQuadWidth;
 uniform int uQuadHeight;
 uniform int uCfaPattern; // 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR
+uniform float uZoomFactor;
 
 float getGreenQuad(ivec2 qcoord) {
     ivec2 qc = clamp(qcoord, ivec2(0), ivec2(uQuadWidth - 1, uQuadHeight - 1));
@@ -96,10 +97,16 @@ void main() {
     float s2 = sqrt(max(0.0, lambda2));
     float coherence = clamp((s1 - s2) / (s1 + s2 + 1e-5), 0.0, 1.0);
 
-    // Anisotropic steering kernel radii (in quad pixel units)
-    const float sigma0 = 0.85;
-    float sigma_tangent = sigma0 * (1.0 + 1.8 * coherence);  // Elongate along edge
-    float sigma_normal  = sigma0 / (1.0 + 0.8 * coherence);  // Narrow across edge
+    // Dynamic kernel radii adaptation:
+    // For 1x focal length (zoom <= 1.05x): compact sigma0 = 0.68, sharpened edge orientation
+    // For zoom > 1.05x: smoothly interpolate sigma0 up to 0.85 matching super-resolution requirements
+    float zoomT = smoothstep(1.05, 2.0, uZoomFactor);
+    float sigma0 = mix(0.68, 0.85, zoomT);
+    float kTan = mix(2.0, 1.8, zoomT);
+    float kNorm = mix(1.2, 0.8, zoomT);
+
+    float sigma_tangent = sigma0 * (1.0 + kTan * coherence);  // Elongate along edge
+    float sigma_normal  = sigma0 / (1.0 + kNorm * coherence); // Narrow across edge
 
     float inv_s1_sq = 1.0 / (sigma_normal * sigma_normal);
     float inv_s2_sq = 1.0 / (sigma_tangent * sigma_tangent);
@@ -330,14 +337,159 @@ layout(local_size_x = 16, local_size_y = 16) in;
 precision highp float;
 precision highp int;
 
+layout(binding = 0) uniform highp usampler2D uRefBayer;
+
 layout(rgba32f, binding = 0) uniform highp readonly image2D uInAccumImg;
 layout(rgba32f, binding = 1) uniform highp readonly image2D uInWeightImg;
 layout(rgba16f, binding = 2) uniform highp writeonly image2D uOutRgbImg;
 
 uniform int uWidth;
 uniform int uHeight;
+uniform int uCfaPattern; // 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR
 uniform float uWhiteLevel;
 uniform vec4 uBlackLevel; // r, g, b, 0.0
+
+int getBayerChannel(int x, int y, int cfa) {
+    int px = x & 1;
+    int py = y & 1;
+    if (cfa == 0) { // RGGB
+        if (py == 0) return (px == 0) ? 0 : 1;
+        else         return (px == 0) ? 1 : 2;
+    } else if (cfa == 1) { // GRBG
+        if (py == 0) return (px == 0) ? 1 : 0;
+        else         return (px == 0) ? 2 : 1;
+    } else if (cfa == 2) { // GBRG
+        if (py == 0) return (px == 0) ? 1 : 2;
+        else         return (px == 0) ? 0 : 1;
+    } else { // BGGR
+        if (py == 0) return (px == 0) ? 2 : 1;
+        else         return (px == 0) ? 1 : 0;
+    }
+}
+
+ivec2 clampBayerCoord(ivec2 p) {
+    int x = p.x;
+    int y = p.y;
+    if (x < 0) {
+        int rem = (x % 2 + 2) % 2;
+        x = (rem == 0) ? 0 : 1;
+    } else if (x >= uWidth) {
+        int rem = (x % 2 + 2) % 2;
+        int lastRem = ((uWidth - 1) % 2 + 2) % 2;
+        x = (rem == lastRem) ? (uWidth - 1) : (uWidth - 2);
+    }
+    if (y < 0) {
+        int rem = (y % 2 + 2) % 2;
+        y = (rem == 0) ? 0 : 1;
+    } else if (y >= uHeight) {
+        int rem = (y % 2 + 2) % 2;
+        int lastRem = ((uHeight - 1) % 2 + 2) % 2;
+        y = (rem == lastRem) ? (uHeight - 1) : (uHeight - 2);
+    }
+    return ivec2(x, y);
+}
+
+float sampleRef(ivec2 p) {
+    ivec2 cp = clampBayerCoord(p);
+    return float(texelFetch(uRefBayer, cp, 0).r);
+}
+
+vec3 computeRcdPrior(ivec2 coord) {
+    float refVal = sampleRef(coord);
+    int refChan = getBayerChannel(coord.x, coord.y, uCfaPattern);
+
+    float priorR = 0.0;
+    float priorG = 0.0;
+    float priorB = 0.0;
+
+    if (refChan == 1) {
+        // Native Green pixel: green is directly sampled from reference Bayer
+        priorG = refVal;
+
+        int hChan = getBayerChannel(coord.x + 1, coord.y, uCfaPattern);
+
+        float h0 = sampleRef(coord - ivec2(1, 0));
+        float h1 = sampleRef(coord + ivec2(1, 0));
+        float gH0 = sampleRef(coord - ivec2(2, 0));
+        float gH1 = sampleRef(coord + ivec2(2, 0));
+
+        float v0 = sampleRef(coord - ivec2(0, 1));
+        float v1 = sampleRef(coord + ivec2(0, 1));
+        float gV0 = sampleRef(coord - ivec2(0, 2));
+        float gV1 = sampleRef(coord + ivec2(0, 2));
+
+        // Second-order Laplacian color-difference estimates
+        float estH = 0.5 * (h0 + h1) + 0.25 * (2.0 * refVal - gH0 - gH1);
+        float estV = 0.5 * (v0 + v1) + 0.25 * (2.0 * refVal - gV0 - gV1);
+
+        if (hChan == 0) { // Horizontal is Red, Vertical is Blue
+            priorR = estH;
+            priorB = estV;
+        } else {          // Horizontal is Blue, Vertical is Red
+            priorR = estV;
+            priorB = estH;
+        }
+    } else {
+        // Native Red (refChan == 0) or Blue (refChan == 2) pixel
+        float gW = sampleRef(coord - ivec2(1, 0));
+        float gE = sampleRef(coord + ivec2(1, 0));
+        float gN = sampleRef(coord - ivec2(0, 1));
+        float gS = sampleRef(coord + ivec2(0, 1));
+
+        float cW2 = sampleRef(coord - ivec2(2, 0));
+        float cE2 = sampleRef(coord + ivec2(2, 0));
+        float cN2 = sampleRef(coord - ivec2(0, 2));
+        float cS2 = sampleRef(coord + ivec2(0, 2));
+
+        // Directional Green estimates with Laplacian color-difference correction
+        float estGH = 0.5 * (gW + gE) + 0.25 * (2.0 * refVal - cW2 - cE2);
+        float gradH = abs(gW - gE) + abs(2.0 * refVal - cW2 - cE2);
+
+        float estGV = 0.5 * (gN + gS) + 0.25 * (2.0 * refVal - cN2 - cS2);
+        float gradV = abs(gN - gS) + abs(2.0 * refVal - cN2 - cS2);
+
+        float wH = 1.0 / (1.0 + gradH);
+        float wV = 1.0 / (1.0 + gradV);
+        priorG = (wH * estGH + wV * estGV) / (wH + wV);
+
+        // Diagonal opposite-color neighbors
+        float opNW = sampleRef(coord + ivec2(-1, -1));
+        float opNE = sampleRef(coord + ivec2(1, -1));
+        float opSW = sampleRef(coord + ivec2(-1, 1));
+        float opSE = sampleRef(coord + ivec2(1, 1));
+
+        float gNW = 0.5 * (gW + gN);
+        float gNE = 0.5 * (gE + gN);
+        float gSW = 0.5 * (gW + gS);
+        float gSE = 0.5 * (gE + gS);
+
+        float diffNW = opNW - gNW;
+        float diffNE = opNE - gNE;
+        float diffSW = opSW - gSW;
+        float diffSE = opSE - gSE;
+
+        float gradP = abs(opNW - opSE) + abs(gNW - gSE);
+        float gradQ = abs(opNE - opSW) + abs(gNE - gSW);
+
+        float wP = 1.0 / (1.0 + gradP);
+        float wQ = 1.0 / (1.0 + gradQ);
+
+        float estDiffP = 0.5 * (diffNW + diffSE);
+        float estDiffQ = 0.5 * (diffNE + diffSW);
+        float oppDiff = (wP * estDiffP + wQ * estDiffQ) / (wP + wQ);
+        float oppVal = priorG + oppDiff;
+
+        if (refChan == 0) { // Native Red
+            priorR = refVal;
+            priorB = oppVal;
+        } else {          // Native Blue
+            priorB = refVal;
+            priorR = oppVal;
+        }
+    }
+
+    return vec3(priorR, priorG, priorB);
+}
 
 void main() {
     ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
@@ -352,65 +504,35 @@ void main() {
     float wg = weight.g;
     float wb = weight.b;
 
-    float normR = accum.r / max(0.001, wr);
-    float normG = accum.g / max(0.001, wg);
-    float normB = accum.b / max(0.001, wb);
-
     float bl_r = uBlackLevel.r;
     float bl_g = uBlackLevel.g;
     float bl_b = uBlackLevel.b;
     float wl = uWhiteLevel;
 
+    float normR = (wr > 0.0001) ? (accum.r / wr) : bl_r;
+    float normG = (wg > 0.0001) ? (accum.g / wg) : bl_g;
+    float normB = (wb > 0.0001) ? (accum.b / wb) : bl_b;
+
     float rOut = normR;
     float gOut = normG;
     float bOut = normB;
 
-    // Cross-Channel Guided Chrominance Filtering for sparse sites
-    if (wr < 0.25 || wb < 0.25) {
-        float sumDiffR = 0.0;
-        float sumWeightR = 0.0;
-        float sumDiffB = 0.0;
-        float sumWeightB = 0.0;
+    // Single-frame RCD (Ratio-preserving / Color-difference) reference prior regularizer:
+    // When multi-frame weights are abundant (w >= 1.0), 100% Sabre physical full-color demosaicing is used.
+    // When multi-frame weights are sparse (w < 1.0), RCD prior smoothly regularizes the result.
+    if (wr < 1.0 || wg < 1.0 || wb < 1.0) {
+        vec3 rcdPrior = computeRcdPrior(coord);
+        rcdPrior.r = clamp(rcdPrior.r, bl_r, wl);
+        rcdPrior.g = clamp(rcdPrior.g, bl_g, wl);
+        rcdPrior.b = clamp(rcdPrior.b, bl_b, wl);
 
-        for (int dy = -2; dy <= 2; ++dy) {
-            int ny = clamp(coord.y + dy, 0, uHeight - 1);
-            for (int dx = -2; dx <= 2; ++dx) {
-                int nx = clamp(coord.x + dx, 0, uWidth - 1);
-                ivec2 ncoord = ivec2(nx, ny);
+        float confR = clamp(wr, 0.0, 1.0);
+        float confG = clamp(wg, 0.0, 1.0);
+        float confB = clamp(wb, 0.0, 1.0);
 
-                vec4 nAccum = imageLoad(uInAccumImg, ncoord);
-                vec4 nWeight = imageLoad(uInWeightImg, ncoord);
-
-                float gNeighbor = nAccum.g / max(0.001, nWeight.g);
-                float guideWeight = 1.0 / (1.0 + abs(gNeighbor - normG) * 0.05);
-
-                if (nWeight.r > 0.05) {
-                    float rNeighbor = nAccum.r / max(0.001, nWeight.r);
-                    sumDiffR += guideWeight * (rNeighbor - gNeighbor);
-                    sumWeightR += guideWeight;
-                }
-                if (nWeight.b > 0.05) {
-                    float bNeighbor = nAccum.b / max(0.001, nWeight.b);
-                    sumDiffB += guideWeight * (bNeighbor - gNeighbor);
-                    sumWeightB += guideWeight;
-                }
-            }
-        }
-
-        if (wr < 0.25) {
-            if (sumWeightR > 0.0) {
-                rOut = clamp(normG + sumDiffR / sumWeightR, bl_r, wl);
-            } else {
-                rOut = (wr > 0.001) ? clamp(normR, bl_r, wl) : bl_r;
-            }
-        }
-        if (wb < 0.25) {
-            if (sumWeightB > 0.0) {
-                bOut = clamp(normG + sumDiffB / sumWeightB, bl_b, wl);
-            } else {
-                bOut = (wb > 0.001) ? clamp(normB, bl_b, wl) : bl_b;
-            }
-        }
+        rOut = mix(rcdPrior.r, rOut, confR);
+        gOut = mix(rcdPrior.g, gOut, confG);
+        bOut = mix(rcdPrior.b, bOut, confB);
     }
 
     // Black level subtraction and normalization to [0.0, 1.0]

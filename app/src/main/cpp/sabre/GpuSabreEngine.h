@@ -72,6 +72,8 @@ private:
     bool prepareTextures(int width, int height);
     void releaseTextures();
 
+    bool computeStructureTensor();
+
     bool accumulateFrameLocked(
         const uint16_t* altBayer,
         const float* flowX,

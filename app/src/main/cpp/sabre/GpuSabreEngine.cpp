@@ -466,6 +466,36 @@ void GpuSabreEngine::clearTexturePool() {
     s_cachedTextures = CachedSabreTextures();
 }
 
+bool GpuSabreEngine::computeStructureTensor() {
+    glUseProgram(s_programStructureTensor);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, refBayerTex_);
+    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uRefBayer"), 0);
+
+    glBindImageTexture(0, covTex_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uCovImg"), 0);
+
+    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uQuadWidth"), quadWidth_);
+    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uQuadHeight"), quadHeight_);
+    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uCfaPattern"), static_cast<int>(config_.cfa));
+    glUniform1f(glGetUniformLocation(s_programStructureTensor, "uZoomFactor"), config_.zoomFactor);
+
+    GLuint numGroupsX = (quadWidth_ + 15) / 16;
+    GLuint numGroupsY = (quadHeight_ + 15) / 16;
+    glDispatchCompute(numGroupsX, numGroupsY, 1);
+
+    // Ensure covariance texture writes are visible to Pass 2
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+
+    // Explicitly unbind image and texture units
+    glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+    return true;
+}
+
 bool GpuSabreEngine::setReferenceFrame(const uint16_t* refBayer) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!sessionActive_ || !refBayer) {
@@ -486,31 +516,7 @@ bool GpuSabreEngine::setReferenceFrame(const uint16_t* refBayer) {
     glBindTexture(GL_TEXTURE_2D, 0);
 
     // 2. Dispatch Pass 1: Structure Tensor & Steering Covariance
-    glUseProgram(s_programStructureTensor);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, refBayerTex_);
-    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uRefBayer"), 0);
-
-    glBindImageTexture(0, covTex_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
-    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uCovImg"), 0);
-
-    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uQuadWidth"), quadWidth_);
-    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uQuadHeight"), quadHeight_);
-    glUniform1i(glGetUniformLocation(s_programStructureTensor, "uCfaPattern"), static_cast<int>(config_.cfa));
-
-    GLuint numGroupsX = (quadWidth_ + 15) / 16;
-    GLuint numGroupsY = (quadHeight_ + 15) / 16;
-    glDispatchCompute(numGroupsX, numGroupsY, 1);
-
-    // Ensure covariance texture writes are visible to Pass 2
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
-
-    // Explicitly unbind image and texture units
-    glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glUseProgram(0);
+    computeStructureTensor();
 
     // 3. Accumulate Frame 0 (zero optical flow)
     bool ok = accumulateFrameLocked(refBayer, nullptr, nullptr, 0, 0, /*isRef=*/true);
@@ -708,6 +714,11 @@ bool GpuSabreEngine::resolve(
     // (outputs intermediate linear RGB into resolvedRgbTex_)
     glUseProgram(s_programResolve);
 
+    // Texture unit 0: Reference Bayer (for single-frame RCD prior blending)
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, refBayerTex_);
+    glUniform1i(glGetUniformLocation(s_programResolve, "uRefBayer"), 0);
+
     // Image unit 0: Input Accumulation (readonly, RGBA32F)
     glBindImageTexture(0, accumTex_[accumIdx_], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glUniform1i(glGetUniformLocation(s_programResolve, "uInAccumImg"), 0);
@@ -727,6 +738,7 @@ bool GpuSabreEngine::resolve(
 
     glUniform1i(glGetUniformLocation(s_programResolve, "uWidth"), width_);
     glUniform1i(glGetUniformLocation(s_programResolve, "uHeight"), height_);
+    glUniform1i(glGetUniformLocation(s_programResolve, "uCfaPattern"), static_cast<int>(config_.cfa));
     glUniform1f(glGetUniformLocation(s_programResolve, "uWhiteLevel"), wl);
     glUniform4f(glGetUniformLocation(s_programResolve, "uBlackLevel"), bl_r, bl_g, bl_b, 0.0f);
 
@@ -735,10 +747,12 @@ bool GpuSabreEngine::resolve(
     // Memory barrier: wait for Pass 3 writes to complete before Pass 4 reads
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
-    // Explicitly unbind Pass 3 image units
+    // Explicitly unbind Pass 3 image units and texture unit 0
     glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glBindImageTexture(1, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glBindImageTexture(2, 0, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
 
     // Dispatch Pass 4: Physical MTF Inverse Restoration via Noise-Gated Deconvolution
