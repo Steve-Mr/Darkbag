@@ -296,4 +296,61 @@ class CaptureSinkTest {
         assertEquals(spec.linearDngPath, eventReceived.dngPath)
         assertFalse(eventReceived.saveJpg)
     }
+
+    @Test
+    fun testHalfFrameCacheSink_OnErrorRollsBackStep0OnFrame1Failure() = runBlocking {
+        val sessionStore = HalfFrameSessionStore(context)
+        sessionStore.clearProfile(HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        sessionStore.markStep(1, 1000L, profile = HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        sessionStore.setBaseName("HF_TEST_1", profile = HalfFrameSessionStore.PROFILE_HALF_SIDE)
+
+        val sink = HalfFrameCacheSink()
+        val spec = createDummySpec(
+            hfMetadata = HalfFrameManager.Metadata(
+                profile = HalfFrameSessionStore.PROFILE_HALF_SIDE,
+                dateStamp = false,
+                frame1BaseName = null
+            )
+        )
+
+        sink.onError(context, spec, RuntimeException("Frame 1 pipeline error"))
+
+        val session = sessionStore.readSession(profile = HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        assertEquals(0, session.step)
+        assertNull(session.baseName)
+    }
+
+    @Test
+    fun testHalfFrameCacheSink_OnErrorPreservesStep1OnFrame2Failure() = runBlocking {
+        val tempFile = java.io.File.createTempFile("frame1", ".jpg").apply { writeText("dummy") }
+        tempFile.deleteOnExit()
+        val now = System.currentTimeMillis()
+
+        val sessionStore = HalfFrameSessionStore(context)
+        sessionStore.clearProfile(HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        sessionStore.markStep(0, profile = HalfFrameSessionStore.PROFILE_HALF_SIDE)
+
+        val sink = HalfFrameCacheSink()
+        val spec = createDummySpec(
+            hfMetadata = HalfFrameManager.Metadata(
+                profile = HalfFrameSessionStore.PROFILE_HALF_SIDE,
+                dateStamp = false,
+                frame1BaseName = "HF_PREV_1",
+                frame1TempPath = tempFile.absolutePath,
+                frame1CaptureTime = now,
+                frame1DigitalGain = 1.2f,
+                flareType = 1
+            )
+        )
+
+        sink.onError(context, spec, RuntimeException("Frame 2 stitch error"))
+
+        val session = sessionStore.readSession(profile = HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        assertEquals(1, session.step)
+        assertEquals("HF_PREV_1", session.baseName)
+        assertEquals(tempFile.absolutePath, session.tempPath)
+        tempFile.delete()
+        Unit
+    }
 }
+

@@ -169,6 +169,7 @@ class CaptureModeCoordinatorTest {
 
         assertFalse(host.burstTriggered)
         assertTrue(host.singleTriggered)
+        assertTrue(host.shutterVisualsShown)
         assertTrue(host.lastSink is DirectMediaStoreSink)
         assertEquals(CaptureTimingMode.SINGLE_RAW, host.lastTiming?.captureMode)
     }

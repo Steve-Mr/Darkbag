@@ -449,7 +449,14 @@ class CameraFragment : Fragment() {
             }
 
             override fun triggerMultiCameraPicture(timing: StandardTimingTracker) {
-                takeMultiCameraPicture(timing)
+                val h = camera2Handler
+                if (h != null) {
+                    h.post {
+                        takeMultiCameraPicture(timing)
+                    }
+                } else {
+                    takeMultiCameraPicture(timing)
+                }
             }
         }
     }
@@ -1034,22 +1041,18 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // Listen for HDR+/RAW foreground processing queue changes to drive loading animation
-        viewLifecycleOwner.lifecycleScope.launch {
-            top.maary.darkbag.processor.HdrPlusRequestManager.pendingForegroundTasksCount.collect { foregroundCount ->
-                cameraViewModel.setTaskCounts(
-                    totalCount = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value,
-                    foregroundCount = foregroundCount
-                )
-                withContext(Dispatchers.Main) {
-                    updateProcessingAnimationUi()
-                }
-            }
-        }
-
-        // Observe CameraViewModel StateFlow and SharedFlow (MVI / UDF)
+        // Observe CameraViewModel StateFlow, SharedFlow, and Task Counts (MVI / UDF)
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                launch {
+                    top.maary.darkbag.processor.HdrPlusRequestManager.pendingForegroundTasksCount.collect { foregroundCount ->
+                        cameraViewModel.setTaskCounts(
+                            totalCount = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value,
+                            foregroundCount = foregroundCount
+                        )
+                        updateProcessingAnimationUi()
+                    }
+                }
                 launch {
                     cameraViewModel.uiState.collect { state ->
                         cameraUiContainerBinding?.cameraCaptureButton?.setDotRotation(state.shutterDotRotation)
@@ -4458,11 +4461,17 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private fun takeMultiCameraPicture(timing: StandardTimingTracker? = null) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            isBurstActive = false
+            cameraViewModel.setBurstActive(false)
+            lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }
             processingSemaphore.release()
             return
         }
 
         val manager = multiCameraManager ?: run {
+            isBurstActive = false
+            cameraViewModel.setBurstActive(false)
+            lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }
             processingSemaphore.release()
             return
         }
@@ -5641,6 +5650,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private suspend fun closeCamera2() {
         camera2Lock.withLock {
+            captureResults.clear()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 multiCameraManager?.close()
                 multiCameraManager = null

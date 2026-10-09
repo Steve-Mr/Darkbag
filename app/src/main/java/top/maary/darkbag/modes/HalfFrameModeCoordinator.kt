@@ -106,9 +106,9 @@ class HalfFrameModeCoordinator(
 
         timing.captureMode = CaptureTimingMode.HALF_FRAME
         val sink = HalfFrameCacheSink()
+        host.showShutterVisuals()
 
         if (host.isHdrPlusEnabled && host.isRawSupported) {
-            host.showShutterVisuals()
             host.triggerHdrPlusBurst(
                 sink = sink,
                 isFrame1 = isFrame1,

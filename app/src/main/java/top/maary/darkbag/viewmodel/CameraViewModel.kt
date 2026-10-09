@@ -39,6 +39,9 @@ class CameraViewModel : ViewModel() {
             }
             is CameraUserIntent.SetBurstActive -> {
                 _uiState.update { it.copy(isBurstActive = intent.active) }
+                if (!intent.active) {
+                    emitEffect(CameraEffect.ResetShutterUi)
+                }
             }
             is CameraUserIntent.UpdateTaskCounts -> {
                 _uiState.update {

@@ -102,4 +102,16 @@ class CameraViewModelTest {
         assertTrue(effect is CameraEffect.ShowToast)
         assertEquals("Lens switched", (effect as CameraEffect.ShowToast).message)
     }
+
+    @Test
+    fun testProcessIntent_SetBurstActive_EmitsResetShutterUiWhenFalse() = runBlocking {
+        viewModel.setBurstActive(true)
+        assertTrue(viewModel.uiState.value.isBurstActive)
+
+        viewModel.setBurstActive(false)
+        assertFalse(viewModel.uiState.value.isBurstActive)
+        val effect = viewModel.effects.first()
+        assertTrue(effect is CameraEffect.ResetShutterUi)
+    }
 }
+

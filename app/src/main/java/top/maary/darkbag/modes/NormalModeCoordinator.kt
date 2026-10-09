@@ -33,10 +33,10 @@ class NormalModeCoordinator(
         }
 
         val sink = DirectMediaStoreSink()
+        host.showShutterVisuals()
 
         if (host.isHdrPlusEnabled && host.isRawSupported) {
             timing.captureMode = CaptureTimingMode.HDR_BURST
-            host.showShutterVisuals()
             host.triggerHdrPlusBurst(
                 sink = sink,
                 isFrame1 = false,
