@@ -72,6 +72,8 @@ private:
     bool prepareTextures(int width, int height);
     void releaseTextures();
 
+    bool computeStructureTensor();
+
     bool accumulateFrameLocked(
         const uint16_t* altBayer,
         const float* flowX,
@@ -119,6 +121,7 @@ private:
     int flowTexHeight_ = 0;
     GLuint accumTex_[2] = {0, 0};
     GLuint weightTex_[2] = {0, 0};
+    GLuint resolvedRgbTex_ = 0;
     GLuint outputRgbTex_ = 0;
     bool reusedFromCache_ = false;
 };

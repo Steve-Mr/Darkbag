@@ -123,7 +123,7 @@ data class StandardTimingTracker(
             "Single(RCD)"
         } else when (fusionMode) {
             1 -> "Spatial+RCD"
-            2 -> "Sabre SR"
+            2 -> if (zoomFactor > 1.05f) "Sabre SR" else "Sabre 1x(Demosaic)"
             3 -> "Classic Wiener"
             else -> if (zoomFactor >= 1.25f) "Auto(Sabre)" else "Auto(RCD)"
         }

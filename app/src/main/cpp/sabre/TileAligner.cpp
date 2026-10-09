@@ -29,6 +29,34 @@ static inline int getOptimalThreadCount() {
     return std::min(4, std::max(1, omp_get_num_procs()));
 }
 
+static float computeWeightedMedian(const float* vals, const float* weights, int count) {
+    if (count <= 0) return 0.0f;
+    if (count == 1) return vals[0];
+
+    int idx[9];
+    for (int i = 0; i < count; ++i) {
+        idx[i] = i;
+    }
+    std::sort(idx, idx + count, [vals](int a, int b) {
+        return vals[a] < vals[b];
+    });
+
+    float totalWeight = 0.0f;
+    for (int i = 0; i < count; ++i) {
+        totalWeight += weights[i];
+    }
+    float halfWeight = 0.5f * totalWeight;
+
+    float cumWeight = 0.0f;
+    for (int i = 0; i < count; ++i) {
+        cumWeight += weights[idx[i]];
+        if (cumWeight >= halfWeight) {
+            return vals[idx[i]];
+        }
+    }
+    return vals[idx[count - 1]];
+}
+
 static void fillPadding(std::vector<uint16_t>& image, int width, int height, int pad, int stride) {
     if (image.empty() || width <= 0 || height <= 0) return;
 
@@ -450,6 +478,52 @@ bool TileAligner::alignFrame(
 
         outFlowX[tileIdx] = dxSensor;
         outFlowY[tileIdx] = dySensor;
+    }
+
+    // 5. Spatial Flow Field Regularization (3x3 weighted median filter & outlier clamping)
+    // Prevents flow field tearing on periodic text and screen structures
+    std::vector<float> rawFlowX = outFlowX;
+    std::vector<float> rawFlowY = outFlowY;
+
+    #pragma omp parallel for num_threads(numThreads) schedule(static)
+    for (int tileIdx = 0; tileIdx < totalTiles; ++tileIdx) {
+        int tx = tileIdx % m_tilesX;
+        int ty = tileIdx / m_tilesX;
+
+        float nbrX[9];
+        float nbrY[9];
+        float weights[9];
+        int count = 0;
+
+        for (int ddy = -1; ddy <= 1; ++ddy) {
+            int ny = ty + ddy;
+            if (ny < 0 || ny >= m_tilesY) continue;
+            for (int ddx = -1; ddx <= 1; ++ddx) {
+                int nx = tx + ddx;
+                if (nx < 0 || nx >= m_tilesX) continue;
+                int nIdx = ny * m_tilesX + nx;
+                nbrX[count] = rawFlowX[nIdx];
+                nbrY[count] = rawFlowY[nIdx];
+                // Spatial weighting: center=2, cardinal=2, diagonal=1
+                weights[count] = (ddx == 0 && ddy == 0) ? 2.0f : ((ddx == 0 || ddy == 0) ? 2.0f : 1.0f);
+                count++;
+            }
+        }
+
+        float medX = computeWeightedMedian(nbrX, weights, count);
+        float medY = computeWeightedMedian(nbrY, weights, count);
+
+        float curX = rawFlowX[tileIdx];
+        float curY = rawFlowY[tileIdx];
+        float diffX = curX - medX;
+        float diffY = curY - medY;
+
+        // If flow vector deviates by more than 3.0 pixels from its 3x3 spatial neighborhood median,
+        // replace with neighborhood median to prevent flow field tearing
+        if (diffX * diffX + diffY * diffY > 9.0f) {
+            outFlowX[tileIdx] = medX;
+            outFlowY[tileIdx] = medY;
+        }
     }
 
     return true;
