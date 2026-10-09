@@ -125,6 +125,25 @@ class HalfFrameModeCoordinator(
         }
     }
 
+    override fun onShutterLongPressed(): Boolean {
+        val currentSession = sessionStore.readSession(profile = profile)
+        if (currentSession.step == 1) {
+            sessionStore.clearProfile(profile)
+            sessionStore.markStep(0, profile = profile)
+            host.updateHalfFrameUi(animate = false)
+            return true
+        }
+        return false
+    }
+
+    override fun getEffectiveOrientation(deviceOrientationDegrees: Int): Int {
+        val layout = host.preferences.getString(
+            SettingsFragment.KEY_HALF_FRAME_LAYOUT,
+            SettingsFragment.HALF_FRAME_LAYOUT_SBS
+        )
+        return if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) 270 else 0
+    }
+
     override fun getShutterDotRotation(deviceOrientationDegrees: Int): Float {
         val layout = host.preferences.getString(
             SettingsFragment.KEY_HALF_FRAME_LAYOUT,

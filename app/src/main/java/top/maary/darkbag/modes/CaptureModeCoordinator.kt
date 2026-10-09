@@ -19,6 +19,12 @@ interface CaptureModeCoordinator {
     /** 用户点击快门动作分发 */
     fun onShutterTriggered(timing: StandardTimingTracker)
 
+    /** 用户长按快门动作分发 (返回 true 表示事件已被模式消费) */
+    fun onShutterLongPressed(): Boolean = false
+
+    /** 获取图像旋转对应的有效设备旋转角度 (用于修正 EXIF 与排版) */
+    fun getEffectiveOrientation(deviceOrientationDegrees: Int): Int = deviceOrientationDegrees
+
     /** 获取快门指示点目标旋转角度 (驱动 ExpressiveShutterButton 导向真实图像上方) */
     fun getShutterDotRotation(deviceOrientationDegrees: Int): Float = -deviceOrientationDegrees.toFloat()
 }

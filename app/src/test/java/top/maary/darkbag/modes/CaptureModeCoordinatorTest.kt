@@ -274,4 +274,61 @@ class CaptureModeCoordinatorTest {
         multi.onShutterTriggered(StandardTimingTracker(shutterClick = 300L))
         assertFalse(host.multiCamTriggered)
     }
+
+    @Test
+    fun testCaptureMode_SupportsMotionPhoto() {
+        assertTrue(CaptureMode.NORMAL.supportsMotionPhoto)
+        assertFalse(CaptureMode.HALF_FRAME_SBS.supportsMotionPhoto)
+        assertFalse(CaptureMode.HALF_FRAME_TB.supportsMotionPhoto)
+        assertFalse(CaptureMode.MULTI_CAMERA.supportsMotionPhoto)
+    }
+
+    @Test
+    fun testHalfFrameModeCoordinator_OnShutterLongPressed_ResetsStep1() {
+        val sessionStore = HalfFrameSessionStore(context)
+        sessionStore.clearProfile(HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        sessionStore.markStep(1, System.currentTimeMillis(), profile = HalfFrameSessionStore.PROFILE_HALF_SIDE)
+
+        val host = MockModeExecutionContext(context, prefs)
+        val coordinator = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+
+        val consumed = coordinator.onShutterLongPressed()
+        assertTrue(consumed)
+        assertEquals(0, sessionStore.readSession(profile = HalfFrameSessionStore.PROFILE_HALF_SIDE).step)
+        assertTrue(host.halfFrameUiUpdated)
+        assertFalse(host.lastHalfFrameUiAnimated)
+
+        // Calling when step is 0 should return false
+        val consumedAgain = coordinator.onShutterLongPressed()
+        assertFalse(consumedAgain)
+    }
+
+    @Test
+    fun testHalfFrameModeCoordinator_EffectiveOrientationRespectsLayout() {
+        val host = MockModeExecutionContext(context, prefs)
+
+        // SBS layout -> 0
+        prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS).apply()
+        val sbsCoordinator = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+        assertEquals(0, sbsCoordinator.getEffectiveOrientation(90))
+
+        // TB layout -> 270
+        prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_TB).apply()
+        val tbCoordinator = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_TB, host)
+        assertEquals(270, tbCoordinator.getEffectiveOrientation(90))
+    }
+
+    @Test
+    fun testNormalAndMultiCamera_DefaultLongPressAndOrientation() {
+        val host = MockModeExecutionContext(context, prefs)
+        val normal = NormalModeCoordinator(host)
+        val multi = MultiCameraModeCoordinator(host)
+
+        assertFalse(normal.onShutterLongPressed())
+        assertEquals(180, normal.getEffectiveOrientation(180))
+
+        assertFalse(multi.onShutterLongPressed())
+        assertEquals(180, multi.getEffectiveOrientation(180))
+    }
 }
+

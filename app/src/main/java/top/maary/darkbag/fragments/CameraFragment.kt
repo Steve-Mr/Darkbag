@@ -293,8 +293,10 @@ class CameraFragment : Fragment() {
 
     // Half-frame State
     private var pendingVfSnapshot: android.graphics.Bitmap? = null
-    private var isHalfFrameModeEnabled = false
-    private var isMultiCameraModeActive = false
+    private val isHalfFrameModeEnabled: Boolean
+        get() = (activeCoordinator?.mode ?: cameraViewModel.uiState.value.currentMode).isHalfFrame
+    private val isMultiCameraModeActive: Boolean
+        get() = (activeCoordinator?.mode ?: cameraViewModel.uiState.value.currentMode).isMultiCamera
     private var isMultiCameraManualLinked = true
     private var multiCameraManager: top.maary.darkbag.camera.MultiCameraCaptureManager? = null
     private var concurrentFrontCameraManager: top.maary.darkbag.camera.ConcurrentFrontCameraManager? = null
@@ -644,7 +646,7 @@ class CameraFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         isMotionPhotoEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false)
 
-        if (isMotionPhotoEnabled && !isHalfFrameModeEnabled && !isMultiCameraModeActive) {
+        if (isMotionPhotoEnabled && (activeCoordinator?.mode ?: resolveActiveCaptureMode(prefs)).supportsMotionPhoto) {
             if (motionPhotoEncoder == null) {
                 motionPhotoEncoder = MotionPhotoEncoder(
                     width = 1080,
@@ -666,7 +668,9 @@ class CameraFragment : Fragment() {
 
     private fun updateMotionPhotoButton() {
         val btn = cameraUiContainerBinding?.motionPhotoButton ?: return
-        if (isHalfFrameModeEnabled || isMultiCameraModeActive) {
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val supportsMotion = (activeCoordinator?.mode ?: resolveActiveCaptureMode(prefs)).supportsMotionPhoto
+        if (!supportsMotion) {
             btn.visibility = View.GONE
             return
         }
@@ -741,19 +745,15 @@ class CameraFragment : Fragment() {
 
         updateHdrPlusConstraints()
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val previousMultiCam = isMultiCameraModeActive
-        val previousHalfFrame = isHalfFrameModeEnabled
-
+        val previousMode = activeCoordinator?.mode
         val activeMode = resolveActiveCaptureMode(prefs)
-        isHalfFrameModeEnabled = (activeMode == CaptureMode.HALF_FRAME_SBS || activeMode == CaptureMode.HALF_FRAME_TB)
-        isMultiCameraModeActive = (activeMode == CaptureMode.MULTI_CAMERA)
         updateActiveCoordinator(activeMode)
-        if (isHalfFrameModeEnabled) {
+        if (activeMode.isHalfFrame) {
             val layout = if (activeMode == CaptureMode.HALF_FRAME_TB) SettingsFragment.HALF_FRAME_LAYOUT_TB else SettingsFragment.HALF_FRAME_LAYOUT_SBS
             prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, layout).apply()
         }
 
-        val modeChanged = (previousMultiCam != isMultiCameraModeActive) || (previousHalfFrame != isHalfFrameModeEnabled)
+        val modeChanged = (previousMode != activeMode)
 
         // Re-initialize camera engine if needed.
         if (modeChanged || camera2Device == null || isMultiCameraModeActive) {
@@ -987,12 +987,10 @@ class CameraFragment : Fragment() {
         updateHdrPlusUi()
         updateHdrPlusConstraints()
 
-        // Initialize Half-frame & Multi-camera State (isolated by mode/layout profile)
+        // Initialize Capture Mode & Coordinator (isolated by mode/layout profile)
         val activeMode = resolveActiveCaptureMode(prefs)
-        isHalfFrameModeEnabled = (activeMode == CaptureMode.HALF_FRAME_SBS || activeMode == CaptureMode.HALF_FRAME_TB)
-        isMultiCameraModeActive = (activeMode == CaptureMode.MULTI_CAMERA)
         updateActiveCoordinator(activeMode)
-        if (isHalfFrameModeEnabled) {
+        if (activeMode.isHalfFrame) {
             val layout = if (activeMode == CaptureMode.HALF_FRAME_TB) SettingsFragment.HALF_FRAME_LAYOUT_TB else SettingsFragment.HALF_FRAME_LAYOUT_SBS
             prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, layout).apply()
         }
@@ -1399,7 +1397,8 @@ class CameraFragment : Fragment() {
                         multiCameraManager?.onSessionFailedListener = { error ->
                             Log.e(TAG, "Multi-camera session failed: $error, falling back to standard mode")
                             lifecycleScope.launch(Dispatchers.Main) {
-                                isMultiCameraModeActive = false
+                                prefs.edit().putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, CaptureMode.NORMAL.key).apply()
+                                updateActiveCoordinator(CaptureMode.NORMAL)
                                 _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
                                 bindCameraUseCases()
                             }
@@ -1417,7 +1416,8 @@ class CameraFragment : Fragment() {
                 return
             } else {
                 Log.w(TAG, "Multi-camera requested but not supported on device, disabling multi-camera mode")
-                isMultiCameraModeActive = false
+                prefs.edit().putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, CaptureMode.NORMAL.key).apply()
+                updateActiveCoordinator(CaptureMode.NORMAL)
                 _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
             }
         }
@@ -1589,7 +1589,7 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.motionPhotoButton?.let { btn ->
             updateMotionPhotoButton()
             btn.setOnClickListener {
-                if (isHalfFrameModeEnabled) return@setOnClickListener
+                if (activeCoordinator?.mode?.supportsMotionPhoto != true) return@setOnClickListener
                 isMotionPhotoEnabled = !isMotionPhotoEnabled
                 requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                     .edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO, isMotionPhotoEnabled).apply()
@@ -1601,37 +1601,33 @@ class CameraFragment : Fragment() {
         val shutter = cameraUiContainerBinding?.cameraCaptureButton
         shutter?.isLongPressHoldEnabled = true
         shutter?.onLongPressHoldStarted = {
-            if (isHalfFrameModeEnabled && halfFrameStep == 1) {
-                // Cancel/Reset half-frame
-                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                halfFrameSessionStore.clearCurrentSession(deleteTempFile = true)
-                writeScopedHalfFrameStep(prefs, 0)
-                updateHalfFrameUI()
-            } else if (!isBurstActive && !isHalfFrameModeEnabled && !isMultiCameraModeActive) {
-                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                val action = prefs.getString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, SettingsFragment.SHUTTER_LONG_PRESS_MP4)
-                if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO || action == SettingsFragment.SHUTTER_LONG_PRESS_MP4) {
-                    val hasAudio = androidx.core.content.ContextCompat.checkSelfPermission(
-                        requireContext(),
-                        android.Manifest.permission.RECORD_AUDIO
-                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                    if (!hasAudio) {
-                        if (shouldShowRequestPermissionRationale(android.Manifest.permission.RECORD_AUDIO)) {
-                            showAudioPermissionRationaleDialog {
-                                if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
-                                    startRawVideoRecording()
-                                } else {
-                                    startMp4VideoRecording()
+            if (activeCoordinator?.onShutterLongPressed() != true) {
+                if (!isBurstActive && activeCoordinator?.mode == CaptureMode.NORMAL) {
+                    val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    val action = prefs.getString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, SettingsFragment.SHUTTER_LONG_PRESS_MP4)
+                    if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO || action == SettingsFragment.SHUTTER_LONG_PRESS_MP4) {
+                        val hasAudio = androidx.core.content.ContextCompat.checkSelfPermission(
+                            requireContext(),
+                            android.Manifest.permission.RECORD_AUDIO
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        if (!hasAudio) {
+                            if (shouldShowRequestPermissionRationale(android.Manifest.permission.RECORD_AUDIO)) {
+                                showAudioPermissionRationaleDialog {
+                                    if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
+                                        startRawVideoRecording()
+                                    } else {
+                                        startMp4VideoRecording()
+                                    }
                                 }
+                            } else {
+                                requestAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                             }
                         } else {
-                            requestAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                        }
-                    } else {
-                        if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
-                            startRawVideoRecording()
-                        } else {
-                            startMp4VideoRecording()
+                            if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
+                                startRawVideoRecording()
+                            } else {
+                                startMp4VideoRecording()
+                            }
                         }
                     }
                 }
@@ -3052,13 +3048,8 @@ class CameraFragment : Fragment() {
                 .get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         } catch (e: Exception) { 0 }
 
-        val effectiveDegrees = if (isHalfFrameModeEnabled) {
-            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
-            if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) 270 else 0
-        } else {
-            deviceOrientationDegrees
-        }
+        val effectiveDegrees = activeCoordinator?.getEffectiveOrientation(deviceOrientationDegrees)
+            ?: deviceOrientationDegrees
 
         val combined = if (lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
             (sensorOrientation - effectiveDegrees + 360) % 360
@@ -6013,8 +6004,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         editor.apply()
 
         val modeChanged = (currentActiveMode != nextMode)
-        isHalfFrameModeEnabled = (nextMode == CaptureMode.HALF_FRAME_SBS || nextMode == CaptureMode.HALF_FRAME_TB)
-        isMultiCameraModeActive = (nextMode == CaptureMode.MULTI_CAMERA)
         updateActiveCoordinator(nextMode)
 
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
@@ -6103,13 +6092,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private fun getDotTargetRotation(): Float {
         return activeCoordinator?.getShutterDotRotation(deviceOrientationDegrees)
-            ?: if (!isHalfFrameModeEnabled) {
-                -deviceOrientationDegrees.toFloat()
-            } else {
-                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
-                if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) 90f else 0f
-            }
+            ?: -deviceOrientationDegrees.toFloat()
     }
 
     private fun resetBurstUi() {
