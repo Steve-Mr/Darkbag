@@ -659,6 +659,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
             effectiveWhiteLevel = kMax16BitValue;
         }
 
+        if (!dngRawData || sharedResult->rgbBuf.empty()) {
+            LOGE("doDngExport: missing raw data for DNG export after readback");
+            return false;
+        }
+
         bool ok = write_dng(
             dng_path_cstr, width, height, dngRawData,
             dngStrideX, dngStrideY, dngStrideC,
@@ -1519,25 +1524,29 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
                 }
             }
             uint16_t* raw_ptr = sharedResult->rgbBuf.data();
-            int stride_x = 1;
-            int stride_y = width;
-            int stride_c = width * height;
-            const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
+            if (!raw_ptr || sharedResult->rgbBuf.empty()) {
+                LOGE("nativeFinishStreamingSession: missing raw buffer for preview, skipping");
+            } else {
+                int stride_x = 1;
+                int stride_y = width;
+                int stride_c = width * height;
+                const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
 
-            float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
-            const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : session->whiteBalanceData();
+                float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
+                const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : session->whiteBalanceData();
 
-            process_and_save_image(
-                raw_ptr, stride_x, stride_y, stride_c,
-                session->lensShadingData(), session->lensShadingRows(), session->lensShadingCols(),
-                width, height, digitalGain, targetLog, lut,
-                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                nullptr, nullptr, nullptr, 1,
-                session->ccmData(), effectiveWb,
-                session->orientation(), bitmapPixels, out_w, out_h,
-                true, fastPreviewDownsample, effectiveZoom, (bool)mirror,
-                (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights
-            );
+                process_and_save_image(
+                    raw_ptr, stride_x, stride_y, stride_c,
+                    session->lensShadingData(), session->lensShadingRows(), session->lensShadingCols(),
+                    width, height, digitalGain, targetLog, lut,
+                    0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                    nullptr, nullptr, nullptr, 1,
+                    session->ccmData(), effectiveWb,
+                    session->orientation(), bitmapPixels, out_w, out_h,
+                    true, fastPreviewDownsample, effectiveZoom, (bool)mirror,
+                    (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights
+                );
+            }
             AndroidBitmap_unlockPixels(env, outputBitmap);
         }
     }

@@ -128,6 +128,9 @@ class HalfFrameModeCoordinator(
     override fun onShutterLongPressed(): Boolean {
         val currentSession = sessionStore.readSession(profile = profile)
         if (currentSession.step == 1) {
+            currentSession.tempPath?.let { path ->
+                runCatching { java.io.File(path).delete() }
+            }
             sessionStore.clearProfile(profile)
             sessionStore.markStep(0, profile = profile)
             host.updateHalfFrameUi(animate = false)

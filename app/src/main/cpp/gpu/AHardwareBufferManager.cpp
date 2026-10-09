@@ -24,6 +24,7 @@ void AHardwareBufferTarget::release() {
 
     GpuContext& ctx = GpuContext::instance();
     GpuContextScope ctxScope(ctx);
+    if (!ctxScope.isAcquired()) return;
     if (eglImage_ != EGL_NO_IMAGE_KHR) {
         if (ctx.fnDestroyImageKHR) {
             ctx.fnDestroyImageKHR(ctx.getDisplay(), eglImage_);

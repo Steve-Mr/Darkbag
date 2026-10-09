@@ -2086,6 +2086,12 @@ bool write_dng(
         return false;
     }
 
+    if (!planarData) {
+        LOGE("write_dng failed: planarData is null");
+        if (tif) TIFFClose(tif);
+        return false;
+    }
+
     // Pre-encode preview images first to calculate SubIFDs offsets
     const struct PreviewSpec {
         int targetLongEdge;

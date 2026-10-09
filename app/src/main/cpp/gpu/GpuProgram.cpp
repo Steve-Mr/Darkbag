@@ -154,6 +154,7 @@ void GpuProgram::drawQuad() {
 void GpuProgram::release() {
     GpuContext& ctx = GpuContext::instance();
     GpuContextScope ctxScope(ctx);
+    if (!ctxScope.isAcquired()) return;
     if (vbo_ != 0) {
         glDeleteBuffers(1, &vbo_);
         vbo_ = 0;

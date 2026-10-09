@@ -71,6 +71,8 @@ class HdrPlusProcessingService : LifecycleService() {
                 HdrPlusRequestManager.onForegroundTaskFinished()
             }
         }
+        val spec = req.toSpec()
+        val sink = spec.getEffectiveSink()
         try {
             val start = System.currentTimeMillis()
             req.timing?.processingStart = start
@@ -365,14 +367,29 @@ class HdrPlusProcessingService : LifecycleService() {
                 }
 
                 if (!stage2HandedOff) {
+                    try {
+                        sink.onError(applicationContext, spec, RuntimeException("Failed to hand off Stage 2"))
+                    } catch (sinkEx: Throwable) {
+                        Log.e(TAG, "Failed calling onError on sink", sinkEx)
+                    }
                     finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
                 }
             } else {
                 Log.e(TAG, "Stage 1 Halide processing failed for ${req.requestId}")
+                try {
+                    sink.onError(applicationContext, spec, RuntimeException("Stage 1 Halide processing failed with ret=$ret"))
+                } catch (sinkEx: Throwable) {
+                    Log.e(TAG, "Failed calling onError on sink", sinkEx)
+                }
                 finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception processing ${req.requestId}", e)
+            try {
+                sink.onError(applicationContext, spec, e)
+            } catch (sinkEx: Throwable) {
+                Log.e(TAG, "Failed calling onError on sink", sinkEx)
+            }
             if (!buffersReleased && req.megaBuffer != null) {
                 HdrPlusBurst.releaseBuffer(req.megaBuffer)
             }
