@@ -37,7 +37,8 @@ public:
         int64_t* outColorPipeMs, int64_t* outJpegEncodeMs,
         const float* lensShadingMap = nullptr,
         int lensShadingRows = 0,
-        int lensShadingCols = 0
+        int lensShadingCols = 0,
+        float physicalZoomFactor = 1.0f
     );
 
     // Direct zero-copy GPU-to-GPU entry point from unified GL_RGBA16UI texture
@@ -55,7 +56,8 @@ public:
         int64_t* outColorPipeMs, int64_t* outJpegEncodeMs,
         const float* lensShadingMap = nullptr,
         int lensShadingRows = 0,
-        int lensShadingCols = 0
+        int lensShadingCols = 0,
+        float physicalZoomFactor = 1.0f
     );
 
     void release();
@@ -83,7 +85,8 @@ private:
         int64_t* outColorPipeMs, int64_t* outJpegEncodeMs,
         const float* lensShadingMap = nullptr,
         int lensShadingRows = 0,
-        int lensShadingCols = 0
+        int lensShadingCols = 0,
+        float physicalZoomFactor = 1.0f
     );
 
     std::mutex engineMutex_;

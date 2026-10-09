@@ -623,9 +623,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                     LOGD("Lazy readback of GPU unified texture %u for Bayer fallback DNG export (%dx%d)",
                          sharedResult->gpuRgbTexture, width, height);
                     sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
-                    darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                    bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
                         sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
                     );
+                    if (!okRb) {
+                        LOGE("GPU readback failed for Bayer fallback DNG export");
+                        sharedResult->rgbBuf.clear();
+                    }
                 }
                 dngRawData = sharedResult->rgbBuf.data();
                 dngStrideX = 1;
@@ -640,15 +644,24 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                 LOGD("Lazy readback of GPU unified texture %u for Linear DNG export (%dx%d)",
                      sharedResult->gpuRgbTexture, width, height);
                 sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
-                darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
                     sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
                 );
+                if (!okRb) {
+                    LOGE("GPU readback failed for Linear DNG export");
+                    sharedResult->rgbBuf.clear();
+                }
             }
             dngRawData = sharedResult->rgbBuf.data();
             dngStrideX = 1;
             dngStrideY = width;
             dngStrideC = width * height;
             effectiveWhiteLevel = kMax16BitValue;
+        }
+
+        if (!dngRawData || sharedResult->rgbBuf.empty()) {
+            LOGE("doDngExport: missing raw data for DNG export after readback");
+            return false;
         }
 
         bool ok = write_dng(
@@ -678,6 +691,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         LOGD("Exporting JPG: JPG=%s (outJpgFd=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd);
         auto jpgStart = std::chrono::high_resolution_clock::now();
         float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
+        float physicalZoom = zoomFactor;
         const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : wbVec.data();
         int64_t measuredColorPipe = 0;
         int64_t measuredJpegEncode = 0;
@@ -699,7 +713,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                     orientation, (bool)mirror, effectiveZoom,
                     (int)colorEngineMode, faithfulHighlights,
                     &measuredColorPipe, &measuredJpegEncode,
-                    lens_shading_ptr, lensShadingRows, lensShadingCols
+                    lens_shading_ptr, lensShadingRows, lensShadingCols,
+                    physicalZoom
                 );
             } else if (sharedResult && !sharedResult->rgbBuf.empty()) {
                 gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImage(
@@ -715,7 +730,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                     orientation, (bool)mirror, effectiveZoom,
                     (int)colorEngineMode, faithfulHighlights,
                     &measuredColorPipe, &measuredJpegEncode,
-                    lens_shading_ptr, lensShadingRows, lensShadingCols
+                    lens_shading_ptr, lensShadingRows, lensShadingCols,
+                    physicalZoom
                 );
             }
             if (gpuAttemptSuccess) {
@@ -733,9 +749,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                 LOGW("Lazy readback of GPU unified texture %u for CPU ColorPipe fallback (%dx%d)",
                      sharedResult->gpuRgbTexture, width, height);
                 sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
-                darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
                     sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
                 );
+                if (!okRb) {
+                    LOGE("GPU readback failed for CPU ColorPipe fallback");
+                    sharedResult->rgbBuf.clear();
+                }
             }
             if (sharedResult && !sharedResult->rgbBuf.empty()) {
                 saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height,
@@ -1495,30 +1515,38 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
                 LOGD("Lazy readback of GPU unified texture %u for streaming finish outputBitmap preview (%dx%d)",
                      sharedResult->gpuRgbTexture, width, height);
                 sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
-                darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
                     sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
                 );
+                if (!okRb) {
+                    LOGE("GPU readback failed for streaming finish outputBitmap preview");
+                    sharedResult->rgbBuf.clear();
+                }
             }
             uint16_t* raw_ptr = sharedResult->rgbBuf.data();
-            int stride_x = 1;
-            int stride_y = width;
-            int stride_c = width * height;
-            const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
+            if (!raw_ptr || sharedResult->rgbBuf.empty()) {
+                LOGE("nativeFinishStreamingSession: missing raw buffer for preview, skipping");
+            } else {
+                int stride_x = 1;
+                int stride_y = width;
+                int stride_c = width * height;
+                const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
 
-            float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
-            const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : session->whiteBalanceData();
+                float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
+                const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : session->whiteBalanceData();
 
-            process_and_save_image(
-                raw_ptr, stride_x, stride_y, stride_c,
-                session->lensShadingData(), session->lensShadingRows(), session->lensShadingCols(),
-                width, height, digitalGain, targetLog, lut,
-                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                nullptr, nullptr, nullptr, 1,
-                session->ccmData(), effectiveWb,
-                session->orientation(), bitmapPixels, out_w, out_h,
-                true, fastPreviewDownsample, effectiveZoom, (bool)mirror,
-                (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights
-            );
+                process_and_save_image(
+                    raw_ptr, stride_x, stride_y, stride_c,
+                    session->lensShadingData(), session->lensShadingRows(), session->lensShadingCols(),
+                    width, height, digitalGain, targetLog, lut,
+                    0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                    nullptr, nullptr, nullptr, 1,
+                    session->ccmData(), effectiveWb,
+                    session->orientation(), bitmapPixels, out_w, out_h,
+                    true, fastPreviewDownsample, effectiveZoom, (bool)mirror,
+                    (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights
+                );
+            }
             AndroidBitmap_unlockPixels(env, outputBitmap);
         }
     }
@@ -1630,7 +1658,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
     jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols,
     jintArray activeArea, jdoubleArray noiseProfile,
     jint iso, jlong exposureTimeNanos, jfloat focalLength, jint focalLength35mm, jfloat fNumber,
-    jint dngCompressionMode, jboolean isHdrPlus
+    jint dngCompressionMode, jboolean isHdrPlus,
+    jobject metadataObj, jfloat digitalGain
 ) {
     if (!rawBuffer || width <= 0 || height <= 0 || bufferOffset < 0) return JNI_FALSE;
     jlong capacity = env->GetDirectBufferCapacity(rawBuffer);
@@ -1720,21 +1749,42 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
     }
 
     ImageMetadata meta;
-    meta.iso = iso;
-    meta.exposureTime = exposureTimeNanos;
-    meta.focalLength = focalLength;
-    meta.focalLengthIn35mmFilm = focalLength35mm;
-    meta.fNumber = fNumber;
-    meta.uniqueCameraModel = "Darkbag";
+    if (metadataObj) {
+        meta = metadataFromJava(env, metadataObj);
+    }
+    if (meta.iso == 0) meta.iso = iso;
+    if (meta.exposureTime == 0) meta.exposureTime = exposureTimeNanos;
+    if (meta.focalLength == 0.0f) meta.focalLength = focalLength;
+    if (meta.focalLengthIn35mmFilm == 0) meta.focalLengthIn35mmFilm = focalLength35mm;
+    if (meta.fNumber == 0.0f) meta.fNumber = fNumber;
+    if (meta.uniqueCameraModel.empty() || meta.uniqueCameraModel == "Unknown") {
+        meta.uniqueCameraModel = "Darkbag";
+    }
 
     std::vector<float> ccmVec(9, 0.0f);
-    if (cm1Ptr) {
+    if (fm1Ptr) {
+        // D50 XYZ -> sRGB Bradford adaptation matrix to map ForwardMatrix1 to sRGB
+        const float M_XYZ_D50_TO_SRGB[9] = {
+             3.1338561f, -1.6168667f, -0.4906146f,
+            -0.9787684f,  1.9161415f,  0.0334540f,
+             0.0719453f, -0.2289914f,  1.4052427f
+        };
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) {
+                float sum = 0.0f;
+                for (int k = 0; k < 3; ++k) {
+                    sum += M_XYZ_D50_TO_SRGB[r * 3 + k] * fm1Ptr[k * 3 + c];
+                }
+                ccmVec[r * 3 + c] = sum;
+            }
+        }
+    } else if (cm1Ptr) {
         for (int i = 0; i < 9; ++i) ccmVec[i] = cm1Ptr[i];
     } else {
         ccmVec = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
     }
 
-    float baselineExposure = 0.0f;
+    float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
     std::vector<float> wbVec = {1.0f, 1.0f, 1.0f, 1.0f};
     if (neutralPtr) {
         wbVec[0] = 1.0f / std::max(1e-4f, neutralPtr[0]);

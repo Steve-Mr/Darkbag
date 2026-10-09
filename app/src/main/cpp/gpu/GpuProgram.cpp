@@ -1,4 +1,5 @@
 #include "GpuProgram.h"
+#include "GpuContext.h"
 #include <android/log.h>
 #include <vector>
 
@@ -111,6 +112,7 @@ bool GpuProgram::build(const char* vertexSrc, const char* fragmentSrc) {
     uniforms_.uOrientation = glGetUniformLocation(programId_, "uOrientation");
     uniforms_.uMirror = glGetUniformLocation(programId_, "uMirror");
     uniforms_.uZoomFactor = glGetUniformLocation(programId_, "uZoomFactor");
+    uniforms_.uPhysicalZoomFactor = glGetUniformLocation(programId_, "uPhysicalZoomFactor");
 
     // Create VAO / VBO
     glGenVertexArrays(1, &vao_);
@@ -150,6 +152,9 @@ void GpuProgram::drawQuad() {
 }
 
 void GpuProgram::release() {
+    GpuContext& ctx = GpuContext::instance();
+    GpuContextScope ctxScope(ctx);
+    if (!ctxScope.isAcquired()) return;
     if (vbo_ != 0) {
         glDeleteBuffers(1, &vbo_);
         vbo_ = 0;

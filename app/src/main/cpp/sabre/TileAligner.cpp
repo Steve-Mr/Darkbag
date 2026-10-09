@@ -38,7 +38,12 @@ static float computeWeightedMedian(const float* vals, const float* weights, int 
         idx[i] = i;
     }
     std::sort(idx, idx + count, [vals](int a, int b) {
-        return vals[a] < vals[b];
+        float va = vals[a];
+        float vb = vals[b];
+        if (std::isnan(va) || std::isnan(vb)) {
+            return !std::isnan(va);
+        }
+        return va < vb;
     });
 
     float totalWeight = 0.0f;

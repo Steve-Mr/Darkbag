@@ -17,6 +17,9 @@ enum class CaptureMode(val key: String) {
     val isMultiCamera: Boolean
         get() = this == MULTI_CAMERA
 
+    val supportsMotionPhoto: Boolean
+        get() = this == NORMAL
+
     companion object {
         fun fromKey(key: String?): CaptureMode? = entries.find { it.key == key }
     }

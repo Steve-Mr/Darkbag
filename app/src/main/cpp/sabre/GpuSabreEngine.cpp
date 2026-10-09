@@ -363,22 +363,27 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
         // Register newly allocated textures into s_cachedTextures under lock
         {
             std::lock_guard<std::mutex> cacheLock(s_cacheMutex);
-            s_cachedTextures.width = width_;
-            s_cachedTextures.height = height_;
-            s_cachedTextures.refBayerTex = refBayerTex_;
-            s_cachedTextures.candBayerTex = candBayerTex_;
-            s_cachedTextures.covTex = covTex_;
-            s_cachedTextures.accumTex[0] = accumTex_[0];
-            s_cachedTextures.accumTex[1] = accumTex_[1];
-            s_cachedTextures.weightTex[0] = weightTex_[0];
-            s_cachedTextures.weightTex[1] = weightTex_[1];
-            s_cachedTextures.resolvedRgbTex = resolvedRgbTex_;
-            s_cachedTextures.inUse = true;
-            reusedFromCache_ = true;
-            LOGD("GpuSabreEngine: newly allocated and cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=[%u,%u], weight=[%u,%u], resolved=%u (this=%p)",
-                 width_, height_, quadWidth_, quadHeight_,
-                 refBayerTex_, candBayerTex_, covTex_,
-                 accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1], resolvedRgbTex_, this);
+            if (!s_cachedTextures.inUse && s_cachedTextures.refBayerTex == 0) {
+                s_cachedTextures.width = width_;
+                s_cachedTextures.height = height_;
+                s_cachedTextures.refBayerTex = refBayerTex_;
+                s_cachedTextures.candBayerTex = candBayerTex_;
+                s_cachedTextures.covTex = covTex_;
+                s_cachedTextures.accumTex[0] = accumTex_[0];
+                s_cachedTextures.accumTex[1] = accumTex_[1];
+                s_cachedTextures.weightTex[0] = weightTex_[0];
+                s_cachedTextures.weightTex[1] = weightTex_[1];
+                s_cachedTextures.resolvedRgbTex = resolvedRgbTex_;
+                s_cachedTextures.inUse = true;
+                reusedFromCache_ = true;
+                LOGD("GpuSabreEngine: newly allocated and cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=[%u,%u], weight=[%u,%u], resolved=%u (this=%p)",
+                     width_, height_, quadWidth_, quadHeight_,
+                     refBayerTex_, candBayerTex_, covTex_,
+                     accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1], resolvedRgbTex_, this);
+            } else {
+                reusedFromCache_ = false;
+                LOGD("GpuSabreEngine: intermediate textures are instance-owned (cache in use or already populated) (this=%p)", this);
+            }
         }
     }
 
@@ -511,9 +516,11 @@ bool GpuSabreEngine::setReferenceFrame(const uint16_t* refBayer) {
     }
 
     // 1. Upload reference Bayer image to refBayerTex_
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glBindTexture(GL_TEXTURE_2D, refBayerTex_);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width_, height_, GL_RED_INTEGER, GL_UNSIGNED_SHORT, refBayer);
     glBindTexture(GL_TEXTURE_2D, 0);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 
     // 2. Dispatch Pass 1: Structure Tensor & Steering Covariance
     computeStructureTensor();
@@ -584,9 +591,11 @@ bool GpuSabreEngine::accumulateFrameLocked(
     bool isRef
 ) {
     // 1. Upload candidate Bayer data to candBayerTex_
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glBindTexture(GL_TEXTURE_2D, candBayerTex_);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width_, height_, GL_RED_INTEGER, GL_UNSIGNED_SHORT, altBayer);
     glBindTexture(GL_TEXTURE_2D, 0);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 
     // 2. Upload flow vectors if available
     bool hasFlow = (!isRef && flowX && flowY && flowWidth > 0 && flowHeight > 0);
@@ -646,7 +655,10 @@ bool GpuSabreEngine::accumulateFrameLocked(
     glUniform1f(glGetUniformLocation(s_programAccumulate, "uZoomFactor"), config_.zoomFactor);
     glUniform1f(glGetUniformLocation(s_programAccumulate, "uCropXStart"), cropXStart_);
     glUniform1f(glGetUniformLocation(s_programAccumulate, "uCropYStart"), cropYStart_);
-    glUniform2f(glGetUniformLocation(s_programAccumulate, "uNoiseModel"), config_.noiseModelS, config_.noiseModelO);
+    const float wl = std::max(1.0f, static_cast<float>(config_.whiteLevel));
+    const float dnNoiseS = config_.noiseModelS * wl;
+    const float dnNoiseO = config_.noiseModelO * (wl * wl);
+    glUniform2f(glGetUniformLocation(s_programAccumulate, "uNoiseModel"), dnNoiseS, dnNoiseO);
     glUniform1i(glGetUniformLocation(s_programAccumulate, "uIsRef"), isRef ? 1 : 0);
     glUniform1i(glGetUniformLocation(s_programAccumulate, "uIsFirstFrame"), (framesAccumulated_ == 0) ? 1 : 0);
     glUniform1i(glGetUniformLocation(s_programAccumulate, "uHasFlow"), hasFlow ? 1 : 0);
@@ -741,6 +753,7 @@ bool GpuSabreEngine::resolve(
     glUniform1i(glGetUniformLocation(s_programResolve, "uCfaPattern"), static_cast<int>(config_.cfa));
     glUniform1f(glGetUniformLocation(s_programResolve, "uWhiteLevel"), wl);
     glUniform4f(glGetUniformLocation(s_programResolve, "uBlackLevel"), bl_r, bl_g, bl_b, 0.0f);
+    glUniform1f(glGetUniformLocation(s_programResolve, "uZoomFactor"), config_.zoomFactor);
 
     glDispatchCompute(numGroupsX, numGroupsY, 1);
 
@@ -770,10 +783,8 @@ bool GpuSabreEngine::resolve(
     glUniform1i(glGetUniformLocation(s_programMtf, "uWidth"), width_);
     glUniform1i(glGetUniformLocation(s_programMtf, "uHeight"), height_);
 
-    // Normalized noise model: S / wl, O / (wl * wl)
-    const float normNoiseS = config_.noiseModelS / wl;
-    const float normNoiseO = config_.noiseModelO / (wl * wl);
-    glUniform2f(glGetUniformLocation(s_programMtf, "uNoiseModel"), normNoiseS, normNoiseO);
+    // Pass 4 operates in normalized [0, 1] luminance; config_ noise parameters are already normalized Camera2 values
+    glUniform2f(glGetUniformLocation(s_programMtf, "uNoiseModel"), config_.noiseModelS, config_.noiseModelO);
 
     const float sharpenStrength = (config_.sharpenStrength > 0.0f) ? config_.sharpenStrength : 1.25f;
     const float coringThreshold = (config_.coringThreshold > 0.0f) ? config_.coringThreshold : 2.0f;

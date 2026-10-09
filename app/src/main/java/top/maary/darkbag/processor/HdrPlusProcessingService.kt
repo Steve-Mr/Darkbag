@@ -71,6 +71,8 @@ class HdrPlusProcessingService : LifecycleService() {
                 HdrPlusRequestManager.onForegroundTaskFinished()
             }
         }
+        val spec = req.toSpec()
+        val sink = spec.getEffectiveSink()
         try {
             val start = System.currentTimeMillis()
             req.timing?.processingStart = start
@@ -202,7 +204,7 @@ class HdrPlusProcessingService : LifecycleService() {
                         val spec = req.toSpec()
                         val sink = spec.getEffectiveSink()
                         try {
-                            val targets = sink.prepareTargets(this@HdrPlusProcessingService, spec)
+                            val targets = sink.prepareTargets(applicationContext, spec)
 
                             val jpgDebugStats = LongArray(15)
                             val dngDebugStats = LongArray(15)
@@ -229,7 +231,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                     jpgSuccess = (jpgExportRet == 0)
                                 } finally {
                                     sink.onImageExported(
-                                        context = this@HdrPlusProcessingService,
+                                        context = applicationContext,
                                         spec = spec,
                                         success = jpgSuccess,
                                         outputPath = targets.outJpgPath,
@@ -258,7 +260,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                     dngSuccess = (dngExportRet == 0)
                                 } finally {
                                     sink.onRawExported(
-                                        context = this@HdrPlusProcessingService,
+                                        context = applicationContext,
                                         spec = spec,
                                         success = dngSuccess,
                                         outputPath = targets.outDngPath,
@@ -320,7 +322,7 @@ class HdrPlusProcessingService : LifecycleService() {
 
                                 // CaptureSink output delivery (secondary saver / stitching / metadata publish)
                                 sink.onComplete(
-                                    context = this@HdrPlusProcessingService,
+                                    context = applicationContext,
                                     spec = spec,
                                     jpgSuccess = jpgSuccess,
                                     rawSuccess = dngSuccess
@@ -339,7 +341,7 @@ class HdrPlusProcessingService : LifecycleService() {
                             } else {
                                 Log.e(TAG, "Processing failed for ${req.requestId}")
                                 sink.onError(
-                                    context = this@HdrPlusProcessingService,
+                                    context = applicationContext,
                                     spec = spec,
                                     error = RuntimeException("Stage 2 export failed: jpgRet=$jpgExportRet, dngRet=$dngExportRet")
                                 )
@@ -347,7 +349,7 @@ class HdrPlusProcessingService : LifecycleService() {
                         } catch (e: Exception) {
                             Log.e(TAG, "Exception during Stage 2 export for ${req.requestId}", e)
                             try {
-                                sink.onError(this@HdrPlusProcessingService, spec, e)
+                                sink.onError(applicationContext, spec, e)
                             } catch (sinkEx: Throwable) {
                                 Log.e(TAG, "Failed calling onError on sink", sinkEx)
                             }
@@ -365,14 +367,29 @@ class HdrPlusProcessingService : LifecycleService() {
                 }
 
                 if (!stage2HandedOff) {
+                    try {
+                        sink.onError(applicationContext, spec, RuntimeException("Failed to hand off Stage 2"))
+                    } catch (sinkEx: Throwable) {
+                        Log.e(TAG, "Failed calling onError on sink", sinkEx)
+                    }
                     finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
                 }
             } else {
                 Log.e(TAG, "Stage 1 Halide processing failed for ${req.requestId}")
+                try {
+                    sink.onError(applicationContext, spec, RuntimeException("Stage 1 Halide processing failed with ret=$ret"))
+                } catch (sinkEx: Throwable) {
+                    Log.e(TAG, "Failed calling onError on sink", sinkEx)
+                }
                 finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception processing ${req.requestId}", e)
+            try {
+                sink.onError(applicationContext, spec, e)
+            } catch (sinkEx: Throwable) {
+                Log.e(TAG, "Failed calling onError on sink", sinkEx)
+            }
             if (!buffersReleased && req.megaBuffer != null) {
                 HdrPlusBurst.releaseBuffer(req.megaBuffer)
             }

@@ -1,4 +1,5 @@
 #include "GpuLutTextureManager.h"
+#include "GpuContext.h"
 #include <android/log.h>
 
 #define TAG "DarkbagGPU_LUT"
@@ -144,6 +145,8 @@ GLuint GpuLutTextureManager::getOrCreateLutTexture(const std::string& lutPath, c
 }
 
 void GpuLutTextureManager::clearCache() {
+    GpuContext& ctx = GpuContext::instance();
+    GpuContextScope ctxScope(ctx);
     for (auto& pair : cache_) {
         if (pair.second.texId != 0) {
             glDeleteTextures(1, &pair.second.texId);

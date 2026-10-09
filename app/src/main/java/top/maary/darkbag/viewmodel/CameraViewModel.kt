@@ -38,7 +38,11 @@ class CameraViewModel : ViewModel() {
                 _uiState.update { it.copy(isHdrPlusEnabled = intent.enabled) }
             }
             is CameraUserIntent.SetBurstActive -> {
+                val wasActive = _uiState.value.isBurstActive
                 _uiState.update { it.copy(isBurstActive = intent.active) }
+                if (!intent.active && wasActive) {
+                    emitEffect(CameraEffect.ResetShutterUi)
+                }
             }
             is CameraUserIntent.UpdateTaskCounts -> {
                 _uiState.update {

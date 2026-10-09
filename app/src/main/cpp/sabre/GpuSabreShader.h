@@ -288,7 +288,8 @@ void main() {
                 float var_spatial = (count > 0) ? (sumSqDiff / float(count)) : 0.0;
 
                 const float eps = 1e-4;
-                float var_total = var_spatial + (uNoiseModel.x * mean_ref + uNoiseModel.y) + eps;
+                float var_noise = max(0.0, uNoiseModel.x * mean_ref + uNoiseModel.y);
+                float var_total = var_spatial + var_noise + eps;
                 float diffVal = candVal - mean_ref;
                 float distSq = (diffVal * diffVal) / var_total;
 
@@ -348,6 +349,7 @@ uniform int uHeight;
 uniform int uCfaPattern; // 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR
 uniform float uWhiteLevel;
 uniform vec4 uBlackLevel; // r, g, b, 0.0
+uniform float uZoomFactor;
 
 int getBayerChannel(int x, int y, int cfa) {
     int px = x & 1;
@@ -519,8 +521,9 @@ void main() {
 
     // Single-frame RCD (Ratio-preserving / Color-difference) reference prior regularizer:
     // When multi-frame weights are abundant (w >= 1.0), 100% Sabre physical full-color demosaicing is used.
-    // When multi-frame weights are sparse (w < 1.0), RCD prior smoothly regularizes the result.
-    if (wr < 1.0 || wg < 1.0 || wb < 1.0) {
+    // When multi-frame weights are sparse (w < 1.0) and at 1x focal length (uZoomFactor <= 1.05), RCD prior smoothly regularizes the result.
+    // At digital zoom (> 1.05x), output coordinate space is cropped and does not align with uRefBayer; RCD prior is bypassed.
+    if (uZoomFactor <= 1.05 && (wr < 1.0 || wg < 1.0 || wb < 1.0)) {
         vec3 rcdPrior = computeRcdPrior(coord);
         rcdPrior.r = clamp(rcdPrior.r, bl_r, wl);
         rcdPrior.g = clamp(rcdPrior.g, bl_g, wl);
@@ -613,8 +616,10 @@ void main() {
     // Clamped luminance boost Delta Y_final = uSharpenStrength * gain * Delta Y_cored
     float deltaYFinal = uSharpenStrength * gain * deltaYCored;
 
-    // Clamp Y_new to [Y_min, Y_max] of 3x3 neighborhood to strictly prevent halos/ringing
-    float yNew = clamp(Y + deltaYFinal, yMin, yMax);
+    // Clamp Y_new to [Y_min - haloMargin, Y_max + haloMargin] of 3x3 neighborhood to prevent halos while preserving fine 1px features
+    float localRange = yMax - yMin;
+    float haloMargin = 0.35 * localRange;
+    float yNew = clamp(Y + deltaYFinal, max(0.0, yMin - haloMargin), min(1.0, yMax + haloMargin));
 
     // Scale RGB preserving chrominance: factor = Y_new / max(10^-4, Y)
     float factor = yNew / max(1e-4, Y);

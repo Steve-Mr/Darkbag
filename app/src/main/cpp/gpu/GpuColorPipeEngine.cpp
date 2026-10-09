@@ -145,7 +145,8 @@ bool GpuColorPipeEngine::processAndSaveImage(
     int64_t* outColorPipeMs, int64_t* outJpegEncodeMs,
     const float* lensShadingMap,
     int lensShadingRows,
-    int lensShadingCols
+    int lensShadingCols,
+    float physicalZoomFactor
 ) {
     return executePipeline(
         width, height,
@@ -160,7 +161,8 @@ bool GpuColorPipeEngine::processAndSaveImage(
         orientation, mirror, zoomFactor,
         colorEngineMode, faithfulHighlights,
         outColorPipeMs, outJpegEncodeMs,
-        lensShadingMap, lensShadingRows, lensShadingCols
+        lensShadingMap, lensShadingRows, lensShadingCols,
+        physicalZoomFactor
     );
 }
 
@@ -178,7 +180,8 @@ bool GpuColorPipeEngine::processAndSaveImageFromTexture(
     int64_t* outColorPipeMs, int64_t* outJpegEncodeMs,
     const float* lensShadingMap,
     int lensShadingRows,
-    int lensShadingCols
+    int lensShadingCols,
+    float physicalZoomFactor
 ) {
     return executePipeline(
         width, height,
@@ -193,7 +196,8 @@ bool GpuColorPipeEngine::processAndSaveImageFromTexture(
         orientation, mirror, zoomFactor,
         colorEngineMode, faithfulHighlights,
         outColorPipeMs, outJpegEncodeMs,
-        lensShadingMap, lensShadingRows, lensShadingCols
+        lensShadingMap, lensShadingRows, lensShadingCols,
+        physicalZoomFactor
     );
 }
 
@@ -212,7 +216,8 @@ bool GpuColorPipeEngine::executePipeline(
     int64_t* outColorPipeMs, int64_t* outJpegEncodeMs,
     const float* lensShadingMap,
     int lensShadingRows,
-    int lensShadingCols
+    int lensShadingCols,
+    float physicalZoomFactor
 ) {
     if (width <= 0 || height <= 0) {
         LOGE("Invalid dimensions (%dx%d) for GpuColorPipeEngine", width, height);
@@ -423,6 +428,7 @@ bool GpuColorPipeEngine::executePipeline(
     glUniform1i(u.uOrientation, orientation);
     glUniform1i(u.uMirror, mirror ? 1 : 0);
     glUniform1f(u.uZoomFactor, zoomFactor > 1.001f ? zoomFactor : 1.0f);
+    glUniform1f(u.uPhysicalZoomFactor, physicalZoomFactor > 1.001f ? physicalZoomFactor : 1.0f);
 
     // 11. Execute offscreen GPU Draw Call
     program_->drawQuad();
@@ -518,25 +524,27 @@ bool GpuColorPipeEngine::executePipeline(
 
 void GpuColorPipeEngine::release() {
     std::lock_guard<std::mutex> lock(engineMutex_);
-    GpuLutTextureManager::instance().clearCache();
-    if (lscTexId_ != 0) {
-        GpuContext& ctx = GpuContext::instance();
-        GpuContextScope ctxScope(ctx);
-        glDeleteTextures(1, &lscTexId_);
-        lscTexId_ = 0;
+    GpuContext& ctx = GpuContext::instance();
+    GpuContextScope ctxScope(ctx);
+    if (ctxScope.isAcquired()) {
+        GpuLutTextureManager::instance().clearCache();
+        if (lscTexId_ != 0) {
+            glDeleteTextures(1, &lscTexId_);
+            lscTexId_ = 0;
+        }
+        if (ahbTarget_) {
+            ahbTarget_->release();
+        }
+        if (inputTexture_) {
+            inputTexture_->release();
+        }
+        if (program_) {
+            program_->release();
+        }
     }
-    if (ahbTarget_) {
-        ahbTarget_->release();
-        ahbTarget_.reset();
-    }
-    if (inputTexture_) {
-        inputTexture_->release();
-        inputTexture_.reset();
-    }
-    if (program_) {
-        program_->release();
-        program_.reset();
-    }
+    ahbTarget_.reset();
+    inputTexture_.reset();
+    program_.reset();
     shadersBuilt_ = false;
     LOGD("GpuColorPipeEngine released");
 }

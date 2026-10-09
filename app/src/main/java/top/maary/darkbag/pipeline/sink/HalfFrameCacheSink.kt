@@ -99,5 +99,29 @@ class HalfFrameCacheSink : CaptureSink {
 
     override suspend fun onError(context: Context, spec: CaptureTaskSpec, error: Throwable) {
         Log.e(TAG, "HalfFrameCacheSink encountered error for ${spec.taskId}", error)
+        val hfMetadata = spec.hfMetadata ?: return
+        try {
+            val sessionStore = top.maary.darkbag.utils.HalfFrameSessionStore(context)
+            if (hfMetadata.frame1BaseName == null) {
+                // Frame 1 failed: revert back to step 0 and clear staged session
+                sessionStore.clearProfile(hfMetadata.profile)
+                Log.i(TAG, "Reverted HalfFrame session step to 0 following Frame 1 failure")
+            } else {
+                // Frame 2 failed: restore step to 1 so user can retry Frame 2 with staged Frame 1 intact
+                sessionStore.markStep(
+                    step = 1,
+                    captureTimeMillis = hfMetadata.frame1CaptureTime,
+                    profile = hfMetadata.profile,
+                    digitalGain = hfMetadata.frame1DigitalGain,
+                    flareType = hfMetadata.flareType
+                )
+                sessionStore.setBaseName(hfMetadata.frame1BaseName, profile = hfMetadata.profile)
+                sessionStore.setTempPath(hfMetadata.frame1TempPath, profile = hfMetadata.profile)
+                Log.i(TAG, "Restored HalfFrame session step to 1 following Frame 2 failure")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to rollback HalfFrame session state", e)
+        }
     }
 }
+

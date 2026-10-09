@@ -205,8 +205,9 @@ bool SabreEngine::accumulateFrame(
     if (!altBayer) return false;
 
     const float z = m_config.zoomFactor;
-    const float noiseS = m_config.noiseModelS;
-    const float noiseO = m_config.noiseModelO;
+    const float wl = std::max(1.0f, static_cast<float>(m_config.whiteLevel));
+    const float noiseS = m_config.noiseModelS * wl;
+    const float noiseO = m_config.noiseModelO * (wl * wl);
     const bool isRef = (m_framesAccumulated == 0);
     const float kernelRadius = std::max(1.5f, m_config.zoomFactor * 1.25f);
     const float kernelRadiusSq = kernelRadius * kernelRadius;
@@ -301,7 +302,8 @@ bool SabreEngine::accumulateFrame(
                 float var_spatial = (count > 0) ? (sumSqDiff / static_cast<float>(count)) : 0.0f;
 
                 const float eps = 1e-4f;
-                float var_total = var_spatial + (noiseS * mean_ref + noiseO) + eps;
+                float var_noise = std::max(0.0f, noiseS * mean_ref + noiseO);
+                float var_total = var_spatial + var_noise + eps;
                 float diffVal = rawVal - mean_ref;
                 float distSq = (diffVal * diffVal) / var_total;
 
