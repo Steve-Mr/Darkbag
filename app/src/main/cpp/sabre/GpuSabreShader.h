@@ -254,8 +254,10 @@ void main() {
                 ref_x = clamp(ref_x, min_x, max_x);
                 ref_y = clamp(ref_y, min_y, max_y);
 
-                float minVal = 1e9;
-                float maxVal = -1e9;
+                // Local mean and spatial variance over same-channel 3x3 neighborhood
+                float vals[9];
+                int count = 0;
+                float sumVal = 0.0;
                 for (int dy_off = -2; dy_off <= 2; dy_off += 2) {
                     int ny = ref_y + dy_off;
                     if (ny < 0 || ny >= uSensorHeight) continue;
@@ -263,25 +265,29 @@ void main() {
                         int nx = ref_x + dx_off;
                         if (nx < 0 || nx >= uSensorWidth) continue;
                         float v = float(texelFetch(uRefBayer, ivec2(nx, ny), 0).r);
-                        minVal = min(minVal, v);
-                        maxVal = max(maxVal, v);
+                        vals[count] = v;
+                        sumVal += v;
+                        count++;
                     }
                 }
 
-                float variance = uNoiseModel.x * max(candVal, maxVal) + uNoiseModel.y + 16.0;
-                float sigma = sqrt(variance);
-                float diff = 0.0;
-                if (candVal < minVal - 2.0 * sigma) {
-                    diff = (minVal - 2.0 * sigma) - candVal;
-                } else if (candVal > maxVal + 2.0 * sigma) {
-                    diff = candVal - (maxVal + 2.0 * sigma);
+                float mean_ref = (count > 0) ? (sumVal / float(count)) : 0.0;
+                float sumSqDiff = 0.0;
+                for (int i = 0; i < count; ++i) {
+                    float d = vals[i] - mean_ref;
+                    sumSqDiff += d * d;
                 }
+                float var_spatial = (count > 0) ? (sumSqDiff / float(count)) : 0.0;
 
-                if (diff > 0.0) {
-                    float distSq = (diff * diff) / variance;
-                    w_motion = exp2(-distSq * 0.15);
+                const float eps = 1e-4;
+                float var_total = var_spatial + (uNoiseModel.x * mean_ref + uNoiseModel.y) + eps;
+                float diffVal = candVal - mean_ref;
+                float distSq = (diffVal * diffVal) / var_total;
+
+                w_motion = exp(-max(0.0, distSq - 4.0) * 0.5);
+                if (w_motion < 0.01) {
+                    w_motion = 0.0;
                 }
-                w_motion = max(0.08, w_motion);
             }
 
             float w = w_spatial * w_motion;

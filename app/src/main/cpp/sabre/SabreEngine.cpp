@@ -276,8 +276,10 @@ bool SabreEngine::accumulateFrame(
                 ref_x = std::clamp(ref_x, min_x, max_x);
                 ref_y = std::clamp(ref_y, min_y, max_y);
 
-                float minVal = 1e9f;
-                float maxVal = -1e9f;
+                // Local mean and spatial variance over same-channel 3x3 neighborhood
+                float vals[9];
+                int count = 0;
+                float sumVal = 0.0f;
                 for (int dy_off = -2; dy_off <= 2; dy_off += 2) {
                     int ny = ref_y + dy_off;
                     if (ny < 0 || ny >= m_height) continue;
@@ -285,30 +287,28 @@ bool SabreEngine::accumulateFrame(
                         int nx = ref_x + dx_off;
                         if (nx < 0 || nx >= m_width) continue;
                         float v = static_cast<float>(m_refBayer[static_cast<size_t>(ny) * m_width + nx]);
-                        minVal = std::min(minVal, v);
-                        maxVal = std::max(maxVal, v);
+                        vals[count++] = v;
+                        sumVal += v;
                     }
                 }
 
-                float variance = noiseS * std::max(rawVal, maxVal) + noiseO + 16.0f;
-                float sigma = std::sqrt(variance);
-
-                float diff = 0.0f;
-                if (rawVal < minVal - 2.0f * sigma) {
-                    diff = (minVal - 2.0f * sigma) - rawVal;
-                } else if (rawVal > maxVal + 2.0f * sigma) {
-                    diff = rawVal - (maxVal + 2.0f * sigma);
+                float mean_ref = (count > 0) ? (sumVal / static_cast<float>(count)) : 0.0f;
+                float sumSqDiff = 0.0f;
+                for (int i = 0; i < count; ++i) {
+                    float d = vals[i] - mean_ref;
+                    sumSqDiff += d * d;
                 }
+                float var_spatial = (count > 0) ? (sumSqDiff / static_cast<float>(count)) : 0.0f;
 
-                if (diff > 0.0f) {
-                    float distSq = (diff * diff) / variance;
-                    // Soft Gaussian motion penalty
-                    w_motion = fast_exp2(-distSq * 0.15f);
-                } else {
-                    w_motion = 1.0f;
+                const float eps = 1e-4f;
+                float var_total = var_spatial + (noiseS * mean_ref + noiseO) + eps;
+                float diffVal = rawVal - mean_ref;
+                float distSq = (diffVal * diffVal) / var_total;
+
+                w_motion = std::exp(-std::max(0.0f, distSq - 4.0f) * 0.5f);
+                if (w_motion < 0.01f) {
+                    w_motion = 0.0f;
                 }
-                // Floor weight to guarantee valid geometric samples never become holes
-                w_motion = std::max(0.08f, w_motion);
             }
 
             // Scatter sample into target grid pixels
