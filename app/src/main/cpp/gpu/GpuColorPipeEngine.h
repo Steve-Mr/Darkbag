@@ -62,13 +62,14 @@ public:
 
     void release();
 
+    // Ensure shader programs are compiled and GPU targets initialized
+    bool ensureShaders();
+
 private:
     GpuColorPipeEngine() = default;
     ~GpuColorPipeEngine();
     GpuColorPipeEngine(const GpuColorPipeEngine&) = delete;
     GpuColorPipeEngine& operator=(const GpuColorPipeEngine&) = delete;
-
-    bool ensureShaders();
 
     bool executePipeline(
         int width, int height,

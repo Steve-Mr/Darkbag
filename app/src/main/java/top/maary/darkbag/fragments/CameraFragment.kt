@@ -289,7 +289,21 @@ class CameraFragment : Fragment() {
     private var isVideoSaving = false
 
     private val isProcessing: Boolean
-        get() = top.maary.darkbag.processor.HdrPlusRequestManager.pendingForegroundTasksCount.value > 0 || isVideoSaving
+        get() = isBurstActive || top.maary.darkbag.processor.HdrPlusRequestManager.pendingForegroundTasksCount.value > 0 || isVideoSaving
+
+    // Memory Info Throttle Cache
+    private var lastMemInfoTime = 0L
+    private val cachedMemInfo = android.app.ActivityManager.MemoryInfo()
+
+    private fun getThrottledMemoryInfo(context: Context): android.app.ActivityManager.MemoryInfo {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastMemInfoTime > 1000L || lastMemInfoTime == 0L) {
+            val actManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            actManager?.getMemoryInfo(cachedMemInfo)
+            lastMemInfoTime = now
+        }
+        return cachedMemInfo
+    }
 
     // Half-frame State
     private var pendingVfSnapshot: android.graphics.Bitmap? = null
@@ -305,9 +319,6 @@ class CameraFragment : Fragment() {
     private var halfFrameTempPath: String? = null
     private lateinit var halfFrameSessionStore: HalfFrameSessionStore
     private var isHalfFrameUiAnimating = false
-    private val hideBlackoutRunnable = Runnable {
-        _fragmentCameraBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
-    }
 
     private var activeCoordinator: CaptureModeCoordinator? = null
 
@@ -345,7 +356,8 @@ class CameraFragment : Fragment() {
                     SettingsFragment.BURST_STRATEGY_BALANCED
                 )
                 val maxQueue = if (burstStrategy == SettingsFragment.BURST_STRATEGY_AGGRESSIVE) 8 else 3
-                if (!top.maary.darkbag.processor.HdrPlusRequestManager.canAcceptNewTask(maxQueue, requireContext())) {
+                val memInfo = getThrottledMemoryInfo(requireContext())
+                if (!top.maary.darkbag.processor.HdrPlusRequestManager.canAcceptNewTask(maxQueue, requireContext(), memInfo)) {
                     val pending = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value
                     val msg = if (pending >= maxQueue) {
                         "Queue full: processing $pending photos, please wait..."
@@ -367,6 +379,7 @@ class CameraFragment : Fragment() {
                     isEnabled = false
                 }
                 showShutterBlackout()
+                showProcessingAnimation()
             }
 
             override fun captureViewFinderSnapshot(): Bitmap? {
@@ -780,7 +793,7 @@ class CameraFragment : Fragment() {
     }
 
     override fun onDestroyView() {
-        _fragmentCameraBinding?.viewFinderBlackout?.removeCallbacks(hideBlackoutRunnable)
+        _fragmentCameraBinding?.viewFinderBlackout?.animate()?.cancel()
         _fragmentCameraBinding = null
         super.onDestroyView()
 
@@ -936,6 +949,9 @@ class CameraFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         _fragmentCameraBinding = FragmentCameraBinding.bind(view)
+
+        // Pre-warm GPU compute and color grading pipelines to eliminate 300-500ms first-shot latency
+        top.maary.darkbag.processor.ColorProcessor.warmupGpuAsync()
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -4883,7 +4899,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             session.capture(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureStarted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, timestamp: Long, frameNumber: Long) {
-                    showShutterBlackout()
                     if (isFrame1Trigger) {
                         val prefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                         triggerAutoBurst(prefs)
@@ -5167,9 +5182,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
 
             val burstRequests = mutableListOf<android.hardware.camera2.CaptureRequest>()
+            val previewSurface = camera2PreviewSurface
             for (i in 0 until burstSize) {
                 val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                 request.addTarget(reader.surface)
+                if (previewSurface != null && previewSurface.isValid) {
+                    request.addTarget(previewSurface)
+                }
                 request.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, combinedOrientation)
 
                 applyManualSettingsToRequest(request, true)
@@ -5201,7 +5220,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         if (isTaskStarted.compareAndSet(false, true)) {
                             top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
                         }
-                        if (!isFrame1Trigger) {
+                        if (!isFrame1Trigger && cameraUiContainerBinding?.processingProgress?.visibility != View.VISIBLE) {
                             showProcessingAnimation()
                         }
                         burstHelper.flush()
@@ -5288,7 +5307,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             isBurstActive = false
                             cameraViewModel.setBurstActive(false)
                             resetBurstUi()
-                            if (!isFrame1Trigger) {
+                            if (!isFrame1Trigger && cameraUiContainerBinding?.processingProgress?.visibility != View.VISIBLE) {
                                 showProcessingAnimation()
                             }
 
@@ -5914,9 +5933,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             blackout.scaleY = vf.scaleY
             blackout.elevation = vf.elevation + 4f
 
+            blackout.animate().cancel()
+            blackout.alpha = 0.85f
             blackout.visibility = View.VISIBLE
-            blackout.removeCallbacks(hideBlackoutRunnable)
-            blackout.postDelayed(hideBlackoutRunnable, 100L) // Use 100ms to ensure visibility during processing
+            blackout.animate()
+                .alpha(0f)
+                .setDuration(60L)
+                .withEndAction {
+                    blackout.visibility = View.INVISIBLE
+                }
+                .start()
         }
 
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {

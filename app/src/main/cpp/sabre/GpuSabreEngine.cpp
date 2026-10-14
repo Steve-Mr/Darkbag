@@ -172,6 +172,24 @@ bool GpuSabreEngine::isAvailable() {
     return ctx.supportsComputeShader();
 }
 
+bool GpuSabreEngine::warmupShaders() {
+    if (!isAvailable()) {
+        return false;
+    }
+    static bool s_warmedUp = false;
+    static std::mutex s_warmupMutex;
+    std::lock_guard<std::mutex> lock(s_warmupMutex);
+    if (s_warmedUp) {
+        return true;
+    }
+    if (ensureShaders()) {
+        s_warmedUp = true;
+        LOGD("GpuSabreEngine::warmupShaders: compute shaders compiled and ready");
+        return true;
+    }
+    return false;
+}
+
 GpuSabreEngine::GpuSabreEngine(const SabreConfig& config)
     : config_(config)
 {

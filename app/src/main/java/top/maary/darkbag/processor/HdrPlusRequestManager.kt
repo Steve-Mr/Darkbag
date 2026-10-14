@@ -259,11 +259,16 @@ object HdrPlusRequestManager {
         }
     }
 
-    fun canAcceptNewTask(maxAllowedQueue: Int, context: Context): Boolean {
+    fun canAcceptNewTask(
+        maxAllowedQueue: Int,
+        context: Context,
+        cachedMemoryInfo: android.app.ActivityManager.MemoryInfo? = null
+    ): Boolean {
         if (_pendingTasksCount.value >= maxAllowedQueue) return false
-        val actManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-        val memInfo = android.app.ActivityManager.MemoryInfo()
-        actManager?.getMemoryInfo(memInfo)
+        val memInfo = cachedMemoryInfo ?: android.app.ActivityManager.MemoryInfo().also {
+            val actManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            actManager?.getMemoryInfo(it)
+        }
         if (memInfo.lowMemory || memInfo.availMem < 600L * 1024L * 1024L) {
             return false
         }

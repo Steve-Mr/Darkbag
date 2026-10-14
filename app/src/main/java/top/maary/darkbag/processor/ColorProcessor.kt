@@ -4,8 +4,10 @@ import java.nio.ByteBuffer
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureResult
 import android.media.Image
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.launch
 import top.maary.darkbag.models.CaptureMetadata
 
 object ColorProcessor {
@@ -49,6 +51,27 @@ object ColorProcessor {
     }.asCoroutineDispatcher()
 
     external fun initMemoryPool(width: Int, height: Int, frames: Int)
+
+    external fun nativeWarmupGpu()
+    private val isGpuWarmedUp = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Pre-warms GPU shaders asynchronously on imageProcessingDispatcher
+     * to eliminate 300-500ms first-shot compilation latency.
+     */
+    fun warmupGpuAsync() {
+        if (isGpuWarmedUp.get()) return
+        CoroutineScope(imageProcessingDispatcher).launch {
+            if (isGpuWarmedUp.compareAndSet(false, true)) {
+                try {
+                    nativeWarmupGpu()
+                } catch (e: Throwable) {
+                    isGpuWarmedUp.set(false)
+                    android.util.Log.w("ColorProcessor", "nativeWarmupGpu failed: ${e.message}")
+                }
+            }
+        }
+    }
 
     external fun allocateDirectBuffer(capacity: Long): ByteBuffer?
     external fun freeDirectBuffer(buffer: ByteBuffer)

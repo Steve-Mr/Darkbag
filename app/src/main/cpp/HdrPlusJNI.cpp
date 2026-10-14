@@ -31,8 +31,11 @@
 #include "hdrplus_single_pipeline.h" // Generated header for single frame
 #include "HdrPlusStreamingSession.h"
 #include "demosaic/RcdDemosaic.h"
+#include "gpu/GpuContext.h"
 #include "gpu/GpuColorPipeEngine.h"
+#include "gpu/GpuAccumulateEngine.h"
 #include "gpu/GpuRcdComputeEngine.h"
+#include "sabre/GpuSabreEngine.h"
 
 
 #define TAG "HdrPlusJNI"
@@ -1809,4 +1812,27 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
         env->ReleaseStringUTFChars(outputPath, outPathCStr);
     }
     return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeWarmupGpu(JNIEnv* /* env */, jobject /* this */) {
+    LOGD("nativeWarmupGpu: Warming up GPU pipelines and compiling shaders...");
+    auto& ctx = darkbag::gpu::GpuContext::instance();
+    if (!ctx.isInitialized()) {
+        if (!ctx.initialize()) {
+            LOGW("nativeWarmupGpu: Failed to initialize GpuContext, skipping GPU warmup");
+            return;
+        }
+    }
+    darkbag::gpu::GpuContextScope ctxScope(ctx);
+    if (!ctxScope.isAcquired()) {
+        LOGW("nativeWarmupGpu: Failed to acquire GpuContextScope");
+        return;
+    }
+
+    darkbag::gpu::GpuColorPipeEngine::instance().ensureShaders();
+    darkbag::gpu::GpuAccumulateEngine::instance().ensureShaders();
+    darkbag::gpu::GpuRcdComputeEngine::instance().ensureShaders();
+    darkbag::sabre::GpuSabreEngine::warmupShaders();
+    LOGD("nativeWarmupGpu: GPU pipeline shaders successfully warmed up");
 }

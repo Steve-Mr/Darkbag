@@ -23,6 +23,9 @@ public:
     // Query whether GPU compute shaders and EGL context are available
     static bool isAvailable();
 
+    // Pre-warm and compile Sabre compute shaders to eliminate first-frame latency
+    static bool warmupShaders();
+
     explicit GpuSabreEngine(const SabreConfig& config);
     ~GpuSabreEngine();
 

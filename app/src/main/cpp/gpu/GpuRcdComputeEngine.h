@@ -108,13 +108,15 @@ public:
 
     void release();
 
+    // Ensure RCD compute shaders are compiled
+    bool ensureShaders();
+
 private:
     GpuRcdComputeEngine() = default;
     ~GpuRcdComputeEngine();
     GpuRcdComputeEngine(const GpuRcdComputeEngine&) = delete;
     GpuRcdComputeEngine& operator=(const GpuRcdComputeEngine&) = delete;
 
-    bool ensureShaders();
     bool prepareTextures(int width, int height, bool needBayerInput = true);
     void releaseTextures();
 

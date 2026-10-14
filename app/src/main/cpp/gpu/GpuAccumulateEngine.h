@@ -63,6 +63,9 @@ public:
      */
     void release();
 
+    // Ensure accumulation compute shaders are compiled
+    bool ensureShaders();
+
     int framesPushed() const { return framesPushed_; }
     int width() const { return width_; }
     int height() const { return height_; }
@@ -74,7 +77,6 @@ private:
     GpuAccumulateEngine(const GpuAccumulateEngine&) = delete;
     GpuAccumulateEngine& operator=(const GpuAccumulateEngine&) = delete;
 
-    bool ensureShaders();
     bool prepareTextures(int width, int height);
     void releaseTextures();
     void releaseTempTextures();

@@ -127,6 +127,7 @@ bool GpuColorPipeEngine::ensureShaders() {
     }
 
     shadersBuilt_ = true;
+    LOGD("GpuColorPipeEngine::ensureShaders: shaders built successfully");
     return true;
 }
 
