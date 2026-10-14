@@ -1040,9 +1040,11 @@ bool process_and_save_image(
         return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
     };
     const float exp_gain = std::pow(2.0f, exposure);
-    const float eff_gain = std::max(1.0f, gain * exp_gain);
-    const float desat_threshold = (65535.0f * 0.8f) / eff_gain;
-    const float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;
+    // Align with GPU shader rawMax > 0.98 specification:
+    // Highlight desaturation protects against sensor highlight clipping/fringing in the raw white balance domain.
+    // It must remain independent of post-WB digital gain / exposure compensation to avoid erroneously desaturating midtones.
+    const float desat_threshold = 65535.0f * 0.95f;
+    const float theoretical_max = 65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f);
 
     struct LscWeight { int idx0, idx1; float w0, w1; };
     std::vector<LscWeight> lscX, lscY;
