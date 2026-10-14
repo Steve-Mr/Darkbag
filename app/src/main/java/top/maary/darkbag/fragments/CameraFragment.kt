@@ -367,6 +367,17 @@ class CameraFragment : Fragment() {
                     Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                     return false
                 }
+                if (isHalfFrameModeEnabled && halfFrameStep == 1) {
+                    val profile = activeCoordinator?.mode?.key?.let {
+                        if (it == SettingsFragment.MODE_HALF_FRAME_TB) HalfFrameSessionStore.PROFILE_HALF_TOP else HalfFrameSessionStore.PROFILE_HALF_SIDE
+                    } ?: halfFrameSessionStore.currentProfile()
+                    val session = halfFrameSessionStore.readSession(profile = profile)
+                    val temp = session.tempPath
+                    if (temp.isNullOrBlank() || !java.io.File(temp).exists()) {
+                        Log.w(TAG, "Frame 1 staging still in progress, canTriggerCapture rejected")
+                        return false
+                    }
+                }
                 return true
             }
 
@@ -1088,6 +1099,11 @@ class CameraFragment : Fragment() {
                             is CameraEffect.PerformHapticFeedback -> view?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             is CameraEffect.PlayShutterClick -> {}
                         }
+                    }
+                }
+                launch {
+                    top.maary.darkbag.processor.ColorProcessor.halfFrameFlow.collect {
+                        updateHalfFrameUI(animate = true)
                     }
                 }
             }

@@ -67,6 +67,14 @@ class HalfFrameModeCoordinator(
         val isFrame1 = step == 0
         val isFrame2 = step == 1
 
+        if (isFrame2) {
+            val f1Path = currentSession.tempPath
+            if (f1Path.isNullOrBlank() || !java.io.File(f1Path).exists()) {
+                android.util.Log.w("HalfFrameCoordinator", "Frame 1 staging still in progress, ignoring premature Frame 2 shutter click")
+                return
+            }
+        }
+
         val hfGroupId = if (isFrame2) {
             currentSession.baseName
         } else {
@@ -131,6 +139,11 @@ class HalfFrameModeCoordinator(
             currentSession.tempPath?.let { path ->
                 runCatching { java.io.File(path).delete() }
             }
+            currentSession.tempDngPath?.let { path ->
+                runCatching { java.io.File(path).delete() }
+            }
+            runCatching { sessionStore.tempFileForProfile(profile).delete() }
+            runCatching { sessionStore.tempDngFileForProfile(profile).delete() }
             sessionStore.clearProfile(profile)
             sessionStore.markStep(0, profile = profile)
             host.updateHalfFrameUi(animate = false)

@@ -15,7 +15,8 @@ class HalfFrameSessionStore(private val context: Context) {
         val baseName: String?,
         val captureTimeMillis: Long,
         val digitalGain: Float = 1.0f,
-        val flareType: Int = -1
+        val flareType: Int = -1,
+        val tempDngPath: String? = null
     )
 
     fun currentProfile(): String {
@@ -41,10 +42,12 @@ class HalfFrameSessionStore(private val context: Context) {
         val captureTime = prefs.getLong(key(KEY_CAPTURE_TIME, activeProfile), 0L)
         val digitalGain = prefs.getFloat(key(KEY_DIGITAL_GAIN, activeProfile), 1.0f)
         val flareType = prefs.getInt(key(KEY_FLARE_TYPE, activeProfile), -1)
+        val tempDngPath = prefs.getString(key(KEY_TEMP_DNG_PATH, activeProfile), null)
 
         var resolvedStep = step
         var resolvedTemp = tempPath
         var resolvedBase = baseName
+        var resolvedDng = tempDngPath
 
         if (resolvedStep == 1) {
             val exists = !resolvedTemp.isNullOrBlank() && File(resolvedTemp).exists()
@@ -54,9 +57,11 @@ class HalfFrameSessionStore(private val context: Context) {
                 resolvedStep = 0
                 resolvedTemp = null
                 resolvedBase = null
+                resolvedDng = null
                 prefs.edit()
                     .putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, activeProfile), 0)
                     .remove(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, activeProfile))
+                    .remove(key(KEY_TEMP_DNG_PATH, activeProfile))
                     .remove(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, activeProfile))
                     .remove(key(KEY_CAPTURE_TIME, activeProfile))
                     .remove(key(KEY_DIGITAL_GAIN, activeProfile))
@@ -65,7 +70,7 @@ class HalfFrameSessionStore(private val context: Context) {
             }
         }
 
-        return Session(activeProfile, resolvedStep, resolvedTemp, resolvedBase, captureTime, digitalGain, flareType)
+        return Session(activeProfile, resolvedStep, resolvedTemp, resolvedBase, captureTime, digitalGain, flareType, resolvedDng)
     }
 
     fun markStep(step: Int, captureTimeMillis: Long? = null, profile: String? = null, digitalGain: Float = 1.0f, flareType: Int = -1) {
@@ -88,6 +93,11 @@ class HalfFrameSessionStore(private val context: Context) {
         prefs.edit().putString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, activeProfile), path).apply()
     }
 
+    fun setTempDngPath(path: String?, profile: String? = null) {
+        val activeProfile = profile ?: currentProfile()
+        prefs.edit().putString(key(KEY_TEMP_DNG_PATH, activeProfile), path).apply()
+    }
+
     fun setBaseName(baseName: String?, profile: String? = null) {
         val activeProfile = profile ?: currentProfile()
         prefs.edit().putString(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, activeProfile), baseName).apply()
@@ -97,6 +107,7 @@ class HalfFrameSessionStore(private val context: Context) {
         prefs.edit()
             .putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, profile), 0)
             .remove(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, profile))
+            .remove(key(KEY_TEMP_DNG_PATH, profile))
             .remove(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, profile))
             .remove(key(KEY_CAPTURE_TIME, profile))
             .remove(key(KEY_DIGITAL_GAIN, profile))
@@ -107,8 +118,15 @@ class HalfFrameSessionStore(private val context: Context) {
     fun clearCurrentSession(deleteTempFile: Boolean = false) {
         val profile = currentProfile()
         val tempPath = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, profile), null)
-        if (deleteTempFile && !tempPath.isNullOrBlank()) {
-            runCatching { File(tempPath).delete() }
+        val tempDngPath = prefs.getString(key(KEY_TEMP_DNG_PATH, profile), null)
+        if (deleteTempFile) {
+            if (!tempPath.isNullOrBlank()) {
+                runCatching { File(tempPath).delete() }
+            }
+            if (!tempDngPath.isNullOrBlank()) {
+                runCatching { File(tempDngPath).delete() }
+            }
+            runCatching { tempDngFileForProfile(profile).delete() }
         }
         clearProfile(profile)
     }
@@ -116,6 +134,10 @@ class HalfFrameSessionStore(private val context: Context) {
     fun tempFileForProfile(profile: String): File = File(context.filesDir, "half_frame_frame1_$profile.jpg")
 
     fun tempFileForCurrentProfile(): File = tempFileForProfile(currentProfile())
+
+    fun tempDngFileForProfile(profile: String): File = File(context.filesDir, "half_frame_frame1_$profile.dng")
+
+    fun tempDngFileForCurrentProfile(): File = tempDngFileForProfile(currentProfile())
 
     fun scopedStepKeyForCurrentProfile(): String = key(SettingsFragment.KEY_HALF_FRAME_STEP, currentProfile())
 
@@ -125,6 +147,7 @@ class HalfFrameSessionStore(private val context: Context) {
         private const val KEY_CAPTURE_TIME = "half_frame_capture_time"
         private const val KEY_DIGITAL_GAIN = "half_frame_digital_gain"
         private const val KEY_FLARE_TYPE = "half_frame_flare_type"
+        private const val KEY_TEMP_DNG_PATH = "half_frame_temp_dng_path"
         private const val MAX_RECOVER_WINDOW_MS = 120_000L
         const val PROFILE_NORMAL = "normal"
         const val PROFILE_HALF_SIDE = "half_side"

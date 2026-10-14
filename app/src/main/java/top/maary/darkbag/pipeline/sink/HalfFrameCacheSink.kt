@@ -106,6 +106,7 @@ class HalfFrameCacheSink : CaptureSink {
                 // Frame 1 failed: revert back to step 0 and clear staged session
                 sessionStore.clearProfile(hfMetadata.profile)
                 Log.i(TAG, "Reverted HalfFrame session step to 0 following Frame 1 failure")
+                top.maary.darkbag.processor.ColorProcessor.halfFrameFlow.tryEmit(0)
             } else {
                 // Frame 2 failed: restore step to 1 so user can retry Frame 2 with staged Frame 1 intact
                 sessionStore.markStep(
@@ -118,6 +119,7 @@ class HalfFrameCacheSink : CaptureSink {
                 sessionStore.setBaseName(hfMetadata.frame1BaseName, profile = hfMetadata.profile)
                 sessionStore.setTempPath(hfMetadata.frame1TempPath, profile = hfMetadata.profile)
                 Log.i(TAG, "Restored HalfFrame session step to 1 following Frame 2 failure")
+                top.maary.darkbag.processor.ColorProcessor.halfFrameFlow.tryEmit(1)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to rollback HalfFrame session state", e)

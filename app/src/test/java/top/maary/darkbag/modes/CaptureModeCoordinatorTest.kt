@@ -211,8 +211,15 @@ class CaptureModeCoordinatorTest {
         assertEquals(1, sessionStore.readSession().step)
         assertNotNull(sessionStore.readSession().baseName)
 
+        // Verify premature Frame 2 shutter click is rejected when staging file is not yet created
+        val prematureTiming = StandardTimingTracker(shutterClick = now + 500L)
+        coordinator.onShutterTriggered(prematureTiming)
+        assertEquals(1, sessionStore.readSession().step)
+
         // Simulate Frame 1 stage result writing temp file path
-        sessionStore.setTempPath("/tmp/frame1.jpg")
+        val tempFile = java.io.File.createTempFile("frame1", ".jpg").apply { writeText("mock") }
+        tempFile.deleteOnExit()
+        sessionStore.setTempPath(tempFile.absolutePath)
 
         // 2. Second Frame trigger
         host.burstTriggered = false
@@ -228,7 +235,8 @@ class CaptureModeCoordinatorTest {
         assertEquals(0, sessionStore.readSession().step)
         assertNotNull(host.lastHfMetadata)
         assertEquals(sessionStore.readSession().baseName, host.lastHfMetadata?.frame1BaseName)
-        assertEquals("/tmp/frame1.jpg", host.lastHfMetadata?.frame1TempPath)
+        assertEquals(tempFile.absolutePath, host.lastHfMetadata?.frame1TempPath)
+        tempFile.delete()
     }
 
     @Test
