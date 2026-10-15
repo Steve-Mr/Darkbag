@@ -152,6 +152,7 @@ struct CachedSabreTextures {
 
 static CachedSabreTextures s_cachedTextures;
 static std::mutex s_cacheMutex;
+static bool s_isLowMemoryDevice = false;
 
 } // namespace
 
@@ -329,7 +330,8 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
     bool gotFromCache = false;
     {
         std::lock_guard<std::mutex> cacheLock(s_cacheMutex);
-        if (s_cachedTextures.width == width_ && s_cachedTextures.height == height_ &&
+        if (!s_isLowMemoryDevice &&
+            s_cachedTextures.width == width_ && s_cachedTextures.height == height_ &&
             !s_cachedTextures.inUse && s_cachedTextures.refBayerTex != 0) {
             // Reuse cached intermediate textures
             refBayerTex_ = s_cachedTextures.refBayerTex;
@@ -346,7 +348,7 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
                  refBayerTex_, candBayerTex_, covTex_,
                  accumTex_, weightTex_, resolvedRgbTex_, this);
         } else if (s_cachedTextures.refBayerTex != 0 && !s_cachedTextures.inUse) {
-            // Dimension changed or stale cache: release old cached textures
+            // Low-memory tier, dimension changed, or stale cache: release old cached textures
             glDeleteTextures(1, &s_cachedTextures.refBayerTex);
             glDeleteTextures(1, &s_cachedTextures.candBayerTex);
             glDeleteTextures(1, &s_cachedTextures.covTex);
@@ -354,7 +356,7 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
             glDeleteTextures(1, &s_cachedTextures.weightTex);
             glDeleteTextures(1, &s_cachedTextures.resolvedRgbTex);
             s_cachedTextures = CachedSabreTextures();
-            LOGD("GpuSabreEngine: destroyed stale cached textures of different dimensions");
+            LOGD("GpuSabreEngine: destroyed stale cached textures (lowMem=%d)", s_isLowMemoryDevice ? 1 : 0);
         }
     }
 
@@ -371,27 +373,32 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
             return false;
         }
 
-        // Register newly allocated textures into s_cachedTextures under lock
+        // Register newly allocated textures into s_cachedTextures under lock (if not in low-memory tier)
         {
             std::lock_guard<std::mutex> cacheLock(s_cacheMutex);
-            if (!s_cachedTextures.inUse && s_cachedTextures.refBayerTex == 0) {
-                s_cachedTextures.width = width_;
-                s_cachedTextures.height = height_;
-                s_cachedTextures.refBayerTex = refBayerTex_;
-                s_cachedTextures.candBayerTex = candBayerTex_;
-                s_cachedTextures.covTex = covTex_;
-                s_cachedTextures.accumTex = accumTex_;
-                s_cachedTextures.weightTex = weightTex_;
-                s_cachedTextures.resolvedRgbTex = resolvedRgbTex_;
-                s_cachedTextures.inUse = true;
-                reusedFromCache_ = true;
-                LOGD("GpuSabreEngine: newly allocated and cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=%u, weight=%u, resolved=%u (this=%p)",
-                     width_, height_, quadWidth_, quadHeight_,
-                     refBayerTex_, candBayerTex_, covTex_,
-                     accumTex_, weightTex_, resolvedRgbTex_, this);
+            if (!s_isLowMemoryDevice) {
+                if (!s_cachedTextures.inUse && s_cachedTextures.refBayerTex == 0) {
+                    s_cachedTextures.width = width_;
+                    s_cachedTextures.height = height_;
+                    s_cachedTextures.refBayerTex = refBayerTex_;
+                    s_cachedTextures.candBayerTex = candBayerTex_;
+                    s_cachedTextures.covTex = covTex_;
+                    s_cachedTextures.accumTex = accumTex_;
+                    s_cachedTextures.weightTex = weightTex_;
+                    s_cachedTextures.resolvedRgbTex = resolvedRgbTex_;
+                    s_cachedTextures.inUse = true;
+                    reusedFromCache_ = true;
+                    LOGD("GpuSabreEngine: newly allocated and cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=%u, weight=%u, resolved=%u (this=%p)",
+                         width_, height_, quadWidth_, quadHeight_,
+                         refBayerTex_, candBayerTex_, covTex_,
+                         accumTex_, weightTex_, resolvedRgbTex_, this);
+                } else {
+                    reusedFromCache_ = false;
+                    LOGD("GpuSabreEngine: intermediate textures are instance-owned (cache in use or already populated) (this=%p)", this);
+                }
             } else {
                 reusedFromCache_ = false;
-                LOGD("GpuSabreEngine: intermediate textures are instance-owned (cache in use or already populated) (this=%p)", this);
+                LOGD("GpuSabreEngine: low-memory tier (<=6GB), intermediate textures are instance-owned and will be freed upon session release (this=%p)", this);
             }
         }
     }
@@ -432,6 +439,18 @@ void GpuSabreEngine::releaseTextures() {
         std::lock_guard<std::mutex> cacheLock(s_cacheMutex);
         if (reusedFromCache_ && s_cachedTextures.refBayerTex == refBayerTex_) {
             s_cachedTextures.inUse = false;
+            if (s_isLowMemoryDevice) {
+                glDeleteTextures(1, &s_cachedTextures.refBayerTex);
+                glDeleteTextures(1, &s_cachedTextures.candBayerTex);
+                glDeleteTextures(1, &s_cachedTextures.covTex);
+                glDeleteTextures(1, &s_cachedTextures.accumTex);
+                glDeleteTextures(1, &s_cachedTextures.weightTex);
+                glDeleteTextures(1, &s_cachedTextures.resolvedRgbTex);
+                s_cachedTextures = CachedSabreTextures();
+                LOGD("GpuSabreEngine: low-memory tier (<=6GB), destroyed intermediate textures on session release");
+            } else {
+                LOGD("GpuSabreEngine: returned intermediate textures to cache");
+            }
             refBayerTex_ = 0;
             candBayerTex_ = 0;
             covTex_ = 0;
@@ -439,7 +458,6 @@ void GpuSabreEngine::releaseTextures() {
             weightTex_ = 0;
             resolvedRgbTex_ = 0;
             reusedFromCache_ = false;
-            LOGD("GpuSabreEngine: returned intermediate textures to cache");
         }
     }
 
@@ -469,9 +487,32 @@ void GpuSabreEngine::clearTexturePool() {
         glDeleteTextures(1, &s_cachedTextures.accumTex);
         glDeleteTextures(1, &s_cachedTextures.weightTex);
         glDeleteTextures(1, &s_cachedTextures.resolvedRgbTex);
-        LOGD("GpuSabreEngine: cleared cached intermediate textures");
+        s_cachedTextures = CachedSabreTextures();
+        LOGD("GpuSabreEngine: cleared cached intermediate textures from texture pool");
+    } else if (!s_cachedTextures.inUse) {
+        s_cachedTextures = CachedSabreTextures();
     }
-    s_cachedTextures = CachedSabreTextures();
+}
+
+void GpuSabreEngine::setLowMemoryDevice(bool isLowMem) {
+    bool needPurge = false;
+    {
+        std::lock_guard<std::mutex> cacheLock(s_cacheMutex);
+        s_isLowMemoryDevice = isLowMem;
+        LOGD("GpuSabreEngine::setLowMemoryDevice: isLowMem=%d", isLowMem ? 1 : 0);
+        if (isLowMem && s_cachedTextures.refBayerTex != 0 && !s_cachedTextures.inUse) {
+            needPurge = true;
+        }
+    }
+    if (needPurge) {
+        LOGD("GpuSabreEngine: immediately purging cached textures upon entering low-memory mode");
+        clearTexturePool();
+    }
+}
+
+bool GpuSabreEngine::isLowMemoryDevice() {
+    std::lock_guard<std::mutex> cacheLock(s_cacheMutex);
+    return s_isLowMemoryDevice;
 }
 
 bool GpuSabreEngine::computeStructureTensor() {

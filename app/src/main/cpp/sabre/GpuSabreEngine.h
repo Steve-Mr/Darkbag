@@ -65,6 +65,12 @@ public:
     // Release cached intermediate textures in the texture pool
     static void clearTexturePool();
 
+    // Configure whether the device is in low-memory tier (<= 6GB RAM or low performance class).
+    // On low-memory devices, intermediate textures are immediately freed upon session release
+    // instead of being pooled across captures.
+    static void setLowMemoryDevice(bool isLowMem);
+    static bool isLowMemoryDevice();
+
     int framesAccumulated() const;
     bool isSessionActive() const;
 

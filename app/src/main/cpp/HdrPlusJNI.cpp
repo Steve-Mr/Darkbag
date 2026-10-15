@@ -1836,3 +1836,15 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeWarmupGpu(JNIEnv* /* env *
     darkbag::sabre::GpuSabreEngine::warmupShaders();
     LOGD("nativeWarmupGpu: GPU pipeline shaders successfully warmed up");
 }
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeClearSabreTexturePool(JNIEnv* /* env */, jobject /* this */) {
+    LOGD("nativeClearSabreTexturePool: clearing Sabre intermediate texture pool");
+    darkbag::sabre::GpuSabreEngine::clearTexturePool();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeSetLowMemoryDevice(JNIEnv* /* env */, jobject /* this */, jboolean isLowMem) {
+    LOGD("nativeSetLowMemoryDevice: isLowMem=%d", isLowMem ? 1 : 0);
+    darkbag::sabre::GpuSabreEngine::setLowMemoryDevice(static_cast<bool>(isLowMem));
+}

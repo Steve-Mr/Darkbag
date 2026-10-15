@@ -827,6 +827,11 @@ class CameraFragment : Fragment() {
         displayManager.unregisterDisplayListener(displayListener)
     }
 
+    override fun onLowMemory() {
+        super.onLowMemory()
+        top.maary.darkbag.processor.ColorProcessor.clearSabreTexturePoolAsync()
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -962,7 +967,7 @@ class CameraFragment : Fragment() {
         _fragmentCameraBinding = FragmentCameraBinding.bind(view)
 
         // Pre-warm GPU compute and color grading pipelines to eliminate 300-500ms first-shot latency
-        top.maary.darkbag.processor.ColorProcessor.warmupGpuAsync()
+        top.maary.darkbag.processor.ColorProcessor.warmupGpuAsync(requireContext())
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 

@@ -53,13 +53,65 @@ object ColorProcessor {
     external fun initMemoryPool(width: Int, height: Int, frames: Int)
 
     external fun nativeWarmupGpu()
+    external fun nativeClearSabreTexturePool()
+    external fun nativeSetLowMemoryDevice(isLowMem: Boolean)
     private val isGpuWarmedUp = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    @Volatile
+    private var lowMemoryTierDetected: Boolean? = null
+
+    internal fun resetMemoryTierDetectionForTesting() {
+        lowMemoryTierDetected = null
+    }
+
+    /**
+     * Determines whether the current device is in the low-memory tier (<= 6GB RAM or
+     * performance class < S). In low-memory tier, GPU Sabre immediately releases intermediate
+     * textures upon session destruction instead of pooling them in VRAM.
+     */
+    fun detectAndApplyMemoryTier(context: android.content.Context): Boolean {
+        lowMemoryTierDetected?.let { return it }
+        val actManager = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        val memInfo = android.app.ActivityManager.MemoryInfo()
+        actManager?.getMemoryInfo(memInfo)
+        val totalRamBytes = memInfo.totalMem
+        // 6.5GB threshold covers 4GB and 6GB devices allowing for OS / GPU memory carve-outs
+        val is6GbOrLess = totalRamBytes in 1..(6.5 * 1024 * 1024 * 1024).toLong()
+        val mediaPerfClass = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            android.os.Build.VERSION.MEDIA_PERFORMANCE_CLASS
+        } else {
+            0
+        }
+        val isLow = is6GbOrLess || (mediaPerfClass < android.os.Build.VERSION_CODES.S && totalRamBytes <= 8L * 1024 * 1024 * 1024L)
+        lowMemoryTierDetected = isLow
+        try {
+            nativeSetLowMemoryDevice(isLow)
+        } catch (e: Throwable) {
+            // Ignored during host unit tests
+        }
+        android.util.Log.i("ColorProcessor", "Memory tier detected: totalMem=${totalRamBytes / (1024 * 1024)}MB, perfClass=$mediaPerfClass, isLowMemoryTier=$isLow")
+        return isLow
+    }
+
+    /**
+     * Asynchronously purges the Sabre intermediate GPU texture pool to reclaim VRAM.
+     */
+    fun clearSabreTexturePoolAsync() {
+        CoroutineScope(imageProcessingDispatcher).launch {
+            try {
+                nativeClearSabreTexturePool()
+            } catch (e: Throwable) {
+                android.util.Log.w("ColorProcessor", "nativeClearSabreTexturePool failed: ${e.message}")
+            }
+        }
+    }
 
     /**
      * Pre-warms GPU shaders asynchronously on imageProcessingDispatcher
      * to eliminate 300-500ms first-shot compilation latency.
      */
-    fun warmupGpuAsync() {
+    fun warmupGpuAsync(context: android.content.Context? = null) {
+        context?.let { detectAndApplyMemoryTier(it) }
         if (isGpuWarmedUp.get()) return
         CoroutineScope(imageProcessingDispatcher).launch {
             if (isGpuWarmedUp.compareAndSet(false, true)) {

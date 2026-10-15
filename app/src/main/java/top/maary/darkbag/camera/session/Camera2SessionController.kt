@@ -205,6 +205,11 @@ class Camera2SessionController(
             cameraDevice?.close()
             cameraDevice = null
             _sessionState.value = CameraSessionState.Closed
+            try {
+                top.maary.darkbag.processor.ColorProcessor.clearSabreTexturePoolAsync()
+            } catch (e: Throwable) {
+                // Ignore in unit tests
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error during closeCamera", e)
         } finally {
@@ -217,5 +222,10 @@ class Camera2SessionController(
     fun release() {
         closeCamera()
         stopBackgroundThread()
+        try {
+            top.maary.darkbag.processor.ColorProcessor.clearSabreTexturePoolAsync()
+        } catch (e: Throwable) {
+            // Ignore in unit tests
+        }
     }
 }
