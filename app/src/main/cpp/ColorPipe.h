@@ -119,7 +119,9 @@ bool process_and_save_image(
     // (no knee) and neutralize sensor-saturated pixels point-wise instead of
     // applying the display-oriented highlight desaturation ramp.
     bool faithfulHighlights = false,
-    int outJpgFd = -1
+    int outJpgFd = -1,
+    int64_t* outColorPipeMs = nullptr,
+    int64_t* outJpegEncodeMs = nullptr
 );
 
 bool write_dng(

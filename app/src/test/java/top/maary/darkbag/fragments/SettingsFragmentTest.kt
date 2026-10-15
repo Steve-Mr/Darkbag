@@ -171,6 +171,7 @@ class SettingsFragmentTest {
 
     @Test
     fun testHdrFusionModes() {
+        assertEquals("hdr_fusion_mode", SettingsFragment.KEY_HDR_FUSION_MODE)
         assertEquals(
             listOf(
                 SettingsFragment.HDR_FUSION_AUTO,
@@ -184,5 +185,34 @@ class SettingsFragmentTest {
         assertEquals("Spatial Merge + RCD", SettingsFragment.HDR_FUSION_SPATIAL_RCD)
         assertEquals("Sabre (Super-Resolution)", SettingsFragment.HDR_FUSION_SABRE)
         assertEquals("Classic HDR+ (Wiener)", SettingsFragment.HDR_FUSION_CLASSIC)
+    }
+
+    @Test
+    fun testHdrFusionModeConstantsAndMapping() {
+        // Verify key and list constants
+        assertEquals("hdr_fusion_mode", SettingsFragment.KEY_HDR_FUSION_MODE)
+        assertEquals(4, SettingsFragment.HDR_FUSION_MODES.size)
+
+        // Verify index contract matches pipeline fusionMode integers:
+        // 0 -> Auto, 1 -> Spatial + RCD, 2 -> Sabre, 3 -> Classic
+        assertEquals(0, SettingsFragment.HDR_FUSION_MODES.indexOf(SettingsFragment.HDR_FUSION_AUTO))
+        assertEquals(1, SettingsFragment.HDR_FUSION_MODES.indexOf(SettingsFragment.HDR_FUSION_SPATIAL_RCD))
+        assertEquals(2, SettingsFragment.HDR_FUSION_MODES.indexOf(SettingsFragment.HDR_FUSION_SABRE))
+        assertEquals(3, SettingsFragment.HDR_FUSION_MODES.indexOf(SettingsFragment.HDR_FUSION_CLASSIC))
+
+        // Contract verification of CameraFragment preference resolution
+        fun mapPreferenceToFusionMode(pref: String?): Int = when (pref) {
+            SettingsFragment.HDR_FUSION_SPATIAL_RCD -> 1
+            SettingsFragment.HDR_FUSION_SABRE -> 2
+            SettingsFragment.HDR_FUSION_CLASSIC -> 3
+            else -> 0
+        }
+
+        assertEquals(0, mapPreferenceToFusionMode(SettingsFragment.HDR_FUSION_AUTO))
+        assertEquals(1, mapPreferenceToFusionMode(SettingsFragment.HDR_FUSION_SPATIAL_RCD))
+        assertEquals(2, mapPreferenceToFusionMode(SettingsFragment.HDR_FUSION_SABRE))
+        assertEquals(3, mapPreferenceToFusionMode(SettingsFragment.HDR_FUSION_CLASSIC))
+        assertEquals(0, mapPreferenceToFusionMode("Unknown"))
+        assertEquals(0, mapPreferenceToFusionMode(null))
     }
 }

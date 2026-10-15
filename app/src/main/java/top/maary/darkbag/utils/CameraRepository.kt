@@ -50,6 +50,21 @@ class CameraRepository(private val context: Context) {
                 cameraManager.getCameraCharacteristics(id)
             }
         }
+
+        /**
+         * Selects the optimal viewfinder preview resolution for SurfaceTexture.
+         * Caps resolution at <= 1920x1440 to avoid choking the GPU on high-res sensors (e.g. 4096x3072),
+         * while prioritizing 4:3 aspect ratio matching the sensor format.
+         */
+        fun selectOptimalPreviewSize(availableSizes: Array<android.util.Size>?): android.util.Size {
+            val candidates = availableSizes
+                ?.filter { it.width.toFloat() / it.height.toFloat() in 1.3f..1.4f }
+            return candidates
+                ?.filter { it.width <= 1920 && it.height <= 1440 }
+                ?.maxByOrNull { it.width * it.height }
+                ?: candidates?.minByOrNull { it.width * it.height }
+                ?: android.util.Size(1440, 1080)
+        }
     }
 
     private fun probeAllCameras() {

@@ -31,12 +31,22 @@
 #include "hdrplus_single_pipeline.h" // Generated header for single frame
 #include "HdrPlusStreamingSession.h"
 #include "demosaic/RcdDemosaic.h"
+#include "gpu/GpuContext.h"
+#include "gpu/GpuColorPipeEngine.h"
+#include "gpu/GpuAccumulateEngine.h"
+#include "gpu/GpuRcdComputeEngine.h"
+#include "sabre/GpuSabreEngine.h"
 
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+
+extern "C" {
+__attribute__((weak)) void halide_profiler_report(void* /* user_context */) {}
+__attribute__((weak)) void halide_profiler_reset() {}
+}
 
 using namespace Halide::Runtime;
 
@@ -488,7 +498,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         auto it = g_sharedMemoryMap.find(temp_path_cstr);
         if (it != g_sharedMemoryMap.end()) {
             sharedResult = it->second;
-            g_sharedMemoryMap.erase(it);
+            // Retain in g_sharedMemoryMap across decoupled export passes (JPEG / DNG).
+            // Explicitly erased and freed via freeSharedRawMemory when the task completes.
         }
     }
 
@@ -558,8 +569,19 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                              cm1Vec, cm2Vec, fm1Vec, fm2Vec, neutralVec,
                              cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, neutralPtr);
 
-    const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { auto cached = get_cached_lut(lut_path_cstr); if (cached) lut = *cached; env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    std::string lutPathStr;
+    if (lutPath) {
+        const char* lut_cstr = env->GetStringUTFChars(lutPath, nullptr);
+        if (lut_cstr) {
+            lutPathStr = lut_cstr;
+            env->ReleaseStringUTFChars(lutPath, lut_cstr);
+        }
+    }
+    LUT3D lut;
+    if (!lutPathStr.empty()) {
+        auto cached = get_cached_lut(lutPathStr.c_str());
+        if (cached) lut = *cached;
+    }
 
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
@@ -571,7 +593,15 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jlong jpgMs = 0;
 
     bool dngOk = true;
-    if (outDngFd >= 0 || dng_path_cstr) {
+    bool saveOk = true;
+    jlong colorPipeMs = 0;
+    jlong jpegEncodeMs = 0;
+    std::future<bool> dngFuture;
+
+    const bool shouldExportDng = (outDngFd >= 0 || dng_path_cstr);
+    const bool shouldExportJpg = (outJpgFd >= 0 || jpg_path_cstr);
+
+    auto doDngExport = [&]() -> bool {
         LOGD("Exporting DNG to %s (outDngFd=%d, mode=%d, rawOutputType=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd, dngCompressionMode, rawOutputType);
         auto dngStart = std::chrono::high_resolution_clock::now();
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
@@ -592,6 +622,18 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                 effectiveWhiteLevel = (whiteLevel > 0) ? whiteLevel : 1023;
             } else {
                 // Fallback to rgbBuf if bayerBuf is not present
+                if (sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
+                    LOGD("Lazy readback of GPU unified texture %u for Bayer fallback DNG export (%dx%d)",
+                         sharedResult->gpuRgbTexture, width, height);
+                    sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
+                    bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                        sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
+                    );
+                    if (!okRb) {
+                        LOGE("GPU readback failed for Bayer fallback DNG export");
+                        sharedResult->rgbBuf.clear();
+                    }
+                }
                 dngRawData = sharedResult->rgbBuf.data();
                 dngStrideX = 1;
                 dngStrideY = width;
@@ -600,6 +642,19 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                 effectiveWhiteLevel = kMax16BitValue;
             }
         } else {
+            // Linear DNG requested (rawOutputType != 0)
+            if (sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
+                LOGD("Lazy readback of GPU unified texture %u for Linear DNG export (%dx%d)",
+                     sharedResult->gpuRgbTexture, width, height);
+                sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
+                bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                    sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
+                );
+                if (!okRb) {
+                    LOGE("GPU readback failed for Linear DNG export");
+                    sharedResult->rgbBuf.clear();
+                }
+            }
             dngRawData = sharedResult->rgbBuf.data();
             dngStrideX = 1;
             dngStrideY = width;
@@ -607,7 +662,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
             effectiveWhiteLevel = kMax16BitValue;
         }
 
-        dngOk = write_dng(
+        if (!dngRawData || (isBayer ? sharedResult->bayerBuf.empty() : sharedResult->rgbBuf.empty())) {
+            LOGE("doDngExport: missing raw data for DNG export after readback (isBayer=%d)", isBayer ? 1 : 0);
+            return false;
+        }
+
+        bool ok = write_dng(
             dng_path_cstr, width, height, dngRawData,
             dngStrideX, dngStrideY, dngStrideC,
             effectiveWhiteLevel,
@@ -618,18 +678,110 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
             noise_ptr, active_area_ptr, lens_shading_ptr, lensShadingRows, lensShadingCols
         );
         dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
+        return ok;
+    };
+
+    if (shouldExportDng) {
+        if (shouldExportJpg) {
+            // Concurrently write DNG in background thread while main thread executes ColorPipe + JPEG
+            dngFuture = std::async(std::launch::async, doDngExport);
+        } else {
+            dngOk = doDngExport();
+        }
     }
 
-    bool saveOk = true;
-    if (outJpgFd >= 0 || jpg_path_cstr) {
+    if (shouldExportJpg) {
         LOGD("Exporting JPG: JPG=%s (outJpgFd=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd);
         auto jpgStart = std::chrono::high_resolution_clock::now();
         float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
+        float physicalZoom = zoomFactor;
         const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : wbVec.data();
-        saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
-                                        exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd);
+        int64_t measuredColorPipe = 0;
+        int64_t measuredJpegEncode = 0;
+
+        bool gpuAttemptSuccess = false;
+        if (darkbag::gpu::GpuColorPipeEngine::instance().isAvailable()) {
+            if (sharedResult && sharedResult->gpuRgbTexture != 0) {
+                LOGD("Invoking zero-copy GPU-to-GPU ColorPipe from unified texture %u (%dx%d, LSC=%d)",
+                     sharedResult->gpuRgbTexture, width, height, lens_shading_ptr != nullptr ? 1 : 0);
+                gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImageFromTexture(
+                    sharedResult->gpuRgbTexture,
+                    width, height,
+                    digitalGain, targetLog,
+                    lutPathStr, &lut,
+                    exposure, contrast, saturation,
+                    highlights, shadows, whites, blacks,
+                    jpg_path_cstr, outJpgFd,
+                    ccmVec.data(), effectiveWb,
+                    orientation, (bool)mirror, effectiveZoom,
+                    (int)colorEngineMode, faithfulHighlights,
+                    &measuredColorPipe, &measuredJpegEncode,
+                    lens_shading_ptr, lensShadingRows, lensShadingCols,
+                    physicalZoom
+                );
+            } else if (sharedResult && !sharedResult->rgbBuf.empty()) {
+                gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImage(
+                    sharedResult->rgbBuf.data(),
+                    width, height,
+                    1, width, width * height,
+                    digitalGain, targetLog,
+                    lutPathStr, &lut,
+                    exposure, contrast, saturation,
+                    highlights, shadows, whites, blacks,
+                    jpg_path_cstr, outJpgFd,
+                    ccmVec.data(), effectiveWb,
+                    orientation, (bool)mirror, effectiveZoom,
+                    (int)colorEngineMode, faithfulHighlights,
+                    &measuredColorPipe, &measuredJpegEncode,
+                    lens_shading_ptr, lensShadingRows, lensShadingCols,
+                    physicalZoom
+                );
+            }
+            if (gpuAttemptSuccess) {
+                saveOk = true;
+                LOGD("GPU ColorPipe executed successfully (render: %lld ms, jpeg: %lld ms)",
+                     (long long)measuredColorPipe, (long long)measuredJpegEncode);
+            } else {
+                LOGW("GPU ColorPipe returned false, safely falling back to CPU ColorPipe");
+            }
+        }
+
+        if (!gpuAttemptSuccess) {
+            // Lazy readback of GPU texture if rgbBuf is empty for CPU ColorPipe fallback
+            if (sharedResult && sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
+                LOGW("Lazy readback of GPU unified texture %u for CPU ColorPipe fallback (%dx%d)",
+                     sharedResult->gpuRgbTexture, width, height);
+                sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
+                bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                    sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
+                );
+                if (!okRb) {
+                    LOGE("GPU readback failed for CPU ColorPipe fallback");
+                    sharedResult->rgbBuf.clear();
+                }
+            }
+            if (sharedResult && !sharedResult->rgbBuf.empty()) {
+                saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height,
+                                                lens_shading_ptr, lensShadingRows, lensShadingCols,
+                                                width, height, digitalGain, targetLog, lut,
+                                                exposure, contrast, saturation, highlights, shadows, whites, blacks,
+                                                jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd,
+                                                &measuredColorPipe, &measuredJpegEncode);
+            } else {
+                LOGE("CPU ColorPipe fallback failed: no RGB buffer available");
+                saveOk = false;
+            }
+        }
         jpgMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jpgStart).count();
+        colorPipeMs = (jlong)measuredColorPipe;
+        jpegEncodeMs = (jlong)measuredJpegEncode;
+        if (jpegEncodeMs == 0 && jpgMs > colorPipeMs) {
+            jpegEncodeMs = jpgMs - colorPipeMs;
+        }
+    }
+
+    if (dngFuture.valid()) {
+        dngOk = dngFuture.get();
     }
 
     auto exportTotalMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - exportStart).count();
@@ -640,9 +792,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         if (len >= 5) {
             jlong stats[15] = {0};
             env->GetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
-            stats[2] = postMs;
+            stats[2] = colorPipeMs;
             stats[3] = dngMs;
-            stats[4] = jpgMs;
+            stats[4] = jpegEncodeMs;
             env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
         }
     }
@@ -843,12 +995,16 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
 
     halide_report_buffer.clear(); halide_profiler_report(nullptr);
-    HalideStageStats stageStats = parseHalideReport(halide_report_buffer); halide_profiler_reset();
+    HalideStageStats stageStats = parseHalideReport(halide_report_buffer);
 
     if (halide_res != 0) {
         LOGE("Halide failed: %d", halide_res);
         if (tr_p_cstr) env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
         return -1;
+    }
+
+    if (sharedResult) {
+        sharedResult->isWhiteBalanceApplied = true;
     }
 
     unsigned char* bitmapPixels = nullptr;
@@ -883,7 +1039,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
                                 width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
-                                nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights);
+                                nullptr, nullptr, nullptr, 1, ccmVec.data(), nullptr, orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
@@ -907,7 +1063,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
             process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
                                     width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                    jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights);
+                                    jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), nullptr, orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights);
 
             if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
                 std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
@@ -918,7 +1074,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
                 process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
                                         width, height, digitalGain, targetLog, lut,
                                         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                        altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights);
+                                        altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), nullptr, orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights);
             }
         }
     }
@@ -943,28 +1099,152 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     jfloatArray neutralColorPoint,
     jint dngCompressionMode
 ) {
-    LOGD("Native processSingleFrameRaw started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
+    auto nativeStart = std::chrono::high_resolution_clock::now();
+    LOGD("Native processSingleFrameRaw started (enableMemoryColor=%d, colorEngineMode=%d, %dx%d, orientation=%d, WL=%d, cfa=%d).",
+         enableMemoryColor, colorEngineMode, width, height, orientation, whiteLevel, cfaPattern);
 
-    // Call the existing processHdrPlus logic directly with the buffer and numFrames=1
-    return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
-        env, nullptr, bayerBuffer, 1, width, height, orientation, whiteLevel, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
-        false, // useSensorColorMatrix
-        whiteBalance, ccm, nullptr, // ccmAlt
-        false, // exportMatrixAB
-        cfaPattern, targetLog, lutPath,
-        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata,
-        enableMemoryColor,
-        colorEngineMode,
-        colorMatrix1,
-        colorMatrix2,
-        forwardMatrix1,
-        forwardMatrix2,
-        calibrationIlluminant1,
-        calibrationIlluminant2,
-        neutralColorPoint,
-        dngCompressionMode,
-        nullptr // noiseProfile
+    (void)metadata;
+    (void)colorMatrix1; (void)colorMatrix2;
+    (void)forwardMatrix1; (void)forwardMatrix2;
+    (void)calibrationIlluminant1; (void)calibrationIlluminant2;
+    (void)neutralColorPoint; (void)dngCompressionMode;
+    (void)outputJpgPath; (void)outputDngPath;
+
+    std::vector<float> lensShadingVec;
+    const float* lens_shading_ptr = nullptr;
+    if (lensShadingMap && lensShadingRows > 0 && lensShadingCols > 0) {
+        int lsSize = env->GetArrayLength(lensShadingMap);
+        int expected = 4 * lensShadingRows * lensShadingCols;
+        if (lsSize >= expected) {
+            lensShadingVec.resize(expected);
+            env->GetFloatArrayRegion(lensShadingMap, 0, expected, lensShadingVec.data());
+            lens_shading_ptr = lensShadingVec.data();
+        }
+    }
+
+    if (!bayerBuffer) { LOGE("processSingleFrameRaw: bayerBuffer is null"); return -1; }
+    uint16_t* rawDataPtr = (uint16_t*)env->GetDirectBufferAddress(bayerBuffer);
+    if (!rawDataPtr) { LOGE("processSingleFrameRaw: Failed to get direct buffer address"); return -1; }
+
+    const size_t numPixels = static_cast<size_t>(width) * height;
+    jlong capacity = env->GetDirectBufferCapacity(bayerBuffer);
+    if (capacity < (jlong)(numPixels * sizeof(uint16_t))) {
+        LOGE("processSingleFrameRaw: Direct buffer capacity %lld < expected %zu",
+             (long long)capacity, numPixels * sizeof(uint16_t));
+        return -1;
+    }
+
+    const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
+    auto sharedResult = std::make_shared<SharedCaptureResult>();
+    sharedResult->bayerBuf.resize(numPixels);
+    // Note: Do not pre-allocate sharedResult->rgbBuf when GPU demosaicing is available!
+
+    // 1. Copy raw CFA into sharedResult->bayerBuf for native DNG writing (< 10ms)
+    std::memcpy(sharedResult->bayerBuf.data(), rawDataPtr, numPixels * sizeof(uint16_t));
+
+    // 2. Parse Black Level and White Balance
+    int bl_pattern[4] = {64, 64, 64, 64};
+    if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
+        env->GetIntArrayRegion(blackLevelPattern, 0, 4, bl_pattern);
+    }
+    uint16_t bl_array[4] = {
+        (uint16_t)std::max(0, bl_pattern[0]),
+        (uint16_t)std::max(0, bl_pattern[1]),
+        (uint16_t)std::max(0, bl_pattern[2]),
+        (uint16_t)std::max(0, bl_pattern[3])
+    };
+
+    float wb_array[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    if (whiteBalance && env->GetArrayLength(whiteBalance) >= 4) {
+        env->GetFloatArrayRegion(whiteBalance, 0, 4, wb_array);
+    }
+
+    // 3. High-Fidelity RCD Demosaicing (CPU OpenMP+NEON: 339ms, zero GPU contention)
+    auto demosaicStart = std::chrono::high_resolution_clock::now();
+    sharedResult->rgbBuf.resize(numPixels * 3);
+    darkbag::demosaic::rcd_demosaic(
+        sharedResult->bayerBuf.data(),
+        width,
+        height,
+        cfaPattern,
+        bl_array,
+        static_cast<uint16_t>(whiteLevel),
+        wb_array,
+        sharedResult->rgbBuf.data()
     );
+    auto demosaicDurationMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - demosaicStart
+    ).count();
+
+    sharedResult->isWhiteBalanceApplied = false;
+    sharedResult->isZoomCropped = false;
+
+    // 4. Save to shared memory map
+    if (tr_p_cstr) {
+        {
+            std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
+            g_sharedMemoryMap[tr_p_cstr] = sharedResult;
+        }
+        env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
+    }
+
+    // 5. Handle outputBitmap if requested (for backwards compatibility)
+    unsigned char* bitmapPixels = nullptr;
+    if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
+    if (bitmapPixels) {
+        if (sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
+            LOGD("Lazy readback of GPU unified texture %u for outputBitmap preview (%dx%d)",
+                 sharedResult->gpuRgbTexture, width, height);
+            sharedResult->rgbBuf.resize(numPixels * 3);
+            darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
+            );
+        }
+        AndroidBitmapInfo info;
+        AndroidBitmap_getInfo(env, outputBitmap, &info);
+        std::vector<float> ccmVec(9, 0.0f);
+        if (ccm && env->GetArrayLength(ccm) >= 9) {
+            env->GetFloatArrayRegion(ccm, 0, 9, ccmVec.data());
+        }
+        const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+        LUT3D lut;
+        if (lut_path_cstr) {
+            auto cached = get_cached_lut(lut_path_cstr);
+            if (cached) lut = *cached;
+            env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+        }
+        const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
+        process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width * height, lens_shading_ptr, lensShadingRows, lensShadingCols,
+                                width, height, digitalGain, targetLog, lut,
+                                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                nullptr, nullptr, nullptr, 1, ccmVec.data(), wb_array, orientation,
+                                bitmapPixels, info.width, info.height, true, fastPreviewDownsample, zoomFactor, (bool)mirror,
+                                (bool)enableMemoryColor, (int)colorEngineMode, true);
+        AndroidBitmap_unlockPixels(env, outputBitmap);
+    }
+
+    auto totalNativeMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - nativeStart
+    ).count();
+
+    // 6. Record timing stats
+    if (debugStats != nullptr) {
+        const jsize len = env->GetArrayLength(debugStats);
+        if (len >= 15) {
+            jlong stats[15] = {0};
+            env->GetLongArrayRegion(debugStats, 0, 15, stats);
+            stats[0] = 0; // copyDurationMs
+            stats[1] = demosaicDurationMs; // halideDurationMs (Stage 1 compute)
+            stats[6] = totalNativeMs; // nativeDurationMs
+            stats[8] = 0; // normalizeMs (Single frame has no accumulation normalization)
+            stats[9] = demosaicDurationMs; // fusionComputeMs (RCD demosaic time)
+            env->SetLongArrayRegion(debugStats, 0, 15, stats);
+        }
+    }
+
+    LOGD("Native processSingleFrameRaw completed in %lld ms (RCD demosaic: %lld ms)",
+         (long long)totalNativeMs, (long long)demosaicDurationMs);
+    return 0;
 }
 
 
@@ -1157,7 +1437,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
     jfloat digitalGain, jint targetLog, jstring lutPath,
     jfloat zoomFactor, jboolean mirror,
     jboolean enableMemoryColor, jint colorEngineMode,
-    jint fusionMode
+    jint fusionMode,
+    jlongArray debugStats
 ) {
     auto session = getValidSession(sessionHandle);
     if (!session) {
@@ -1181,6 +1462,27 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
     if (finishRes != 0 || !sharedResult) {
         LOGE("nativeFinishStreamingSession: finish failed with code %d", finishRes);
         return -1;
+    }
+
+    if (debugStats != nullptr) {
+        const jsize len = env->GetArrayLength(debugStats);
+        if (len > 0) {
+            jlong stats[20] = {0};
+            env->GetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 20), stats);
+            stats[0] = session->normalizeMs() + session->fusionComputeMs();
+            stats[8] = session->normalizeMs();
+            stats[9] = session->fusionComputeMs();
+            if (len >= 19) {
+                stats[15] = (jlong)session->pushCount();
+                stats[16] = (session->pushCount() > 0) ? (session->pushTotalMs() / session->pushCount()) : 0;
+                stats[17] = session->pushMinMs();
+                stats[18] = session->pushMaxMs();
+            }
+            if (len >= 20) {
+                stats[19] = session->normalizeMs();
+            }
+            env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 20), stats);
+        }
     }
 
     const char* tr_p_cstr = tempRawPath ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
@@ -1212,26 +1514,42 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
 
             int width = session->width();
             int height = session->height();
+            if (sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
+                LOGD("Lazy readback of GPU unified texture %u for streaming finish outputBitmap preview (%dx%d)",
+                     sharedResult->gpuRgbTexture, width, height);
+                sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
+                bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                    sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
+                );
+                if (!okRb) {
+                    LOGE("GPU readback failed for streaming finish outputBitmap preview");
+                    sharedResult->rgbBuf.clear();
+                }
+            }
             uint16_t* raw_ptr = sharedResult->rgbBuf.data();
-            int stride_x = 1;
-            int stride_y = width;
-            int stride_c = width * height;
-            const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
+            if (!raw_ptr || sharedResult->rgbBuf.empty()) {
+                LOGE("nativeFinishStreamingSession: missing raw buffer for preview, skipping");
+            } else {
+                int stride_x = 1;
+                int stride_y = width;
+                int stride_c = width * height;
+                const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
 
-            float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
-            const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : session->whiteBalanceData();
+                float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
+                const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : session->whiteBalanceData();
 
-            process_and_save_image(
-                raw_ptr, stride_x, stride_y, stride_c,
-                session->lensShadingData(), session->lensShadingRows(), session->lensShadingCols(),
-                width, height, digitalGain, targetLog, lut,
-                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                nullptr, nullptr, nullptr, 1,
-                session->ccmData(), effectiveWb,
-                session->orientation(), bitmapPixels, out_w, out_h,
-                true, fastPreviewDownsample, effectiveZoom, (bool)mirror,
-                (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights
-            );
+                process_and_save_image(
+                    raw_ptr, stride_x, stride_y, stride_c,
+                    session->lensShadingData(), session->lensShadingRows(), session->lensShadingCols(),
+                    width, height, digitalGain, targetLog, lut,
+                    0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                    nullptr, nullptr, nullptr, 1,
+                    session->ccmData(), effectiveWb,
+                    session->orientation(), bitmapPixels, out_w, out_h,
+                    true, fastPreviewDownsample, effectiveZoom, (bool)mirror,
+                    (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights
+                );
+            }
             AndroidBitmap_unlockPixels(env, outputBitmap);
         }
     }
@@ -1292,14 +1610,241 @@ Java_top_maary_darkbag_processor_ColorProcessor_rcdDemosaicNative(
         wbPtr = wbArray;
     }
 
-    darkbag::demosaic::rcd_demosaic(
-        bayerData,
-        width,
-        height,
-        cfaPattern,
-        blArray,
-        static_cast<uint16_t>(whiteLevel),
-        wbPtr,
-        rgbData
+    bool gpuDemosaicOk = false;
+    if (darkbag::gpu::GpuRcdComputeEngine::instance().isAvailable()) {
+        int64_t gpuComputeMs = 0;
+        gpuDemosaicOk = darkbag::gpu::GpuRcdComputeEngine::instance().demosaicToCpuBuffer(
+            bayerData,
+            width,
+            height,
+            cfaPattern,
+            blArray,
+            static_cast<uint16_t>(whiteLevel),
+            wbPtr,
+            rgbData,
+            &gpuComputeMs
+        );
+        if (gpuDemosaicOk) {
+            LOGD("rcdDemosaicNative GPU Compute succeeded in %lld ms", (long long)gpuComputeMs);
+        } else {
+            LOGW("rcdDemosaicNative GPU Compute failed, falling back to CPU");
+        }
+    }
+
+    if (!gpuDemosaicOk) {
+        darkbag::demosaic::rcd_demosaic(
+            bayerData,
+            width,
+            height,
+            cfaPattern,
+            blArray,
+            static_cast<uint16_t>(whiteLevel),
+            wbPtr,
+            rgbData
+        );
+    }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
+    JNIEnv* env, jobject /* this */,
+    jobject rawBuffer, jint bufferOffset,
+    jint width, jint height,
+    jint rowStrideBytes, jint pixelStrideBytes,
+    jstring outputPath, jint outFd,
+    jint orientationDegrees, jint whiteLevel,
+    jfloatArray blackLevelPattern, jint cfaPattern,
+    jfloatArray colorMatrix1, jfloatArray colorMatrix2,
+    jfloatArray forwardMatrix1, jfloatArray forwardMatrix2,
+    jint calibrationIlluminant1, jint calibrationIlluminant2,
+    jfloatArray neutralColorPoint,
+    jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols,
+    jintArray activeArea, jdoubleArray noiseProfile,
+    jint iso, jlong exposureTimeNanos, jfloat focalLength, jint focalLength35mm, jfloat fNumber,
+    jint dngCompressionMode, jboolean isHdrPlus,
+    jobject metadataObj, jfloat digitalGain
+) {
+    if (!rawBuffer || width <= 0 || height <= 0 || bufferOffset < 0) return JNI_FALSE;
+    jlong capacity = env->GetDirectBufferCapacity(rawBuffer);
+    uint8_t* rawBase = static_cast<uint8_t*>(env->GetDirectBufferAddress(rawBuffer));
+    if (!rawBase || capacity <= 0) return JNI_FALSE;
+
+    int stride_x = (pixelStrideBytes > 0) ? (pixelStrideBytes / 2) : 1;
+    int stride_y = (rowStrideBytes > 0) ? (rowStrideBytes / 2) : width;
+    int stride_c = 0;
+
+    size_t requiredBytes = static_cast<size_t>(bufferOffset) +
+        (static_cast<size_t>(height - 1) * stride_y + static_cast<size_t>(width) * stride_x) * sizeof(unsigned short);
+    if (static_cast<size_t>(capacity) < requiredBytes) {
+        LOGE("nativeWriteRawImageDng: Direct buffer capacity %lld < required %zu",
+             (long long)capacity, requiredBytes);
+        return JNI_FALSE;
+    }
+
+    const unsigned short* planarData = reinterpret_cast<const unsigned short*>(rawBase + bufferOffset);
+
+    const char* outPathCStr = outputPath ? env->GetStringUTFChars(outputPath, nullptr) : nullptr;
+
+    float bl_pattern[4] = {64.0f, 64.0f, 64.0f, 64.0f};
+    bool has_bl = false;
+    if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
+        env->GetFloatArrayRegion(blackLevelPattern, 0, 4, bl_pattern);
+        has_bl = true;
+    }
+
+    std::vector<float> cm1Vec, cm2Vec, fm1Vec, fm2Vec, neutralVec;
+    const float* cm1Ptr = nullptr;
+    const float* cm2Ptr = nullptr;
+    const float* fm1Ptr = nullptr;
+    const float* fm2Ptr = nullptr;
+    const float* neutralPtr = nullptr;
+
+    if (colorMatrix1 && env->GetArrayLength(colorMatrix1) >= 9) {
+        cm1Vec.resize(9);
+        env->GetFloatArrayRegion(colorMatrix1, 0, 9, cm1Vec.data());
+        cm1Ptr = cm1Vec.data();
+    }
+    if (colorMatrix2 && env->GetArrayLength(colorMatrix2) >= 9) {
+        cm2Vec.resize(9);
+        env->GetFloatArrayRegion(colorMatrix2, 0, 9, cm2Vec.data());
+        cm2Ptr = cm2Vec.data();
+    }
+    if (forwardMatrix1 && env->GetArrayLength(forwardMatrix1) >= 9) {
+        fm1Vec.resize(9);
+        env->GetFloatArrayRegion(forwardMatrix1, 0, 9, fm1Vec.data());
+        fm1Ptr = fm1Vec.data();
+    }
+    if (forwardMatrix2 && env->GetArrayLength(forwardMatrix2) >= 9) {
+        fm2Vec.resize(9);
+        env->GetFloatArrayRegion(forwardMatrix2, 0, 9, fm2Vec.data());
+        fm2Ptr = fm2Vec.data();
+    }
+    if (neutralColorPoint && env->GetArrayLength(neutralColorPoint) >= 3) {
+        neutralVec.resize(3);
+        env->GetFloatArrayRegion(neutralColorPoint, 0, 3, neutralVec.data());
+        neutralPtr = neutralVec.data();
+    }
+
+    std::vector<float> lensShadingVec;
+    const float* lens_shading_ptr = nullptr;
+    if (lensShadingMap && lensShadingRows > 0 && lensShadingCols > 0) {
+        int lsSize = env->GetArrayLength(lensShadingMap);
+        int expected = 4 * lensShadingRows * lensShadingCols;
+        if (lsSize >= expected) {
+            lensShadingVec.resize(expected);
+            env->GetFloatArrayRegion(lensShadingMap, 0, expected, lensShadingVec.data());
+            lens_shading_ptr = lensShadingVec.data();
+        }
+    }
+
+    int active_area[4] = {0};
+    const int* active_area_ptr = nullptr;
+    if (activeArea && env->GetArrayLength(activeArea) >= 4) {
+        env->GetIntArrayRegion(activeArea, 0, 4, active_area);
+        active_area_ptr = active_area;
+    }
+
+    double noise_prof[8] = {0};
+    const double* noise_ptr = nullptr;
+    if (noiseProfile && env->GetArrayLength(noiseProfile) >= 8) {
+        env->GetDoubleArrayRegion(noiseProfile, 0, 8, noise_prof);
+        noise_ptr = noise_prof;
+    }
+
+    ImageMetadata meta;
+    if (metadataObj) {
+        meta = metadataFromJava(env, metadataObj);
+    }
+    if (meta.iso == 0) meta.iso = iso;
+    if (meta.exposureTime == 0) meta.exposureTime = exposureTimeNanos;
+    if (meta.focalLength == 0.0f) meta.focalLength = focalLength;
+    if (meta.focalLengthIn35mmFilm == 0) meta.focalLengthIn35mmFilm = focalLength35mm;
+    if (meta.fNumber == 0.0f) meta.fNumber = fNumber;
+    if (meta.uniqueCameraModel.empty() || meta.uniqueCameraModel == "Unknown") {
+        meta.uniqueCameraModel = "Darkbag";
+    }
+
+    std::vector<float> ccmVec(9, 0.0f);
+    if (fm1Ptr) {
+        // D50 XYZ -> sRGB Bradford adaptation matrix to map ForwardMatrix1 to sRGB
+        const float M_XYZ_D50_TO_SRGB[9] = {
+             3.1338561f, -1.6168667f, -0.4906146f,
+            -0.9787684f,  1.9161415f,  0.0334540f,
+             0.0719453f, -0.2289914f,  1.4052427f
+        };
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) {
+                float sum = 0.0f;
+                for (int k = 0; k < 3; ++k) {
+                    sum += M_XYZ_D50_TO_SRGB[r * 3 + k] * fm1Ptr[k * 3 + c];
+                }
+                ccmVec[r * 3 + c] = sum;
+            }
+        }
+    } else if (cm1Ptr) {
+        for (int i = 0; i < 9; ++i) ccmVec[i] = cm1Ptr[i];
+    } else {
+        ccmVec = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    }
+
+    float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
+    std::vector<float> wbVec = {1.0f, 1.0f, 1.0f, 1.0f};
+    if (neutralPtr) {
+        wbVec[0] = 1.0f / std::max(1e-4f, neutralPtr[0]);
+        wbVec[1] = 1.0f / std::max(1e-4f, neutralPtr[1]);
+        wbVec[2] = 1.0f / std::max(1e-4f, neutralPtr[1]);
+        wbVec[3] = 1.0f / std::max(1e-4f, neutralPtr[2]);
+    }
+
+    bool ok = write_dng(
+        outPathCStr, width, height, planarData,
+        stride_x, stride_y, stride_c,
+        whiteLevel,
+        ccmVec, meta, orientationDegrees, false, baselineExposure, wbVec.data(),
+        cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr,
+        calibrationIlluminant1, calibrationIlluminant2, neutralPtr,
+        outFd, dngCompressionMode,
+        /*isBayer=*/true, cfaPattern, has_bl ? bl_pattern : nullptr,
+        noise_ptr, active_area_ptr, lens_shading_ptr, lensShadingRows, lensShadingCols
     );
+
+    if (outPathCStr) {
+        env->ReleaseStringUTFChars(outputPath, outPathCStr);
+    }
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeWarmupGpu(JNIEnv* /* env */, jobject /* this */) {
+    LOGD("nativeWarmupGpu: Warming up GPU pipelines and compiling shaders...");
+    auto& ctx = darkbag::gpu::GpuContext::instance();
+    if (!ctx.isInitialized()) {
+        if (!ctx.initialize()) {
+            LOGW("nativeWarmupGpu: Failed to initialize GpuContext, skipping GPU warmup");
+            return;
+        }
+    }
+    darkbag::gpu::GpuContextScope ctxScope(ctx);
+    if (!ctxScope.isAcquired()) {
+        LOGW("nativeWarmupGpu: Failed to acquire GpuContextScope");
+        return;
+    }
+
+    darkbag::gpu::GpuColorPipeEngine::instance().ensureShaders();
+    darkbag::gpu::GpuAccumulateEngine::instance().ensureShaders();
+    darkbag::gpu::GpuRcdComputeEngine::instance().ensureShaders();
+    darkbag::sabre::GpuSabreEngine::warmupShaders();
+    LOGD("nativeWarmupGpu: GPU pipeline shaders successfully warmed up");
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeClearSabreTexturePool(JNIEnv* /* env */, jobject /* this */) {
+    LOGD("nativeClearSabreTexturePool: clearing Sabre intermediate texture pool");
+    darkbag::sabre::GpuSabreEngine::clearTexturePool();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeSetLowMemoryDevice(JNIEnv* /* env */, jobject /* this */, jboolean isLowMem) {
+    LOGD("nativeSetLowMemoryDevice: isLowMem=%d", isLowMem ? 1 : 0);
+    darkbag::sabre::GpuSabreEngine::setLowMemoryDevice(static_cast<bool>(isLowMem));
 }

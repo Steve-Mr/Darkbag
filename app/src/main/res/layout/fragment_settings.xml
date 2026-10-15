@@ -1097,13 +1097,43 @@
                             android:layout_marginTop="4dp"
                             android:layout_marginBottom="@dimen/spacing_medium" />
 
-                        <TextView
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Debug Status"
-                            android:textSize="12sp"
-                            android:textColor="?attr/colorOutline"
-                            android:layout_marginBottom="@dimen/spacing_small"/>
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="@dimen/spacing_small">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Debug Status &amp; Performance"
+                                android:textSize="12sp"
+                                android:textColor="?attr/colorOutline" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_copy_debug_logs"
+                                style="@style/Widget.Material3.Button.TextButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Copy"
+                                android:textSize="12sp"
+                                android:minHeight="36dp"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_clear_debug_logs"
+                                style="@style/Widget.Material3.Button.TextButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Clear"
+                                android:textSize="12sp"
+                                android:minHeight="36dp"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp" />
+                        </LinearLayout>
 
                         <TextView
                             android:id="@+id/tv_debug_stats"

@@ -170,7 +170,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         jfloat zoomFactor,
         jobject metadataObj,
         jboolean enableMemoryColor,
-        jint colorEngineMode
+        jint colorEngineMode,
+        jfloatArray lensShadingMap,
+        jint lensShadingRows,
+        jint lensShadingCols
 ) {
     LOGD("Native processRaw started using LibRaw (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
 
@@ -278,9 +281,22 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         meta = metadataFromJava(env, metadataObj);
     }
 
+    std::vector<float> lensShadingVec;
+    const float* lens_shading_ptr = nullptr;
+    if (lensShadingMap && lensShadingRows > 0 && lensShadingCols > 0) {
+        int lsSize = env->GetArrayLength(lensShadingMap);
+        int expected = 4 * lensShadingRows * lensShadingCols;
+        if (lsSize >= expected) {
+            lensShadingVec.resize(expected);
+            env->GetFloatArrayRegion(lensShadingMap, 0, expected, lensShadingVec.data());
+            lens_shading_ptr = lensShadingVec.data();
+        }
+    }
+
     // Use Shared Pipeline
     bool saveOk = process_and_save_image(
-        rawImage.data(), 3, image->width * 3, 1, nullptr, 0, 0,
+        rawImage.data(), 3, image->width * 3, 1,
+        lens_shading_ptr, lensShadingRows, lensShadingCols,
         image->width,
         image->height,
         digitalGain,

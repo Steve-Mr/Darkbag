@@ -23,8 +23,8 @@ class HdrPlusRequestManagerTest {
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         // Reset pending tasks count to 0 and drain channel
-        while (HdrPlusRequestManager.pendingTasksCount.value > 0) {
-            HdrPlusRequestManager.onTaskFinished()
+        while (HdrPlusRequestManager.pendingTasksCount.value > 0 || HdrPlusRequestManager.pendingForegroundTasksCount.value > 0) {
+            HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = false)
         }
         while (HdrPlusRequestManager.requestChannel.tryReceive().isSuccess) {
             // Drain channel
@@ -179,19 +179,19 @@ class HdrPlusRequestManagerTest {
     @Test
     fun testEnqueue_FailureRollback_NotTracked() {
         assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
-        // Fill channel (capacity is 3)
-        HdrPlusRequestManager.enqueue(createDummyRequest("req-1"))
-        HdrPlusRequestManager.enqueue(createDummyRequest("req-2"))
-        HdrPlusRequestManager.enqueue(createDummyRequest("req-3"))
-        assertEquals(3, HdrPlusRequestManager.pendingTasksCount.value)
+        // Fill channel (capacity is MAX_IN_FLIGHT_REQUESTS)
+        for (i in 1..HdrPlusRequestManager.MAX_IN_FLIGHT_REQUESTS) {
+            HdrPlusRequestManager.enqueue(createDummyRequest("req-$i"))
+        }
+        assertEquals(HdrPlusRequestManager.MAX_IN_FLIGHT_REQUESTS, HdrPlusRequestManager.pendingTasksCount.value)
 
-        // 4th request should fail trySend and roll back
+        // Overflow request should fail trySend and roll back
         try {
-            HdrPlusRequestManager.enqueue(createDummyRequest("req-4"), alreadyTracked = false)
+            HdrPlusRequestManager.enqueue(createDummyRequest("req-overflow"), alreadyTracked = false)
             org.junit.Assert.fail("Expected IllegalStateException")
         } catch (e: IllegalStateException) {
-            // Count rolled back to 3
-            assertEquals(3, HdrPlusRequestManager.pendingTasksCount.value)
+            // Count rolled back to MAX_IN_FLIGHT_REQUESTS
+            assertEquals(HdrPlusRequestManager.MAX_IN_FLIGHT_REQUESTS, HdrPlusRequestManager.pendingTasksCount.value)
         }
 
         // Clean up channel
@@ -204,31 +204,104 @@ class HdrPlusRequestManagerTest {
     @Test
     fun testEnqueue_FailureRollback_AlreadyTracked_DoesNotDoubleDecrement() {
         assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
-        // Fill channel (capacity is 3)
-        HdrPlusRequestManager.enqueue(createDummyRequest("req-1"))
-        HdrPlusRequestManager.enqueue(createDummyRequest("req-2"))
-        HdrPlusRequestManager.enqueue(createDummyRequest("req-3"))
-        assertEquals(3, HdrPlusRequestManager.pendingTasksCount.value)
+        // Fill channel (capacity is MAX_IN_FLIGHT_REQUESTS)
+        for (i in 1..HdrPlusRequestManager.MAX_IN_FLIGHT_REQUESTS) {
+            HdrPlusRequestManager.enqueue(createDummyRequest("req-$i"))
+        }
+        assertEquals(HdrPlusRequestManager.MAX_IN_FLIGHT_REQUESTS, HdrPlusRequestManager.pendingTasksCount.value)
 
-        // 4th request was tracked upfront
+        // Overflow request was tracked upfront
         HdrPlusRequestManager.onTaskStarted()
-        assertEquals(4, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(HdrPlusRequestManager.MAX_IN_FLIGHT_REQUESTS + 1, HdrPlusRequestManager.pendingTasksCount.value)
 
         try {
-            HdrPlusRequestManager.enqueue(createDummyRequest("req-4"), alreadyTracked = true)
+            HdrPlusRequestManager.enqueue(createDummyRequest("req-overflow"), alreadyTracked = true)
             org.junit.Assert.fail("Expected IllegalStateException")
         } catch (e: IllegalStateException) {
             // enqueue itself did NOT decrement count because alreadyTracked == true!
-            assertEquals(4, HdrPlusRequestManager.pendingTasksCount.value)
+            assertEquals(HdrPlusRequestManager.MAX_IN_FLIGHT_REQUESTS + 1, HdrPlusRequestManager.pendingTasksCount.value)
             // Caller's catch block does the decrement:
             HdrPlusRequestManager.onTaskFinished()
-            assertEquals(3, HdrPlusRequestManager.pendingTasksCount.value)
+            assertEquals(HdrPlusRequestManager.MAX_IN_FLIGHT_REQUESTS, HdrPlusRequestManager.pendingTasksCount.value)
         }
 
         // Clean up channel
         while (HdrPlusRequestManager.requestChannel.tryReceive().isSuccess) {
-            HdrPlusRequestManager.onTaskFinished()
+            HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = false)
         }
         assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+    }
+
+    @Test
+    fun testForegroundTaskLifecycle_SingleTask() {
+        assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Shutter clicked: task begins
+        HdrPlusRequestManager.onTaskStarted()
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(1, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Fast Path JPEG completes: foreground spinner dismisses immediately
+        HdrPlusRequestManager.onForegroundTaskFinished()
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Background DNG completes: task fully finishes without double-decrement
+        HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = true)
+        assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+    }
+
+    @Test
+    fun testMultiShotPipelining_NoPrematureForegroundDrop() {
+        assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Photo 1 starts
+        HdrPlusRequestManager.onTaskStarted()
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(1, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Photo 1 Fast Path completes
+        HdrPlusRequestManager.onForegroundTaskFinished()
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Photo 2 starts while Photo 1 DNG is still encoding in background
+        HdrPlusRequestManager.onTaskStarted()
+        assertEquals(2, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(1, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Photo 1 Background DNG finishes: must NOT steal Photo 2's foreground counter!
+        HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = true)
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(1, HdrPlusRequestManager.pendingForegroundTasksCount.value) // Photo 2 still actively computing!
+
+        // Photo 2 Fast Path completes
+        HdrPlusRequestManager.onForegroundTaskFinished()
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Photo 2 Background DNG finishes
+        HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = true)
+        assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+    }
+
+    @Test
+    fun testTaskFailure_CleansUpBothCounters() {
+        assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Task starts
+        HdrPlusRequestManager.onTaskStarted()
+        assertEquals(1, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(1, HdrPlusRequestManager.pendingForegroundTasksCount.value)
+
+        // Error occurs before foreground completes (e.g. HAL failure)
+        HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = false)
+        assertEquals(0, HdrPlusRequestManager.pendingTasksCount.value)
+        assertEquals(0, HdrPlusRequestManager.pendingForegroundTasksCount.value)
     }
 }

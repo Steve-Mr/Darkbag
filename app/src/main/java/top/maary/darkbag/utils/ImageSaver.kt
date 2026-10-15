@@ -161,7 +161,12 @@ object ImageSaver {
                                 ColorProcessor.halfFrameFlow.tryEmit(2)
                                 if (finalPath != null) {
                                     val finalFile = File(finalPath)
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
+                                    val effectiveJpgBaseName = if (isHalfFrameActive && halfFrameMetadata?.frame1BaseName != null) {
+                                        baseName.replace("_HF2", "")
+                                    } else {
+                                        baseName
+                                    }
+                                    finalJpgUri = saveJpegToMediaStore(context, "$effectiveJpgBaseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -169,10 +174,15 @@ object ImageSaver {
                         } else {
                             if (finalPath != null) {
                                 val finalFile = File(finalPath)
-                                if (jpgFolderUri != null) {
-                                    finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath)
+                                val effectiveJpgBaseName = if (isHalfFrameActive && halfFrameMetadata?.frame1BaseName != null) {
+                                    baseName.replace("_HF2", "")
                                 } else {
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
+                                    baseName
+                                }
+                                if (jpgFolderUri != null) {
+                                    finalJpgUri = saveFileToFolder(context, finalFile, "$effectiveJpgBaseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath)
+                                } else {
+                                    finalJpgUri = saveJpegToMediaStore(context, "$effectiveJpgBaseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -278,9 +288,14 @@ object ImageSaver {
                                         ColorProcessor.halfFrameFlow.tryEmit(2)
                                         if (finalPath != null) {
                                             val finalFile = File(finalPath)
+                                            val effectiveJpgBaseName = if (isHalfFrameActive && halfFrameMetadata?.frame1BaseName != null) {
+                                                baseName.replace("_HF2", "")
+                                            } else {
+                                                baseName
+                                            }
                                             finalJpgUri = saveJpegToMediaStore(
                                                 context,
-                                                "$baseName.jpg",
+                                                "$effectiveJpgBaseName.jpg",
                                                 targetUri,
                                                 processedBitmap.width,
                                                 processedBitmap.height,
@@ -301,8 +316,13 @@ object ImageSaver {
                                 } else {
                                     if (finalPath != null) {
                                         val finalFile = File(finalPath)
+                                        val effectiveJpgBaseName = if (isHalfFrameActive && halfFrameMetadata?.frame1BaseName != null) {
+                                            baseName.replace("_HF2", "")
+                                        } else {
+                                            baseName
+                                        }
                                         if (jpgFolderUri != null) {
-                                        finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
+                                        finalJpgUri = saveFileToFolder(context, finalFile, "$effectiveJpgBaseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
                                         } else {
                                             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                                             BitmapFactory.decodeFile(finalPath, options)
@@ -311,7 +331,7 @@ object ImageSaver {
 
                                             finalJpgUri = saveJpegToMediaStore(
                                                 context,
-                                                "$baseName.jpg",
+                                                "$effectiveJpgBaseName.jpg",
                                                 targetUri,
                                                 finalW,
                                                 finalH,
@@ -380,44 +400,56 @@ object ImageSaver {
             if (dngFile.exists()) {
                 val baseSuffix = if (linearDngPath.contains("_linear")) "_linear" else ""
                 val dngDisplayName = "$baseName$baseSuffix.dng"
-                if (rawFolderUri != null) {
-                    finalRawUri = saveFileToFolder(context, dngFile, dngDisplayName, "image/x-adobe-dng", rawFolderUri)
-                } else {
-                    val dngValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, dngDisplayName)
-                        put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                            put(MediaStore.MediaColumns.IS_PENDING, 1)
-                        }
-                    }
-                    val dngUri = contentResolver.insert(
-                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                        dngValues
-                    )
-                    if (dngUri != null) {
+
+                if (isHalfFrameActive) {
+                    val halfFrameSessionStore = HalfFrameSessionStore(context)
+                    val activeProfile = halfFrameMetadata?.profile ?: halfFrameSessionStore.currentProfile()
+                    val isFrame1 = halfFrameMetadata?.frame1BaseName == null
+
+                    if (isFrame1) {
+                        // Frame 1: Stage DNG internally to avoid polluting public MediaStore
+                        val targetStagingDng = halfFrameSessionStore.tempDngFileForProfile(activeProfile)
                         try {
-                            context.contentResolver.openFileDescriptor(dngUri, "w")?.use { pfd ->
-                                FileOutputStream(pfd.fileDescriptor).use { out ->
-                                    FileInputStream(dngFile).copyTo(out)
-                                    out.flush()
-                                }
-                            }
-
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                dngValues.clear()
-                                dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                contentResolver.update(dngUri, dngValues, null, null)
-                            }
-
-                            finalRawUri = dngUri
+                            dngFile.copyTo(targetStagingDng, overwrite = true)
+                            halfFrameSessionStore.setTempDngPath(targetStagingDng.absolutePath, profile = activeProfile)
+                            Log.d(TAG, "HalfFrame Frame 1 DNG staged internally: ${targetStagingDng.absolutePath}")
                         } catch (e: Exception) {
-                            Log.e(TAG, "Failed to save Linear DNG", e)
-                            contentResolver.delete(dngUri, null, null)
+                            Log.e(TAG, "Failed to stage Frame 1 DNG", e)
+                        } finally {
+                            dngFile.delete()
+                        }
+                        finalRawUri = null
+                    } else {
+                        // Frame 2: Save Frame 2 DNG to destination
+                        finalRawUri = saveDngToDestination(context, dngFile, dngDisplayName, rawFolderUri)
+                        dngFile.delete()
+
+                        // Also publish the staged Frame 1 DNG if present
+                        val session = halfFrameSessionStore.readSession(profile = activeProfile)
+                        val stagedPath = session.tempDngPath
+                        val stagedFile = if (!stagedPath.isNullOrBlank() && File(stagedPath).exists()) {
+                            File(stagedPath)
+                        } else {
+                            val defaultStaged = halfFrameSessionStore.tempDngFileForProfile(activeProfile)
+                            if (defaultStaged.exists()) defaultStaged else null
+                        }
+
+                        if (stagedFile != null && stagedFile.exists()) {
+                            val f1DisplayName = if (baseName.contains("_HF2")) {
+                                baseName.replace("_HF2", "_HF1") + "$baseSuffix.dng"
+                            } else {
+                                "${halfFrameMetadata?.frame1BaseName ?: session.baseName ?: baseName}_HF1$baseSuffix.dng"
+                            }
+                            Log.d(TAG, "Publishing staged Frame 1 DNG as $f1DisplayName")
+                            saveDngToDestination(context, stagedFile, f1DisplayName, rawFolderUri)
+                            stagedFile.delete()
+                            halfFrameSessionStore.setTempDngPath(null, profile = activeProfile)
                         }
                     }
+                } else {
+                    finalRawUri = saveDngToDestination(context, dngFile, dngDisplayName, rawFolderUri)
+                    dngFile.delete()
                 }
-                dngFile.delete()
             }
         }
 
@@ -441,6 +473,51 @@ object ImageSaver {
         if (isHalfFrameActive && finalJpgUri == null) return null
 
         return finalJpgUri ?: finalRawUri
+    }
+
+    private fun saveDngToDestination(
+        context: Context,
+        dngFile: File,
+        displayName: String,
+        rawFolderUri: String?
+    ): Uri? {
+        if (!dngFile.exists()) return null
+        if (rawFolderUri != null) {
+            return saveFileToFolder(context, dngFile, displayName, "image/x-adobe-dng", rawFolderUri)
+        }
+        val contentResolver = context.contentResolver
+        val dngValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+        }
+        val dngUri = contentResolver.insert(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            dngValues
+        ) ?: return null
+
+        return try {
+            contentResolver.openFileDescriptor(dngUri, "w")?.use { pfd ->
+                FileOutputStream(pfd.fileDescriptor).use { out ->
+                    FileInputStream(dngFile).use { it.copyTo(out) }
+                    out.flush()
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                dngValues.clear()
+                dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                contentResolver.update(dngUri, dngValues, null, null)
+            }
+            dngUri
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save DNG: $displayName", e)
+            contentResolver.delete(dngUri, null, null)
+            null
+        }
     }
 
     private fun writeStandardExif(exif: ExifInterface, captureMetadata: CaptureMetadata?) {

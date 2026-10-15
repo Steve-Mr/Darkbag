@@ -20,5 +20,15 @@ class MainApplication : Application() {
             .remove(top.maary.darkbag.fragments.CameraFragment.KEY_SELECTED_LENS_ID)
             .remove(top.maary.darkbag.fragments.CameraFragment.KEY_LENS_FACING)
             .apply()
+
+        top.maary.darkbag.processor.ColorProcessor.detectAndApplyMemoryTier(this)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+            level == android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            top.maary.darkbag.processor.ColorProcessor.clearSabreTexturePoolAsync()
+        }
     }
 }

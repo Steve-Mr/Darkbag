@@ -133,8 +133,13 @@ add_custom_command(
 )
 
 # Run the generator to produce the target object file
-# We target arm-64-android with OpenCL and Vulkan support, plus profiling.
-set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16-profile")
+# We target arm-64-android with OpenCL and Vulkan support.
+# Halide profiler instrumentation is included for Debug builds; stripped in Release builds.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16-profile")
+else()
+    set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16")
+endif()
 set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.h")
 set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.a") # Static lib output
 set(SINGLE_GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_single_pipeline.h")
@@ -236,8 +241,10 @@ file(GLOB_RECURSE LIBRAW_SOURCES
 # *_ph.cpp files are usually "placeholders" or specific implementation alternatives that conflict with the standard ones
 list(FILTER LIBRAW_SOURCES EXCLUDE REGEX ".*_ph\\.cpp$")
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(rawvideo)
 include_directories(rawvideo/lz4)
+include_directories(gpu)
 
 add_library(
         native-lib
@@ -249,6 +256,15 @@ add_library(
         demosaic/RcdDemosaic.cpp
         sabre/SabreEngine.cpp
         sabre/TileAligner.cpp
+        sabre/GpuSabreEngine.cpp
+        gpu/GpuContext.cpp
+        gpu/GpuProgram.cpp
+        gpu/GpuLutTextureManager.cpp
+        gpu/GpuInputTexture.cpp
+        gpu/AHardwareBufferManager.cpp
+        gpu/GpuColorPipeEngine.cpp
+        gpu/GpuRcdComputeEngine.cpp
+        gpu/GpuAccumulateEngine.cpp
         rawvideo/lz4/lz4.c
         rawvideo/RawVideoContainer.cpp
         rawvideo/RawVideoRecorder.cpp

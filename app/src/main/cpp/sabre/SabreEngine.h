@@ -25,6 +25,8 @@ struct SabreConfig {
     float zoomFactor = 1.0f; // Scale factor: >= 1.0f
     float noiseModelS = 1.0e-4f; // Poisson shot noise slope
     float noiseModelO = 1.0e-5f; // Read noise floor
+    float sharpenStrength = 1.25f; // MTF restoration sharpening strength
+    float coringThreshold = 2.0f;  // Noise coring threshold in sigma units
 };
 
 /**

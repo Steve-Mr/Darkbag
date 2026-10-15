@@ -66,6 +66,8 @@ fastlane/readme.md
 .dsh/
 
 # Agent runtime workspaces & coordination artifacts
-.agents/
+.agents/*
+!.agents/rules/
+!.agents/skills/
 
 
