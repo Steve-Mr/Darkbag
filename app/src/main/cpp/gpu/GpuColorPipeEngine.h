@@ -38,7 +38,11 @@ public:
         const float* lensShadingMap = nullptr,
         int lensShadingRows = 0,
         int lensShadingCols = 0,
-        float physicalZoomFactor = 1.0f
+        float physicalZoomFactor = 1.0f,
+        int distortionMode = 0,
+        const float* distortionCoeffs = nullptr,
+        const float* intrinsicCalibration = nullptr,
+        float focalLength = 0.0f
     );
 
     // Direct zero-copy GPU-to-GPU entry point from unified GL_RGBA16UI texture
@@ -57,7 +61,11 @@ public:
         const float* lensShadingMap = nullptr,
         int lensShadingRows = 0,
         int lensShadingCols = 0,
-        float physicalZoomFactor = 1.0f
+        float physicalZoomFactor = 1.0f,
+        int distortionMode = 0,
+        const float* distortionCoeffs = nullptr,
+        const float* intrinsicCalibration = nullptr,
+        float focalLength = 0.0f
     );
 
     void release();
@@ -87,7 +95,11 @@ private:
         const float* lensShadingMap = nullptr,
         int lensShadingRows = 0,
         int lensShadingCols = 0,
-        float physicalZoomFactor = 1.0f
+        float physicalZoomFactor = 1.0f,
+        int distortionMode = 0,
+        const float* distortionCoeffs = nullptr,
+        const float* intrinsicCalibration = nullptr,
+        float focalLength = 0.0f
     );
 
     std::mutex engineMutex_;

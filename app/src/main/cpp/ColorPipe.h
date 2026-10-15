@@ -121,7 +121,11 @@ bool process_and_save_image(
     bool faithfulHighlights = false,
     int outJpgFd = -1,
     int64_t* outColorPipeMs = nullptr,
-    int64_t* outJpegEncodeMs = nullptr
+    int64_t* outJpegEncodeMs = nullptr,
+    int distortionMode = 0,
+    const float* distortionCoeffs = nullptr,
+    const float* intrinsicCalibration = nullptr,
+    float focalLength = 0.0f
 );
 
 bool write_dng(
@@ -155,7 +159,11 @@ bool write_dng(
     const int* activeArea = nullptr,
     const float* lensShadingMap = nullptr,
     int lensShadingRows = 0,
-    int lensShadingCols = 0
+    int lensShadingCols = 0,
+    int distortionMode = 0,
+    const float* distortionCoeffs = nullptr,
+    const float* intrinsicCalibration = nullptr,
+    float focalLength = 0.0f
 );
 
 std::vector<unsigned char> encode_lossless_jpeg16(

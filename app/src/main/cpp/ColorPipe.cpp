@@ -366,6 +366,7 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_FORWARDMATRIX2, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ForwardMatrix2") },
     { TIFFTAG_NOISEPROFILE, -1, -1, TIFF_DOUBLE, FIELD_CUSTOM, 1, 1, const_cast<char*>("NoiseProfile") },
     { TIFFTAG_OPCODELIST2, -1, -1, TIFF_UNDEFINED, FIELD_CUSTOM, 1, 1, const_cast<char*>("OpcodeList2") },
+    { TIFFTAG_OPCODELIST3, -1, -1, TIFF_UNDEFINED, FIELD_CUSTOM, 1, 1, const_cast<char*>("OpcodeList3") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
     { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
     { TIFFTAG_CALIBRATIONILLUMINANT2, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant2") },
@@ -999,11 +1000,15 @@ bool process_and_save_image(
     bool faithfulHighlights,
     int outJpgFd,
     int64_t* outColorPipeMs,
-    int64_t* outJpegEncodeMs
+    int64_t* outJpegEncodeMs,
+    int distortionMode,
+    const float* distortionCoeffs,
+    const float* intrinsicCalibration,
+    float focalLength
 ) {
     auto colorPipeStart = std::chrono::high_resolution_clock::now();
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
-         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d, distMode=%d",
+         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights, distortionMode);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -1300,6 +1305,56 @@ bool process_and_save_image(
     int finalW_zoomed = swapDims ? (cropH / downsampleFactor) : (cropW / downsampleFactor);
     int finalH_zoomed = swapDims ? (cropW / downsampleFactor) : (cropH / downsampleFactor);
 
+    float distCx = width * 0.5f;
+    float distCy = height * 0.5f;
+    float distFocalPx = static_cast<float>(std::max(width, height));
+    float distK1 = 0.0f, distK2 = 0.0f, distK3 = 0.0f;
+    if (intrinsicCalibration) {
+        float fx = intrinsicCalibration[0];
+        float fy = intrinsicCalibration[1];
+        if (fx > 1.0f && fy > 1.0f) distFocalPx = (fx + fy) * 0.5f;
+        if (intrinsicCalibration[2] > 0.0f && intrinsicCalibration[3] > 0.0f) {
+            distCx = intrinsicCalibration[2];
+            distCy = intrinsicCalibration[3];
+        }
+    } else if (focalLength > 0.0f) {
+        distFocalPx = (focalLength / 6.4f) * width;
+    }
+    if (distortionCoeffs) {
+        distK1 = distortionCoeffs[0];
+        distK2 = distortionCoeffs[1];
+        distK3 = distortionCoeffs[2];
+    }
+
+    auto map_backward_coords = [&](int inX, int inY, int& outX, int& outY) {
+        if (distortionMode == 2 && distFocalPx > 1.0f) {
+            float dx = static_cast<float>(inX) - distCx;
+            float dy = static_cast<float>(inY) - distCy;
+            float ru = std::sqrt(dx * dx + dy * dy);
+            if (ru > 0.001f) {
+                float theta = std::atan(ru / distFocalPx);
+                float rd = distFocalPx * theta;
+                float s = rd / ru;
+                outX = std::clamp(static_cast<int>(std::round(distCx + dx * s)), 0, width - 1);
+                outY = std::clamp(static_cast<int>(std::round(distCy + dy * s)), 0, height - 1);
+                return;
+            }
+        } else if (distortionMode == 1 && distFocalPx > 1.0f) {
+            float dx = static_cast<float>(inX) - distCx;
+            float dy = static_cast<float>(inY) - distCy;
+            float ru = std::sqrt(dx * dx + dy * dy) / distFocalPx;
+            if (ru > 0.001f) {
+                float ru2 = ru * ru;
+                float radial = 1.0f + distK1 * ru2 + distK2 * ru2 * ru2 + distK3 * ru2 * ru2 * ru2;
+                outX = std::clamp(static_cast<int>(std::round(distCx + dx * radial)), 0, width - 1);
+                outY = std::clamp(static_cast<int>(std::round(distCy + dy * radial)), 0, height - 1);
+                return;
+            }
+        }
+        outX = std::clamp(inX, 0, width - 1);
+        outY = std::clamp(inY, 0, height - 1);
+    };
+
     if (enableStageDebug) {
         size_t n = static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3;
         debugA8.resize(n);
@@ -1330,7 +1385,9 @@ bool process_and_save_image(
                 else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
                 else { sx = (int)fx; sy = (int)fy; }
 
-                Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
+                int sampleX, sampleY;
+                map_backward_coords(cropX + sx, cropY + sy, sampleX, sampleY);
+                Vec3 color = process_pixel(sampleX, sampleY, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * renderW + px) * 3;
                 float r8_f = color.r * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 0);
                 float g8_f = color.g * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 1);
@@ -1373,8 +1430,10 @@ bool process_and_save_image(
                 else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
                 else { sx = (int)fx; sy = (int)fy; }
 
+                int sampleX, sampleY;
+                map_backward_coords(cropX + sx, cropY + sy, sampleX, sampleY);
                 Vec3 stageA{}, stageB{}, stageC{};
-                Vec3 color = process_pixel(cropX + sx, cropY + sy,
+                Vec3 color = process_pixel(sampleX, sampleY,
                                            enableStageDebug ? &stageA : nullptr,
                                            enableStageDebug ? &stageB : nullptr,
                                            enableStageDebug ? &stageC : nullptr);
@@ -1429,8 +1488,10 @@ bool process_and_save_image(
                 else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
                 else { sx = (int)fx; sy = (int)fy; }
 
+                int sampleX, sampleY;
+                map_backward_coords(cropX + sx, cropY + sy, sampleX, sampleY);
                 Vec3 stageA{}, stageB{}, stageC{};
-                Vec3 color = process_pixel(cropX + sx, cropY + sy,
+                Vec3 color = process_pixel(sampleX, sampleY,
                                            enableStageDebug ? &stageA : nullptr,
                                            enableStageDebug ? &stageB : nullptr,
                                            enableStageDebug ? &stageC : nullptr);
@@ -2030,6 +2091,126 @@ static std::vector<uint8_t> build_dng_gainmap_opcodes(
     return buf;
 }
 
+static std::vector<uint8_t> build_dng_warp_opcodes(
+    int distortionMode,
+    const float* distortionCoeffs,
+    const float* intrinsicCalibration,
+    float focalLength,
+    int imageWidth,
+    int imageHeight
+) {
+    if (distortionMode == 0 || imageWidth <= 0 || imageHeight <= 0) return {};
+
+    double cx = imageWidth * 0.5;
+    double cy = imageHeight * 0.5;
+    double f = std::max(imageWidth, imageHeight);
+
+    if (intrinsicCalibration) {
+        float fx = intrinsicCalibration[0];
+        float fy = intrinsicCalibration[1];
+        if (fx > 1.0f && fy > 1.0f) {
+            f = (fx + fy) * 0.5;
+        }
+        if (intrinsicCalibration[2] > 0.0f && intrinsicCalibration[3] > 0.0f) {
+            cx = intrinsicCalibration[2];
+            cy = intrinsicCalibration[3];
+        }
+    } else if (focalLength > 0.0f) {
+        f = (static_cast<double>(focalLength) / 6.4) * imageWidth;
+    }
+
+    if (f <= 1.0) return {};
+
+    double norm_cx = cx / static_cast<double>(imageWidth);
+    double norm_cy = cy / static_cast<double>(imageHeight);
+
+    // Compute m: maximum Euclidean distance in pixels from optical center to any corner
+    double d0 = std::hypot(cx, cy);
+    double d1 = std::hypot(static_cast<double>(imageWidth) - cx, cy);
+    double d2 = std::hypot(cx, static_cast<double>(imageHeight) - cy);
+    double d3 = std::hypot(static_cast<double>(imageWidth) - cx, static_cast<double>(imageHeight) - cy);
+    double m = std::max({d0, d1, d2, d3});
+    if (m <= 0.001) return {};
+
+    double mf = m / f;
+    double mf2 = mf * mf;
+    double mf4 = mf2 * mf2;
+
+    double k0 = 1.0;
+    double k1 = 0.0;
+    double k2 = 0.0;
+    double k3 = 0.0;
+    double kt0 = 0.0;
+    double kt1 = 0.0;
+
+    if (distortionMode == 2) {
+        // Mode 2 (Optical fallback):
+        // Taylor series coefficients: k0 = 1.0, k1 = 1/3 * (m/f)^2, k2 = 2/15 * (m/f)^4, k3 = 17/315 * (m/f)^6
+        k1 = (1.0 / 3.0) * mf2;
+        k2 = (2.0 / 15.0) * mf4;
+        k3 = (17.0 / 315.0) * mf2 * mf4;
+    } else if (distortionMode == 1 && distortionCoeffs) {
+        // Mode 1 (Polynomial from Camera2 LENS_DISTORTION):
+        k1 = static_cast<double>(distortionCoeffs[0]) * mf2;
+        k2 = static_cast<double>(distortionCoeffs[1]) * mf4;
+        k3 = static_cast<double>(distortionCoeffs[2]) * mf2 * mf4;
+        kt0 = static_cast<double>(distortionCoeffs[3]) * mf;
+        kt1 = static_cast<double>(distortionCoeffs[4]) * mf;
+    } else {
+        return {};
+    }
+
+    // Binary layout:
+    // uint32 numOpcodes = 1; (4 bytes)
+    // Opcode header:
+    //   uint32 opId = 1; (4 bytes, WarpRectilinear)
+    //   uint32 dngVer = 0x01030000; (4 bytes)
+    //   uint32 flags = 1; (4 bytes, optional)
+    //   uint32 paramBytes = 4 + 64; (4 bytes)
+    // Opcode parameters:
+    //   uint32 N = 1; (4 bytes)
+    //   8 * real64 (64 bytes): kr0, kr1, kr2, kr3, kt0, kt1, cx, cy
+    const uint32_t totalBufferSize = 4 + 16 + 4 + 64; // 88 bytes
+    std::vector<uint8_t> buf(totalBufferSize, 0);
+    uint8_t* ptr = buf.data();
+
+    uint32_t numOpsBe = swap_u32(1);
+    memcpy(ptr, &numOpsBe, 4); ptr += 4;
+
+    uint32_t opId = swap_u32(1);
+    uint32_t dngVer = swap_u32(0x01030000);
+    uint32_t flags = swap_u32(1);
+    uint32_t paramBytes = swap_u32(4 + 64);
+
+    memcpy(ptr, &opId, 4); ptr += 4;
+    memcpy(ptr, &dngVer, 4); ptr += 4;
+    memcpy(ptr, &flags, 4); ptr += 4;
+    memcpy(ptr, &paramBytes, 4); ptr += 4;
+
+    uint32_t numPlanes = swap_u32(1);
+    memcpy(ptr, &numPlanes, 4); ptr += 4;
+
+    uint64_t pk0 = swap_f64(k0);
+    uint64_t pk1 = swap_f64(k1);
+    uint64_t pk2 = swap_f64(k2);
+    uint64_t pk3 = swap_f64(k3);
+    uint64_t pkt0 = swap_f64(kt0);
+    uint64_t pkt1 = swap_f64(kt1);
+    uint64_t pcx = swap_f64(norm_cx);
+    uint64_t pcy = swap_f64(norm_cy);
+
+    memcpy(ptr, &pk0, 8); ptr += 8;
+    memcpy(ptr, &pk1, 8); ptr += 8;
+    memcpy(ptr, &pk2, 8); ptr += 8;
+    memcpy(ptr, &pk3, 8); ptr += 8;
+    memcpy(ptr, &pkt0, 8); ptr += 8;
+    memcpy(ptr, &pkt1, 8); ptr += 8;
+    memcpy(ptr, &pcx, 8); ptr += 8;
+    memcpy(ptr, &pcy, 8); ptr += 8;
+
+    return buf;
+}
+
 bool write_dng(
     const char* filename,
     int width,
@@ -2061,7 +2242,11 @@ bool write_dng(
     const int* activeArea,
     const float* lensShadingMap,
     int lensShadingRows,
-    int lensShadingCols
+    int lensShadingCols,
+    int distortionMode,
+    const float* distortionCoeffs,
+    const float* intrinsicCalibration,
+    float focalLength
 ) {
     static std::once_flag extender_flag;
     std::call_once(extender_flag, [](){
@@ -2268,6 +2453,19 @@ bool write_dng(
     } else {
         LOGW("write_dng: OpcodeList2 GainMap skipped (isBayer=%d, mapPtr=%p, rows=%d, cols=%d)",
              isBayer, lensShadingMap, lensShadingRows, lensShadingCols);
+    }
+
+    if (distortionMode != 0) {
+        std::vector<uint8_t> opcodeList3 = build_dng_warp_opcodes(
+            distortionMode, distortionCoeffs, intrinsicCalibration, focalLength, width, height
+        );
+        if (!opcodeList3.empty()) {
+            TIFFSetField(tif, TIFFTAG_OPCODELIST3, (uint32_t)opcodeList3.size(), opcodeList3.data());
+            LOGI("write_dng: successfully written OpcodeList3 WarpRectilinear (mode=%d, %zu bytes)",
+                 distortionMode, opcodeList3.size());
+        } else {
+            LOGW("write_dng: build_dng_warp_opcodes returned empty buffer (mode=%d)", distortionMode);
+        }
     }
 
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);

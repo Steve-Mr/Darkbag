@@ -83,6 +83,14 @@ uniform float uShadows;
 uniform float uWhites;
 uniform float uBlacks;
 
+uniform int uDistortionMode; // 0=None, 1=Polynomial, 2=Optical Fallback
+uniform vec4 uDistortionK;    // k1, k2, k3, k4
+uniform vec2 uDistortionCenter; // normalized cx, cy in [0, 1]
+uniform float uDistortionFocalPx; // focal length in pixels
+uniform float uDistortionFitScale; // default 1.0
+uniform vec2 uImageSize; // width, height
+uniform float uPhysicalZoomFactor;
+
 in vec2 vTexCoord;
 in vec2 vLscTexCoord;
 out vec4 fragColor;
@@ -285,21 +293,52 @@ float applyHswb(float v) {
 }
 
 void main() {
+    // 0. Distortion Correction backward mapping
+    vec2 sampleTc = vTexCoord;
+    if (uDistortionMode == 2) {
+        vec2 d = (vTexCoord - uDistortionCenter) * uImageSize;
+        float ru = length(d);
+        if (ru > 0.001 && uDistortionFocalPx > 1.0) {
+            float theta = atan(ru / uDistortionFocalPx);
+            float rd = uDistortionFocalPx * theta;
+            float s = (rd / ru) * uDistortionFitScale;
+            sampleTc = uDistortionCenter + (d * s) / uImageSize;
+        }
+    } else if (uDistortionMode == 1) {
+        vec2 d = (vTexCoord - uDistortionCenter) * uImageSize;
+        if (uDistortionFocalPx > 1.0) {
+            float ru = length(d) / uDistortionFocalPx;
+            if (ru > 0.001) {
+                float ru2 = ru * ru;
+                float radial = 1.0 + uDistortionK.x * ru2 + uDistortionK.y * ru2 * ru2 + uDistortionK.z * ru2 * ru2 * ru2;
+                sampleTc = uDistortionCenter + (d * radial * uDistortionFitScale) / uImageSize;
+            }
+        }
+    }
+    sampleTc = clamp(sampleTc, 0.0, 1.0);
+
     // 1. Fetch linear sensor RGB (Layout 1: unified RGBA16F float, Layout 0: planar 3-texture uint16)
     float rawR, rawG, rawB;
     if (uInputLayout == 1) {
-        vec4 rawRgba = texture(uTexUnifiedRgb, vTexCoord);
+        vec4 rawRgba = texture(uTexUnifiedRgb, sampleTc);
         rawR = rawRgba.r;
         rawG = rawRgba.g;
         rawB = rawRgba.b;
     } else {
-        rawR = float(texture(uTexR, vTexCoord).r) / 65535.0;
-        rawG = float(texture(uTexG, vTexCoord).r) / 65535.0;
-        rawB = float(texture(uTexB, vTexCoord).r) / 65535.0;
+        rawR = float(texture(uTexR, sampleTc).r) / 65535.0;
+        rawG = float(texture(uTexG, sampleTc).r) / 65535.0;
+        rawB = float(texture(uTexB, sampleTc).r) / 65535.0;
     }
     // 1.5 Lens Shading Correction (Hardware Sensor GainMap)
     if (uHasLsc != 0) {
-        vec4 lscGain = texture(uTexLsc, vLscTexCoord);
+        vec2 lscTc = vLscTexCoord;
+        if (uDistortionMode != 0) {
+            lscTc = sampleTc;
+            if (uPhysicalZoomFactor > 1.001) {
+                lscTc = (lscTc - 0.5) / uPhysicalZoomFactor + 0.5;
+            }
+        }
+        vec4 lscGain = texture(uTexLsc, lscTc);
         rawR *= lscGain.r;
         rawG *= lscGain.g;
         rawB *= lscGain.b;

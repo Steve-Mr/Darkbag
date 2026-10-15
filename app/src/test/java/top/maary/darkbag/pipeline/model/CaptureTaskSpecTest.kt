@@ -113,6 +113,60 @@ class CaptureTaskSpecTest {
         assertEquals(originalSpec.renderRecipe.digitalGain, roundTripSpec.renderRecipe.digitalGain, 0.001f)
         assertEquals(originalSpec.renderRecipe.lutPath, roundTripSpec.renderRecipe.lutPath)
         assertEquals(originalSpec.frameMetadata.iso, roundTripSpec.frameMetadata.iso)
+        assertEquals(originalSpec.hardwareProfile.focalLength, roundTripSpec.hardwareProfile.focalLength, 0.001f)
+    }
+
+    @Test
+    fun testHardwareProfile_DistortionMode_Polynomial() {
+        val hw = HardwareProfile(
+            lensId = "0",
+            focalLength = 4.2f,
+            lensDistortion = floatArrayOf(0.02f, -0.005f, 0.001f, 0f, 0f)
+        )
+        assertEquals(1, hw.getDistortionMode())
+        assertEquals(false, hw.isUltraWide())
+    }
+
+    @Test
+    fun testHardwareProfile_DistortionMode_OpticalProjectionFallback() {
+        val hw = HardwareProfile(
+            lensId = "2",
+            focalLength = 2.1f, // ultrawide
+            lensDistortion = null,
+            intrinsicCalibration = floatArrayOf(1500f, 1500f, 2000f, 1500f, 0f)
+        )
+        assertEquals(true, hw.isUltraWide())
+        assertEquals(2, hw.getDistortionMode())
+    }
+
+    @Test
+    fun testHardwareProfile_DistortionMode_DisabledForMainLens() {
+        val hw = HardwareProfile(
+            lensId = "0",
+            focalLength = 5.5f, // main lens
+            lensDistortion = null,
+            intrinsicCalibration = floatArrayOf(3000f, 3000f, 2000f, 1500f, 0f)
+        )
+        assertEquals(false, hw.isUltraWide())
+        assertEquals(0, hw.getDistortionMode())
+    }
+
+    @Test
+    fun testHardwareProfile_DistortionMode_DummyDistortionIgnored() {
+        // Zero or dummy 0.001f single value
+        val hwZero = HardwareProfile(
+            lensId = "0",
+            focalLength = 5.5f,
+            lensDistortion = floatArrayOf(0f, 0f, 0f, 0f, 0f)
+        )
+        assertEquals(0, hwZero.getDistortionMode())
+
+        val hwDummy = HardwareProfile(
+            lensId = "0",
+            focalLength = 5.5f,
+            lensDistortion = floatArrayOf(0.001f, 0f, 0f, 0f, 0f)
+        )
+        assertEquals(0, hwDummy.getDistortionMode())
     }
 
     @Test
@@ -121,15 +175,83 @@ class CaptureTaskSpecTest {
             lensId = "0",
             cfaPattern = 0,
             whiteLevel = 1023,
-            blackLevelPattern = intArrayOf(64, 64, 64, 64)
+            blackLevelPattern = intArrayOf(64, 64, 64, 64),
+            lensDistortion = floatArrayOf(0.01f, 0f, 0f, 0f, 0f),
+            intrinsicCalibration = floatArrayOf(1000f, 1000f, 500f, 500f, 0f),
+            focalLength = 2.2f
         )
         val hw2 = HardwareProfile(
             lensId = "0",
             cfaPattern = 0,
             whiteLevel = 1023,
-            blackLevelPattern = intArrayOf(64, 64, 64, 64)
+            blackLevelPattern = intArrayOf(64, 64, 64, 64),
+            lensDistortion = floatArrayOf(0.01f, 0f, 0f, 0f, 0f),
+            intrinsicCalibration = floatArrayOf(1000f, 1000f, 500f, 500f, 0f),
+            focalLength = 2.2f
         )
         assertEquals(hw1, hw2)
         assertEquals(hw1.hashCode(), hw2.hashCode())
+
+        val hw3 = hw1.copy(focalLength = 5.0f)
+        assertTrue(hw1 != hw3)
+
+        val hw4 = hw1.copy(lensDistortion = floatArrayOf(0.05f, 0f, 0f, 0f, 0f))
+        assertTrue(hw1 != hw4)
+
+        val hw5 = hw1.copy(lensDistortion = null)
+        assertTrue(hw1 != hw5)
+
+        val hw6 = hw1.copy(intrinsicCalibration = floatArrayOf(2000f, 2000f, 500f, 500f, 0f))
+        assertTrue(hw1 != hw6)
+
+        val hw7 = hw1.copy(intrinsicCalibration = null)
+        assertTrue(hw1 != hw7)
+    }
+
+    @Test
+    fun testHardwareProfile_DistortionMode_FocalLengthBoundaries() {
+        val calib = floatArrayOf(1500f, 1500f, 2000f, 1500f, 0f)
+
+        // Below 0.1f is not ultrawide
+        val hwBelow = HardwareProfile(focalLength = 0.09f, intrinsicCalibration = calib)
+        assertEquals(false, hwBelow.isUltraWide())
+        assertEquals(0, hwBelow.getDistortionMode())
+
+        // 0.1f is inclusive lower bound
+        val hwLower = HardwareProfile(focalLength = 0.1f, intrinsicCalibration = calib)
+        assertEquals(true, hwLower.isUltraWide())
+        assertEquals(2, hwLower.getDistortionMode())
+
+        // 3.2f is inclusive upper bound
+        val hwUpper = HardwareProfile(focalLength = 3.2f, intrinsicCalibration = calib)
+        assertEquals(true, hwUpper.isUltraWide())
+        assertEquals(2, hwUpper.getDistortionMode())
+
+        // Above 3.2f is not ultrawide (e.g. 3.21f or 5.0f main lens)
+        val hwAbove = HardwareProfile(focalLength = 3.21f, intrinsicCalibration = calib)
+        assertEquals(false, hwAbove.isUltraWide())
+        assertEquals(0, hwAbove.getDistortionMode())
+    }
+
+    @Test
+    fun testHardwareProfile_DistortionMode_EmptyArrays() {
+        // Empty lens distortion array
+        val hwEmptyDist = HardwareProfile(
+            focalLength = 2.0f,
+            lensDistortion = floatArrayOf(),
+            intrinsicCalibration = floatArrayOf(1500f, 1500f, 2000f, 1500f, 0f)
+        )
+        // Should fall back to Mode 2 since lensDistortion is empty
+        assertEquals(true, hwEmptyDist.isUltraWide())
+        assertEquals(2, hwEmptyDist.getDistortionMode())
+
+        // Empty intrinsic calibration array
+        val hwEmptyCalib = HardwareProfile(
+            focalLength = 2.0f,
+            lensDistortion = null,
+            intrinsicCalibration = floatArrayOf()
+        )
+        assertEquals(true, hwEmptyCalib.isUltraWide())
+        assertEquals(0, hwEmptyCalib.getDistortionMode())
     }
 }

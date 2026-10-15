@@ -147,7 +147,11 @@ bool GpuColorPipeEngine::processAndSaveImage(
     const float* lensShadingMap,
     int lensShadingRows,
     int lensShadingCols,
-    float physicalZoomFactor
+    float physicalZoomFactor,
+    int distortionMode,
+    const float* distortionCoeffs,
+    const float* intrinsicCalibration,
+    float focalLength
 ) {
     return executePipeline(
         width, height,
@@ -163,7 +167,8 @@ bool GpuColorPipeEngine::processAndSaveImage(
         colorEngineMode, faithfulHighlights,
         outColorPipeMs, outJpegEncodeMs,
         lensShadingMap, lensShadingRows, lensShadingCols,
-        physicalZoomFactor
+        physicalZoomFactor,
+        distortionMode, distortionCoeffs, intrinsicCalibration, focalLength
     );
 }
 
@@ -182,7 +187,11 @@ bool GpuColorPipeEngine::processAndSaveImageFromTexture(
     const float* lensShadingMap,
     int lensShadingRows,
     int lensShadingCols,
-    float physicalZoomFactor
+    float physicalZoomFactor,
+    int distortionMode,
+    const float* distortionCoeffs,
+    const float* intrinsicCalibration,
+    float focalLength
 ) {
     return executePipeline(
         width, height,
@@ -198,7 +207,8 @@ bool GpuColorPipeEngine::processAndSaveImageFromTexture(
         colorEngineMode, faithfulHighlights,
         outColorPipeMs, outJpegEncodeMs,
         lensShadingMap, lensShadingRows, lensShadingCols,
-        physicalZoomFactor
+        physicalZoomFactor,
+        distortionMode, distortionCoeffs, intrinsicCalibration, focalLength
     );
 }
 
@@ -218,7 +228,11 @@ bool GpuColorPipeEngine::executePipeline(
     const float* lensShadingMap,
     int lensShadingRows,
     int lensShadingCols,
-    float physicalZoomFactor
+    float physicalZoomFactor,
+    int distortionMode,
+    const float* distortionCoeffs,
+    const float* intrinsicCalibration,
+    float focalLength
 ) {
     if (width <= 0 || height <= 0) {
         LOGE("Invalid dimensions (%dx%d) for GpuColorPipeEngine", width, height);
@@ -430,6 +444,44 @@ bool GpuColorPipeEngine::executePipeline(
     glUniform1i(u.uMirror, mirror ? 1 : 0);
     glUniform1f(u.uZoomFactor, zoomFactor > 1.001f ? zoomFactor : 1.0f);
     glUniform1f(u.uPhysicalZoomFactor, physicalZoomFactor > 1.001f ? physicalZoomFactor : 1.0f);
+
+    // 10.5 Distortion Correction
+    glUniform1i(u.uDistortionMode, distortionMode);
+    glUniform2f(u.uImageSize, static_cast<float>(width), static_cast<float>(height));
+
+    float cx = width * 0.5f;
+    float cy = height * 0.5f;
+    float focalPx = static_cast<float>(std::max(width, height));
+    float k1 = 0.0f, k2 = 0.0f, k3 = 0.0f, k4 = 0.0f;
+
+    if (intrinsicCalibration) {
+        float fx = intrinsicCalibration[0];
+        float fy = intrinsicCalibration[1];
+        if (fx > 1.0f && fy > 1.0f) {
+            focalPx = (fx + fy) * 0.5f;
+        }
+        if (intrinsicCalibration[2] > 0.0f && intrinsicCalibration[3] > 0.0f) {
+            cx = intrinsicCalibration[2];
+            cy = intrinsicCalibration[3];
+        }
+    } else if (focalLength > 0.0f) {
+        focalPx = (focalLength / 6.4f) * width;
+    }
+
+    if (distortionCoeffs) {
+        k1 = distortionCoeffs[0];
+        k2 = distortionCoeffs[1];
+        k3 = distortionCoeffs[2];
+        k4 = distortionCoeffs[3];
+    }
+
+    float normCx = (width > 0) ? (cx / static_cast<float>(width)) : 0.5f;
+    float normCy = (height > 0) ? (cy / static_cast<float>(height)) : 0.5f;
+
+    glUniform4f(u.uDistortionK, k1, k2, k3, k4);
+    glUniform2f(u.uDistortionCenter, normCx, normCy);
+    glUniform1f(u.uDistortionFocalPx, std::max(1.0f, focalPx));
+    glUniform1f(u.uDistortionFitScale, 1.0f);
 
     // 11. Execute offscreen GPU Draw Call
     program_->drawQuad();
