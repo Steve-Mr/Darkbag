@@ -113,6 +113,12 @@ bool GpuProgram::build(const char* vertexSrc, const char* fragmentSrc) {
     uniforms_.uMirror = glGetUniformLocation(programId_, "uMirror");
     uniforms_.uZoomFactor = glGetUniformLocation(programId_, "uZoomFactor");
     uniforms_.uPhysicalZoomFactor = glGetUniformLocation(programId_, "uPhysicalZoomFactor");
+    uniforms_.uDistortionMode = glGetUniformLocation(programId_, "uDistortionMode");
+    uniforms_.uDistortionK = glGetUniformLocation(programId_, "uDistortionK");
+    uniforms_.uDistortionCenter = glGetUniformLocation(programId_, "uDistortionCenter");
+    uniforms_.uDistortionFocalPx = glGetUniformLocation(programId_, "uDistortionFocalPx");
+    uniforms_.uDistortionFitScale = glGetUniformLocation(programId_, "uDistortionFitScale");
+    uniforms_.uImageSize = glGetUniformLocation(programId_, "uImageSize");
 
     // Create VAO / VBO
     glGenVertexArrays(1, &vao_);

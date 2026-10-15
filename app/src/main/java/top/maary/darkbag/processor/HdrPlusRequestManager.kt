@@ -68,6 +68,9 @@ data class HdrPlusRequest(
     val noiseProfile: DoubleArray? = null,
     val activeArray: IntArray? = null,
     val fusionMode: Int = 0,
+    val lensDistortion: FloatArray? = null,
+    val intrinsicCalibration: FloatArray? = null,
+    val focalLength: Float = 0f,
     val spec: top.maary.darkbag.pipeline.model.CaptureTaskSpec? = null
 ) {
     fun toSpec(): top.maary.darkbag.pipeline.model.CaptureTaskSpec {
@@ -85,7 +88,10 @@ data class HdrPlusRequest(
             calibrationIlluminant2 = calibrationIlluminant2,
             activeArray = activeArray,
             noiseProfile = noiseProfile,
-            useSensorColorMatrix = useSensorColorMatrix
+            useSensorColorMatrix = useSensorColorMatrix,
+            lensDistortion = lensDistortion,
+            intrinsicCalibration = intrinsicCalibration,
+            focalLength = focalLength
         )
         val frameMeta = top.maary.darkbag.pipeline.model.CaptureFrameMetadata(
             timestamp = metadata.dateTimeOriginal ?: 0L,
@@ -208,6 +214,9 @@ data class HdrPlusRequest(
                 noiseProfile = spec.hardwareProfile.noiseProfile,
                 activeArray = spec.hardwareProfile.activeArray,
                 fusionMode = spec.fusionMode,
+                lensDistortion = spec.hardwareProfile.lensDistortion,
+                intrinsicCalibration = spec.hardwareProfile.intrinsicCalibration,
+                focalLength = spec.hardwareProfile.focalLength,
                 spec = spec
             )
         }

@@ -484,9 +484,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jintArray activeArea,
     jfloatArray lensShadingMap,
     jint lensShadingRows,
-    jint lensShadingCols
+    jint lensShadingCols,
+    jint distortionMode,
+    jfloatArray distortionCoeffs,
+    jfloatArray intrinsicCalibration,
+    jfloat focalLength
 ) {
-    LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d, rawOutputType=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights, rawOutputType);
+    LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d, rawOutputType=%d, distMode=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights, rawOutputType, distortionMode);
 
     if (!tempRawPath) return -1;
     const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
@@ -568,6 +572,28 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     extract_calibration_data(env, colorMatrix1, colorMatrix2, forwardMatrix1, forwardMatrix2, neutralColorPoint,
                              cm1Vec, cm2Vec, fm1Vec, fm2Vec, neutralVec,
                              cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, neutralPtr);
+
+    std::vector<float> distCoeffsVec;
+    const float* dist_coeffs_ptr = nullptr;
+    if (distortionCoeffs) {
+        jsize len = env->GetArrayLength(distortionCoeffs);
+        if (len > 0) {
+            distCoeffsVec.resize(std::max(5, (int)len), 0.0f);
+            env->GetFloatArrayRegion(distortionCoeffs, 0, len, distCoeffsVec.data());
+            dist_coeffs_ptr = distCoeffsVec.data();
+        }
+    }
+
+    std::vector<float> intrinsicVec;
+    const float* intrinsic_ptr = nullptr;
+    if (intrinsicCalibration) {
+        jsize len = env->GetArrayLength(intrinsicCalibration);
+        if (len > 0) {
+            intrinsicVec.resize(std::max(5, (int)len), 0.0f);
+            env->GetFloatArrayRegion(intrinsicCalibration, 0, len, intrinsicVec.data());
+            intrinsic_ptr = intrinsicVec.data();
+        }
+    }
 
     std::string lutPathStr;
     if (lutPath) {
@@ -675,7 +701,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
             cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr,
             outDngFd, (int)dngCompressionMode,
             isBayer, (int)cfaPattern, has_bl ? bl_pattern : nullptr,
-            noise_ptr, active_area_ptr, lens_shading_ptr, lensShadingRows, lensShadingCols
+            noise_ptr, active_area_ptr, lens_shading_ptr, lensShadingRows, lensShadingCols,
+            (int)distortionMode, dist_coeffs_ptr, intrinsic_ptr, (float)focalLength
         );
         dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
         return ok;
@@ -717,7 +744,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                     (int)colorEngineMode, faithfulHighlights,
                     &measuredColorPipe, &measuredJpegEncode,
                     lens_shading_ptr, lensShadingRows, lensShadingCols,
-                    physicalZoom
+                    physicalZoom,
+                    (int)distortionMode, dist_coeffs_ptr, intrinsic_ptr, (float)focalLength
                 );
             } else if (sharedResult && !sharedResult->rgbBuf.empty()) {
                 gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImage(
@@ -734,7 +762,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                     (int)colorEngineMode, faithfulHighlights,
                     &measuredColorPipe, &measuredJpegEncode,
                     lens_shading_ptr, lensShadingRows, lensShadingCols,
-                    physicalZoom
+                    physicalZoom,
+                    (int)distortionMode, dist_coeffs_ptr, intrinsic_ptr, (float)focalLength
                 );
             }
             if (gpuAttemptSuccess) {
@@ -766,7 +795,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                                                 width, height, digitalGain, targetLog, lut,
                                                 exposure, contrast, saturation, highlights, shadows, whites, blacks,
                                                 jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd,
-                                                &measuredColorPipe, &measuredJpegEncode);
+                                                &measuredColorPipe, &measuredJpegEncode,
+                                                (int)distortionMode, dist_coeffs_ptr, intrinsic_ptr, (float)focalLength);
             } else {
                 LOGE("CPU ColorPipe fallback failed: no RGB buffer available");
                 saveOk = false;
@@ -1662,7 +1692,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
     jintArray activeArea, jdoubleArray noiseProfile,
     jint iso, jlong exposureTimeNanos, jfloat focalLength, jint focalLength35mm, jfloat fNumber,
     jint dngCompressionMode, jboolean isHdrPlus,
-    jobject metadataObj, jfloat digitalGain
+    jobject metadataObj, jfloat digitalGain,
+    jint distortionMode,
+    jfloatArray distortionCoeffs,
+    jfloatArray intrinsicCalibration
 ) {
     if (!rawBuffer || width <= 0 || height <= 0 || bufferOffset < 0) return JNI_FALSE;
     jlong capacity = env->GetDirectBufferCapacity(rawBuffer);
@@ -1751,6 +1784,28 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
         noise_ptr = noise_prof;
     }
 
+    std::vector<float> distCoeffsVec;
+    const float* dist_coeffs_ptr = nullptr;
+    if (distortionCoeffs) {
+        jsize len = env->GetArrayLength(distortionCoeffs);
+        if (len > 0) {
+            distCoeffsVec.resize(std::max(5, (int)len), 0.0f);
+            env->GetFloatArrayRegion(distortionCoeffs, 0, len, distCoeffsVec.data());
+            dist_coeffs_ptr = distCoeffsVec.data();
+        }
+    }
+
+    std::vector<float> intrinsicVec;
+    const float* intrinsic_ptr = nullptr;
+    if (intrinsicCalibration) {
+        jsize len = env->GetArrayLength(intrinsicCalibration);
+        if (len > 0) {
+            intrinsicVec.resize(std::max(5, (int)len), 0.0f);
+            env->GetFloatArrayRegion(intrinsicCalibration, 0, len, intrinsicVec.data());
+            intrinsic_ptr = intrinsicVec.data();
+        }
+    }
+
     ImageMetadata meta;
     if (metadataObj) {
         meta = metadataFromJava(env, metadataObj);
@@ -1805,7 +1860,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeWriteRawImageDng(
         calibrationIlluminant1, calibrationIlluminant2, neutralPtr,
         outFd, dngCompressionMode,
         /*isBayer=*/true, cfaPattern, has_bl ? bl_pattern : nullptr,
-        noise_ptr, active_area_ptr, lens_shading_ptr, lensShadingRows, lensShadingCols
+        noise_ptr, active_area_ptr, lens_shading_ptr, lensShadingRows, lensShadingCols,
+        (int)distortionMode, dist_coeffs_ptr, intrinsic_ptr, (float)focalLength
     );
 
     if (outPathCStr) {

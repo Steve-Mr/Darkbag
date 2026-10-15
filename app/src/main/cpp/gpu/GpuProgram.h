@@ -33,6 +33,12 @@ struct ColorPipeUniforms {
     GLint uMirror = -1;
     GLint uZoomFactor = -1;
     GLint uPhysicalZoomFactor = -1;
+    GLint uDistortionMode = -1;
+    GLint uDistortionK = -1;
+    GLint uDistortionCenter = -1;
+    GLint uDistortionFocalPx = -1;
+    GLint uDistortionFitScale = -1;
+    GLint uImageSize = -1;
 };
 
 class GpuProgram {

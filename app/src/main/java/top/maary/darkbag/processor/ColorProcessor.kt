@@ -308,7 +308,11 @@ object ColorProcessor {
         activeArray: IntArray? = null,
         lensShadingMap: FloatArray? = null,
         lensShadingRows: Int = 0,
-        lensShadingCols: Int = 0
+        lensShadingCols: Int = 0,
+        distortionMode: Int = 0,
+        distortionCoeffs: FloatArray? = null,
+        intrinsicCalibration: FloatArray? = null,
+        focalLength: Float = 0f
     ): Int
 
     fun exportHdrPlus(
@@ -368,7 +372,11 @@ object ColorProcessor {
             activeArray = hw.activeArray,
             lensShadingMap = fm.lensShadingMap,
             lensShadingRows = fm.lensShadingRows,
-            lensShadingCols = fm.lensShadingCols
+            lensShadingCols = fm.lensShadingCols,
+            distortionMode = hw.getDistortionMode(),
+            distortionCoeffs = hw.lensDistortion,
+            intrinsicCalibration = hw.intrinsicCalibration,
+            focalLength = hw.focalLength
         )
     }
 
@@ -510,7 +518,10 @@ object ColorProcessor {
         dngCompressionMode: Int,
         isHdrPlus: Boolean,
         metadata: CaptureMetadata? = null,
-        digitalGain: Float = 1.0f
+        digitalGain: Float = 1.0f,
+        distortionMode: Int = 0,
+        distortionCoeffs: FloatArray? = null,
+        intrinsicCalibration: FloatArray? = null
     ): Boolean
 
     fun writeRawImageToDng(
@@ -576,6 +587,18 @@ object ColorProcessor {
             (focalLength * 36f / sensorPhysicalSize.width).toInt()
         } else 24
 
+        val lensDistortion = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            chars.get(CameraCharacteristics.LENS_DISTORTION)
+        } else null
+        val intrinsicCalibration = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            chars.get(CameraCharacteristics.LENS_INTRINSIC_CALIBRATION)
+        } else null
+        val hwDistortionMode = top.maary.darkbag.pipeline.model.HardwareProfile(
+            lensDistortion = lensDistortion,
+            intrinsicCalibration = intrinsicCalibration,
+            focalLength = focalLength
+        ).getDistortionMode()
+
         return nativeWriteRawImageDng(
             rawBuffer = buffer,
             bufferOffset = buffer.position(),
@@ -609,7 +632,10 @@ object ColorProcessor {
             dngCompressionMode = dngCompressionMode,
             isHdrPlus = isHdrPlus,
             metadata = metadata,
-            digitalGain = digitalGain
+            digitalGain = digitalGain,
+            distortionMode = hwDistortionMode,
+            distortionCoeffs = lensDistortion,
+            intrinsicCalibration = intrinsicCalibration
         )
     }
 }

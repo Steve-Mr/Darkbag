@@ -19,8 +19,28 @@ data class HardwareProfile(
     val calibrationIlluminant2: Int = 17,
     val activeArray: IntArray? = null,
     val noiseProfile: DoubleArray? = null,
-    val useSensorColorMatrix: Boolean = false
+    val useSensorColorMatrix: Boolean = false,
+    val lensDistortion: FloatArray? = null,
+    val intrinsicCalibration: FloatArray? = null,
+    val focalLength: Float = 0f
 ) {
+    fun isUltraWide(): Boolean = focalLength in 0.1f..3.2f
+
+    fun getDistortionMode(): Int {
+        val ld = lensDistortion
+        if (ld != null && ld.isNotEmpty()) {
+            val sumAbs = ld.fold(0f) { acc, v -> acc + kotlin.math.abs(v) }
+            val isDummy = ld.size >= 1 && kotlin.math.abs(ld[0] - 0.001f) < 1e-4f && (sumAbs - kotlin.math.abs(ld[0])) < 1e-4f
+            if (sumAbs > 0.005f && !isDummy) {
+                return 1
+            }
+        }
+        if (isUltraWide() && intrinsicCalibration != null && intrinsicCalibration.isNotEmpty()) {
+            return 2
+        }
+        return 0
+    }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
@@ -60,6 +80,15 @@ data class HardwareProfile(
             if (!noiseProfile.contentEquals(other.noiseProfile)) return false
         } else if (other.noiseProfile != null) return false
         if (useSensorColorMatrix != other.useSensorColorMatrix) return false
+        if (lensDistortion != null) {
+            if (other.lensDistortion == null) return false
+            if (!lensDistortion.contentEquals(other.lensDistortion)) return false
+        } else if (other.lensDistortion != null) return false
+        if (intrinsicCalibration != null) {
+            if (other.intrinsicCalibration == null) return false
+            if (!intrinsicCalibration.contentEquals(other.intrinsicCalibration)) return false
+        } else if (other.intrinsicCalibration != null) return false
+        if (focalLength != other.focalLength) return false
         return true
     }
 
@@ -78,6 +107,9 @@ data class HardwareProfile(
         result = 31 * result + (activeArray?.contentHashCode() ?: 0)
         result = 31 * result + (noiseProfile?.contentHashCode() ?: 0)
         result = 31 * result + useSensorColorMatrix.hashCode()
+        result = 31 * result + (lensDistortion?.contentHashCode() ?: 0)
+        result = 31 * result + (intrinsicCalibration?.contentHashCode() ?: 0)
+        result = 31 * result + focalLength.hashCode()
         return result
     }
 }
