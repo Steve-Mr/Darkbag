@@ -132,10 +132,8 @@ layout(binding = 1) uniform highp usampler2D uCandBayer;
 layout(binding = 2) uniform highp sampler2D  uFlowTex;
 
 layout(rgba16f, binding = 0) uniform highp readonly image2D uCovImg;
-layout(rgba32f, binding = 1) uniform highp readonly image2D uInAccumImg;
-layout(rgba32f, binding = 2) uniform highp readonly image2D uInWeightImg;
-layout(rgba32f, binding = 3) uniform highp writeonly image2D uOutAccumImg;
-layout(rgba32f, binding = 4) uniform highp writeonly image2D uOutWeightImg;
+layout(rgba32f, binding = 1) uniform highp image2D uAccumImg;
+layout(rgba32f, binding = 2) uniform highp image2D uWeightImg;
 
 uniform int uWidth;
 uniform int uHeight;
@@ -243,6 +241,9 @@ void main() {
             // Anisotropic Mahalanobis distance d2 = delta^T Omega delta
             float d2 = dtx * dtx * oxx + dty * dty * oyy + 2.0 * dtx * dty * oxy;
             float w_spatial = exp2(-d2 * 0.72);
+            if (w_spatial < 0.001) {
+                continue;
+            }
 
             float candVal = float(texelFetch(uCandBayer, ivec2(cx, cy), 0).r);
             float w_motion = 1.0;
@@ -319,15 +320,15 @@ void main() {
     vec4 prevVal = vec4(0.0);
     vec4 prevWeight = vec4(0.0);
     if (uIsFirstFrame == 0) {
-        prevVal = imageLoad(uInAccumImg, outCoord);
-        prevWeight = imageLoad(uInWeightImg, outCoord);
+        prevVal = imageLoad(uAccumImg, outCoord);
+        prevWeight = imageLoad(uWeightImg, outCoord);
     }
 
     vec4 newVal = prevVal + vec4(addAccumR, addAccumG, addAccumB, 0.0);
     vec4 newWeight = prevWeight + vec4(addWeightR, addWeightG, addWeightB, 0.0);
 
-    imageStore(uOutAccumImg, outCoord, newVal);
-    imageStore(uOutWeightImg, outCoord, newWeight);
+    imageStore(uAccumImg, outCoord, newVal);
+    imageStore(uWeightImg, outCoord, newWeight);
 }
 )glsl";
 

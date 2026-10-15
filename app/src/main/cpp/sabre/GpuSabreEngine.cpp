@@ -144,8 +144,8 @@ struct CachedSabreTextures {
     GLuint refBayerTex = 0;
     GLuint candBayerTex = 0;
     GLuint covTex = 0;
-    GLuint accumTex[2] = {0, 0};
-    GLuint weightTex[2] = {0, 0};
+    GLuint accumTex = 0;
+    GLuint weightTex = 0;
     GLuint resolvedRgbTex = 0;
     bool inUse = false;
 };
@@ -223,7 +223,6 @@ GpuSabreEngine::GpuSabreEngine(const SabreConfig& config)
     }
 
     framesAccumulated_ = 0;
-    accumIdx_ = 0;
     sessionActive_ = true;
 
     LOGD("GpuSabreEngine session initialized: %dx%d, CFA=%d, Zoom=%.2fx (crop: %.1fx%.1f at (%.1f, %.1f))",
@@ -336,27 +335,23 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
             refBayerTex_ = s_cachedTextures.refBayerTex;
             candBayerTex_ = s_cachedTextures.candBayerTex;
             covTex_ = s_cachedTextures.covTex;
-            accumTex_[0] = s_cachedTextures.accumTex[0];
-            accumTex_[1] = s_cachedTextures.accumTex[1];
-            weightTex_[0] = s_cachedTextures.weightTex[0];
-            weightTex_[1] = s_cachedTextures.weightTex[1];
+            accumTex_ = s_cachedTextures.accumTex;
+            weightTex_ = s_cachedTextures.weightTex;
             resolvedRgbTex_ = s_cachedTextures.resolvedRgbTex;
             s_cachedTextures.inUse = true;
             reusedFromCache_ = true;
             gotFromCache = true;
-            LOGD("GpuSabreEngine: reused cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=[%u,%u], weight=[%u,%u], resolved=%u (this=%p)",
+            LOGD("GpuSabreEngine: reused cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=%u, weight=%u, resolved=%u (this=%p)",
                  width_, height_, quadWidth_, quadHeight_,
                  refBayerTex_, candBayerTex_, covTex_,
-                 accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1], resolvedRgbTex_, this);
+                 accumTex_, weightTex_, resolvedRgbTex_, this);
         } else if (s_cachedTextures.refBayerTex != 0 && !s_cachedTextures.inUse) {
             // Dimension changed or stale cache: release old cached textures
             glDeleteTextures(1, &s_cachedTextures.refBayerTex);
             glDeleteTextures(1, &s_cachedTextures.candBayerTex);
             glDeleteTextures(1, &s_cachedTextures.covTex);
-            glDeleteTextures(1, &s_cachedTextures.accumTex[0]);
-            glDeleteTextures(1, &s_cachedTextures.accumTex[1]);
-            glDeleteTextures(1, &s_cachedTextures.weightTex[0]);
-            glDeleteTextures(1, &s_cachedTextures.weightTex[1]);
+            glDeleteTextures(1, &s_cachedTextures.accumTex);
+            glDeleteTextures(1, &s_cachedTextures.weightTex);
             glDeleteTextures(1, &s_cachedTextures.resolvedRgbTex);
             s_cachedTextures = CachedSabreTextures();
             LOGD("GpuSabreEngine: destroyed stale cached textures of different dimensions");
@@ -368,10 +363,8 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
         if (!createTexWithFallback(refBayerTex_, GL_R16UI, width_, height_) ||
             !createTexWithFallback(candBayerTex_, GL_R16UI, width_, height_) ||
             !createTexWithFallback(covTex_, GL_RGBA16F, quadWidth_, quadHeight_) ||
-            !createTexWithFallback(accumTex_[0], GL_RGBA32F, width_, height_) ||
-            !createTexWithFallback(accumTex_[1], GL_RGBA32F, width_, height_) ||
-            !createTexWithFallback(weightTex_[0], GL_RGBA32F, width_, height_) ||
-            !createTexWithFallback(weightTex_[1], GL_RGBA32F, width_, height_) ||
+            !createTexWithFallback(accumTex_, GL_RGBA32F, width_, height_) ||
+            !createTexWithFallback(weightTex_, GL_RGBA32F, width_, height_) ||
             !createTexWithFallback(resolvedRgbTex_, GL_RGBA16F, width_, height_)) {
             LOGE("GpuSabreEngine: failed to allocate storage textures");
             releaseTextures();
@@ -387,17 +380,15 @@ bool GpuSabreEngine::prepareTextures(int width, int height) {
                 s_cachedTextures.refBayerTex = refBayerTex_;
                 s_cachedTextures.candBayerTex = candBayerTex_;
                 s_cachedTextures.covTex = covTex_;
-                s_cachedTextures.accumTex[0] = accumTex_[0];
-                s_cachedTextures.accumTex[1] = accumTex_[1];
-                s_cachedTextures.weightTex[0] = weightTex_[0];
-                s_cachedTextures.weightTex[1] = weightTex_[1];
+                s_cachedTextures.accumTex = accumTex_;
+                s_cachedTextures.weightTex = weightTex_;
                 s_cachedTextures.resolvedRgbTex = resolvedRgbTex_;
                 s_cachedTextures.inUse = true;
                 reusedFromCache_ = true;
-                LOGD("GpuSabreEngine: newly allocated and cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=[%u,%u], weight=[%u,%u], resolved=%u (this=%p)",
+                LOGD("GpuSabreEngine: newly allocated and cached intermediate textures (%dx%d, quad=%dx%d): ref=%u, cand=%u, cov=%u, accum=%u, weight=%u, resolved=%u (this=%p)",
                      width_, height_, quadWidth_, quadHeight_,
                      refBayerTex_, candBayerTex_, covTex_,
-                     accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1], resolvedRgbTex_, this);
+                     accumTex_, weightTex_, resolvedRgbTex_, this);
             } else {
                 reusedFromCache_ = false;
                 LOGD("GpuSabreEngine: intermediate textures are instance-owned (cache in use or already populated) (this=%p)", this);
@@ -444,10 +435,8 @@ void GpuSabreEngine::releaseTextures() {
             refBayerTex_ = 0;
             candBayerTex_ = 0;
             covTex_ = 0;
-            accumTex_[0] = 0;
-            accumTex_[1] = 0;
-            weightTex_[0] = 0;
-            weightTex_[1] = 0;
+            accumTex_ = 0;
+            weightTex_ = 0;
             resolvedRgbTex_ = 0;
             reusedFromCache_ = false;
             LOGD("GpuSabreEngine: returned intermediate textures to cache");
@@ -457,10 +446,8 @@ void GpuSabreEngine::releaseTextures() {
     if (refBayerTex_ != 0) { glDeleteTextures(1, &refBayerTex_); refBayerTex_ = 0; }
     if (candBayerTex_ != 0) { glDeleteTextures(1, &candBayerTex_); candBayerTex_ = 0; }
     if (covTex_ != 0) { glDeleteTextures(1, &covTex_); covTex_ = 0; }
-    if (accumTex_[0] != 0) { glDeleteTextures(1, &accumTex_[0]); accumTex_[0] = 0; }
-    if (accumTex_[1] != 0) { glDeleteTextures(1, &accumTex_[1]); accumTex_[1] = 0; }
-    if (weightTex_[0] != 0) { glDeleteTextures(1, &weightTex_[0]); weightTex_[0] = 0; }
-    if (weightTex_[1] != 0) { glDeleteTextures(1, &weightTex_[1]); weightTex_[1] = 0; }
+    if (accumTex_ != 0) { glDeleteTextures(1, &accumTex_); accumTex_ = 0; }
+    if (weightTex_ != 0) { glDeleteTextures(1, &weightTex_); weightTex_ = 0; }
     if (resolvedRgbTex_ != 0) { glDeleteTextures(1, &resolvedRgbTex_); resolvedRgbTex_ = 0; }
     if (flowTex_ != 0) { glDeleteTextures(1, &flowTex_); flowTex_ = 0; }
     if (outputRgbTex_ != 0) { glDeleteTextures(1, &outputRgbTex_); outputRgbTex_ = 0; }
@@ -479,10 +466,8 @@ void GpuSabreEngine::clearTexturePool() {
         glDeleteTextures(1, &s_cachedTextures.refBayerTex);
         glDeleteTextures(1, &s_cachedTextures.candBayerTex);
         glDeleteTextures(1, &s_cachedTextures.covTex);
-        glDeleteTextures(1, &s_cachedTextures.accumTex[0]);
-        glDeleteTextures(1, &s_cachedTextures.accumTex[1]);
-        glDeleteTextures(1, &s_cachedTextures.weightTex[0]);
-        glDeleteTextures(1, &s_cachedTextures.weightTex[1]);
+        glDeleteTextures(1, &s_cachedTextures.accumTex);
+        glDeleteTextures(1, &s_cachedTextures.weightTex);
         glDeleteTextures(1, &s_cachedTextures.resolvedRgbTex);
         LOGD("GpuSabreEngine: cleared cached intermediate textures");
     }
@@ -621,10 +606,7 @@ bool GpuSabreEngine::accumulateFrameLocked(
         updateFlowTexture(flowX, flowY, flowWidth, flowHeight);
     }
 
-    // 3. Setup ping-pong texture targets (avoid aliasing on Frame 0)
-    int inIdx = (framesAccumulated_ == 0) ? 1 : accumIdx_;
-    int outIdx = (framesAccumulated_ == 0) ? 0 : (1 - accumIdx_);
-
+    // 3. In-place read/write accumulation setup
     glUseProgram(s_programAccumulate);
 
     // Texture unit 0: Reference Bayer
@@ -646,21 +628,13 @@ bool GpuSabreEngine::accumulateFrameLocked(
     glBindImageTexture(0, covTex_, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
     glUniform1i(glGetUniformLocation(s_programAccumulate, "uCovImg"), 0);
 
-    // Image unit 1: Input Accumulation (readonly, RGBA32F)
-    glBindImageTexture(1, accumTex_[inIdx], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
-    glUniform1i(glGetUniformLocation(s_programAccumulate, "uInAccumImg"), 1);
+    // Image unit 1: Accumulation (read-write, RGBA32F)
+    glBindImageTexture(1, accumTex_, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uAccumImg"), 1);
 
-    // Image unit 2: Input Weight (readonly, RGBA32F)
-    glBindImageTexture(2, weightTex_[inIdx], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
-    glUniform1i(glGetUniformLocation(s_programAccumulate, "uInWeightImg"), 2);
-
-    // Image unit 3: Output Accumulation (writeonly, RGBA32F)
-    glBindImageTexture(3, accumTex_[outIdx], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-    glUniform1i(glGetUniformLocation(s_programAccumulate, "uOutAccumImg"), 3);
-
-    // Image unit 4: Output Weight (writeonly, RGBA32F)
-    glBindImageTexture(4, weightTex_[outIdx], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-    glUniform1i(glGetUniformLocation(s_programAccumulate, "uOutWeightImg"), 4);
+    // Image unit 2: Weight (read-write, RGBA32F)
+    glBindImageTexture(2, weightTex_, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+    glUniform1i(glGetUniformLocation(s_programAccumulate, "uWeightImg"), 2);
 
     // Set uniforms
     glUniform1i(glGetUniformLocation(s_programAccumulate, "uWidth"), width_);
@@ -691,7 +665,7 @@ bool GpuSabreEngine::accumulateFrameLocked(
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
     // Explicitly unbind all image units
-    for (GLuint i = 0; i < 5; ++i) {
+    for (GLuint i = 0; i < 3; ++i) {
         glBindImageTexture(i, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     }
 
@@ -704,10 +678,9 @@ bool GpuSabreEngine::accumulateFrameLocked(
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
 
-    accumIdx_ = outIdx;
     framesAccumulated_++;
-    LOGD("GpuSabreEngine: accumulated frame %d (isRef=%d, hasFlow=%d, outIdx=%d)",
-         framesAccumulated_, isRef ? 1 : 0, hasFlow ? 1 : 0, outIdx);
+    LOGD("GpuSabreEngine: accumulated frame %d in-place (isRef=%d, hasFlow=%d)",
+         framesAccumulated_, isRef ? 1 : 0, hasFlow ? 1 : 0);
     return true;
 }
 
@@ -719,10 +692,10 @@ bool GpuSabreEngine::resolve(
 ) {
     auto startTime = std::chrono::high_resolution_clock::now();
     std::lock_guard<std::mutex> lock(mutex_);
-    LOGD("GpuSabreEngine::resolve: this=%p, sessionActive=%d, framesAccumulated=%d, ref=%u, cand=%u, cov=%u, flow=%u, accum=[%u,%u], weight=[%u,%u], resolved=%u, outRgb=%u, width=%d, height=%d",
+    LOGD("GpuSabreEngine::resolve: this=%p, sessionActive=%d, framesAccumulated=%d, ref=%u, cand=%u, cov=%u, flow=%u, accum=%u, weight=%u, resolved=%u, outRgb=%u, width=%d, height=%d",
          this, sessionActive_ ? 1 : 0, framesAccumulated_,
          refBayerTex_, candBayerTex_, covTex_, flowTex_,
-         accumTex_[0], accumTex_[1], weightTex_[0], weightTex_[1],
+         accumTex_, weightTex_,
          resolvedRgbTex_, outputRgbTex_, width_, height_);
     if (!sessionActive_ || framesAccumulated_ == 0 || outputRgbTex_ == 0 || resolvedRgbTex_ == 0) {
         LOGE("GpuSabreEngine::resolve: failed check (this=%p): sessionActive=%d, framesAccumulated=%d, outputRgbTex=%u, resolvedRgbTex=%u",
@@ -750,11 +723,11 @@ bool GpuSabreEngine::resolve(
     glUniform1i(glGetUniformLocation(s_programResolve, "uRefBayer"), 0);
 
     // Image unit 0: Input Accumulation (readonly, RGBA32F)
-    glBindImageTexture(0, accumTex_[accumIdx_], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glBindImageTexture(0, accumTex_, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glUniform1i(glGetUniformLocation(s_programResolve, "uInAccumImg"), 0);
 
     // Image unit 1: Input Weight (readonly, RGBA32F)
-    glBindImageTexture(1, weightTex_[accumIdx_], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glBindImageTexture(1, weightTex_, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glUniform1i(glGetUniformLocation(s_programResolve, "uInWeightImg"), 1);
 
     // Image unit 2: Intermediate Resolved RGB Texture (writeonly, RGBA16F)

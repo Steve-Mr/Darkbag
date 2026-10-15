@@ -108,7 +108,6 @@ private:
     int quadWidth_ = 0;
     int quadHeight_ = 0;
     int framesAccumulated_ = 0;
-    int accumIdx_ = 0;
 
     float cropXStart_ = 0.0f;
     float cropYStart_ = 0.0f;
@@ -122,8 +121,8 @@ private:
     GLuint flowTex_ = 0;
     int flowTexWidth_ = 0;
     int flowTexHeight_ = 0;
-    GLuint accumTex_[2] = {0, 0};
-    GLuint weightTex_[2] = {0, 0};
+    GLuint accumTex_ = 0;
+    GLuint weightTex_ = 0;
     GLuint resolvedRgbTex_ = 0;
     GLuint outputRgbTex_ = 0;
     bool reusedFromCache_ = false;
