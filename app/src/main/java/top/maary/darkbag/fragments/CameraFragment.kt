@@ -53,7 +53,9 @@ import android.os.Bundle
 import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
 import android.util.Log
+import android.view.GestureDetector
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.OrientationEventListener
 import android.view.LayoutInflater
 import android.view.Surface
@@ -120,6 +122,7 @@ import top.maary.darkbag.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
@@ -200,6 +203,7 @@ class CameraFragment : Fragment() {
     private var activeManualTab: String? = null // "Focus", "ISO", "Shutter", "EV"
     private var focusMeteringRegion: MeteringRectangle? = null
     private var exposureMeteringRegion: MeteringRectangle? = null
+    private var tapToFocusJob: Job? = null
 
     // Live AE / AF telemetry readings
     @Volatile private var liveIso: Int = 100
@@ -2153,22 +2157,87 @@ class CameraFragment : Fragment() {
         }
 
     private fun setupTapToFocus() {
-        _fragmentCameraBinding?.viewFinderStage?.setOnTouchListener { view, event ->
-            if (event.action == android.view.MotionEvent.ACTION_UP) {
+        val gestureDetector = GestureDetector(requireContext(), object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
                 val uiBinding = cameraUiContainerBinding
                 if (uiBinding?.lutListContainer?.visibility == View.VISIBLE ||
                     uiBinding?.manualControlsRoot?.visibility == View.VISIBLE ||
                     uiBinding?.proInfoBarCard?.visibility == View.VISIBLE
                 ) {
                     dismissFloatingOverlays()
-                    return@setOnTouchListener true
+                    return true
                 }
 
-                triggerTapToFocusCamera2(event.x, event.y)
-                showFocusRing(event.x, event.y)
+                triggerTapToFocusCamera2(e.x, e.y)
+                showFocusRing(e.x, e.y)
+                return true
+            }
+
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                val uiBinding = cameraUiContainerBinding
+                if (uiBinding?.lutListContainer?.visibility == View.VISIBLE ||
+                    uiBinding?.manualControlsRoot?.visibility == View.VISIBLE ||
+                    uiBinding?.proInfoBarCard?.visibility == View.VISIBLE
+                ) {
+                    dismissFloatingOverlays()
+                    return true
+                }
+
+                unlockFocusAndMetering()
+                return true
+            }
+        })
+
+        _fragmentCameraBinding?.viewFinderStage?.setOnTouchListener { view, event ->
+            gestureDetector.onTouchEvent(event)
+            if (event.action == MotionEvent.ACTION_UP) {
                 view.performClick()
             }
             true
+        }
+    }
+
+    private fun unlockFocusAndMetering() {
+        val hadFocusLock = focusMeteringRegion != null || exposureMeteringRegion != null
+        if (!hadFocusLock) return
+
+        tapToFocusJob?.cancel()
+        tapToFocusJob = null
+
+        focusMeteringRegion = null
+        exposureMeteringRegion = null
+
+        val action = {
+            _fragmentCameraBinding?.focusRing?.animate()?.cancel()
+            _fragmentCameraBinding?.focusRing?.visibility = View.GONE
+
+            val device = camera2Device
+            val session = camera2Session
+            val surface = camera2PreviewSurface
+            val handler = camera2Handler
+
+            if (device != null && session != null && surface != null && handler != null) {
+                try {
+                    if (!isManualFocus) {
+                        val cancelRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                        cancelRequest.addTarget(surface)
+                        applyManualSettingsToRequest(cancelRequest)
+                        cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+                        session.capture(cancelRequest.build(), null, handler)
+                    }
+                    applyCameraControls()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to unlock focus and metering", e)
+                }
+            }
+        }
+
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            action()
+        } else {
+            activity?.runOnUiThread(action)
         }
     }
 
@@ -2178,7 +2247,9 @@ class CameraFragment : Fragment() {
         val surface = camera2PreviewSurface ?: return
         val handler = camera2Handler ?: return
 
-        lifecycleScope.launch(Dispatchers.Default) {
+        tapToFocusJob?.cancel()
+        tapToFocusJob = lifecycleScope.launch(Dispatchers.Default) {
+            val job = coroutineContext[Job]
             try {
                 val characteristics = CameraRepository.getCharacteristics(camera2Manager, device.id)
                 val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
@@ -2201,49 +2272,62 @@ class CameraFragment : Fragment() {
                     exposureMeteringRegion = region
                 }
 
-                // 1. Cancel ongoing
+                // 1. Cancel ongoing AF scan cleanly
                 val cancelRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                 cancelRequest.addTarget(surface)
                 applyManualSettingsToRequest(cancelRequest)
                 cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
-                cancelRequest.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL)
-                session.capture(cancelRequest.build(), null, handler)
+                // Note: Strictly avoid setting CONTROL_AE_PRECAPTURE_TRIGGER here!
 
-                // 2. Trigger AF/AE
-                val triggerRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
-                triggerRequest.addTarget(surface)
-                applyManualSettingsToRequest(triggerRequest)
-
-                triggerRequest.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(region))
-                if (!isManualExposure) {
-                    triggerRequest.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(region))
-                }
-
-                // If in manual focus, we need to temporarily switch to AUTO to perform the tap-to-focus
-                if (isManualFocus) {
-                    triggerRequest.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
-                }
-
-                triggerRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
-                if (!isManualExposure) {
-                    triggerRequest.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
-                }
-
-                session.capture(triggerRequest.build(), object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                // Chain triggerRequest strictly after cancelRequest completes in HAL
+                session.capture(cancelRequest.build(), object : CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(
+                        session: CameraCaptureSession,
+                        request: CaptureRequest,
+                        result: TotalCaptureResult
+                    ) {
                         super.onCaptureCompleted(session, request, result)
-                        if (isManualFocus) {
-                             syncManualFocusAfterTap()
+                        if (job?.isActive != true) return
+
+                        try {
+                            val triggerRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                            triggerRequest.addTarget(surface)
+                            applyManualSettingsToRequest(triggerRequest)
+
+                            triggerRequest.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(region))
+                            if (!isManualExposure) {
+                                triggerRequest.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(region))
+                            }
+
+                            if (isManualFocus) {
+                                triggerRequest.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                            }
+
+                            triggerRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+                            // Crucial: DO NOT set CONTROL_AE_PRECAPTURE_TRIGGER_START!
+                            // Setting CONTROL_AE_REGIONS above updates AE weighting dynamically without freezing AE state machine!
+
+                            session.capture(triggerRequest.build(), object : CameraCaptureSession.CaptureCallback() {
+                                override fun onCaptureCompleted(
+                                    session: CameraCaptureSession,
+                                    request: CaptureRequest,
+                                    result: TotalCaptureResult
+                                ) {
+                                    super.onCaptureCompleted(session, request, result)
+                                    if (isManualFocus) {
+                                        syncManualFocusAfterTap()
+                                    }
+                                }
+                            }, handler)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to submit AF trigger request", e)
                         }
                     }
                 }, handler)
 
-                // 3. Resume repeating
+                // 3. Resume repeating preview with AF_MODE_AUTO and updated regions
                 withContext(Dispatchers.Main) {
-                    // If we were in manual focus, we don't want to switch to AUTO permanently.
-                    // But if we were in continuous AF, we switch to AUTO to keep it locked.
-                    if (!isManualFocus) {
-                        // focusMeteringRegion is already set, applyCameraControls will use AF_MODE_AUTO
+                    if (!isManualFocus && job?.isActive == true) {
                         applyCameraControls()
                     }
                 }
@@ -5811,11 +5895,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_REGIONS, arrayOf(focusMeteringRegion))
             } else {
                 request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_REGIONS, arrayOf(MeteringRectangle(0, 0, 0, 0, 0)))
             }
         }
 
-        if (!isManualExposure && exposureMeteringRegion != null) {
-            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_REGIONS, arrayOf(exposureMeteringRegion))
+        if (!isManualExposure) {
+            if (exposureMeteringRegion != null) {
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_REGIONS, arrayOf(exposureMeteringRegion))
+            } else {
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_REGIONS, arrayOf(MeteringRectangle(0, 0, 0, 0, 0)))
+            }
         }
 
         if (currentLens?.useCamera2 == true) {
@@ -5855,6 +5944,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private suspend fun closeCamera2() {
         camera2Lock.withLock {
+            tapToFocusJob?.cancel()
+            tapToFocusJob = null
+            focusMeteringRegion = null
+            exposureMeteringRegion = null
             captureResults.clear()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 multiCameraManager?.close()
@@ -6326,6 +6419,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         } else {
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
         }
+
+        unlockFocusAndMetering()
     }
 
     private fun createDngThumbnailBitmap(sourceJpeg: File, maxDimension: Int = 240): android.graphics.Bitmap? {
@@ -6588,8 +6683,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         lensFacing: Int,
         cropRegion: android.graphics.Rect
     ): MeteringRectangle {
-        val normalizedX = x / viewWidth
-        val normalizedY = y / viewHeight
+        val safeWidth = maxOf(1, viewWidth)
+        val safeHeight = maxOf(1, viewHeight)
+        val normalizedX = (x / safeWidth).coerceIn(0f, 1f)
+        val normalizedY = (y / safeHeight).coerceIn(0f, 1f)
 
         val displayRotation = when (displayManager.getDisplay(displayId)?.rotation) {
             Surface.ROTATION_90 -> 90
@@ -6619,13 +6716,41 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val centerX = cropRegion.left + (sx * cropRegion.width()).toInt()
         val centerY = cropRegion.top + (sy * cropRegion.height()).toInt()
 
-        val size = (cropRegion.width() * 0.1f).toInt()
-        val rect = android.graphics.Rect(
-            (centerX - size / 2).coerceIn(cropRegion.left, cropRegion.right),
-            (centerY - size / 2).coerceIn(cropRegion.top, cropRegion.bottom),
-            (centerX + size / 2).coerceIn(cropRegion.left, cropRegion.right),
-            (centerY + size / 2).coerceIn(cropRegion.top, cropRegion.bottom)
-        )
-        return MeteringRectangle(rect, 1000)
+        // Robust bounding box: at least 32 pixels wide and high, clamped strictly within cropRegion
+        val halfSize = maxOf(16, (cropRegion.width() * 0.05f).toInt())
+        val minX = cropRegion.left
+        val maxX = cropRegion.right
+        val minY = cropRegion.top
+        val maxY = cropRegion.bottom
+
+        var left = centerX - halfSize
+        var right = centerX + halfSize
+        var top = centerY - halfSize
+        var bottom = centerY + halfSize
+
+        if (left < minX) {
+            right += (minX - left)
+            left = minX
+        }
+        if (right > maxX) {
+            left -= (right - maxX)
+            right = maxX
+        }
+        left = left.coerceIn(minX, maxOf(minX, maxX - 1))
+        right = right.coerceIn(minOf(maxX, left + 1), maxX)
+
+        if (top < minY) {
+            bottom += (minY - top)
+            top = minY
+        }
+        if (bottom > maxY) {
+            top -= (bottom - maxY)
+            bottom = maxY
+        }
+        top = top.coerceIn(minY, maxOf(minY, maxY - 1))
+        bottom = bottom.coerceIn(minOf(maxY, top + 1), maxY)
+
+        val rect = android.graphics.Rect(left, top, right, bottom)
+        return MeteringRectangle(rect, MeteringRectangle.METERING_WEIGHT_MAX)
     }
 }
