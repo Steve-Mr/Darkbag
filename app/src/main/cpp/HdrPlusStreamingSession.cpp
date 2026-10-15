@@ -331,7 +331,6 @@ int HdrPlusStreamingSession::finish(
     }
 
     const size_t numPixels = static_cast<size_t>(m_width) * m_height;
-    outSharedResult->bayerBuf.resize(numPixels);
     outSharedResult->noiseProfile = m_noiseProfile;
 
     // Determine effective fusion mode (Invariant 3 & SABRE_FULL_FIDELITY_SPEC.md Section 3.1):
@@ -357,18 +356,19 @@ int HdrPlusStreamingSession::finish(
     if (effectiveMode == 2 && (m_gpuSabreEngine || m_sabreEngine) && m_framesPushed > 1) {
         LOGD("HdrPlusStreamingSession: resolving with Sabre (zoom=%.2fx, frames=%d, gpu=%d) [Invariant 3]",
              m_zoomFactor, m_framesPushed, m_gpuSabreEngine ? 1 : 0);
-        outSharedResult->rgbBuf.resize(numPixels * 3);
-        outSharedResult->bayerBuf.resize(numPixels);
         auto fusionStart = std::chrono::high_resolution_clock::now();
         bool sabreOk = false;
 
         if (m_gpuSabreEngine) {
             GLuint outTex = 0;
             int64_t gpuComputeMs = 0;
+            // Zero-Copy GPU-to-GPU: Do NOT allocate 195MB rgbaBuf or 73MB rgbBuf / 24MB bayerBuf on CPU!
+            // GpuSabreEngine writes directly to outTex, which is transferred to outSharedResult->gpuRgbTexture.
+            // DNG export will perform lazy on-demand readback in background thread only if needed.
             sabreOk = m_gpuSabreEngine->resolve(
                 &outTex,
-                outSharedResult->rgbBuf.data(),
-                outSharedResult->bayerBuf.data(),
+                nullptr,
+                nullptr,
                 &gpuComputeMs
             );
             if (sabreOk && outTex != 0) {
@@ -389,6 +389,8 @@ int HdrPlusStreamingSession::finish(
             m_gpuSabreEngine.reset();
             m_tileAligner.reset();
         } else if (m_sabreEngine) {
+            outSharedResult->rgbBuf.resize(numPixels * 3);
+            outSharedResult->bayerBuf.resize(numPixels);
             sabreOk = m_sabreEngine->resolve(
                 outSharedResult->rgbBuf.data(),
                 outSharedResult->bayerBuf.data()
@@ -410,8 +412,12 @@ int HdrPlusStreamingSession::finish(
                 outSharedResult->isZoomCropped = false;
             }
             outSharedResult->isWhiteBalanceApplied = false;
-            outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
-            outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
+            if (!outSharedResult->bayerBuf.empty()) {
+                outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
+            }
+            if (!outSharedResult->rgbBuf.empty()) {
+                outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
+            }
             return 0;
         }
 
@@ -420,6 +426,9 @@ int HdrPlusStreamingSession::finish(
         outSharedResult->releaseGpuResources();
         outSharedResult->isZoomCropped = false;
     }
+
+    // Allocate bayerBuf for standard spatial merge / RCD paths (Sabre bypassed this to save 24MB)
+    outSharedResult->bayerBuf.resize(numPixels);
 
     const bool usedGpuAccumulation = m_useGpuAccumulation;
     bool gpuNormSucceeded = false;

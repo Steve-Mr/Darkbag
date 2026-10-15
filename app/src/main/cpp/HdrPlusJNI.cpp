@@ -662,8 +662,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
             effectiveWhiteLevel = kMax16BitValue;
         }
 
-        if (!dngRawData || sharedResult->rgbBuf.empty()) {
-            LOGE("doDngExport: missing raw data for DNG export after readback");
+        if (!dngRawData || (isBayer ? sharedResult->bayerBuf.empty() : sharedResult->rgbBuf.empty())) {
+            LOGE("doDngExport: missing raw data for DNG export after readback (isBayer=%d)", isBayer ? 1 : 0);
             return false;
         }
 
