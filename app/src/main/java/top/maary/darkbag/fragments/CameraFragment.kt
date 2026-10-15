@@ -663,7 +663,8 @@ class CameraFragment : Fragment() {
         val digitalGain: Float = 1.0f,
         val motionPhotoMp4Path: String? = null,
         val motionPhotoStillPtsUs: Long = 0L,
-        val sink: top.maary.darkbag.pipeline.sink.CaptureSink? = null
+        val sink: top.maary.darkbag.pipeline.sink.CaptureSink? = null,
+        val capturedLens: LensInfo? = null
     )
 
     private var motionPhotoEncoder: MotionPhotoEncoder? = null
@@ -1896,7 +1897,7 @@ class CameraFragment : Fragment() {
                     captureResult?.get(android.hardware.camera2.CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
                 } else null
 
-                val targetCharId = activePhysicalId ?: image.physicalId ?: currentLens?.id ?: "0"
+                val targetCharId = activePhysicalId ?: image.physicalId ?: image.capturedLens?.id ?: currentLens?.id ?: "0"
                 Log.d(TAG, "Fetching characteristics for processing using ID: $targetCharId")
                 val chars = CameraRepository.getCharacteristics(cameraManager, targetCharId)
 
@@ -1965,7 +1966,8 @@ class CameraFragment : Fragment() {
                     captureTime = captureTime,
                     targetCharId = targetCharId,
                     isHdrPlus = false,
-                    captureResult = captureResult
+                    captureResult = captureResult,
+                    capturedLens = image.capturedLens
                 )
 
                 // 3. JNI Halide Processing (REMOVED)
@@ -3165,7 +3167,11 @@ class CameraFragment : Fragment() {
             .start()
     }
 
-    private fun createCaptureMetadataFromTimestamp(timestamp: Long): CaptureMetadata {
+    private fun createCaptureMetadataFromTimestamp(
+        timestamp: Long,
+        capturedLens: LensInfo? = null
+    ): CaptureMetadata {
+        val lens = capturedLens ?: currentLens
         val result = captureResults[timestamp]
         val captureTime = System.currentTimeMillis()
         return createCaptureMetadata(
@@ -3174,9 +3180,10 @@ class CameraFragment : Fragment() {
             fNumber = result?.get(CaptureResult.LENS_APERTURE),
             focalLength = result?.get(CaptureResult.LENS_FOCAL_LENGTH),
             captureTime = captureTime,
-            targetCharId = currentLens?.id,
+            targetCharId = lens?.id,
             isHdrPlus = isHdrPlusEnabled,
-            captureResult = result
+            captureResult = result,
+            capturedLens = lens
         )
     }
 
@@ -3601,12 +3608,17 @@ class CameraFragment : Fragment() {
         burstResult: BurstResult,
         digitalGain: Float,
         hfMetadata: HalfFrameManager.Metadata? = null,
-        timing: StandardTimingTracker? = null
+        timing: StandardTimingTracker? = null,
+        capturedLens: LensInfo? = null,
+        zoomFactor: Float = 1.0f
     ) {
-        val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+        val effectiveLens = capturedLens ?: currentLens
+        val currentZoom = if (capturedLens != null) {
+            if (capturedLens.isZoomPreset && capturedLens.targetZoomRatio != null) capturedLens.targetZoomRatio!! else 1.0f
+        } else if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
             currentLens!!.targetZoomRatio!!
         } else {
-            1.0f
+            zoomFactor
         }
         val combinedOrientation = getCombinedOrientation()
         val startTime = burstStartTime
@@ -3635,7 +3647,7 @@ class CameraFragment : Fragment() {
                     result.get(android.hardware.camera2.CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
                 } else null
 
-                val targetCharId = activePhysicalId ?: frames[0].physicalId ?: currentLens?.id ?: "0"
+                val targetCharId = activePhysicalId ?: frames[0].physicalId ?: effectiveLens?.id ?: "0"
                 Log.d(TAG, "Fetching HDR+ characteristics for processing using ID: $targetCharId")
                 val chars = CameraRepository.getCharacteristics(cameraManager, targetCharId)
 
@@ -3745,7 +3757,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     captureTime = captureTime,
                     targetCharId = targetCharId,
                     isHdrPlus = true,
-                    captureResult = result
+                    captureResult = result,
+                    capturedLens = effectiveLens
                 )
 
                 val dngName = if (hfMetadata != null) {
@@ -3928,7 +3941,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             combinedOrientation = combinedOrientation,
                             zoomRatio = currentZoom,
                             physicalId = firstFrame.physicalId,
-                            halfFrameMetadata = hfMetadata
+                            halfFrameMetadata = hfMetadata,
+                            capturedLens = effectiveLens
                         )
                         processingChannel.send(holder)
                         fallbackSent = true
@@ -3978,12 +3992,17 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         lensShadingRows: Int,
         lensShadingCols: Int,
         useSensorColorMatrix: Boolean,
-        noiseProfileFlat: DoubleArray?
+        noiseProfileFlat: DoubleArray?,
+        capturedLens: LensInfo? = null,
+        zoomFactor: Float = 1.0f
     ) {
-        val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+        val effectiveLens = capturedLens ?: currentLens
+        val currentZoom = if (capturedLens != null) {
+            if (capturedLens.isZoomPreset && capturedLens.targetZoomRatio != null) capturedLens.targetZoomRatio!! else 1.0f
+        } else if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
             currentLens!!.targetZoomRatio!!
         } else {
-            1.0f
+            zoomFactor
         }
         val appContext = context?.applicationContext ?: run {
             Log.e(TAG, "Fragment detached before processStreamingHdrPlusBurst could launch. Cleaning up.")
@@ -4037,7 +4056,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     captureTime = captureTime,
                     targetCharId = targetCharId,
                     isHdrPlus = true,
-                    captureResult = result
+                    captureResult = result,
+                    capturedLens = effectiveLens
                 )
 
                 val dngName = if (hfMetadata != null) {
@@ -4909,10 +4929,19 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
         var taskStarted = true
 
+        val capturedLens = currentLens
+        val capturedZoom = if (capturedLens?.isZoomPreset == true && capturedLens.targetZoomRatio != null) {
+            capturedLens.targetZoomRatio!!
+        } else {
+            1.0f
+        }
+        val capturedOrientation = getCombinedOrientation()
+        val capturedLensId = capturedLens?.id
+
         try {
             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
             request.addTarget(reader.surface)
-            request.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, getCombinedOrientation())
+            request.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, capturedOrientation)
 
             applyManualSettingsToRequest(request)
 
@@ -4930,11 +4959,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     return@setOnImageAvailableListener
                 }
                 try {
-                    val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
-                        currentLens!!.targetZoomRatio!!
-                    } else {
-                        1.0f
-                    }
                     if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
                         val digitalGain = getDigitalGainAndUpdateStep(
                             image.timestamp,
@@ -4942,7 +4966,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             timing?.shutterClick
                         )
 
-                        val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id, hfMetadata?.copy(digitalGain = digitalGain), sink).copy(timing = timing, digitalGain = digitalGain)
+                        val holder = copyAndroidImageToHolder(
+                            image,
+                            capturedZoom,
+                            capturedOrientation,
+                            capturedLensId,
+                            hfMetadata?.copy(digitalGain = digitalGain),
+                            sink,
+                            capturedLens
+                        ).copy(timing = timing, digitalGain = digitalGain)
                         image.close()
                         timing?.recordShutterReady()
                         isBurstActive = false
@@ -4970,9 +5002,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             showProcessingAnimation()
                         }
 
-                        val captureMetadata = if (hfMetadata == null) createCaptureMetadataFromTimestamp(image.timestamp) else null
+                        val captureMetadata = if (hfMetadata == null) createCaptureMetadataFromTimestamp(image.timestamp, capturedLens) else null
 
-                        saveJpegFallback(data, 0, currentZoom, hfMetadata, captureMetadata) // Rotation handled by C2 JPEG_ORIENTATION
+                        saveJpegFallback(data, 0, capturedZoom, hfMetadata, captureMetadata) // Rotation handled by C2 JPEG_ORIENTATION
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to process Camera2 image", e)
@@ -5091,7 +5123,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 writeScopedHalfFrameStep(prefs, 1, captureStartTime, digitalGain = burstGain, flareType = hfMetadata?.flareType ?: -1)
             }
 
-            val burstLensId = currentLens?.id ?: "0"
+            val capturedLens = currentLens
+            val burstLensId = capturedLens?.id ?: "0"
             val burstChars = CameraRepository.getCharacteristics(camera2Manager, burstLensId)
             val burstSensorOrientation = burstChars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
@@ -5162,8 +5195,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 else -> 0
             }
 
-            val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
-                currentLens!!.targetZoomRatio!!
+            val currentZoom = if (capturedLens?.isZoomPreset == true && capturedLens.targetZoomRatio != null) {
+                capturedLens.targetZoomRatio!!
             } else {
                 1.0f
             }
@@ -5194,7 +5227,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         val failSpec = top.maary.darkbag.pipeline.model.CaptureTaskSpec(
                             taskId = java.util.UUID.randomUUID().toString(),
                             width = 0, height = 0, orientation = 0,
-                            hardwareProfile = top.maary.darkbag.pipeline.model.HardwareProfile(lensId = "0"),
+                            zoomFactor = currentZoom,
+                            hardwareProfile = top.maary.darkbag.pipeline.model.HardwareProfile(lensId = burstLensId),
                             frameMetadata = top.maary.darkbag.pipeline.model.CaptureFrameMetadata(timestamp = captureStartTime, iso = 100, exposureTimeNs = 10_000_000L),
                             renderRecipe = top.maary.darkbag.pipeline.model.RenderRecipe(),
                             hfMetadata = hfMetadata,
@@ -5243,7 +5277,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         lensShadingRows = lensShadingRows,
                         lensShadingCols = lensShadingCols,
                         useSensorColorMatrix = useSensorColorMatrix,
-                        noiseProfileFlat = noiseProfileFlat
+                        noiseProfileFlat = noiseProfileFlat,
+                        capturedLens = capturedLens,
+                        zoomFactor = currentZoom
                     )
                 },
                 onBurstFailed = { error ->
@@ -5474,7 +5510,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         combinedOrientation: Int,
         physicalId: String?,
         halfFrameMetadata: HalfFrameManager.Metadata? = null,
-        sink: top.maary.darkbag.pipeline.sink.CaptureSink? = null
+        sink: top.maary.darkbag.pipeline.sink.CaptureSink? = null,
+        capturedLens: LensInfo? = null
     ): RawImageHolder {
         val plane = image.planes[0]
         val buffer = plane.buffer
@@ -5534,7 +5571,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             zoomRatio = zoomRatio,
             physicalId = physicalId,
             halfFrameMetadata = halfFrameMetadata,
-            sink = sink
+            sink = sink,
+            capturedLens = capturedLens
         )
     }
 
@@ -6617,13 +6655,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         captureTime: Long,
         targetCharId: String?,
         isHdrPlus: Boolean,
-        captureResult: CaptureResult?
+        captureResult: CaptureResult?,
+        capturedLens: LensInfo? = null
     ): CaptureMetadata {
         val offset = SimpleDateFormat("XXX", Locale.US).format(Date(captureTime))
 
         // Get focal length in 35mm film equivalent
         var focalIn35mm: Int? = null
         var finalFocalLength = focalLength
+        val effectiveLens = capturedLens ?: currentLens
         try {
             val chars = targetCharId?.let { CameraRepository.getCharacteristics(camera2Manager, it) }
             if (chars != null) {
@@ -6633,10 +6673,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     (focal * 36f / sensorWidth).toInt()
                 }
 
-                if (currentLens?.isZoomPreset == true) {
-                    val zoomRatio = currentLens?.targetZoomRatio ?: 1.0f
+                if (effectiveLens?.isZoomPreset == true) {
+                    val zoomRatio = effectiveLens.targetZoomRatio ?: 1.0f
                     if (zoomRatio > 1.0f) {
-                        val baseF35 = focalIn35mm ?: kotlin.math.round(currentLens?.equivalentFocalLength ?: 24f).toInt()
+                        val baseF35 = focalIn35mm ?: kotlin.math.round(effectiveLens.equivalentFocalLength ?: 24f).toInt()
                         val virtualF35 = kotlin.math.round(baseF35 * zoomRatio).toInt()
                         focalIn35mm = virtualF35
 
