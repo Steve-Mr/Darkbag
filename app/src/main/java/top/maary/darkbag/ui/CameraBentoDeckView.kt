@@ -3,10 +3,20 @@ package top.maary.darkbag.ui
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Typeface
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.TextPaint
+import android.text.style.AbsoluteSizeSpan
+import android.text.style.ForegroundColorSpan
+import android.text.style.MetricAffectingSpan
+import android.text.style.StyleSpan
 import android.util.AttributeSet
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
+import androidx.core.graphics.ColorUtils
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.databinding.CameraUiContainerBinding
@@ -55,6 +65,14 @@ class CameraBentoDeckView @JvmOverloads constructor(
 
     fun styleModeButton(button: MaterialButton, isSpecialMode: Boolean) {
         styleModeSwitchButton(button, isSpecialMode)
+    }
+
+    fun styleProPill(button: MaterialButton, isTabActive: Boolean, isValueManual: Boolean) {
+        styleBentoProPill(button, isTabActive, isValueManual)
+    }
+
+    fun styleProLink(button: MaterialButton, isLinked: Boolean) {
+        styleBentoProLink(button, isLinked)
     }
 
     companion object {
@@ -547,6 +565,223 @@ class CameraBentoDeckView @JvmOverloads constructor(
             return if (stripped.isNotBlank()) stripped else fallback
         }
 
+        /**
+         * Applies Material 3 Expressive Bento styling to Row 1 manual Pro telemetry buttons.
+         *
+         * - Inactive (Auto parameter, dial closed):
+         *     Background: colorSurfaceContainerHigh
+         *     Stroke: 1dp colorOutlineVariant
+         *     Corner Radius: 14dp
+         *     Text Color: colorOnSurface
+         * - Active / Tab Selected (dial wheel is currently open for this parameter):
+         *     Background: colorPrimaryContainer
+         *     Stroke: 1.5dp colorPrimary
+         *     Corner Radius: 10dp (squircle morph!)
+         *     Text Color: colorOnPrimaryContainer
+         * - Manual Override (locked to manual value, dial closed):
+         *     Background: colorSecondaryContainer
+         *     Stroke: 1.5dp ColorUtils.setAlphaComponent(colorPrimary, 180)
+         *     Corner Radius: 12dp
+         *     Text Color: colorPrimary
+         */
+        @JvmStatic
+        fun styleBentoProPill(button: MaterialButton, isTabActive: Boolean, isValueManual: Boolean) {
+            val density = button.resources.displayMetrics.density
+            val stroke1dp = (1f * density).roundToInt()
+            val stroke1_5dp = (1.5f * density).roundToInt()
+            val radius10dp = (10f * density).roundToInt()
+            val radius12dp = (12f * density).roundToInt()
+            val radius14dp = (14f * density).roundToInt()
+
+            val colorPrimary = MaterialColors.getColor(
+                button,
+                android.R.attr.colorPrimary,
+                Color.WHITE
+            )
+            val colorPrimaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorPrimaryContainer,
+                Color.DKGRAY
+            )
+            val colorOnPrimaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOnPrimaryContainer,
+                Color.WHITE
+            )
+            val colorSecondaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorSecondaryContainer,
+                Color.DKGRAY
+            )
+            val colorSurfaceContainerHigh = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorSurfaceContainerHigh,
+                Color.GRAY
+            )
+            val colorOnSurface = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOnSurface,
+                Color.WHITE
+            )
+            val colorOutlineVariant = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOutlineVariant,
+                Color.parseColor("#4DFFFFFF")
+            )
+
+            when {
+                isTabActive -> {
+                    button.backgroundTintList = ColorStateList.valueOf(colorPrimaryContainer)
+                    button.strokeColor = ColorStateList.valueOf(colorPrimary)
+                    button.strokeWidth = stroke1_5dp
+                    button.cornerRadius = radius10dp
+                    button.setTextColor(colorOnPrimaryContainer)
+                }
+                isValueManual -> {
+                    val strokeColor = ColorUtils.setAlphaComponent(colorPrimary, 180)
+                    button.backgroundTintList = ColorStateList.valueOf(colorSecondaryContainer)
+                    button.strokeColor = ColorStateList.valueOf(strokeColor)
+                    button.strokeWidth = stroke1_5dp
+                    button.cornerRadius = radius12dp
+                    button.setTextColor(colorPrimary)
+                }
+                else -> {
+                    button.backgroundTintList = ColorStateList.valueOf(colorSurfaceContainerHigh)
+                    button.strokeColor = ColorStateList.valueOf(colorOutlineVariant)
+                    button.strokeWidth = stroke1dp
+                    button.cornerRadius = radius14dp
+                    button.setTextColor(colorOnSurface)
+                }
+            }
+        }
+
+        /**
+         * Applies Bento styling to the Multi-Camera Pro Sync Link button.
+         */
+        @JvmStatic
+        fun styleBentoProLink(button: MaterialButton, isLinked: Boolean) {
+            val density = button.resources.displayMetrics.density
+            val stroke1dp = (1f * density).roundToInt()
+            val stroke1_5dp = (1.5f * density).roundToInt()
+            val radius14dp = (14f * density).roundToInt()
+
+            val colorPrimary = MaterialColors.getColor(
+                button,
+                android.R.attr.colorPrimary,
+                Color.WHITE
+            )
+            val colorSecondaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorSecondaryContainer,
+                Color.DKGRAY
+            )
+            val colorSurfaceContainerHigh = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorSurfaceContainerHigh,
+                Color.GRAY
+            )
+            val colorOutlineVariant = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOutlineVariant,
+                Color.parseColor("#4DFFFFFF")
+            )
+            val colorOnSurfaceVariant = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOnSurfaceVariant,
+                Color.LTGRAY
+            )
+
+            button.cornerRadius = radius14dp
+            if (isLinked) {
+                button.setIconResource(top.maary.darkbag.R.drawable.ic_link)
+                button.iconTint = ColorStateList.valueOf(colorPrimary)
+                button.strokeWidth = stroke1_5dp
+                button.strokeColor = ColorStateList.valueOf(ColorUtils.setAlphaComponent(colorPrimary, 180))
+                button.backgroundTintList = ColorStateList.valueOf(colorSecondaryContainer)
+            } else {
+                button.setIconResource(top.maary.darkbag.R.drawable.ic_link_off)
+                button.iconTint = ColorStateList.valueOf(colorOnSurfaceVariant)
+                button.strokeWidth = stroke1dp
+                button.strokeColor = ColorStateList.valueOf(colorOutlineVariant)
+                button.backgroundTintList = ColorStateList.valueOf(colorSurfaceContainerHigh)
+            }
+        }
+
+        /**
+         * Creates a sleek two-line formatted telemetry text using SpannableStringBuilder:
+         * - Line 1: [label] (e.g. AF, ISO, SEC, EV) in 9.5sp, bold, letter-spacing.
+         * - Line 2: [value] (e.g. Macro / 0.8m, 1330, 1/33s, 0.0) in 11.5sp, bold.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun formatProTelemetry(
+            label: String,
+            value: String,
+            isTabActive: Boolean = false,
+            isValueManual: Boolean = false,
+            context: Context
+        ): CharSequence {
+            val text = "$label\n$value"
+            val builder = SpannableStringBuilder(text)
+            val displayMetrics = context.resources.displayMetrics
+            val labelPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 9.5f, displayMetrics).roundToInt()
+            val valuePx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 11.5f, displayMetrics).roundToInt()
+
+            val colorPrimary = MaterialColors.getColor(
+                context,
+                android.R.attr.colorPrimary,
+                Color.WHITE
+            )
+            val colorOnPrimaryContainer = MaterialColors.getColor(
+                context,
+                com.google.android.material.R.attr.colorOnPrimaryContainer,
+                Color.WHITE
+            )
+            val colorOnSurface = MaterialColors.getColor(
+                context,
+                com.google.android.material.R.attr.colorOnSurface,
+                Color.WHITE
+            )
+            val colorOnSurfaceVariant = MaterialColors.getColor(
+                context,
+                com.google.android.material.R.attr.colorOnSurfaceVariant,
+                Color.LTGRAY
+            )
+
+            val (labelColor, valueColor) = when {
+                isTabActive -> Pair(
+                    ColorUtils.setAlphaComponent(colorOnPrimaryContainer, 215),
+                    colorOnPrimaryContainer
+                )
+                isValueManual -> Pair(
+                    ColorUtils.setAlphaComponent(colorPrimary, 215),
+                    colorPrimary
+                )
+                else -> Pair(
+                    colorOnSurfaceVariant,
+                    colorOnSurface
+                )
+            }
+
+            val labelEnd = label.length
+            if (labelEnd > 0) {
+                builder.setSpan(AbsoluteSizeSpan(labelPx, false), 0, labelEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(StyleSpan(Typeface.BOLD), 0, labelEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(ProLetterSpacingSpan(0.08f), 0, labelEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(ForegroundColorSpan(labelColor), 0, labelEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+
+            val valueStart = labelEnd + 1
+            val valueEnd = text.length
+            if (valueStart < valueEnd) {
+                builder.setSpan(AbsoluteSizeSpan(valuePx, false), valueStart, valueEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(StyleSpan(Typeface.BOLD), valueStart, valueEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(ForegroundColorSpan(valueColor), valueStart, valueEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+
+            return builder
+        }
+
         private fun applyLayoutWeight(button: MaterialButton, targetWeight: Float) {
             val lp = button.layoutParams
             if (lp is LayoutParams) {
@@ -556,5 +791,15 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 }
             }
         }
+    }
+}
+
+private class ProLetterSpacingSpan(private val letterSpacing: Float) : MetricAffectingSpan() {
+    override fun updateDrawState(tp: TextPaint) {
+        tp.letterSpacing = letterSpacing
+    }
+
+    override fun updateMeasureState(textPaint: TextPaint) {
+        textPaint.letterSpacing = letterSpacing
     }
 }

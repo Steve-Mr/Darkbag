@@ -84,4 +84,62 @@ class CameraBentoDeckViewTest {
         assertEquals("None", CameraBentoDeckView.formatRecipeLabel(null))
         assertEquals("None", CameraBentoDeckView.formatRecipeLabel("None"))
     }
+
+    @Test
+    fun testStyleBentoProPill() {
+        val button = MaterialButton(themedContext)
+        val density = themedContext.resources.displayMetrics.density
+
+        // Inactive (Auto parameter, dial closed): 14dp radius, 1dp stroke
+        CameraBentoDeckView.styleBentoProPill(button, isTabActive = false, isValueManual = false)
+        assertEquals((14f * density).roundToInt(), button.cornerRadius)
+        assertEquals((1f * density).roundToInt(), button.strokeWidth)
+
+        // Active / Tab Selected (dial open): 10dp squircle radius, 1.5dp stroke
+        CameraBentoDeckView.styleBentoProPill(button, isTabActive = true, isValueManual = false)
+        assertEquals((10f * density).roundToInt(), button.cornerRadius)
+        assertEquals((1.5f * density).roundToInt(), button.strokeWidth)
+
+        // Active takes precedence even if isValueManual = true
+        CameraBentoDeckView.styleBentoProPill(button, isTabActive = true, isValueManual = true)
+        assertEquals((10f * density).roundToInt(), button.cornerRadius)
+        assertEquals((1.5f * density).roundToInt(), button.strokeWidth)
+
+        // Manual Override (locked to manual, dial closed): 12dp radius, 1.5dp stroke
+        CameraBentoDeckView.styleBentoProPill(button, isTabActive = false, isValueManual = true)
+        assertEquals((12f * density).roundToInt(), button.cornerRadius)
+        assertEquals((1.5f * density).roundToInt(), button.strokeWidth)
+    }
+
+    @Test
+    fun testStyleBentoProLink() {
+        val button = MaterialButton(themedContext)
+        val density = themedContext.resources.displayMetrics.density
+
+        // Unlinked: 14dp radius, 1dp stroke
+        CameraBentoDeckView.styleBentoProLink(button, isLinked = false)
+        assertEquals((14f * density).roundToInt(), button.cornerRadius)
+        assertEquals((1f * density).roundToInt(), button.strokeWidth)
+
+        // Linked: 14dp radius, 1.5dp stroke
+        CameraBentoDeckView.styleBentoProLink(button, isLinked = true)
+        assertEquals((14f * density).roundToInt(), button.cornerRadius)
+        assertEquals((1.5f * density).roundToInt(), button.strokeWidth)
+    }
+
+    @Test
+    fun testFormatProTelemetry() {
+        val telemetry = CameraBentoDeckView.formatProTelemetry("ISO", "100", isTabActive = false, isValueManual = false, context = themedContext)
+        assertEquals("ISO\n100", telemetry.toString())
+
+        val spanned = telemetry as android.text.Spanned
+        val spans = spanned.getSpans(0, spanned.length, Any::class.java)
+        org.junit.Assert.assertTrue(spans.isNotEmpty())
+
+        val sizeSpans = spanned.getSpans(0, spanned.length, android.text.style.AbsoluteSizeSpan::class.java)
+        assertEquals(2, sizeSpans.size)
+
+        val styleSpans = spanned.getSpans(0, spanned.length, android.text.style.StyleSpan::class.java)
+        assertEquals(2, styleSpans.size)
+    }
 }
