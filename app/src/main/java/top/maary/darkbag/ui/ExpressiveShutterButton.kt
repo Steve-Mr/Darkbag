@@ -154,7 +154,8 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     init {
         background = null
         setupColors()
-        elevation = 4f * resources.displayMetrics.density
+        elevation = 0f
+        stateListAnimator = null
     }
 
     private fun setupColors() {
@@ -413,12 +414,11 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         activeBlockPath.reset()
         activeBlockPath.addRoundRect(rect, radius, radius, Path.Direction.CW)
 
-        // 1. Base fill color (Normal / Multi-Cam mode):
-        // MaterialColors.layer(colorSurfaceContainerHighest, colorPrimaryContainer, 0.72f) (or colorSecondaryContainer when disabled)
+        // 1. Base fill color (Normal / Multi-Cam mode): Hero prominent M3 colorPrimary tonal accent
         val baseFill = if (!isEnabled) {
             colorSecondaryContainer
         } else {
-            MaterialColors.layer(colorSurfaceContainerHighest, colorPrimaryContainer, 0.72f)
+            colorPrimaryContainer
         }
         blockFillPaint.color = baseFill
         canvas.drawPath(activeBlockPath, blockFillPaint)

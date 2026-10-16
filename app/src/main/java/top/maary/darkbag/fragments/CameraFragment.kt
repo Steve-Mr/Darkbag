@@ -212,6 +212,7 @@ class CameraFragment : Fragment() {
     @Volatile private var liveIso: Int = 100
     @Volatile private var liveExposureTime: Long = 10_000_000L
     @Volatile private var liveFocusDistance: Float = 0.0f
+    private var lastTelemetryUpdateMs: Long = 0L
 
     // Flash State
     private var isFlashEnabled = false
@@ -1575,7 +1576,7 @@ class CameraFragment : Fragment() {
                         constraintSet.constrainHeight(containerId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
                         constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.TOP, topId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
                         constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomId, androidx.constraintlayout.widget.ConstraintSet.TOP)
-                        constraintSet.setVerticalBias(containerId, 0.5f)
+                        constraintSet.setVerticalBias(containerId, 0.12f)
                     }
 
                     constraintSet.applyTo(root)
@@ -1852,7 +1853,12 @@ class CameraFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
         val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
-        cameraUiContainerBinding?.let { CameraBentoDeckView.bindRecipeRow(it, targetLogName, activeLutName) }
+        cameraUiContainerBinding?.let {
+            CameraBentoDeckView.bindRecipeRow(it, targetLogName, activeLutName)
+            CameraBentoDeckView.applyDynamicRowHeights(it)
+        }
+        updateCameraSwitchButton()
+        initLensControls()
         updateLiveLut()
     }
 
@@ -2696,19 +2702,19 @@ class CameraFragment : Fragment() {
         }
 
         // Focus
-        val focusText = if (isManualFocus) "MF " + formatFocusDist(currentFocusDistance) else "AF"
+        val focusText = if (isManualFocus) "MF\n" + formatFocusDist(currentFocusDistance) else "AF\n" + formatFocusDist(liveFocusDistance)
         applyPillState(binding.pillFocus, activeManualTab == "Focus", isManualFocus, focusText)
 
         // ISO
-        val isoText = if (isManualIso) "ISO $currentIso" else "ISO"
+        val isoText = if (isManualIso) "ISO\n$currentIso" else "ISO\n$liveIso"
         applyPillState(binding.pillIso, activeManualTab == "ISO", isManualIso, isoText)
 
         // Shutter
-        val shutterText = if (isManualShutter) formatShutterTime(currentExposureTime) else "SEC"
+        val shutterText = if (isManualShutter) "SEC\n" + formatShutterTime(currentExposureTime) else "SEC\n" + formatShutterTime(liveExposureTime)
         applyPillState(binding.pillShutter, activeManualTab == "Shutter", isManualShutter, shutterText)
 
         // EV
-        val evText = if (currentEvIndex != 0) formatEvVal(currentEvIndex) else "EV"
+        val evText = "EV\n" + (if (currentEvIndex == 0) "0.0" else String.format(Locale.US, "%+d", currentEvIndex))
         applyPillState(binding.pillEv, activeManualTab == "EV", currentEvIndex != 0, evText)
 
         // Multi-Camera Link Button (Only visible if multi-camera mode or front PiP is active)
@@ -3101,6 +3107,26 @@ class CameraFragment : Fragment() {
         if (resTime != null) liveExposureTime = resTime
         if (resFocus != null) liveFocusDistance = resFocus
         captureResultFlow.tryEmit(result)
+
+        if (cameraViewModel.uiState.value.uiTier == CameraUiTier.PRO) {
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastTelemetryUpdateMs >= 250L) {
+                lastTelemetryUpdateMs = now
+                val focusText = if (isManualFocus) "MF\n" + formatFocusDist(currentFocusDistance) else "AF\n" + formatFocusDist(liveFocusDistance)
+                val isoText = if (isManualIso) "ISO\n$currentIso" else "ISO\n$liveIso"
+                val shutterText = if (isManualShutter) "SEC\n" + formatShutterTime(currentExposureTime) else "SEC\n" + formatShutterTime(liveExposureTime)
+                val evText = "EV\n" + (if (currentEvIndex == 0) "0.0" else String.format(Locale.US, "%+d", currentEvIndex))
+
+                lifecycleScope.launch(Dispatchers.Main.immediate) {
+                    val binding = cameraUiContainerBinding ?: return@launch
+                    if (cameraViewModel.uiState.value.uiTier != CameraUiTier.PRO) return@launch
+                    binding.pillFocus?.text = focusText
+                    binding.pillIso?.text = isoText
+                    binding.pillShutter?.text = shutterText
+                    binding.pillEv?.text = evText
+                }
+            }
+        }
     }
 
     private fun updateZoomCamera2() {
@@ -6350,6 +6376,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         updateMotionPhotoEncoder()
         updateProInfoBar()
         cameraUiContainerBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
+        updateCameraSwitchButton()
+        initLensControls()
 
         if (modeChanged) {
             if (isMultiCameraModeActive && isAdded) {
@@ -6370,7 +6398,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             CaptureMode.NORMAL -> R.drawable.ic_mode_normal
         }
         btn.setIconResource(iconRes)
-        CameraBentoDeckView.styleBentoToggleTile(btn, isActive = activeMode != CaptureMode.NORMAL, isTertiaryAccent = false)
+        CameraBentoDeckView.styleModeSwitchButton(btn, activeMode != CaptureMode.NORMAL)
     }
 
     private fun rotateShutter(targetRotation: Float) {

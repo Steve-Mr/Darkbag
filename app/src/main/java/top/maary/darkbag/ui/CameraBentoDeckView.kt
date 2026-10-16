@@ -10,6 +10,7 @@ import android.widget.LinearLayout
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.databinding.CameraUiContainerBinding
+import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.viewmodel.CameraUiTier
 import kotlin.math.roundToInt
 
@@ -35,6 +36,15 @@ class CameraBentoDeckView @JvmOverloads constructor(
         clipChildren = false
     }
 
+    override fun onFinishInflate() {
+        super.onFinishInflate()
+        applyDynamicRowHeights()
+    }
+
+    fun applyDynamicRowHeights() {
+        applyDynamicRowHeights(this)
+    }
+
     fun styleLensButton(button: MaterialButton, isActive: Boolean, isDigitalCrop: Boolean) {
         styleBentoLensButton(button, isActive, isDigitalCrop)
     }
@@ -43,9 +53,86 @@ class CameraBentoDeckView @JvmOverloads constructor(
         styleBentoToggleTile(button, isActive, isTertiaryAccent)
     }
 
+    fun styleModeButton(button: MaterialButton, isSpecialMode: Boolean) {
+        styleModeSwitchButton(button, isSpecialMode)
+    }
+
     companion object {
 
         const val PREF_KEY_UI_TIER = "pref_camera_bento_ui_tier"
+
+        /**
+         * Dynamically calculates and applies Bento row heights based on screen height and aspect ratio.
+         *
+         * On standard screens (< 750dp or aspect ratio < 1.9):
+         * - Pro bar: 42dp
+         * - Recipe row: 48dp
+         * - Lens row: 48dp
+         * - Shutter row: 78dp
+         *
+         * On tall screens (>= 750dp or aspect ratio >= 1.9):
+         * - Pro bar: 48dp
+         * - Recipe row: 54dp
+         * - Lens row: 54dp
+         * - Shutter row: 88dp
+         */
+        @JvmStatic
+        fun applyDynamicRowHeights(view: View) {
+            val resources = view.resources
+            val density = resources.displayMetrics.density
+            val metrics = resources.displayMetrics
+            val maxDimension = maxOf(metrics.heightPixels, metrics.widthPixels)
+            val minDimension = minOf(metrics.heightPixels, metrics.widthPixels)
+            val aspectRatio = if (minDimension > 0) maxDimension.toFloat() / minDimension.toFloat() else 1.77f
+            val maxDp = maxOf(resources.configuration.screenHeightDp, resources.configuration.screenWidthDp)
+
+            val isTallScreen = maxDp >= 750 || aspectRatio >= 1.9f
+
+            val proBarDp = if (isTallScreen) 48 else 42
+            val recipeRowDp = if (isTallScreen) 54 else 48
+            val lensRowDp = if (isTallScreen) 54 else 48
+            val shutterRowDp = if (isTallScreen) 88 else 78
+
+            val proBarPx = (proBarDp * density).roundToInt()
+            val recipeRowPx = (recipeRowDp * density).roundToInt()
+            val lensRowPx = (lensRowDp * density).roundToInt()
+            val shutterRowPx = (shutterRowDp * density).roundToInt()
+
+            view.findViewById<View>(top.maary.darkbag.R.id.pro_info_bar_card)?.let { v ->
+                val lp = v.layoutParams
+                if (lp != null && lp.height != proBarPx) {
+                    lp.height = proBarPx
+                    v.layoutParams = lp
+                }
+            }
+            view.findViewById<View>(top.maary.darkbag.R.id.bento_film_row)?.let { v ->
+                val lp = v.layoutParams
+                if (lp != null && lp.height != recipeRowPx) {
+                    lp.height = recipeRowPx
+                    v.layoutParams = lp
+                }
+            }
+            view.findViewById<View>(top.maary.darkbag.R.id.lens_control_row)?.let { v ->
+                val lp = v.layoutParams
+                if (lp != null && lp.height != lensRowPx) {
+                    lp.height = lensRowPx
+                    v.layoutParams = lp
+                }
+            }
+            view.findViewById<View>(top.maary.darkbag.R.id.bento_shutter_row)?.let { v ->
+                val lp = v.layoutParams
+                if (lp != null && lp.height != shutterRowPx) {
+                    lp.height = shutterRowPx
+                    v.layoutParams = lp
+                }
+            }
+        }
+
+        @JvmStatic
+        fun applyDynamicRowHeights(binding: CameraUiContainerBinding) {
+            val root = binding.bentoDeckView ?: binding.bottomIslandCard ?: binding.root
+            applyDynamicRowHeights(root)
+        }
 
         /**
          * Updates the Bento Matrix deck visibility and tier switcher button styling for
@@ -100,6 +187,16 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 com.google.android.material.R.attr.colorOnSurface,
                 Color.WHITE
             )
+            val colorInverseSurface = MaterialColors.getColor(
+                root,
+                com.google.android.material.R.attr.colorSurfaceInverse,
+                Color.DKGRAY
+            )
+            val colorInverseOnSurface = MaterialColors.getColor(
+                root,
+                com.google.android.material.R.attr.colorOnSurfaceInverse,
+                Color.WHITE
+            )
 
             binding.btnBentoTier?.let { btn ->
                 btn.text = tier.displayLabel
@@ -115,8 +212,8 @@ class CameraBentoDeckView @JvmOverloads constructor(
                         btn.cornerRadius = (12f * density).roundToInt()
                     }
                     CameraUiTier.PRO -> {
-                        btn.backgroundTintList = ColorStateList.valueOf(colorPrimaryContainer)
-                        btn.setTextColor(colorOnPrimaryContainer)
+                        btn.backgroundTintList = ColorStateList.valueOf(colorInverseSurface)
+                        btn.setTextColor(colorInverseOnSurface)
                         btn.cornerRadius = (10f * density).roundToInt()
                     }
                 }
@@ -156,12 +253,12 @@ class CameraBentoDeckView @JvmOverloads constructor(
 
             binding.bentoLogButton?.let { btn ->
                 btn.text = if (isLogActive) targetLogName else "Log: Off"
-                styleBentoToggleTile(btn, isActive = isLogActive, isTertiaryAccent = false)
+                styleBentoToggleTile(btn, isActive = isLogActive, isTertiaryAccent = true)
             }
 
             binding.lutSwitcherButton?.let { btn ->
                 btn.text = if (isLutActive) formatRecipeLabel(activeLutName, "LUT: Off") else "LUT: Off"
-                styleBentoToggleTile(btn, isActive = isLutActive, isTertiaryAccent = false)
+                styleBentoToggleTile(btn, isActive = isLutActive, isTertiaryAccent = true)
             }
         }
 
@@ -305,26 +402,37 @@ class CameraBentoDeckView @JvmOverloads constructor(
             val density = button.resources.displayMetrics.density
             val radius12dp = (12f * density).roundToInt()
             val radius14dp = (14f * density).roundToInt()
+            val stroke1_5dp = (1.5f * density).roundToInt()
 
-            val colorPrimaryContainer = MaterialColors.getColor(
+            val colorPrimary = MaterialColors.getColor(
                 button,
-                com.google.android.material.R.attr.colorPrimaryContainer,
+                android.R.attr.colorPrimary,
+                Color.WHITE
+            )
+            val colorSecondaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorSecondaryContainer,
                 Color.DKGRAY
             )
-            val colorOnPrimaryContainer = MaterialColors.getColor(
+            val colorOnSecondaryContainer = MaterialColors.getColor(
                 button,
-                com.google.android.material.R.attr.colorOnPrimaryContainer,
+                com.google.android.material.R.attr.colorOnSecondaryContainer,
                 Color.WHITE
+            )
+            val colorTertiary = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorTertiary,
+                colorPrimary
             )
             val colorTertiaryContainer = MaterialColors.getColor(
                 button,
                 com.google.android.material.R.attr.colorTertiaryContainer,
-                colorPrimaryContainer
+                colorSecondaryContainer
             )
             val colorOnTertiaryContainer = MaterialColors.getColor(
                 button,
                 com.google.android.material.R.attr.colorOnTertiaryContainer,
-                colorOnPrimaryContainer
+                colorOnSecondaryContainer
             )
             val colorSurfaceContainerHigh = MaterialColors.getColor(
                 button,
@@ -338,20 +446,88 @@ class CameraBentoDeckView @JvmOverloads constructor(
             )
 
             if (isActive) {
-                val bg = if (isTertiaryAccent) colorTertiaryContainer else colorPrimaryContainer
-                val fg = if (isTertiaryAccent) colorOnTertiaryContainer else colorOnPrimaryContainer
-                button.backgroundTintList = ColorStateList.valueOf(bg)
-                button.setTextColor(fg)
-                button.iconTint = ColorStateList.valueOf(fg)
-                button.strokeWidth = 0
-                button.cornerRadius = radius12dp
+                if (isTertiaryAccent) {
+                    button.backgroundTintList = ColorStateList.valueOf(colorTertiaryContainer)
+                    button.setTextColor(colorOnTertiaryContainer)
+                    button.iconTint = ColorStateList.valueOf(colorOnTertiaryContainer)
+                    button.strokeColor = ColorStateList.valueOf(colorTertiary)
+                    button.strokeWidth = stroke1_5dp
+                    button.cornerRadius = radius12dp
+                } else {
+                    button.backgroundTintList = ColorStateList.valueOf(colorSecondaryContainer)
+                    button.setTextColor(colorOnSecondaryContainer)
+                    button.iconTint = ColorStateList.valueOf(colorOnSecondaryContainer)
+                    button.strokeColor = ColorStateList.valueOf(Color.TRANSPARENT)
+                    button.strokeWidth = 0
+                    button.cornerRadius = radius12dp
+                }
             } else {
                 button.backgroundTintList = ColorStateList.valueOf(colorSurfaceContainerHigh)
                 button.setTextColor(colorOnSurfaceVariant)
                 button.iconTint = ColorStateList.valueOf(colorOnSurfaceVariant)
+                button.strokeColor = ColorStateList.valueOf(Color.TRANSPARENT)
                 button.strokeWidth = 0
                 button.cornerRadius = radius14dp
             }
+        }
+
+        /**
+         * Applies Material 3 Expressive styling to capture mode switch button.
+         *
+         * - Normal mode: colorSurfaceContainerHigh fill, colorOnSurfaceVariant icon, 0dp stroke, 14dp radius.
+         * - Half-Frame / Multi-Camera: colorSecondaryContainer fill, colorOnSecondaryContainer icon, 1.5dp colorPrimary stroke, 12dp radius.
+         */
+        @JvmStatic
+        fun styleModeSwitchButton(button: MaterialButton, isSpecialMode: Boolean) {
+            val density = button.resources.displayMetrics.density
+            val radius12dp = (12f * density).roundToInt()
+            val radius14dp = (14f * density).roundToInt()
+            val stroke1_5dp = (1.5f * density).roundToInt()
+
+            val colorPrimary = MaterialColors.getColor(
+                button,
+                android.R.attr.colorPrimary,
+                Color.WHITE
+            )
+            val colorSecondaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorSecondaryContainer,
+                Color.DKGRAY
+            )
+            val colorOnSecondaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOnSecondaryContainer,
+                Color.WHITE
+            )
+            val colorSurfaceContainerHigh = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorSurfaceContainerHigh,
+                Color.GRAY
+            )
+            val colorOnSurfaceVariant = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOnSurfaceVariant,
+                Color.LTGRAY
+            )
+
+            if (isSpecialMode) {
+                button.backgroundTintList = ColorStateList.valueOf(colorSecondaryContainer)
+                button.iconTint = ColorStateList.valueOf(colorOnSecondaryContainer)
+                button.strokeColor = ColorStateList.valueOf(colorPrimary)
+                button.strokeWidth = stroke1_5dp
+                button.cornerRadius = radius12dp
+            } else {
+                button.backgroundTintList = ColorStateList.valueOf(colorSurfaceContainerHigh)
+                button.iconTint = ColorStateList.valueOf(colorOnSurfaceVariant)
+                button.strokeColor = ColorStateList.valueOf(Color.TRANSPARENT)
+                button.strokeWidth = 0
+                button.cornerRadius = radius14dp
+            }
+        }
+
+        @JvmStatic
+        fun styleModeSwitchButton(button: MaterialButton, mode: CaptureMode) {
+            styleModeSwitchButton(button, mode != CaptureMode.NORMAL)
         }
 
         /**
