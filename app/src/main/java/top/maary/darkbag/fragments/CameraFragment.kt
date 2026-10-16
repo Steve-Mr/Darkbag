@@ -22,6 +22,7 @@ import top.maary.darkbag.camera.session.Camera2SessionController
 import top.maary.darkbag.camera.session.CameraSessionState
 import top.maary.darkbag.viewmodel.CameraViewModel
 import top.maary.darkbag.viewmodel.CameraUiState
+import top.maary.darkbag.viewmodel.CameraUiTier
 import top.maary.darkbag.viewmodel.CameraEffect
 import top.maary.darkbag.viewmodel.CameraUserIntent
 import top.maary.darkbag.models.StandardTimingTracker
@@ -29,6 +30,8 @@ import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.modes.CaptureModeCoordinator
 import top.maary.darkbag.modes.ModeCoordinatorFactory
 import top.maary.darkbag.modes.ModeExecutionContext
+import top.maary.darkbag.ui.CameraBentoDeckView
+import top.maary.darkbag.ui.ColorRecipeBottomSheet
 import top.maary.darkbag.ui.ExpressiveShutterButton
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.LensInfo
@@ -705,19 +708,8 @@ class CameraFragment : Fragment() {
             return
         }
         btn.visibility = View.VISIBLE
-        if (isMotionPhotoEnabled) {
-            btn.setIconResource(R.drawable.ic_motion_photo_on)
-            val onPrimary = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorOnPrimaryContainer)
-            val primaryContainer = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorPrimaryContainer)
-            btn.iconTint = ColorStateList.valueOf(onPrimary)
-            btn.backgroundTintList = ColorStateList.valueOf(primaryContainer)
-        } else {
-            btn.setIconResource(R.drawable.ic_motion_photo_off)
-            val onSecondary = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorOnSecondaryContainer)
-            val secondaryContainer = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSecondaryContainer)
-            btn.iconTint = ColorStateList.valueOf(onSecondary)
-            btn.backgroundTintList = ColorStateList.valueOf(secondaryContainer)
-        }
+        btn.setIconResource(if (isMotionPhotoEnabled) R.drawable.ic_motion_photo_on else R.drawable.ic_motion_photo_off)
+        CameraBentoDeckView.styleBentoToggleTile(btn, isMotionPhotoEnabled, isTertiaryAccent = false)
     }
 
 
@@ -764,6 +756,7 @@ class CameraFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
+        (activity as? top.maary.darkbag.MainActivity)?.setFloatingToolbarForcedHidden(true)
         // Make sure that all permissions are still present, since the
         // user could have removed them while the app was in paused state.
         if (!PermissionsFragment.hasPermissions(requireContext())) {
@@ -803,12 +796,13 @@ class CameraFragment : Fragment() {
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateCameraUi()
         updateHalfFrameUI()
-        _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
+        cameraUiContainerBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
         applyUIVisibility()
         updateMotionPhotoEncoder()
     }
 
     override fun onDestroyView() {
+        (activity as? top.maary.darkbag.MainActivity)?.setFloatingToolbarForcedHidden(false)
         _fragmentCameraBinding?.viewFinderBlackout?.animate()?.cancel()
         _fragmentCameraBinding = null
         super.onDestroyView()
@@ -981,8 +975,8 @@ class CameraFragment : Fragment() {
             override fun handleOnBackPressed() {
                 val uiBinding = cameraUiContainerBinding
                 if (uiBinding?.manualControlsRoot?.visibility == View.VISIBLE ||
-                    uiBinding?.proInfoBarCard?.visibility == View.VISIBLE ||
-                    uiBinding?.lutListContainer?.visibility == View.VISIBLE
+                    uiBinding?.lutListContainer?.visibility == View.VISIBLE ||
+                    activeManualTab != null
                 ) {
                     dismissFloatingOverlays()
                 } else {
@@ -1442,7 +1436,7 @@ class CameraFragment : Fragment() {
                             lifecycleScope.launch(Dispatchers.Main) {
                                 prefs.edit().putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, CaptureMode.NORMAL.key).apply()
                                 updateActiveCoordinator(CaptureMode.NORMAL)
-                                _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
+                                cameraUiContainerBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
                                 bindCameraUseCases()
                             }
                         }
@@ -1461,7 +1455,7 @@ class CameraFragment : Fragment() {
                 Log.w(TAG, "Multi-camera requested but not supported on device, disabling multi-camera mode")
                 prefs.edit().putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, CaptureMode.NORMAL.key).apply()
                 updateActiveCoordinator(CaptureMode.NORMAL)
-                _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
+                cameraUiContainerBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
             }
         }
 
@@ -1608,6 +1602,35 @@ class CameraFragment : Fragment() {
                 .navigate(CameraFragmentDirections.actionCameraToSettings())
         }
 
+        // Listener for Bento Playground button
+        cameraUiContainerBinding?.btnBentoPlayground?.setOnClickListener {
+            val safeActivity = activity ?: return@setOnClickListener
+            val navController = Navigation.findNavController(safeActivity, R.id.fragment_container)
+            if (navController.currentDestination?.id == R.id.camera_fragment) {
+                navController.navigate(R.id.action_camera_to_playground_gallery)
+            }
+        }
+
+        // Bento Tier Switcher (P&S / FILM / PRO)
+        val initialPrefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val savedTier = CameraUiTier.fromKey(initialPrefs.getString(CameraBentoDeckView.PREF_KEY_UI_TIER, CameraUiTier.FILM.key))
+        cameraViewModel.setUiTier(savedTier)
+        updateTierUi(savedTier)
+
+        cameraUiContainerBinding?.btnBentoTier?.setOnClickListener { v ->
+            v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            val nextTier = cameraViewModel.uiState.value.uiTier.next()
+            requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putString(CameraBentoDeckView.PREF_KEY_UI_TIER, nextTier.key).apply()
+            cameraViewModel.setUiTier(nextTier)
+            if (nextTier != CameraUiTier.PRO && activeManualTab != null) {
+                activeManualTab = null
+                updateFocusPeakingState()
+                updateProInfoBar()
+            }
+            updateTierUi(nextTier)
+        }
+
         // Flash / Underexposure Toggle Button
         cameraUiContainerBinding?.flashButton?.let { btn ->
             if (isHdrPlusEnabled) {
@@ -1694,7 +1717,7 @@ class CameraFragment : Fragment() {
             }
             coordinator?.onShutterTriggered(timing)
         }
-        _fragmentCameraBinding?.cameraSwitchButtonAlt?.let {
+        cameraUiContainerBinding?.cameraSwitchButtonAlt?.let {
 
             // Disable the button until the camera is set up
             it.isEnabled = false
@@ -1736,7 +1759,7 @@ class CameraFragment : Fragment() {
 
         updateHdrPlusConstraints()
 
-        // HDR+ Switch
+        // HDR+ Switch & Bento Tile
         cameraUiContainerBinding?.hdrPlusSwitch?.let { toggle ->
             toggle.setOnCheckedChangeListener { _, isChecked ->
                 isHdrPlusEnabled = isChecked
@@ -1746,9 +1769,16 @@ class CameraFragment : Fragment() {
                 updateHdrPlusConstraints()
             }
         }
+        cameraUiContainerBinding?.hdrPlusPill?.setOnClickListener {
+            cameraUiContainerBinding?.hdrPlusSwitch?.let { toggle ->
+                if (toggle.visibility == View.VISIBLE) {
+                    toggle.isChecked = !toggle.isChecked
+                }
+            }
+        }
 
         // Mode Switch Button (Lens Row)
-        _fragmentCameraBinding?.modeSwitchButton?.let { btn ->
+        cameraUiContainerBinding?.modeSwitchButton?.let { btn ->
             updateModeSwitchIcon(btn)
             btn.setOnClickListener {
                 if (isBurstActive) return@setOnClickListener
@@ -1757,21 +1787,19 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // LUT Switcher (Strip)
-        cameraUiContainerBinding?.lutSwitcherButton?.setOnClickListener {
-            val binding = cameraUiContainerBinding
-            if (binding?.proInfoBarCard?.visibility == View.VISIBLE ||
-                binding?.manualControlsRoot?.visibility == View.VISIBLE) {
-                binding.proInfoBarCard?.visibility = View.GONE
-                binding.manualControlsRoot?.visibility = View.GONE
-                binding.dialPanel?.visibility = View.GONE
+        // Log & LUT Switcher (Bento Row 1 -> opens Modal BottomSheet so layout never shifts)
+        val openColorRecipeSheet = View.OnClickListener {
+            if (activeManualTab != null) {
+                cameraUiContainerBinding?.manualControlsRoot?.visibility = View.GONE
+                cameraUiContainerBinding?.dialPanel?.visibility = View.GONE
                 activeManualTab = null
                 updateFocusPeakingState()
                 updateProInfoBar()
-                updateLensControlRowPosition(animate = true)
             }
             showLutMenu()
         }
+        cameraUiContainerBinding?.bentoLogButton?.setOnClickListener(openColorRecipeSheet)
+        cameraUiContainerBinding?.lutSwitcherButton?.setOnClickListener(openColorRecipeSheet)
 
         cameraUiContainerBinding?.photoViewButton?.setOnLongClickListener {
             val safeActivity = activity ?: return@setOnLongClickListener false
@@ -1823,8 +1851,23 @@ class CameraFragment : Fragment() {
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
-        cameraUiContainerBinding?.lutSwitcherButton?.text = activeLutName?.substringBeforeLast(".") ?: getString(R.string.lut_none)
+        val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+        cameraUiContainerBinding?.let { CameraBentoDeckView.bindRecipeRow(it, targetLogName, activeLutName) }
         updateLiveLut()
+    }
+
+    private fun updateTierUi(tier: CameraUiTier = cameraViewModel.uiState.value.uiTier) {
+        val binding = cameraUiContainerBinding ?: return
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val showLutSwitcher = prefs.getBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, true)
+        val isAnyManual = isManualFocus || isManualIso || isManualShutter || currentEvIndex != 0
+        CameraBentoDeckView.bindTierState(
+            binding = binding,
+            tier = tier,
+            isAnyManual = isAnyManual,
+            hasActiveManualTab = activeManualTab != null,
+            showLutSwitcherPref = showLutSwitcher
+        )
     }
 
     /** Enabled or disabled a button to switch cameras depending on the available cameras */
@@ -1832,11 +1875,11 @@ class CameraFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val showSwitch = prefs.getBoolean(SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, true)
         try {
-            _fragmentCameraBinding?.cameraSwitchButtonAlt?.isEnabled =
+            cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled =
                 hasBackCamera() && hasFrontCamera()
-            _fragmentCameraBinding?.cameraSwitchButtonAlt?.visibility = if (showSwitch) View.VISIBLE else View.GONE
+            cameraUiContainerBinding?.cameraSwitchButtonAlt?.visibility = if (showSwitch) View.VISIBLE else View.GONE
         } catch (exception: Exception) {
-            _fragmentCameraBinding?.cameraSwitchButtonAlt?.isEnabled = false
+            cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled = false
         }
     }
 
@@ -2169,7 +2212,7 @@ class CameraFragment : Fragment() {
                 val uiBinding = cameraUiContainerBinding
                 if (uiBinding?.lutListContainer?.visibility == View.VISIBLE ||
                     uiBinding?.manualControlsRoot?.visibility == View.VISIBLE ||
-                    uiBinding?.proInfoBarCard?.visibility == View.VISIBLE
+                    activeManualTab != null
                 ) {
                     dismissFloatingOverlays()
                     return true
@@ -2184,7 +2227,7 @@ class CameraFragment : Fragment() {
                 val uiBinding = cameraUiContainerBinding
                 if (uiBinding?.lutListContainer?.visibility == View.VISIBLE ||
                     uiBinding?.manualControlsRoot?.visibility == View.VISIBLE ||
-                    uiBinding?.proInfoBarCard?.visibility == View.VISIBLE
+                    activeManualTab != null
                 ) {
                     dismissFloatingOverlays()
                     return true
@@ -2368,12 +2411,10 @@ class CameraFragment : Fragment() {
             binding.lutListContainer?.visibility = View.GONE
         }
 
-        if (binding.proInfoBarCard?.visibility == View.VISIBLE ||
-            binding.manualControlsRoot?.visibility == View.VISIBLE ||
+        if (binding.manualControlsRoot?.visibility == View.VISIBLE ||
             binding.dialPanel?.visibility == View.VISIBLE ||
             activeManualTab != null
         ) {
-            binding.proInfoBarCard?.visibility = View.GONE
             binding.manualControlsRoot?.visibility = View.GONE
             binding.dialPanel?.visibility = View.GONE
             activeManualTab = null
@@ -2388,35 +2429,8 @@ class CameraFragment : Fragment() {
     private fun initManualControls() {
         val prefs =
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val enabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
         val binding = cameraUiContainerBinding ?: return
-        binding.btnProMode?.visibility = if (enabled) View.VISIBLE else View.GONE
-        if (!enabled) {
-            binding.proInfoBarCard?.visibility = View.GONE
-            binding.manualControlsRoot?.visibility = View.GONE
-            return
-        }
-
-        // Level 1: Pro Trigger Button (Toggles Level 2 Pills Bar)
-        binding.btnProMode?.setOnClickListener {
-            if (binding.lutListContainer?.visibility == View.VISIBLE) {
-                binding.lutListContainer?.visibility = View.GONE
-            }
-            val isBarOpen = binding.proInfoBarCard?.visibility == View.VISIBLE
-            if (isBarOpen) {
-                binding.proInfoBarCard?.visibility = View.GONE
-                binding.manualControlsRoot?.visibility = View.GONE
-                binding.touchOverlay?.visibility = View.GONE
-                activeManualTab = null
-                updateFocusPeakingState()
-                updateLensControlRowPosition(animate = true)
-            } else {
-                binding.proInfoBarCard?.visibility = View.VISIBLE
-                binding.touchOverlay?.visibility = View.VISIBLE
-                updateProInfoBar()
-                updateLensControlRowPosition(animate = true)
-            }
-        }
+        binding.btnProMode?.visibility = View.GONE
 
         // Dismiss touch overlay
         binding.touchOverlay?.setOnClickListener {
@@ -2477,11 +2491,12 @@ class CameraFragment : Fragment() {
 
         updateLensControlRowPosition(animate = false)
         updateProInfoBar()
+        updateTierUi()
     }
 
     private fun updateLensControlRowPosition(animate: Boolean = true) {
-        val vfBinding = _fragmentCameraBinding ?: return
-        val lensRow = vfBinding.lensControlRow ?: return
+        val uiBinding = cameraUiContainerBinding ?: return
+        val lensRow = uiBinding.lensControlRow ?: return
         lensRow.translationY = 0f
     }
 
@@ -2491,6 +2506,7 @@ class CameraFragment : Fragment() {
             // Collapse dial
             activeManualTab = null
             binding.manualControlsRoot?.visibility = View.GONE
+            binding.touchOverlay?.visibility = View.GONE
             updateFocusPeakingState()
             updateProInfoBar()
         } else {
@@ -2642,11 +2658,13 @@ class CameraFragment : Fragment() {
         val binding = cameraUiContainerBinding ?: return
         val primaryColor = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, Color.parseColor("#FFD54F"))
         val onPrimaryColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimary, Color.BLACK)
-        val onSurfaceColor = Color.WHITE
-        val outlineColor = Color.parseColor("#4DFFFFFF")
-        val frostedSurfaceColor = Color.parseColor("#731C1B1F")
-        val activeContainerColor = androidx.core.graphics.ColorUtils.setAlphaComponent(primaryColor, 90)
-        val lockedContainerColor = androidx.core.graphics.ColorUtils.setAlphaComponent(primaryColor, 45)
+        val onSurfaceColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface, Color.WHITE)
+        val onSurfaceVariantColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.LTGRAY)
+        val surfaceHighColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerHigh, Color.parseColor("#2B2930"))
+        val primaryContainerColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, Color.parseColor("#4F378B"))
+        val onPrimaryContainerColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimaryContainer, Color.WHITE)
+        val secondaryContainerColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondaryContainer, Color.parseColor("#4A4458"))
+        val outlineColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, Color.parseColor("#4DFFFFFF"))
         val density = resources.displayMetrics.density
 
         fun applyPillState(
@@ -2658,20 +2676,22 @@ class CameraFragment : Fragment() {
             if (btn == null) return
             btn.text = textValue
             if (isTabActive) {
+                btn.cornerRadius = (10f * density).roundToInt()
                 btn.strokeWidth = (1.5f * density).roundToInt()
                 btn.strokeColor = ColorStateList.valueOf(primaryColor)
-                btn.backgroundTintList = ColorStateList.valueOf(activeContainerColor)
-                btn.setTextColor(primaryColor)
+                btn.backgroundTintList = ColorStateList.valueOf(primaryContainerColor)
+                btn.setTextColor(onPrimaryContainerColor)
             } else if (isValueManual) {
+                btn.cornerRadius = (12f * density).roundToInt()
                 btn.strokeWidth = (1f * density).roundToInt()
-                btn.strokeColor = ColorStateList.valueOf(androidx.core.graphics.ColorUtils.setAlphaComponent(primaryColor, 140))
-                btn.backgroundTintList = ColorStateList.valueOf(lockedContainerColor)
+                btn.strokeColor = ColorStateList.valueOf(androidx.core.graphics.ColorUtils.setAlphaComponent(primaryColor, 160))
+                btn.backgroundTintList = ColorStateList.valueOf(secondaryContainerColor)
                 btn.setTextColor(primaryColor)
             } else {
-                btn.strokeWidth = (0.5f * density).roundToInt()
-                btn.strokeColor = ColorStateList.valueOf(outlineColor)
-                btn.backgroundTintList = ColorStateList.valueOf(Color.TRANSPARENT)
-                btn.setTextColor(onSurfaceColor)
+                btn.cornerRadius = (14f * density).roundToInt()
+                btn.strokeWidth = 0
+                btn.backgroundTintList = ColorStateList.valueOf(surfaceHighColor)
+                btn.setTextColor(onSurfaceVariantColor)
             }
         }
 
@@ -2699,35 +2719,26 @@ class CameraFragment : Fragment() {
             binding.btnProLink?.iconTint = ColorStateList.valueOf(primaryColor)
             binding.btnProLink?.strokeWidth = (1f * density).roundToInt()
             binding.btnProLink?.strokeColor = ColorStateList.valueOf(androidx.core.graphics.ColorUtils.setAlphaComponent(primaryColor, 140))
-            binding.btnProLink?.backgroundTintList = ColorStateList.valueOf(lockedContainerColor)
+            binding.btnProLink?.backgroundTintList = ColorStateList.valueOf(secondaryContainerColor)
         } else {
             binding.btnProLink?.setIconResource(R.drawable.ic_link_off)
-            binding.btnProLink?.iconTint = ColorStateList.valueOf(onSurfaceColor)
+            binding.btnProLink?.iconTint = ColorStateList.valueOf(onSurfaceVariantColor)
             binding.btnProLink?.strokeWidth = (0.5f * density).roundToInt()
             binding.btnProLink?.strokeColor = ColorStateList.valueOf(outlineColor)
-            binding.btnProLink?.backgroundTintList = ColorStateList.valueOf(Color.TRANSPARENT)
+            binding.btnProLink?.backgroundTintList = ColorStateList.valueOf(surfaceHighColor)
         }
 
-        // Update Level 1 Trigger Button State Indicator (PRO / M)
-        val isAnyManual = isManualFocus || isManualIso || isManualShutter || currentEvIndex != 0
-        binding.btnProMode?.let { btn ->
-            if (isAnyManual) {
-                btn.text = "M"
-                btn.setTextColor(onPrimaryColor)
-                btn.strokeWidth = 0
-                btn.strokeColor = ColorStateList.valueOf(primaryColor)
-                btn.backgroundTintList = ColorStateList.valueOf(primaryColor)
-            } else {
-                btn.text = "PRO"
-                btn.setTextColor(onSurfaceColor)
-                btn.strokeWidth = (1f * density).roundToInt()
-                btn.strokeColor = ColorStateList.valueOf(outlineColor)
-                btn.backgroundTintList = ColorStateList.valueOf(frostedSurfaceColor)
-            }
-        }
+        // Sync manual flags to ViewModel & update tier button styling
+        cameraViewModel.updateManualFlags(
+            isManualFocus = isManualFocus,
+            isManualIso = isManualIso,
+            isManualShutter = isManualShutter,
+            isProLinked = isMultiCameraManualLinked
+        )
+        updateTierUi()
 
         // Update Level 3 Dial Theme Colors
-        binding.dialWheelView?.setThemeColors(primaryColor, onSurfaceColor, Color.parseColor("#B0BEC5"))
+        binding.dialWheelView?.setThemeColors(primaryColor, onSurfaceColor, onSurfaceVariantColor)
         binding.tvDialTargetLabel?.setTextColor(primaryColor)
         binding.tvDialTargetValue?.setTextColor(onSurfaceColor)
     }
@@ -2885,7 +2896,7 @@ class CameraFragment : Fragment() {
     }
 
     private fun initLensControls() {
-        val binding = _fragmentCameraBinding ?: return
+        val binding = cameraUiContainerBinding ?: return
         val container = binding.lensControlsContainer ?: return
         val row = binding.lensControlRow ?: return
 
@@ -2922,23 +2933,32 @@ class CameraFragment : Fragment() {
                 filteredLenses.filter { it.multiplier > 1.05f && !it.isZoomPreset }.maxByOrNull { it.multiplier }
             } else null
 
+            val density = resources.displayMetrics.density
+            val marginPx = (3f * density).roundToInt()
+
             for (lens in filteredLenses) {
                 val btn = com.google.android.material.button.MaterialButton(
                     requireContext()
                 ).apply {
                     layoutParams = android.widget.LinearLayout.LayoutParams(
-                        resources.getDimensionPixelSize(R.dimen.lens_button_size),
-                        resources.getDimensionPixelSize(R.dimen.lens_button_size)
+                        0,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        1.0f
                     ).apply {
-                        marginEnd = resources.getDimensionPixelSize(R.dimen.spacing_small)
+                        marginStart = marginPx
+                        marginEnd = marginPx
                     }
                     text = lens.name
                     tag = lens
-                    textSize = 10f
+                    textSize = 11f
+                    isSingleLine = true
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
                     setPadding(0, 0, 0, 0)
                     insetTop = 0
                     insetBottom = 0
-                    cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
+                    minWidth = 0
+                    minimumWidth = 0
 
                     setOnClickListener {
                         if (isBurstActive || isSwitchingLens) return@setOnClickListener
@@ -3015,15 +3035,12 @@ class CameraFragment : Fragment() {
             prefs.edit().putString(KEY_SELECTED_LENS_ID, it.sensorId).apply()
         }
 
-        val binding = _fragmentCameraBinding ?: return
+        val binding = cameraUiContainerBinding ?: return
 
         // Ensure the row containing the switch button is always visible
         binding.lensControlRow?.visibility = View.VISIBLE
 
         val container = binding.lensControlsContainer ?: return
-
-        val colorPrimary = MaterialColors.getColor(container, android.R.attr.colorPrimary)
-        val colorOnSurface = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
 
         val isBackCamera = lensFacing == CameraCharacteristics.LENS_FACING_BACK
         val largestTele = if (isBackCamera) {
@@ -3043,25 +3060,13 @@ class CameraFragment : Fragment() {
                         btn.text = transientLensLabel ?: String.format("%.1fx", currentLens?.multiplier ?: 1.0f)
                     } else if (largestTele != null && lens.sensorId == largestTele.sensorId) {
                         btn.text = String.format("%.1fx", currentLens?.multiplier ?: lens.multiplier)
-                    }
-
-                    val activeColor = if (currentLens?.isZoomPreset == true && (currentLens?.targetZoomRatio ?: 1.0f) > 1.0f) {
-                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorTertiary)
                     } else {
-                        colorPrimary
+                        btn.text = lens.name
                     }
-                    btn.setTextColor(activeColor)
-                    btn.strokeWidth = resources.getDimensionPixelSize(R.dimen.stroke_small)
-                    btn.strokeColor = android.content.res.ColorStateList.valueOf(activeColor)
-                    btn.setBackgroundColor(MaterialColors.layer(
-                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
-                        activeColor,
-                        0.1f
-                    ))
-                } else {
-                    btn.setTextColor(colorOnSurface)
-                    btn.strokeWidth = 0
 
+                    val isDigitalCrop = (currentLens?.isZoomPreset == true && (currentLens?.targetZoomRatio ?: 1.0f) > 1.0f) || lens.isZoomPreset
+                    CameraBentoDeckView.styleBentoLensButton(btn, isActive = true, isDigitalCrop = isDigitalCrop)
+                } else {
                     if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
                         val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, null)
                         val presets1x = cameraRepository.get1xPresets(lens)
@@ -3071,11 +3076,7 @@ class CameraFragment : Fragment() {
                         btn.text = lens.name
                     }
 
-                    btn.setBackgroundColor(MaterialColors.layer(
-                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
-                        colorOnSurface,
-                        0.15f
-                    ))
+                    CameraBentoDeckView.styleBentoLensButton(btn, isActive = false, isDigitalCrop = lens.isZoomPreset)
                 }
             }
         }
@@ -3320,6 +3321,7 @@ class CameraFragment : Fragment() {
     private fun updateFlashIcon(btn: MaterialButton) {
         btn.text = null
         btn.setIconResource(if (isFlashEnabled) R.drawable.ic_flash_on else R.drawable.ic_flash_off)
+        CameraBentoDeckView.styleBentoToggleTile(btn, isFlashEnabled, isTertiaryAccent = false)
     }
 
     private fun updateUnderexposureButton() {
@@ -3336,6 +3338,7 @@ class CameraFragment : Fragment() {
             else -> R.drawable.ic_hdr_dynamic
         }
         btn.setIconResource(iconRes)
+        CameraBentoDeckView.styleBentoToggleTile(btn, isActive = mode != "Off", isTertiaryAccent = false)
     }
 
     private fun cycleUnderexposureMode() {
@@ -3355,7 +3358,6 @@ class CameraFragment : Fragment() {
     }
 
     private fun updateLiveLut() {
-        val proc = lutProcessor ?: return
         val prefs =
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -3364,8 +3366,10 @@ class CameraFragment : Fragment() {
         val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
         val isPreviewEnabled = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, true)
 
-        val displayLut = activeLutName?.substringBeforeLast(".") ?: getString(R.string.lut_none)
-        cameraUiContainerBinding?.lutSwitcherButton?.text = displayLut
+        cameraUiContainerBinding?.let { CameraBentoDeckView.bindRecipeRow(it, targetLogName, activeLutName) }
+        cameraViewModel.updateColorRecipe(targetLogName ?: "None", activeLutName ?: "None")
+
+        val proc = lutProcessor ?: return
 
         activeLutJob?.cancel()
         activeLutJob = lifecycleScope.launch(Dispatchers.IO) {
@@ -3390,24 +3394,10 @@ class CameraFragment : Fragment() {
     }
 
     private fun showLutMenu() {
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
-        val currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None")?.substringBeforeLast(".") ?: "None"
-
-        val items = mutableListOf<Pair<String, Boolean>>()
-        items.add("${getString(R.string.lut_menu_log)}: $currentLog" to true)
-        if (currentLog == "None") {
-            items.add(getString(R.string.lut_menu_select_log_first) to false)
-        } else {
-            items.add("${getString(R.string.lut_menu_lut)}: $currentLut" to true)
-        }
-
-        showPillPopup(items, autoDismiss = false) { item, _ ->
-            if (item.startsWith(getString(R.string.lut_menu_log))) {
-                showLogSelectionMenu()
-            } else {
-                showLutSelectionMenu()
-            }
+        if (!isAdded) return
+        ColorRecipeBottomSheet.show(requireContext(), lutManager) { logName, lutName ->
+            cameraViewModel.updateColorRecipe(logName, lutName ?: "None")
+            updateLiveLut()
         }
     }
 
@@ -4280,7 +4270,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         cameraUiContainerBinding?.hdrPlusSwitch?.let { toggle ->
             toggle.isChecked = isHdrPlusEnabled
         }
-        cameraUiContainerBinding?.tvHdrStatus?.text = if (isHdrPlusEnabled) "HDR+" else "OFF"
+        cameraUiContainerBinding?.let { CameraBentoDeckView.styleHdrPlusTile(it, isHdrPlusEnabled) }
     }
 
     private fun updateHdrPlusConstraints() {
@@ -4303,13 +4293,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 applyCameraControls()
             }
 
-            // Retain manual controls if enabled in settings
-            val manualEnabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
-            binding.btnProMode?.visibility = if (manualEnabled) View.VISIBLE else View.GONE
-            if (!manualEnabled) {
-                binding.proInfoBarCard?.visibility = View.GONE
-                binding.manualControlsRoot?.visibility = View.GONE
-            }
+            binding.btnProMode?.visibility = View.GONE
             updateProInfoBar()
             updateLensControlRowPosition(animate = true)
         } else {
@@ -4325,14 +4309,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 binding.flashButton?.let { updateFlashIcon(it) }
             }
 
-            // Restore manual controls if enabled in settings
-            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val manualEnabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
-            binding.btnProMode?.visibility = if (manualEnabled) View.VISIBLE else View.GONE
-            if (!manualEnabled) {
-                binding.proInfoBarCard?.visibility = View.GONE
-                binding.manualControlsRoot?.visibility = View.GONE
-            }
+            binding.btnProMode?.visibility = View.GONE
             updateProInfoBar()
             updateLensControlRowPosition(animate = true)
         }
@@ -4581,7 +4558,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val binding = _fragmentCameraBinding ?: return
         val pipContainer = binding.pipContainer ?: return
         val pipViewFinder = binding.pipViewFinder ?: return
-        val switchBtn = binding.cameraSwitchButtonAlt ?: return
+        val switchBtn = cameraUiContainerBinding?.cameraSwitchButtonAlt ?: return
 
         isFrontPipActive = !isFrontPipActive
         if (isFrontPipActive) {
@@ -6123,6 +6100,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         vfBinding.viewFinder.post {
             val isEnabled = isHalfFrameModeEnabled
             readScopedHalfFrameState(prefs)
+            cameraViewModel.setHalfFrameStep(halfFrameStep)
+            uiBinding.cameraCaptureButton?.setHalfFrameState(isEnabled, halfFrameStep)
 
             val gapView = vfBinding.halfFrameGapIndicator ?: return@post
             val snapshotView = vfBinding.halfFrameSnapshot ?: return@post
@@ -6154,10 +6133,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 return@post
             }
 
-            // Enabled path
-            if (uiBinding.tvHalfFrameStep?.visibility != View.VISIBLE) {
-                uiBinding.tvHalfFrameStep?.visibility = View.VISIBLE
-            }
+            // Enabled path: Half-Frame step is visually represented by the Left/Right split inside ExpressiveShutterButton
+            uiBinding.tvHalfFrameStep?.visibility = View.GONE
             val stepText = if (halfFrameStep == 0) "1/2" else "2/2"
             if (uiBinding.tvHalfFrameStep?.text != stepText) {
                 uiBinding.tvHalfFrameStep?.text = stepText
@@ -6372,7 +6349,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         updateShutterOrientation()
         updateMotionPhotoEncoder()
         updateProInfoBar()
-        _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
+        cameraUiContainerBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
 
         if (modeChanged) {
             if (isMultiCameraModeActive && isAdded) {
@@ -6393,6 +6370,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             CaptureMode.NORMAL -> R.drawable.ic_mode_normal
         }
         btn.setIconResource(iconRes)
+        CameraBentoDeckView.styleBentoToggleTile(btn, isActive = activeMode != CaptureMode.NORMAL, isTertiaryAccent = false)
     }
 
     private fun rotateShutter(targetRotation: Float) {
@@ -6423,7 +6401,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private fun applyUIVisibility() {
         val uiBinding = cameraUiContainerBinding ?: return
-        val vfBinding = _fragmentCameraBinding ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
         val showHdrPill = prefs.getBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, true)
@@ -6435,20 +6412,22 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         uiBinding.hdrPlusPill?.visibility = if (showHdrPill) View.VISIBLE else View.GONE
         uiBinding.settingsButton?.visibility = if (showSettings) View.VISIBLE else View.GONE
-        vfBinding.cameraSwitchButtonAlt?.visibility = if (showSwitch) View.VISIBLE else View.GONE
-        vfBinding.modeSwitchButton?.visibility = if (showModeSwitch) View.VISIBLE else View.GONE
+        uiBinding.cameraSwitchButtonAlt?.visibility = if (showSwitch) View.VISIBLE else View.GONE
+        uiBinding.modeSwitchButton?.visibility = if (showModeSwitch) View.VISIBLE else View.GONE
 
-        val hasMultipleLenses = vfBinding.lensControlsContainer?.childCount ?: 0 > 1
-        vfBinding.lensControlsCard?.visibility = if (showLensControls && hasMultipleLenses) View.VISIBLE else View.GONE
+        val hasMultipleLenses = (uiBinding.lensControlsContainer?.childCount ?: 0) > 1
+        uiBinding.lensControlsCard?.visibility = if (showLensControls && hasMultipleLenses) View.VISIBLE else View.GONE
 
         // Hide the whole row if all its components are hidden
-        vfBinding.lensControlRow?.visibility = if (showSwitch || showModeSwitch || (showLensControls && hasMultipleLenses)) View.VISIBLE else View.GONE
+        uiBinding.lensControlRow?.visibility = if (showSwitch || showModeSwitch || (showLensControls && hasMultipleLenses)) View.VISIBLE else View.GONE
 
         uiBinding.lutSwitcherButton?.visibility = if (showLutSwitcher) View.VISIBLE else View.GONE
+        uiBinding.bentoLogButton?.visibility = if (showLutSwitcher) View.VISIBLE else View.GONE
 
-        // Update Motion Photo Button & Flash/Underexposure button as well
+        // Update Motion Photo Button & Flash/Underexposure button & Tier rows as well
         updateMotionPhotoButton()
         updateHdrPlusConstraints()
+        updateTierUi()
     }
 
     private fun getDotTargetRotation(): Float {

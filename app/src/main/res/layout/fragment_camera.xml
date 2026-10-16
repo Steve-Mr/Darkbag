@@ -18,7 +18,7 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/camera_container"
-    android:background="@android:color/transparent"
+    android:background="?attr/colorSurfaceContainerLowest"
     android:clipChildren="false"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
@@ -27,10 +27,13 @@
         android:id="@+id/viewFinderContainer"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginHorizontal="@dimen/margin_medium"
-        app:cardCornerRadius="@dimen/radius_medium"
-        app:cardBackgroundColor="@android:color/system_surface_container_dark"
-        app:strokeWidth="0dp"
+        android:layout_marginHorizontal="10dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="6dp"
+        app:cardCornerRadius="22dp"
+        app:cardBackgroundColor="@android:color/black"
+        app:strokeWidth="1dp"
+        app:strokeColor="?attr/colorOutlineVariant"
         app:cardElevation="0dp"
         app:cardPreventCornerOverlap="false"
         app:layout_constraintTop_toTopOf="parent"
@@ -45,7 +48,7 @@
             android:id="@+id/viewFinderStage"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="@android:color/system_surface_container_dark"
+            android:background="@android:color/black"
             android:clipChildren="true">
 
             <top.maary.darkbag.utils.AutoFitTextureView
@@ -140,69 +143,7 @@
                     android:layout_height="match_parent" />
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Unified Controls Hub (Zoom & Physical Lenses) moved inside stage -->
-            <LinearLayout
-                android:id="@+id/lensControlRow"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:visibility="visible"
-                app:layout_constraintBottom_toTopOf="@id/halfFrameFilmEdgeBottom"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintEnd_toEndOf="parent"
-                android:layout_marginBottom="@dimen/margin_xsmall">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/cameraSwitchButtonAlt"
-                    style="@style/Widget.App.Button.IconButton.Large"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="@dimen/spacing_small"
-                    app:icon="@drawable/ic_switch"
-                    app:iconTint="?attr/colorOnSurface"
-                    android:backgroundTint="?attr/colorSurfaceContainerHighest"
-                    android:contentDescription="@string/switch_camera_button_alt" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/modeSwitchButton"
-                    style="@style/Widget.App.Button.IconButton.Large"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="@dimen/spacing_small"
-                    app:icon="@drawable/ic_mode_normal"
-                    app:iconTint="?attr/colorOnSurface"
-                    android:backgroundTint="?attr/colorSurfaceContainerHighest"
-                    android:contentDescription="Switch Capture Mode" />
-
-                <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/lensControlsCard"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    app:cardCornerRadius="26dp"
-                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                    app:strokeWidth="0dp"
-                    android:visibility="gone">
-
-                    <HorizontalScrollView
-                        android:id="@+id/controlsHubScroll"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:paddingHorizontal="4dp"
-                        android:clipToPadding="false"
-                        android:scrollbars="none">
-
-                        <LinearLayout
-                            android:id="@+id/lensControlsContainer"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:paddingVertical="4dp"
-                            android:orientation="horizontal"
-                            android:gravity="center_vertical" />
-                    </HorizontalScrollView>
-                </com.google.android.material.card.MaterialCardView>
-            </LinearLayout>
-</androidx.constraintlayout.widget.ConstraintLayout>
+        </androidx.constraintlayout.widget.ConstraintLayout>
 
     </com.google.android.material.card.MaterialCardView>
 </androidx.constraintlayout.widget.ConstraintLayout>

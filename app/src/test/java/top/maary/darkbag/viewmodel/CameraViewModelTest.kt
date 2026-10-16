@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -36,6 +37,19 @@ class CameraViewModelTest {
         assertFalse(state.isBurstActive)
         assertTrue(state.isHdrPlusEnabled)
         assertEquals(0f, state.shutterDotRotation, 0.001f)
+        assertEquals(CameraUiTier.FILM, state.uiTier)
+        assertEquals("None", state.activeLogName)
+        assertEquals("None", state.activeLutName)
+        assertEquals("Dynamic (Experimental)", state.underexposureMode)
+        assertFalse(state.isFlashEnabled)
+        assertFalse(state.isMotionPhotoEnabled)
+        assertNull(state.activeManualTab)
+        assertFalse(state.isManualFocus)
+        assertFalse(state.isManualIso)
+        assertFalse(state.isManualShutter)
+        assertTrue(state.isProLinked)
+        assertFalse(state.showDetailedTelemetry)
+        assertTrue(state.showFilmRecipeRow)
     }
 
     @Test
@@ -125,5 +139,108 @@ class CameraViewModelTest {
         } == null
         assertTrue(channelEmpty)
     }
-}
 
+    @Test
+    fun testCameraUiTier_NextAndFromKey() {
+        assertEquals(CameraUiTier.FILM, CameraUiTier.POINT_AND_SHOOT.next())
+        assertEquals(CameraUiTier.PRO, CameraUiTier.FILM.next())
+        assertEquals(CameraUiTier.POINT_AND_SHOOT, CameraUiTier.PRO.next())
+
+        assertEquals(CameraUiTier.POINT_AND_SHOOT, CameraUiTier.fromKey("PS"))
+        assertEquals(CameraUiTier.POINT_AND_SHOOT, CameraUiTier.fromKey("ps"))
+        assertEquals(CameraUiTier.FILM, CameraUiTier.fromKey("FILM"))
+        assertEquals(CameraUiTier.FILM, CameraUiTier.fromKey("film"))
+        assertEquals(CameraUiTier.PRO, CameraUiTier.fromKey("PRO"))
+        assertEquals(CameraUiTier.PRO, CameraUiTier.fromKey("pro"))
+        assertEquals(CameraUiTier.FILM, CameraUiTier.fromKey(null))
+        assertEquals(CameraUiTier.FILM, CameraUiTier.fromKey("unknown"))
+    }
+
+    @Test
+    fun testUiTierCycling() {
+        assertEquals(CameraUiTier.FILM, viewModel.uiState.value.uiTier)
+
+        viewModel.cycleUiTier()
+        assertEquals(CameraUiTier.PRO, viewModel.uiState.value.uiTier)
+
+        viewModel.cycleUiTier()
+        assertEquals(CameraUiTier.POINT_AND_SHOOT, viewModel.uiState.value.uiTier)
+
+        viewModel.cycleUiTier()
+        assertEquals(CameraUiTier.FILM, viewModel.uiState.value.uiTier)
+    }
+
+    @Test
+    fun testUiTierComputedProperties() {
+        // POINT_AND_SHOOT
+        viewModel.setUiTier(CameraUiTier.POINT_AND_SHOOT)
+        assertFalse(viewModel.uiState.value.showDetailedTelemetry)
+        assertFalse(viewModel.uiState.value.showFilmRecipeRow)
+
+        // FILM
+        viewModel.setUiTier(CameraUiTier.FILM)
+        assertFalse(viewModel.uiState.value.showDetailedTelemetry)
+        assertTrue(viewModel.uiState.value.showFilmRecipeRow)
+
+        // PRO
+        viewModel.setUiTier(CameraUiTier.PRO)
+        assertTrue(viewModel.uiState.value.showDetailedTelemetry)
+        assertTrue(viewModel.uiState.value.showFilmRecipeRow)
+    }
+
+    @Test
+    fun testSwitchAwayFromProClearsActiveManualTab() {
+        viewModel.setUiTier(CameraUiTier.PRO)
+        viewModel.setActiveManualTab("focus")
+        assertEquals("focus", viewModel.uiState.value.activeManualTab)
+
+        // Cycle away to POINT_AND_SHOOT
+        viewModel.cycleUiTier()
+        assertEquals(CameraUiTier.POINT_AND_SHOOT, viewModel.uiState.value.uiTier)
+        assertNull(viewModel.uiState.value.activeManualTab)
+
+        // Reset to PRO and set active manual tab
+        viewModel.setUiTier(CameraUiTier.PRO)
+        viewModel.setActiveManualTab("iso")
+        assertEquals("iso", viewModel.uiState.value.activeManualTab)
+
+        // Directly setUiTier to FILM
+        viewModel.setUiTier(CameraUiTier.FILM)
+        assertEquals(CameraUiTier.FILM, viewModel.uiState.value.uiTier)
+        assertNull(viewModel.uiState.value.activeManualTab)
+    }
+
+    @Test
+    fun testUpdateColorRecipe() {
+        viewModel.updateColorRecipe("F-Log", "Classic Chrome")
+        assertEquals("F-Log", viewModel.uiState.value.activeLogName)
+        assertEquals("Classic Chrome", viewModel.uiState.value.activeLutName)
+    }
+
+    @Test
+    fun testUpdateManualFlags() {
+        viewModel.updateManualFlags(
+            isManualFocus = true,
+            isManualIso = true,
+            isManualShutter = false,
+            isProLinked = false
+        )
+        val state = viewModel.uiState.value
+        assertTrue(state.isManualFocus)
+        assertTrue(state.isManualIso)
+        assertFalse(state.isManualShutter)
+        assertFalse(state.isProLinked)
+    }
+
+    @Test
+    fun testAdditionalCameraControls() {
+        viewModel.setMotionPhotoEnabled(true)
+        assertTrue(viewModel.uiState.value.isMotionPhotoEnabled)
+
+        viewModel.setFlashEnabled(true)
+        assertTrue(viewModel.uiState.value.isFlashEnabled)
+
+        viewModel.setUnderexposureMode("Dynamic Daylight")
+        assertEquals("Dynamic Daylight", viewModel.uiState.value.underexposureMode)
+    }
+}
