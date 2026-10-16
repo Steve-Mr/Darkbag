@@ -240,7 +240,7 @@ object ColorRecipeBottomSheet {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 val hPad = (16 * density).roundToInt()
-                val topPad = (12 * density).roundToInt()
+                val topPad = (14 * density).roundToInt()
                 val btmPad = (6 * density).roundToInt()
                 setPadding(hPad, topPad, hPad, btmPad)
             }
@@ -296,9 +296,7 @@ object ColorRecipeBottomSheet {
         val lutRecyclerView = MaxHeightRecyclerView(context).apply {
             layoutManager = GridLayoutManager(context, 2)
             clipToPadding = false
-            val hPad = (12 * density).roundToInt()
-            val bPad = (8 * density).roundToInt()
-            setPadding(hPad, 0, hPad, bPad)
+            setPadding((16 * density).roundToInt(), (4 * density).roundToInt(), (16 * density).roundToInt(), (12 * density).roundToInt())
         }
         rootLayout.addView(lutRecyclerView)
 
@@ -358,17 +356,19 @@ object ColorRecipeBottomSheet {
                     val margin = (4 * density).roundToInt()
                     layoutParams = RecyclerView.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
+                        (46 * density).roundToInt()
                     ).apply {
                         setMargins(margin, margin, margin, margin)
                     }
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.END
                     isAllCaps = false
-                    textSize = 13f
+                    textSize = 12.5f
+                    setTypeface(typeface, Typeface.BOLD)
+                    gravity = Gravity.CENTER
                     insetTop = 0
                     insetBottom = 0
-                    setPadding(0, 0, 0, 0)
+                    setPadding((12 * density).roundToInt(), 0, (12 * density).roundToInt(), 0)
                 }
                 return LutViewHolder(btn)
             }
@@ -380,12 +380,12 @@ object ColorRecipeBottomSheet {
 
                 val isActive = isEntryActive(entry, currentLut)
                 if (isActive) {
-                    // Bento active tile: 8dp corner radius morph, colorSecondaryContainer fill, colorPrimary stroke
+                    // Bento active tile: 10dp corner radius squircle morph, colorSecondaryContainer fill, colorPrimary stroke 1.5dp
                     btn.backgroundTintList = ColorStateList.valueOf(colorSecondaryContainer)
                     btn.setTextColor(colorOnSecondaryContainer)
                     btn.strokeColor = ColorStateList.valueOf(colorPrimary)
                     btn.strokeWidth = (1.5f * density).roundToInt()
-                    btn.cornerRadius = (8 * density).roundToInt()
+                    btn.cornerRadius = (10 * density).roundToInt()
                 } else {
                     // Bento inactive tile: 12dp corner radius, colorSurfaceContainerHigh fill, 0 stroke
                     btn.backgroundTintList = ColorStateList.valueOf(colorSurfaceContainerHigh)

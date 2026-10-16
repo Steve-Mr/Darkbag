@@ -30,7 +30,7 @@ import com.google.android.material.color.MaterialColors
  * Material 3 Expressive Bento "Tofu Block" (豆腐块) Shutter Button.
  *
  * Features:
- * - Bento Tofu Block rounded rectangle shape with rest radius 20dp morphing to 12dp on press.
+ * - Bento Tofu Block rounded rectangle shape with rest radius 16dp morphing to 12dp on press.
  * - Dynamic M3 tonal container fill and subtle primary border stroke.
  * - Perimeter orientation pill indicator smoothly interpolating along the Tofu Block perimeter.
  * - Internal progress fill (determinate) and sweeping highlight wave (indeterminate burst/capture).
@@ -104,8 +104,8 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     private var continuousRotation = 0f
     private var clickRotation = 0f
 
-    // Corner Morphing: 20dp rest -> 12dp press
-    private var currentCornerRadiusDp = 20f
+    // Corner Morphing: 16dp rest -> 12dp press
+    private var currentCornerRadiusDp = 16f
     private var cornerMorphAnimator: ValueAnimator? = null
 
     // Half-Frame split state
@@ -203,7 +203,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         val rippleColor = MaterialColors.getColor(this, android.R.attr.colorControlHighlight)
         val maskDrawable = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = 20f * dp
+            cornerRadius = 16f * dp
             setColor(Color.WHITE)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -249,7 +249,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
             }
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPressRunnable)
-                animateCornerRadius(20f, 180L)
+                animateCornerRadius(16f, 180L)
                 animate().scaleX(1.0f).scaleY(1.0f).setDuration(160).withEndAction {
                     if (!isRotating) {
                         clickSpinAnimator.cancel()
@@ -267,7 +267,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
             }
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPressRunnable)
-                animateCornerRadius(20f, 180L)
+                animateCornerRadius(16f, 180L)
                 animate().scaleX(1.0f).scaleY(1.0f).setDuration(160).start()
                 if (isHoldingLongPress) {
                     isHoldingLongPress = false

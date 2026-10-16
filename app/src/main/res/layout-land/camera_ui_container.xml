@@ -92,16 +92,14 @@
         app:layout_constraintStart_toStartOf="@id/viewFinderContainer" />
 
     <!-- Level 2: Pro Parameter Connected Button Group in Landscape (M3 Expressive Connected Capsule) -->
-    <com.google.android.material.button.MaterialButtonToggleGroup
+    <LinearLayout
         android:id="@+id/pro_info_bar_card"
         android:layout_width="0dp"
         android:layout_height="36dp"
         android:layout_marginStart="6dp"
         android:layout_marginEnd="10dp"
         android:visibility="gone"
-        app:singleSelection="true"
-        app:selectionRequired="false"
-        app:cornerRadius="18dp"
+        android:orientation="horizontal"
         app:elevation="2dp"
         android:background="@drawable/bg_pro_connected_group"
         app:layout_constraintTop_toTopOf="@id/btn_pro_mode"
@@ -125,7 +123,9 @@
             android:minHeight="0dp"
             android:maxLines="2"
             android:gravity="center"
-            android:textSize="10sp"
+            android:includeFontPadding="false"
+            android:lineSpacingExtra="1dp"
+            android:textSize="10.5sp"
             android:textStyle="bold"
             android:text="AF"
             android:textColor="?attr/colorOnSurface"
@@ -148,7 +148,9 @@
             android:minHeight="0dp"
             android:maxLines="2"
             android:gravity="center"
-            android:textSize="10sp"
+            android:includeFontPadding="false"
+            android:lineSpacingExtra="1dp"
+            android:textSize="10.5sp"
             android:textStyle="bold"
             android:text="ISO"
             android:textColor="?attr/colorOnSurface"
@@ -171,7 +173,9 @@
             android:minHeight="0dp"
             android:maxLines="2"
             android:gravity="center"
-            android:textSize="10sp"
+            android:includeFontPadding="false"
+            android:lineSpacingExtra="1dp"
+            android:textSize="10.5sp"
             android:textStyle="bold"
             android:text="SEC"
             android:textColor="?attr/colorOnSurface"
@@ -194,7 +198,9 @@
             android:minHeight="0dp"
             android:maxLines="2"
             android:gravity="center"
-            android:textSize="10sp"
+            android:includeFontPadding="false"
+            android:lineSpacingExtra="1dp"
+            android:textSize="10.5sp"
             android:textStyle="bold"
             android:text="EV"
             android:textColor="?attr/colorOnSurface"
@@ -221,7 +227,7 @@
             app:strokeColor="?attr/colorOutlineVariant"
             android:visibility="gone"
             android:contentDescription="Toggle Multi-Camera Sync Link" />
-    </com.google.android.material.button.MaterialButtonToggleGroup>
+    </LinearLayout>
 
     <!-- Level 3: Pro Dial Wheel Top Panel in Landscape (Integrated directly below Level 2 bar) -->
     <com.google.android.material.card.MaterialCardView

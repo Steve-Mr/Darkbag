@@ -45,8 +45,8 @@
         android:layout_marginHorizontal="10dp"
         android:layout_marginBottom="6dp"
         app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
-        app:cardCornerRadius="24dp"
-        app:contentPadding="6dp"
+        app:cardCornerRadius="26dp"
+        app:contentPadding="8dp"
         app:strokeWidth="1dp"
         app:strokeColor="?attr/colorOutlineVariant"
         app:cardElevation="0dp"
@@ -80,7 +80,7 @@
                     android:layout_marginBottom="5dp"
                     android:visibility="gone"
                     app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="18dp"
                     app:strokeWidth="1dp"
                     app:strokeColor="?attr/colorOutlineVariant"
                     app:cardElevation="0dp">
@@ -186,15 +186,13 @@
                 </com.google.android.material.card.MaterialCardView>
 
                 <!-- Sub-Row A2: Pro Telemetry & Parameter Bento Row (AF/MF · ISO · SEC · EV · LINK) -->
-                <com.google.android.material.button.MaterialButtonToggleGroup
+                <LinearLayout
                     android:id="@+id/pro_info_bar_card"
                     android:layout_width="match_parent"
-                    android:layout_height="40dp"
+                    android:layout_height="48dp"
                     android:layout_marginBottom="5dp"
+                    android:orientation="horizontal"
                     android:visibility="visible"
-                    app:singleSelection="true"
-                    app:selectionRequired="false"
-                    app:cornerRadius="14dp"
                     android:background="@drawable/bg_pro_connected_group">
 
                     <com.google.android.material.button.MaterialButton
@@ -206,12 +204,14 @@
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:paddingHorizontal="1dp"
-                        android:paddingVertical="0dp"
+                        android:paddingVertical="2dp"
                         android:minWidth="0dp"
                         android:minHeight="0dp"
                         android:maxLines="2"
                         android:gravity="center"
-                        android:textSize="10sp"
+                        android:includeFontPadding="false"
+                        android:lineSpacingExtra="1dp"
+                        android:textSize="10.5sp"
                         android:textStyle="bold"
                         android:text="AF"
                         android:textColor="?attr/colorOnSurface"
@@ -227,12 +227,14 @@
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:paddingHorizontal="1dp"
-                        android:paddingVertical="0dp"
+                        android:paddingVertical="2dp"
                         android:minWidth="0dp"
                         android:minHeight="0dp"
                         android:maxLines="2"
                         android:gravity="center"
-                        android:textSize="10sp"
+                        android:includeFontPadding="false"
+                        android:lineSpacingExtra="1dp"
+                        android:textSize="10.5sp"
                         android:textStyle="bold"
                         android:text="ISO"
                         android:textColor="?attr/colorOnSurface"
@@ -248,12 +250,14 @@
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:paddingHorizontal="1dp"
-                        android:paddingVertical="0dp"
+                        android:paddingVertical="2dp"
                         android:minWidth="0dp"
                         android:minHeight="0dp"
                         android:maxLines="2"
                         android:gravity="center"
-                        android:textSize="10sp"
+                        android:includeFontPadding="false"
+                        android:lineSpacingExtra="1dp"
+                        android:textSize="10.5sp"
                         android:textStyle="bold"
                         android:text="SEC"
                         android:textColor="?attr/colorOnSurface"
@@ -269,12 +273,14 @@
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:paddingHorizontal="1dp"
-                        android:paddingVertical="0dp"
+                        android:paddingVertical="2dp"
                         android:minWidth="0dp"
                         android:minHeight="0dp"
                         android:maxLines="2"
                         android:gravity="center"
-                        android:textSize="10sp"
+                        android:includeFontPadding="false"
+                        android:lineSpacingExtra="1dp"
+                        android:textSize="10.5sp"
                         android:textStyle="bold"
                         android:text="EV"
                         android:textColor="?attr/colorOnSurface"
@@ -300,7 +306,7 @@
                         app:strokeColor="?attr/colorOutlineVariant"
                         android:visibility="gone"
                         android:contentDescription="Toggle Multi-Camera Sync Link" />
-                </com.google.android.material.button.MaterialButtonToggleGroup>
+                </LinearLayout>
             </LinearLayout>
 
             <!-- ================================================================= -->
@@ -478,7 +484,7 @@
                     app:iconPadding="0dp"
                     app:iconTint="?attr/colorOnSurface"
                     app:backgroundTint="?attr/colorSurfaceContainerHighest"
-                    app:cornerRadius="14dp"
+                    app:cornerRadius="18dp"
                     android:contentDescription="Switch Capture Mode" />
 
                 <!-- 2. Center Dynamic Weighted Lens Bento Strip (Physical vs Crop Lenses) -->
@@ -519,7 +525,7 @@
                     app:iconPadding="0dp"
                     app:iconTint="?attr/colorOnSurface"
                     app:backgroundTint="?attr/colorSurfaceContainerHigh"
-                    app:cornerRadius="14dp"
+                    app:cornerRadius="18dp"
                     android:contentDescription="@string/switch_camera_button_alt" />
             </LinearLayout>
 
@@ -535,7 +541,8 @@
 
                 <!-- 1. Left Bento Tile: Gallery Thumbnail & Processing Indicator -->
                 <com.google.android.material.card.MaterialCardView
-                    android:layout_width="76dp"
+                    android:id="@+id/photo_view_card"
+                    android:layout_width="72dp"
                     android:layout_height="match_parent"
                     android:layout_marginEnd="5dp"
                     app:cardCornerRadius="18dp"
@@ -551,12 +558,12 @@
 
                         <ImageButton
                             android:id="@+id/photo_view_button"
-                            android:layout_width="52dp"
-                            android:layout_height="52dp"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
                             android:layout_gravity="center"
-                            android:padding="4dp"
-                            android:scaleType="fitCenter"
-                            android:background="@drawable/ic_outer_circle"
+                            android:padding="0dp"
+                            android:scaleType="centerCrop"
+                            android:background="@null"
                             android:src="@drawable/ic_photo"
                             android:contentDescription="@string/gallery_button_alt" />
 
@@ -594,7 +601,7 @@
 
                 <!-- 3. Right Bento Stack: P&S / FILM / PRO Tier Button + Playground / Settings -->
                 <LinearLayout
-                    android:layout_width="88dp"
+                    android:layout_width="102dp"
                     android:layout_height="match_parent"
                     android:orientation="vertical">
 
@@ -602,8 +609,7 @@
                         android:id="@+id/btn_bento_tier"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="match_parent"
-                        android:layout_height="0dp"
-                        android:layout_weight="1"
+                        android:layout_height="40dp"
                         android:layout_marginBottom="4dp"
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
@@ -619,7 +625,7 @@
 
                     <LinearLayout
                         android:layout_width="match_parent"
-                        android:layout_height="30dp"
+                        android:layout_height="40dp"
                         android:orientation="horizontal">
 
                         <com.google.android.material.button.MaterialButton
@@ -635,12 +641,12 @@
                             android:minHeight="0dp"
                             android:padding="0dp"
                             app:icon="@drawable/ic_style"
-                            app:iconSize="16dp"
+                            app:iconSize="18dp"
                             app:iconGravity="textStart"
                             app:iconPadding="0dp"
                             app:iconTint="?attr/colorOnSurfaceVariant"
                             app:backgroundTint="?attr/colorSurfaceContainerHigh"
-                            app:cornerRadius="10dp"
+                            app:cornerRadius="12dp"
                             android:contentDescription="Color Playground" />
 
                         <com.google.android.material.button.MaterialButton
@@ -655,12 +661,12 @@
                             android:minHeight="0dp"
                             android:padding="0dp"
                             app:icon="@drawable/ic_settings"
-                            app:iconSize="16dp"
+                            app:iconSize="18dp"
                             app:iconGravity="textStart"
                             app:iconPadding="0dp"
                             app:iconTint="?attr/colorOnSurfaceVariant"
                             app:backgroundTint="?attr/colorSurfaceContainerHigh"
-                            app:cornerRadius="10dp"
+                            app:cornerRadius="12dp"
                             android:contentDescription="@string/settings_button_alt" />
                     </LinearLayout>
                 </LinearLayout>

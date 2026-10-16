@@ -88,7 +88,7 @@ class CameraBentoDeckView @JvmOverloads constructor(
 
             val isTallScreen = maxDp >= 750 || aspectRatio >= 1.9f
 
-            val proBarDp = if (isTallScreen) 48 else 42
+            val proBarDp = 48
             val recipeRowDp = if (isTallScreen) 54 else 48
             val lensRowDp = if (isTallScreen) 54 else 48
             val shutterRowDp = if (isTallScreen) 88 else 78
@@ -226,7 +226,7 @@ class CameraBentoDeckView @JvmOverloads constructor(
             }
 
             // Row B: Film Recipe + Quick Switches (visible in FILM and PRO; hidden in P&S)
-            val showFilmRow = (tier == CameraUiTier.FILM || tier == CameraUiTier.PRO)
+            val showFilmRow = (tier == CameraUiTier.FILM || tier == CameraUiTier.PRO) && !hasActiveManualTab
             binding.bentoFilmRow?.visibility = if (showFilmRow) View.VISIBLE else View.GONE
             binding.bentoLogButton?.visibility = if (showFilmRow && showLutSwitcherPref) View.VISIBLE else View.GONE
             binding.lutSwitcherButton?.visibility = if (showFilmRow && showLutSwitcherPref) View.VISIBLE else View.GONE
@@ -292,15 +292,15 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 Color.LTGRAY
             )
 
-            label.text = if (isHdrPlusEnabled) "HDR+" else "HDR-"
+            label.text = if (isHdrPlusEnabled) "HDR+" else "HDR"
             if (isHdrPlusEnabled) {
                 card.setCardBackgroundColor(colorPrimaryContainer)
                 label.setTextColor(colorOnPrimaryContainer)
-                card.radius = 12f * density
+                card.radius = 14f * density
             } else {
                 card.setCardBackgroundColor(colorSurfaceContainerHigh)
                 label.setTextColor(colorOnSurfaceVariant)
-                card.radius = 14f * density
+                card.radius = 16f * density
             }
         }
 
@@ -481,7 +481,7 @@ class CameraBentoDeckView @JvmOverloads constructor(
         fun styleModeSwitchButton(button: MaterialButton, isSpecialMode: Boolean) {
             val density = button.resources.displayMetrics.density
             val radius12dp = (12f * density).roundToInt()
-            val radius14dp = (14f * density).roundToInt()
+            val radius18dp = (18f * density).roundToInt()
             val stroke1_5dp = (1.5f * density).roundToInt()
 
             val colorPrimary = MaterialColors.getColor(
@@ -521,7 +521,7 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 button.iconTint = ColorStateList.valueOf(colorOnSurfaceVariant)
                 button.strokeColor = ColorStateList.valueOf(Color.TRANSPARENT)
                 button.strokeWidth = 0
-                button.cornerRadius = radius14dp
+                button.cornerRadius = radius18dp
             }
         }
 

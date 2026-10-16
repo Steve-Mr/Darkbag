@@ -870,7 +870,7 @@ class CameraFragment : Fragment() {
                 photoViewButton.alpha = 1f
             }
 
-            photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+            photoViewButton.setPadding(0, 0, 0, 0)
             lifecycleScope.launch(Dispatchers.Main) {
                 val uri = try { android.net.Uri.parse(filename) } catch (_: Exception) { null }
                 val isRawVid = filename.endsWith(".rawvid", ignoreCase = true) || uri?.toString()?.endsWith(".rawvid", ignoreCase = true) == true
@@ -931,7 +931,7 @@ class CameraFragment : Fragment() {
                     if (bmp != null) {
                         Glide.with(photoViewButton)
                             .load(bmp)
-                            .apply(RequestOptions.circleCropTransform())
+                            .apply(RequestOptions.centerCropTransform())
                             .into(photoViewButton)
                         return@launch
                     }
@@ -954,7 +954,7 @@ class CameraFragment : Fragment() {
                     .load(loadTarget)
                     .override(thumbSizePx, thumbSizePx)
                     .downsample(com.bumptech.glide.load.resource.bitmap.DownsampleStrategy.CENTER_INSIDE)
-                    .apply(RequestOptions.circleCropTransform())
+                    .apply(RequestOptions.centerCropTransform())
                     .signature(com.bumptech.glide.signature.ObjectKey(lastModified))
                     .into(photoViewButton)
             }
@@ -1567,16 +1567,15 @@ class CameraFragment : Fragment() {
 
                     val containerId = vfBinding.viewFinderContainer.id
                     val topId = uiBinding.topRightControls?.id
-                    val bottomId = uiBinding.bottomIslandCard?.id
-                    if (topId != null && bottomId != null) {
+                    if (topId != null) {
                         val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
                         constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START, marginMedium)
                         constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END, marginMedium)
 
                         constraintSet.constrainHeight(containerId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
                         constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.TOP, topId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
-                        constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomId, androidx.constraintlayout.widget.ConstraintSet.TOP)
-                        constraintSet.setVerticalBias(containerId, 0.12f)
+                        constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
+                        constraintSet.setVerticalBias(containerId, 0.08f)
                     }
 
                     constraintSet.applyTo(root)
@@ -1626,6 +1625,8 @@ class CameraFragment : Fragment() {
             cameraViewModel.setUiTier(nextTier)
             if (nextTier != CameraUiTier.PRO && activeManualTab != null) {
                 activeManualTab = null
+                cameraViewModel.setActiveManualTab(null)
+                updateBentoFolding(isDialOpen = false)
                 updateFocusPeakingState()
                 updateProInfoBar()
             }
@@ -1790,13 +1791,7 @@ class CameraFragment : Fragment() {
 
         // Log & LUT Switcher (Bento Row 1 -> opens Modal BottomSheet so layout never shifts)
         val openColorRecipeSheet = View.OnClickListener {
-            if (activeManualTab != null) {
-                cameraUiContainerBinding?.manualControlsRoot?.visibility = View.GONE
-                cameraUiContainerBinding?.dialPanel?.visibility = View.GONE
-                activeManualTab = null
-                updateFocusPeakingState()
-                updateProInfoBar()
-            }
+            dismissFloatingOverlays()
             showLutMenu()
         }
         cameraUiContainerBinding?.bentoLogButton?.setOnClickListener(openColorRecipeSheet)
@@ -2418,18 +2413,53 @@ class CameraFragment : Fragment() {
         }
 
         if (binding.manualControlsRoot?.visibility == View.VISIBLE ||
-            binding.dialPanel?.visibility == View.VISIBLE ||
             activeManualTab != null
         ) {
             binding.manualControlsRoot?.visibility = View.GONE
-            binding.dialPanel?.visibility = View.GONE
             activeManualTab = null
+            cameraViewModel.setActiveManualTab(null)
+            updateBentoFolding(isDialOpen = false)
             updateFocusPeakingState()
             updateProInfoBar()
             updateLensControlRowPosition(animate = true)
         }
 
         binding.touchOverlay?.visibility = View.GONE
+    }
+
+    private fun updateBentoFolding(isDialOpen: Boolean) {
+        val binding = cameraUiContainerBinding ?: return
+        val density = resources.displayMetrics.density
+        if (isDialOpen) {
+            // Collapse bento_film_row to View.GONE (reclaims 54dp!)
+            binding.bentoFilmRow?.visibility = View.GONE
+            // Compact lens_control_row height to 42dp
+            binding.lensControlRow?.let { v ->
+                val lp = v.layoutParams
+                val h = (42 * density).roundToInt()
+                if (lp != null && lp.height != h) {
+                    lp.height = h
+                    v.layoutParams = lp
+                }
+            }
+            // Compact bento_shutter_row height to 72dp
+            binding.bentoShutterRow?.let { v ->
+                val lp = v.layoutParams
+                val h = (72 * density).roundToInt()
+                if (lp != null && lp.height != h) {
+                    lp.height = h
+                    v.layoutParams = lp
+                }
+            }
+        } else {
+            // Restore bento_film_row to View.VISIBLE
+            val tier = cameraViewModel.uiState.value.uiTier
+            if (tier == CameraUiTier.FILM || tier == CameraUiTier.PRO) {
+                binding.bentoFilmRow?.visibility = View.VISIBLE
+            }
+            // Restore lens_control_row and bento_shutter_row to standard/tall heights via applyDynamicRowHeights()
+            CameraBentoDeckView.applyDynamicRowHeights(binding)
+        }
     }
 
     private fun initManualControls() {
@@ -2511,15 +2541,20 @@ class CameraFragment : Fragment() {
         if (activeManualTab == tab) {
             // Collapse dial
             activeManualTab = null
+            cameraViewModel.setActiveManualTab(null)
             binding.manualControlsRoot?.visibility = View.GONE
             binding.touchOverlay?.visibility = View.GONE
+            updateBentoFolding(isDialOpen = false)
             updateFocusPeakingState()
             updateProInfoBar()
         } else {
             // Open dial
             activeManualTab = tab
+            cameraViewModel.setActiveManualTab(tab)
             binding.manualControlsRoot?.visibility = View.VISIBLE
+            binding.dialPanel?.visibility = View.VISIBLE
             binding.touchOverlay?.visibility = View.VISIBLE
+            updateBentoFolding(isDialOpen = true)
             updateDialPanel()
             updateFocusPeakingState()
             updateProInfoBar()
@@ -5771,10 +5806,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         if (photoViewButton != null && thumbnail != null) {
                             photoViewButton.visibility = View.VISIBLE
                             photoViewButton.alpha = 1f
-                            photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+                            photoViewButton.setPadding(0, 0, 0, 0)
                             Glide.with(photoViewButton)
                                 .load(thumbnail)
-                                .apply(RequestOptions.circleCropTransform())
+                                .apply(RequestOptions.centerCropTransform())
                                 .into(photoViewButton)
                         }
                     }
@@ -5867,10 +5902,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         if (photoViewButton != null && thumbnail != null) {
                             photoViewButton.visibility = View.VISIBLE
                             photoViewButton.alpha = 1f
-                            photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+                            photoViewButton.setPadding(0, 0, 0, 0)
                             Glide.with(photoViewButton)
                                 .load(thumbnail)
-                                .apply(RequestOptions.circleCropTransform())
+                                .apply(RequestOptions.centerCropTransform())
                                 .into(photoViewButton)
                         }
                     }
