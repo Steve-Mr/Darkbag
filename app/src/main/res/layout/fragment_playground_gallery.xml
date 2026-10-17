@@ -10,21 +10,148 @@
         android:id="@+id/appBarLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        app:liftOnScroll="true"
-        app:liftOnScrollTargetViewId="@+id/recyclerView"
-        app:elevation="4dp"
-        android:outlineProvider="background"
-        android:background="?android:attr/colorBackground">
+        app:liftOnScroll="false"
+        app:elevation="0dp"
+        android:background="@android:color/transparent">
 
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
+            android:layout_height="1dp"
+            android:visibility="gone"
             app:title="Playground"
             android:background="@android:color/transparent"
             app:navigationIcon="@drawable/ic_back"
             app:navigationIconTint="?attr/colorOnSurface"
             app:menu="@menu/menu_playground_gallery" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/playground_top_bento_card"
+            style="@style/Widget.Material3.CardView.Filled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="12dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="4dp"
+            app:cardCornerRadius="26dp"
+            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:contentPadding="6dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_playground_back"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
+                    android:padding="0dp"
+                    app:cornerRadius="18dp"
+                    app:icon="@drawable/ic_back"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconTint="?attr/colorOnSurface"
+                    app:backgroundTint="?attr/colorSurfaceContainerHigh"
+                    android:contentDescription="@string/back_button_alt" />
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/playground_title_card"
+                    style="@style/Widget.Material3.CardView.Filled"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:layout_marginEnd="6dp"
+                    app:cardCornerRadius="14dp"
+                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                    app:cardElevation="0dp"
+                    app:strokeWidth="1dp"
+                    app:strokeColor="?attr/colorOutlineVariant">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical"
+                        android:gravity="center"
+                        android:paddingHorizontal="8dp">
+
+                        <TextView
+                            android:id="@+id/tv_playground_title"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="PLAYGROUND"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:textColor="?attr/colorOnSurface"
+                            android:singleLine="true"
+                            android:ellipsize="end" />
+
+                        <TextView
+                            android:id="@+id/tv_playground_subtitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="外部导入暗房 (0 SANDBOX)"
+                            android:textSize="9.5sp"
+                            android:textColor="?attr/colorTertiary"
+                            android:singleLine="true"
+                            android:ellipsize="end" />
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_playground_select_all"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="42dp"
+                    android:minWidth="56dp"
+                    android:layout_marginEnd="6dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:text="☑ ALL"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    app:cornerRadius="14dp"
+                    app:backgroundTint="?attr/colorSecondaryContainer"
+                    android:textColor="?attr/colorOnSecondaryContainer" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_playground_settings"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
+                    android:padding="0dp"
+                    app:cornerRadius="18dp"
+                    app:icon="@drawable/ic_settings"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconTint="?attr/colorOnSurface"
+                    app:backgroundTint="?attr/colorSurfaceContainerHigh"
+                    android:contentDescription="Settings" />
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
 
     </com.google.android.material.appbar.AppBarLayout>
 
@@ -46,101 +173,135 @@
         android:textAppearance="?attr/textAppearanceBodyLarge"
         android:visibility="gone" />
 
-    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
-        android:id="@+id/fabAdd"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="16dp"
-        android:text="＋ IMPORT"
-        android:textColor="?attr/colorPrimary"
-        android:contentDescription="Import DNG"
-        app:icon="@drawable/ic_add"
-        app:iconTint="?attr/colorPrimary"
-        app:backgroundTint="?attr/colorPrimaryContainer"
-        app:cornerRadius="16dp" />
-
     <com.google.android.material.bottomappbar.BottomAppBar
         android:id="@+id/bottomAppBar"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="1dp"
         android:layout_gravity="bottom"
         android:visibility="gone"
-        app:hideOnScroll="true"
         app:elevation="0dp"
-        app:backgroundTint="@android:color/transparent">
+        app:backgroundTint="@android:color/transparent" />
 
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:layout_marginVertical="8dp"
-            app:cardCornerRadius="26dp"
-            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
-            app:cardElevation="0dp"
-            app:strokeWidth="1dp"
-            app:strokeColor="?attr/colorOutlineVariant"
-            app:contentPadding="8dp">
+    <!-- Always-Docked Bottom Concentric Bento Action Deck -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/playground_bento_dock"
+        style="@style/Widget.Material3.CardView.Filled"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_margin="12dp"
+        app:cardCornerRadius="26dp"
+        app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
+        app:cardElevation="0dp"
+        app:strokeWidth="1dp"
+        app:strokeColor="?attr/colorOutlineVariant"
+        app:contentPadding="8dp">
 
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnExport"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="44dp"
-                    android:layout_marginEnd="6dp"
-                    app:cornerRadius="14dp"
-                    android:text="↗ EXPORT" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/fabAdd"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1.15"
+                android:layout_marginEnd="5dp"
+                android:insetLeft="0dp"
+                android:insetTop="0dp"
+                android:insetRight="0dp"
+                android:insetBottom="0dp"
+                android:padding="2dp"
+                android:text="＋ IMPORT\n导入外部 DNG"
+                android:lines="2"
+                android:gravity="center"
+                android:textSize="10.5sp"
+                android:contentDescription="Import DNG"
+                app:cornerRadius="18dp"
+                app:backgroundTint="?attr/colorSurfaceContainerHigh"
+                android:textColor="?attr/colorOnSurface" />
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnMerge"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="44dp"
-                    android:layout_marginEnd="6dp"
-                    app:cornerRadius="14dp"
-                    app:backgroundTint="?attr/colorPrimaryContainer"
-                    android:textColor="?attr/colorPrimary"
-                    android:text="⊞ MERGE HF"
-                    android:visibility="gone" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnMerge"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1.2"
+                android:layout_marginEnd="5dp"
+                android:insetLeft="0dp"
+                android:insetTop="0dp"
+                android:insetRight="0dp"
+                android:insetBottom="0dp"
+                android:padding="2dp"
+                android:text="⊞ MERGE HF\n半格拼图"
+                android:lines="2"
+                android:gravity="center"
+                android:textSize="10.5sp"
+                app:cornerRadius="14dp"
+                app:backgroundTint="?attr/colorSurfaceContainerHigh"
+                android:textColor="?attr/colorOnSurface" />
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnDisband"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="44dp"
-                    android:layout_marginEnd="6dp"
-                    app:cornerRadius="14dp"
-                    android:text="@string/playground_btn_disband"
-                    android:visibility="gone" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnDisband"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1.0"
+                android:layout_marginEnd="5dp"
+                android:insetLeft="0dp"
+                android:insetTop="0dp"
+                android:insetRight="0dp"
+                android:insetBottom="0dp"
+                android:padding="2dp"
+                android:text="@string/playground_btn_disband"
+                android:lines="2"
+                android:gravity="center"
+                android:textSize="10.5sp"
+                android:visibility="gone"
+                app:cornerRadius="14dp" />
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnDelete"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
-                    android:insetLeft="0dp"
-                    android:insetTop="0dp"
-                    android:insetRight="0dp"
-                    android:insetBottom="0dp"
-                    android:padding="0dp"
-                    app:cornerRadius="14dp"
-                    app:icon="@drawable/ic_delete"
-                    app:iconGravity="textStart"
-                    app:iconPadding="0dp"
-                    app:iconTint="?attr/colorOnErrorContainer"
-                    app:backgroundTint="?attr/colorErrorContainer"
-                    android:visibility="gone" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnExport"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1.15"
+                android:layout_marginEnd="5dp"
+                android:insetLeft="0dp"
+                android:insetTop="0dp"
+                android:insetRight="0dp"
+                android:insetBottom="0dp"
+                android:padding="2dp"
+                android:text="↗ EXPORT\n批量导出"
+                android:lines="2"
+                android:gravity="center"
+                android:textSize="10.5sp"
+                app:cornerRadius="14dp"
+                app:backgroundTint="?attr/colorSecondaryContainer"
+                android:textColor="?attr/colorOnSecondaryContainer" />
 
-            </LinearLayout>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnDelete"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="48dp"
+                android:layout_height="match_parent"
+                android:insetLeft="0dp"
+                android:insetTop="0dp"
+                android:insetRight="0dp"
+                android:insetBottom="0dp"
+                android:padding="0dp"
+                app:cornerRadius="18dp"
+                app:icon="@drawable/ic_delete"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconTint="?attr/colorOnErrorContainer"
+                app:backgroundTint="?attr/colorErrorContainer" />
 
-        </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
 
-    </com.google.android.material.bottomappbar.BottomAppBar>
+    </com.google.android.material.card.MaterialCardView>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

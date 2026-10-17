@@ -871,48 +871,84 @@
                     android:orientation="vertical"
                     android:padding="@dimen/padding_medium">
 
-                    <com.google.android.material.button.MaterialButtonToggleGroup
-                        android:id="@+id/toggle_ui_tiers"
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/Widget.Material3.CardView.Filled"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginBottom="@dimen/spacing_medium"
-                        app:singleSelection="true"
-                        app:selectionRequired="true">
+                        app:cardCornerRadius="20dp"
+                        app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
+                        app:cardElevation="0dp"
+                        app:strokeWidth="1dp"
+                        app:strokeColor="?attr/colorOutlineVariant"
+                        app:contentPadding="5dp">
 
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btn_tier_ps"
-                            style="@style/Widget.Material3.Button.OutlinedButton"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="P&amp;S 极简层"
-                            android:textSize="12sp"
-                            android:paddingStart="4dp"
-                            android:paddingEnd="4dp" />
+                        <com.google.android.material.button.MaterialButtonToggleGroup
+                            android:id="@+id/toggle_ui_tiers"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            app:singleSelection="true"
+                            app:selectionRequired="true">
 
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btn_tier_film"
-                            style="@style/Widget.Material3.Button.OutlinedButton"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="FILM 胶片层"
-                            android:textSize="12sp"
-                            android:paddingStart="4dp"
-                            android:paddingEnd="4dp" />
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_tier_ps"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1"
+                                android:layout_marginEnd="5dp"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:paddingStart="4dp"
+                                android:paddingEnd="4dp"
+                                android:text="P&amp;S\n极简层"
+                                android:lines="2"
+                                android:gravity="center"
+                                android:textSize="11sp"
+                                app:cornerRadius="14dp"
+                                app:backgroundTint="?attr/colorSurfaceContainerHigh"
+                                android:textColor="?attr/colorOnSurface" />
 
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btn_tier_pro"
-                            style="@style/Widget.Material3.Button.OutlinedButton"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="PRO 专业层"
-                            android:textSize="12sp"
-                            android:paddingStart="4dp"
-                            android:paddingEnd="4dp" />
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_tier_film"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1"
+                                android:layout_marginEnd="5dp"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:paddingStart="4dp"
+                                android:paddingEnd="4dp"
+                                android:text="FILM\n胶片层"
+                                android:lines="2"
+                                android:gravity="center"
+                                android:textSize="11sp"
+                                app:cornerRadius="14dp"
+                                app:backgroundTint="?attr/colorSurfaceContainerHigh"
+                                android:textColor="?attr/colorOnSurface" />
 
-                    </com.google.android.material.button.MaterialButtonToggleGroup>
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_tier_pro"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:paddingStart="4dp"
+                                android:paddingEnd="4dp"
+                                android:text="PRO\n专业层"
+                                android:lines="2"
+                                android:gravity="center"
+                                android:textSize="11sp"
+                                app:cornerRadius="14dp"
+                                app:backgroundTint="?attr/colorSurfaceContainerHigh"
+                                android:textColor="?attr/colorOnSurface" />
+
+                        </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                    </com.google.android.material.card.MaterialCardView>
 
                     <!-- Container Tier 1: Point & Shoot (P&S) Controls -->
                     <LinearLayout

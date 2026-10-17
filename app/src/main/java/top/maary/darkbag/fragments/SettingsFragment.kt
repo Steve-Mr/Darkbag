@@ -634,14 +634,54 @@ class SettingsFragment : Fragment() {
             binding.layoutExternalViewerMenu.visibility = if (isChecked) View.GONE else View.VISIBLE
         }
 
+        fun styleTierButton(btn: com.google.android.material.button.MaterialButton, title: String, subtitle: String, isActive: Boolean) {
+            val ctx = requireContext()
+            btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                label = title,
+                value = subtitle,
+                isTabActive = isActive,
+                context = ctx
+            )
+            val density = resources.displayMetrics.density
+            val stroke1dp = (1f * density).toInt()
+            val stroke1_5dp = (1.5f * density).toInt()
+            val radius10dp = (10f * density).toInt()
+            val radius14dp = (14f * density).toInt()
+
+            val colorPrimary = MaterialColors.getColor(btn, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
+            val colorPrimaryContainer = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
+            val colorSurfaceContainerHigh = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.GRAY)
+            val colorOutlineVariant = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.DKGRAY)
+
+            if (isActive) {
+                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
+                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                btn.strokeWidth = stroke1_5dp
+                btn.cornerRadius = radius10dp
+            } else {
+                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+                btn.strokeWidth = stroke1dp
+                btn.cornerRadius = radius14dp
+            }
+        }
+
+        fun updateUiTierButtons(checkedId: Int) {
+            styleTierButton(binding.btnTierPs, "P&S", "极简层", checkedId == R.id.btn_tier_ps)
+            styleTierButton(binding.btnTierFilm, "FILM", "胶片层", checkedId == R.id.btn_tier_film)
+            styleTierButton(binding.btnTierPro, "PRO", "专业层", checkedId == R.id.btn_tier_pro)
+        }
+
         binding.toggleUiTiers.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isChecked) {
                 binding.containerTierPs.visibility = if (checkedId == R.id.btn_tier_ps) View.VISIBLE else View.GONE
                 binding.containerTierFilm.visibility = if (checkedId == R.id.btn_tier_film) View.VISIBLE else View.GONE
                 binding.containerTierPro.visibility = if (checkedId == R.id.btn_tier_pro) View.VISIBLE else View.GONE
+                updateUiTierButtons(checkedId)
             }
         }
         binding.toggleUiTiers.check(R.id.btn_tier_film)
+        updateUiTierButtons(R.id.btn_tier_film)
 
         setupSwitch(binding.switchShowHdrPlusSwitch, KEY_SHOW_HDR_PLUS_SWITCH)
         setupSwitch(binding.switchShowUnderexposureButton, KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON)
