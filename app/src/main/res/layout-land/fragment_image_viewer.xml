@@ -476,7 +476,27 @@
                     android:textSize="10.5sp"
                     android:textStyle="bold"
                     android:gravity="center"
-                    app:cornerRadius="12dp"
+                    app:cornerRadius="14dp"
+                    android:visibility="gone" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_derivative_cycle_compact"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:layout_marginEnd="4dp"
+                    android:minWidth="46dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:insetLeft="0dp"
+                    android:insetRight="0dp"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
+                    android:text="V1 ●"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    app:cornerRadius="14dp"
                     android:visibility="gone" />
 
                 <!-- Unified Film Recipe (Log + LUT) Bento Tile -->

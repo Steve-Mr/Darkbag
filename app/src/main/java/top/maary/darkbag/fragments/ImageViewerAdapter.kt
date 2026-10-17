@@ -895,9 +895,13 @@ class ImageViewerAdapter(
                         presentationTimestampUs = group.motionPhotoPtsUs
                     )
                 } else null
+                val candidateUris = listOfNotNull(group.jpgUri) + group.derivativeJpgUris
+                val motionUri = candidateUris.firstOrNull { uri ->
+                    top.maary.darkbag.motionphoto.MotionPhotoReader.isMotionPhoto(context, uri)
+                } ?: group.jpgUri
                 top.maary.darkbag.motionphoto.MotionPhotoReader.extractVideoToCache(
                     context,
-                    group.jpgUri,
+                    motionUri,
                     group.baseName,
                     info
                 )

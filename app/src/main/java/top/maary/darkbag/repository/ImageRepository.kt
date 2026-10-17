@@ -277,6 +277,49 @@ class ImageRepository(private val context: Context) {
         } catch (e: Exception) {
             android.util.Log.w("ImageRepository", "Failed to open $jpgUri", e)
         }
+
+        if (!builder.isMotionPhoto && builder.derivativeJpgUris.isNotEmpty()) {
+            for (derivUri in builder.derivativeJpgUris) {
+                if (builder.isMotionPhoto) break
+                try {
+                    context.contentResolver.openFileDescriptor(derivUri, "r")?.use { pfd ->
+                        var motionInfoParsed = false
+                        try {
+                            val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                            val xmpBytes = exif.getAttributeBytes(androidx.exifinterface.media.ExifInterface.TAG_XMP)
+                            if (xmpBytes != null && xmpBytes.isNotEmpty()) {
+                                val xmpStr = String(xmpBytes, java.nio.charset.StandardCharsets.UTF_8)
+                                val motionInfo = top.maary.darkbag.motionphoto.MotionPhotoReader.parseXmpPayload(xmpStr, pfd.statSize)
+                                if (motionInfo != null) {
+                                    builder.isMotionPhoto = true
+                                    builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
+                                    builder.motionPhotoVideoLength = motionInfo.videoLength
+                                    motionInfoParsed = true
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("ImageRepository", "Failed to read EXIF from $derivUri", e)
+                        }
+
+                        if (!motionInfoParsed) {
+                            try {
+                                android.system.Os.lseek(pfd.fileDescriptor, 0L, android.system.OsConstants.SEEK_SET)
+                                val motionInfo = top.maary.darkbag.motionphoto.MotionPhotoReader.parseMotionPhotoInfo(pfd)
+                                if (motionInfo != null) {
+                                    builder.isMotionPhoto = true
+                                    builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
+                                    builder.motionPhotoVideoLength = motionInfo.videoLength
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.w("ImageRepository", "Failed to read Motion Photo from $derivUri", e)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("ImageRepository", "Failed to open $derivUri", e)
+                }
+            }
+        }
         builder.metadataLoaded = true
     }
 

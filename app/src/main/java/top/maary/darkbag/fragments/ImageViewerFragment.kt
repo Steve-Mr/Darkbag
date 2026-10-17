@@ -470,6 +470,9 @@ open class ImageViewerFragment : Fragment() {
                                         if (continuation.isActive) continuation.resume(Unit)
                                     }
                                 }
+                                if (binding.imagePager.currentItem == initialIndex && !isAdjusted) {
+                                    updateControlsVisibility()
+                                }
                                 if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex && binding.imagePager.currentItem == initialIndex) {
                                     hasAutoPlayedPosition = initialIndex
                                     adapter.playMotionVideoForPosition(initialIndex)
@@ -520,6 +523,9 @@ open class ImageViewerFragment : Fragment() {
                                         }
                                     }
                                     val index = adapter.getGroups().indexOfFirst { it.baseName == updatedGroup.baseName }
+                                    if (index == binding.imagePager.currentItem && !isAdjusted) {
+                                        updateControlsVisibility()
+                                    }
                                     if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != index && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == index) {
                                         hasAutoPlayedPosition = index
                                         adapter.playMotionVideoForPosition(index)
@@ -637,16 +643,18 @@ open class ImageViewerFragment : Fragment() {
         val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
 
         val showDerivCycle = !currentGroup.isMultiCamera && !isRawSelected && derivatives.size >= 2
-        val showMotionLive = !currentGroup.isMultiCamera && currentGroup.isMotionPhoto && currentGroup.jpgUri != null && !isRawSelected && !isAdjusted
-        val hasContextualAddons = showDerivCycle || showMotionLive
+        val showMotionLive = !currentGroup.isMultiCamera && currentGroup.isMotionPhoto && !isRawSelected && !isAdjusted
+        val hasContextualAddons = showMotionLive
 
         if (hasContextualAddons) {
             currentBinding.viewerFormatRow?.visibility = View.VISIBLE
             currentBinding.btnFormatSwitch?.visibility = View.VISIBLE
             currentBinding.btnFormatSwitchCompact?.visibility = View.GONE
+            currentBinding.btnDerivativeCycleCompact?.visibility = View.GONE
         } else {
             currentBinding.viewerFormatRow?.visibility = View.GONE
             currentBinding.btnFormatSwitchCompact?.visibility = View.VISIBLE
+            currentBinding.btnDerivativeCycleCompact?.visibility = if (showDerivCycle) View.VISIBLE else View.GONE
         }
 
         currentBinding.btnFormatSwitch?.let { btn ->
@@ -766,7 +774,7 @@ open class ImageViewerFragment : Fragment() {
                 btn.setTextColor(colorOnPrimaryContainer)
                 btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
                 btn.strokeWidth = (1.5f * density).toInt()
-                btn.cornerRadius = (10f * density).toInt()
+                btn.cornerRadius = (14f * density).toInt()
             } else if (isRawAvailable) {
                 btn.isEnabled = !isAdjusted
                 btn.isClickable = !isAdjusted
@@ -775,7 +783,7 @@ open class ImageViewerFragment : Fragment() {
                 btn.setTextColor(colorOnSurfaceVariant)
                 btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
                 btn.strokeWidth = (1f * density).toInt()
-                btn.cornerRadius = (12f * density).toInt()
+                btn.cornerRadius = (14f * density).toInt()
             } else {
                 btn.isEnabled = false
                 btn.isClickable = false
@@ -783,13 +791,43 @@ open class ImageViewerFragment : Fragment() {
                 btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
                 btn.setTextColor(androidx.core.graphics.ColorUtils.setAlphaComponent(colorOnSurfaceVariant, 120))
                 btn.strokeWidth = 0
-                btn.cornerRadius = (12f * density).toInt()
+                btn.cornerRadius = (14f * density).toInt()
+            }
+        }
+
+        currentBinding.btnDerivativeCycleCompact?.let { btn ->
+            val showCompactLook = !hasContextualAddons && showDerivCycle
+            btn.visibility = if (showCompactLook) View.VISIBLE else View.GONE
+            if (showCompactLook) {
+                val dotColor = LOOK_DOT_COLORS[activeDerivIdx % LOOK_DOT_COLORS.size]
+                val dotColorAlpha = androidx.core.graphics.ColorUtils.setAlphaComponent(dotColor, 200)
+
+                val text = "V${activeDerivIdx + 1} ●"
+                val spannable = android.text.SpannableStringBuilder(text)
+                val dotIdx = text.indexOf("●")
+                if (dotIdx >= 0) {
+                    spannable.setSpan(
+                        android.text.style.ForegroundColorSpan(dotColor),
+                        dotIdx,
+                        dotIdx + 1,
+                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+                btn.text = spannable
+                btn.icon = null
+
+                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                btn.setTextColor(colorOnSurfaceVariant)
+                btn.strokeColor = android.content.res.ColorStateList.valueOf(dotColorAlpha)
+                btn.strokeWidth = (1.5f * density).toInt()
+                btn.cornerRadius = (14f * density).toInt()
             }
         }
 
         currentBinding.btnDerivativeCycle?.let { btn ->
-            btn.visibility = if (showDerivCycle) View.VISIBLE else View.GONE
-            if (showDerivCycle) {
+            val showExpandedLook = hasContextualAddons && showDerivCycle
+            btn.visibility = if (showExpandedLook) View.VISIBLE else View.GONE
+            if (showExpandedLook) {
                 val dotColor = LOOK_DOT_COLORS[activeDerivIdx % LOOK_DOT_COLORS.size]
                 val dotColorAlpha = androidx.core.graphics.ColorUtils.setAlphaComponent(dotColor, 200)
 
@@ -1254,6 +1292,14 @@ open class ImageViewerFragment : Fragment() {
         }
 
         binding.btnDerivativeCycle?.setOnClickListener {
+            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            val curPos = binding.imagePager.currentItem
+            adapter.cycleDerivativeVersion(curPos)
+            updateFormatBentoRow()
+        }
+
+        binding.btnDerivativeCycleCompact?.setOnClickListener {
             if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
             it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
             val curPos = binding.imagePager.currentItem

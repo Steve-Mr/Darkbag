@@ -201,20 +201,12 @@ class ImageViewerMultiCameraAndLookTest {
             derivativeJpgUris = emptyList()
         )
 
-        // Case 2: Standard photo has no contextual addons -> compact single row slot!
-        val stdDerivatives = standardGroup.derivativeJpgUris
-        val stdShowDerivCycle = !standardGroup.isMultiCamera && stdDerivatives.size >= 2
-        val stdShowMotionLive = !standardGroup.isMultiCamera && standardGroup.isMotionPhoto && standardGroup.jpgUri != null
-        val stdHasContextualAddons = stdShowDerivCycle || stdShowMotionLive
-        assertFalse("Standard photo must not trigger upper format row addons", stdHasContextualAddons)
+        // Case 1: Standard photo has no contextual addons -> compact single row slot!
+        val stdShowMotionLive = !standardGroup.isMultiCamera && standardGroup.isMotionPhoto
+        val stdHasContextualAddons = stdShowMotionLive
+        assertFalse("Standard photo must not expand upper format row", stdHasContextualAddons)
 
-        // Motion Photo photo -> expands upper format row!
-        val motionGroup = standardGroup.copy(isMotionPhoto = true)
-        val motionShowMotionLive = !motionGroup.isMultiCamera && motionGroup.isMotionPhoto && motionGroup.jpgUri != null
-        val motionHasContextualAddons = stdShowDerivCycle || motionShowMotionLive
-        assertTrue("Motion photo must trigger upper format row addons", motionHasContextualAddons)
-
-        // Multi-look photo -> expands upper format row!
+        // Case 2: Multi-look photo alone uses compact Look button in Primary Action Row without expanding upper format row
         val multiLookGroup = standardGroup.copy(
             derivativeJpgUris = listOf(
                 Uri.parse("content://media/1.jpg"),
@@ -223,8 +215,24 @@ class ImageViewerMultiCameraAndLookTest {
         )
         val lookDerivatives = multiLookGroup.derivativeJpgUris
         val lookShowDerivCycle = !multiLookGroup.isMultiCamera && lookDerivatives.size >= 2
-        val lookHasContextualAddons = lookShowDerivCycle || stdShowMotionLive
-        assertTrue("Multi-look photo must trigger upper format row addons", lookHasContextualAddons)
+        val lookHasContextualAddons = !multiLookGroup.isMultiCamera && multiLookGroup.isMotionPhoto
+        assertFalse("Multi-look alone uses compact mode in primary action row", lookHasContextualAddons)
+        assertTrue("Multi-look displays compact cycle button", lookShowDerivCycle)
+
+        // Case 3: Motion Photo expands upper format row!
+        val motionGroup = standardGroup.copy(isMotionPhoto = true)
+        val motionShowMotionLive = !motionGroup.isMultiCamera && motionGroup.isMotionPhoto
+        val motionHasContextualAddons = motionShowMotionLive
+        assertTrue("Motion photo must trigger upper format row addons", motionHasContextualAddons)
+
+        // Case 4: Coexistence of Motion Photo and Multi-Look -> Both displayed simultaneously in upper row!
+        val motionPlusLookGroup = multiLookGroup.copy(isMotionPhoto = true)
+        val coexistenceMotionLive = !motionPlusLookGroup.isMultiCamera && motionPlusLookGroup.isMotionPhoto
+        val coexistenceDerivCycle = !motionPlusLookGroup.isMultiCamera && motionPlusLookGroup.derivativeJpgUris.size >= 2
+        val coexistenceHasUpperRow = coexistenceMotionLive
+        assertTrue("Motion Photo + Looks expands upper format row", coexistenceHasUpperRow)
+        assertTrue("Motion Photo button is active", coexistenceMotionLive)
+        assertTrue("Look cycle button is active simultaneously in upper row", coexistenceDerivCycle)
     }
 
     @Test
