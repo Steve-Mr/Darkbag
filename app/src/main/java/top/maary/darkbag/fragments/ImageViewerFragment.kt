@@ -844,6 +844,7 @@ open class ImageViewerFragment : Fragment() {
     private fun updateSplitButtons() {
         if (isEditingAdjustments || isAdjusted) {
             binding.btnActionMain?.setIconResource(R.drawable.ic_save)
+            binding.btnActionMain?.text = getString(R.string.save).uppercase()
             binding.btnActionMain?.contentDescription = getString(R.string.save)
         } else {
             if (::adapter.isInitialized && adapter.itemCount > 0) {
@@ -853,13 +854,16 @@ open class ImageViewerFragment : Fragment() {
 
                 if (isUnrenderedRawVideoOrCinemaDng) {
                     binding.btnActionMain?.setIconResource(R.drawable.ic_save)
+                    binding.btnActionMain?.text = "EXPORT"
                     binding.btnActionMain?.contentDescription = getString(R.string.action_export_main)
                 } else {
                     binding.btnActionMain?.setIconResource(R.drawable.ic_share)
+                    binding.btnActionMain?.text = "SHARE"
                     binding.btnActionMain?.contentDescription = getString(R.string.share_button_alt)
                 }
             } else {
                 binding.btnActionMain?.setIconResource(R.drawable.ic_share)
+                binding.btnActionMain?.text = "SHARE"
                 binding.btnActionMain?.contentDescription = getString(R.string.share_button_alt)
             }
         }
@@ -893,6 +897,16 @@ open class ImageViewerFragment : Fragment() {
                     performShare()
                 }
             }
+        }
+
+        binding.btnActionMain?.setOnLongClickListener {
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            if (isEditingAdjustments || isAdjusted) {
+                showSaveMenu(it)
+            } else {
+                showViewMenu(it)
+            }
+            true
         }
 
         binding.btnActionMenu?.setOnClickListener {
@@ -932,7 +946,6 @@ open class ImageViewerFragment : Fragment() {
 
         binding.btnMotionLive?.setOnClickListener {
             if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
             handleMotionPhotoIndicatorTapped(binding.imagePager.currentItem)
         }
 
@@ -1822,6 +1835,8 @@ open class ImageViewerFragment : Fragment() {
         isMotionPhotoAutoPlay = !isMotionPhotoAutoPlay
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY, isMotionPhotoAutoPlay).apply()
+        updateFormatBentoRow()
+        view?.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
         adapter.setMotionPhotoAutoPlayEnabled(isMotionPhotoAutoPlay)
 
         if (isMotionPhotoAutoPlay) {
