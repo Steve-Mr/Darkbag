@@ -1082,36 +1082,12 @@ class PlaygroundAdapter(
             var decodedBitmap: Bitmap? = null
             var bitmapAssigned = false
             try {
-                decodedBitmap = top.maary.darkbag.utils.ImageUtils.decodeDngThumbnail(
+                decodedBitmap = top.maary.darkbag.utils.GalleryThumbnailLoader.loadDngThumbnail(
                     context = context,
                     uri = Uri.fromFile(file),
                     reqWidth = 400,
                     reqHeight = 400
                 )
-
-                if (decodedBitmap == null) {
-                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeFile(file.absolutePath, options)
-                    val inSampleSize = top.maary.darkbag.utils.ImageUtils.calculateInSampleSize(options, 400, 400)
-                    val decodeOpts = BitmapFactory.Options().apply {
-                        this.inSampleSize = inSampleSize
-                        inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
-                    }
-                    decodedBitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
-                    if (decodedBitmap != null) {
-                        val orientation = try {
-                            ExifInterface(file.absolutePath).getAttributeInt(
-                                ExifInterface.TAG_ORIENTATION,
-                                ExifInterface.ORIENTATION_NORMAL
-                            )
-                        } catch (e: Exception) {
-                            ExifInterface.ORIENTATION_NORMAL
-                        }
-                        if (orientation != ExifInterface.ORIENTATION_NORMAL) {
-                            decodedBitmap = top.maary.darkbag.utils.ImageUtils.rotateBitmap(decodedBitmap!!, orientation)
-                        }
-                    }
-                }
 
                 ensureActive()
 

@@ -717,8 +717,7 @@ class DarkbagGalleryGridAdapter(
         holder.loadJob = adapterScope.launch {
             val bmp = thumbnailSemaphore.withPermit {
                 if (!isActive) return@withPermit null
-                top.maary.darkbag.utils.ImageUtils.decodeDngThumbnail(context, uri, reqWidth = 512, reqHeight = 512)
-                    ?: top.maary.darkbag.utils.ImageUtils.renderDngBitmap(context, uri, reqWidth = 512, reqHeight = 512)
+                top.maary.darkbag.utils.GalleryThumbnailLoader.loadDngThumbnail(context, uri, reqWidth = 512, reqHeight = 512)
             }
             if (bmp != null) {
                 rawThumbCache.put("DNG_${targetBaseName}", bmp)
