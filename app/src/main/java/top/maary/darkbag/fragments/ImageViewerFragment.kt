@@ -121,6 +121,7 @@ open class ImageViewerFragment : Fragment() {
     private var isLongPressing = false
     private var savedMatrix = android.graphics.Matrix()
     private var savedScale = 1f
+    private var pendingSingleDeleteGroup: ImageGroup? = null
 
     protected lateinit var lutManager: top.maary.darkbag.utils.LutManager
     protected var previewJob: Job? = null
@@ -205,8 +206,8 @@ open class ImageViewerFragment : Fragment() {
                 } else {
                     exitGalleryMode()
                 }
-            } else if (binding.lutListContainer.visibility == View.VISIBLE) {
-                binding.lutListContainer.visibility = View.GONE
+            } else if (binding.lutListContainer?.visibility == View.VISIBLE) {
+                binding.lutListContainer?.visibility = View.GONE
                 binding.touchOverlay.visibility = View.GONE
                 updateBackPressedCallbackState()
             } else if (isEditingAdjustments) {
@@ -253,6 +254,11 @@ open class ImageViewerFragment : Fragment() {
             val selectedItems = if (::galleryAdapter.isInitialized) galleryAdapter.getSelectedItems() else emptyList()
             if (selectedItems.isNotEmpty()) {
                 deleteBatchImages(selectedItems, mode)
+            } else {
+                pendingSingleDeleteGroup?.let { group ->
+                    executeSingleGroupDelete(group, mode)
+                    pendingSingleDeleteGroup = null
+                }
             }
         }
 
@@ -731,7 +737,7 @@ open class ImageViewerFragment : Fragment() {
         }
 
         binding.touchOverlay.setOnClickListener {
-            binding.lutListContainer.visibility = View.GONE
+            binding.lutListContainer?.visibility = View.GONE
             binding.touchOverlay.visibility = View.GONE
             updateBackPressedCallbackState()
         }
@@ -992,7 +998,7 @@ open class ImageViewerFragment : Fragment() {
         previewJob?.cancel()
         currentEditConfig = null
 
-        binding.lutListContainer.visibility = View.GONE
+        binding.lutListContainer?.visibility = View.GONE
 
         val currentIndex = binding.imagePager.currentItem
         adapter.notifyItemChanged(currentIndex)
@@ -1176,97 +1182,39 @@ open class ImageViewerFragment : Fragment() {
     private fun showLutMenu() {
         if (isEditingAdjustments) return
 
-        val currentLog = currentEditConfig?.log ?: "None"
-        val currentLut = currentEditConfig?.lut?.substringBeforeLast(".") ?: "None"
-
-        val items = mutableListOf<Pair<String, Boolean>>()
-        items.add("Log: $currentLog" to true)
-        if (currentLog == "None") {
-            items.add("Select Log First" to false)
-        } else {
-            items.add("LUT: $currentLut" to true)
-        }
-
-        showPillPopup(items, autoDismiss = false) { item, _ ->
-            if (item.startsWith("Log:")) {
-                showLogSelectionMenu()
+        val lutManager = top.maary.darkbag.utils.LutManager(requireContext())
+        top.maary.darkbag.ui.ColorRecipeBottomSheet.show(requireContext(), lutManager) { selectedLog, selectedLut ->
+            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+            val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
+            if (isRawVideo) {
+                currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(
+                    log = selectedLog,
+                    lut = selectedLut ?: "None"
+                )
+                markAdjusted()
+                updateEditUi()
+                applyEditPreview()
             } else {
-                showLutSelectionMenu()
+                lifecycleScope.launch {
+                    ensureDngBytesLoaded()
+                    currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(
+                        log = selectedLog,
+                        lut = selectedLut ?: "None"
+                    )
+                    markAdjusted()
+                    updateEditUi()
+                    applyEditPreview()
+                }
             }
         }
-        updateBackPressedCallbackState()
     }
 
     private fun showLogSelectionMenu() {
-        val items = mutableListOf("← Back" to true)
-        SettingsFragment.LOG_CURVES.forEach { log ->
-            items.add(log to true)
-        }
-
-        showPillPopup(items, autoDismiss = false) { selectedLog, position ->
-            if (position == 0) {
-                showLutMenu()
-            } else {
-                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
-                if (isRawVideo) {
-                    currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(log = selectedLog)
-                    if (selectedLog == "None") {
-                        currentEditConfig = currentEditConfig?.copy(lut = "None")
-                    }
-                    markAdjusted()
-                    updateEditUi()
-                    showLutMenu()
-                    applyEditPreview()
-                } else {
-                    lifecycleScope.launch {
-                        ensureDngBytesLoaded()
-                        currentEditConfig = currentEditConfig?.copy(log = selectedLog)
-                        if (selectedLog == "None") {
-                            currentEditConfig = currentEditConfig?.copy(lut = "None")
-                        }
-                        markAdjusted()
-                        updateEditUi()
-                        showLutMenu()
-                        applyEditPreview()
-                    }
-                }
-            }
-        }
+        showLutMenu()
     }
 
     private fun showLutSelectionMenu() {
-        val luts = lutManager.getLuts()
-        val items = mutableListOf("← Back" to true, "None" to true)
-        luts.forEach { file ->
-            items.add(file.nameWithoutExtension to true)
-        }
-
-        showPillPopup(items, autoDismiss = false) { selectedName, position ->
-            if (position == 0) {
-                showLutMenu()
-            } else {
-                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
-                val newLut = if (position == 1) "None" else luts[position - 2].name
-                if (isRawVideo) {
-                    currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(lut = newLut)
-                    markAdjusted()
-                    updateEditUi()
-                    showLutMenu()
-                    applyEditPreview()
-                } else {
-                    lifecycleScope.launch {
-                        ensureDngBytesLoaded()
-                        currentEditConfig = currentEditConfig?.copy(lut = newLut)
-                        markAdjusted()
-                        updateEditUi()
-                        showLutMenu()
-                        applyEditPreview()
-                    }
-                }
-            }
-        }
+        showLutMenu()
     }
 
     private fun showPillPopup(items: List<Pair<String, Boolean>>, autoDismiss: Boolean = true, onSelected: (String, Int) -> Unit) {
@@ -1329,14 +1277,8 @@ open class ImageViewerFragment : Fragment() {
         binding.editAdjustmentPanel.visibility = View.VISIBLE
         binding.editAdjustmentPanel.alpha = 0f
 
-        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        if (isLandscape) {
-            binding.editAdjustmentPanel.translationX = 100f
-            binding.editAdjustmentPanel.translationY = 0f
-        } else {
-            binding.editAdjustmentPanel.translationX = 0f
-            binding.editAdjustmentPanel.translationY = 100f
-        }
+        binding.editAdjustmentPanel.translationX = 0f
+        binding.editAdjustmentPanel.translationY = 100f
 
         binding.editAdjustmentPanel.animate()
             .alpha(1f)
@@ -1379,20 +1321,14 @@ open class ImageViewerFragment : Fragment() {
 
         updateViewportPadding()
 
-        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         val anim = binding.editAdjustmentPanel.animate()
             .alpha(0f)
+            .translationY(100f)
             .setDuration(200)
             .withEndAction {
                 binding.editAdjustmentPanel.visibility = View.GONE
                 updateControlsVisibility()
             }
-
-        if (isLandscape) {
-            anim.translationX(100f)
-        } else {
-            anim.translationY(100f)
-        }
         anim.start()
 
         updateSelectionFeedback()
@@ -2638,87 +2574,66 @@ open class ImageViewerFragment : Fragment() {
         return String.format("%.1f %s", size / 1024.0.pow(digitGroups.toDouble()), units[digitGroups])
     }
 
-    private data class SingleDeleteOption(
-        val label: String,
-        val uris: List<Uri>,
-        val isEntireGroup: Boolean
-    )
-
     private fun showDeleteDialog(group: ImageGroup) {
         val hasCdng = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
         val hasRawVid = group.isRawVideo || group.rawVideoUri != null
         val hasDerivatives = group.allDerivativeUris.isNotEmpty()
         val hasPhotoDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null || group.multiDngUris.isNotEmpty()
+        val hasRaw = hasPhotoDng || hasRawVid
 
-        val options = mutableListOf<SingleDeleteOption>()
+        val componentCount = (if (hasRaw) 1 else 0) + (if (hasDerivatives) 1 else 0) + (if (hasCdng) 1 else 0)
+        val hasMultipleComponents = componentCount > 1
 
-        if (hasCdng && hasRawVid) {
-            options.add(SingleDeleteOption(getString(R.string.delete_cdng_only), group.allCinemaDngUris, false))
-            options.add(SingleDeleteOption(getString(R.string.delete_rawvid_only), group.rawVideoMasterUris, false))
-            if (hasDerivatives) {
-                options.add(SingleDeleteOption(getString(R.string.delete_derivatives_only), group.allDerivativeUris, false))
-            }
-            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
-        } else if (hasCdng) {
-            options.add(SingleDeleteOption(getString(R.string.delete_cdng_only), group.allCinemaDngUris, false))
-            if (hasDerivatives) {
-                options.add(SingleDeleteOption(getString(R.string.delete_derivatives_only), group.allDerivativeUris, false))
-            }
-            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
-        } else if (hasRawVid) {
-            options.add(SingleDeleteOption(getString(R.string.delete_rawvid_only), group.rawVideoMasterUris, false))
-            if (hasDerivatives) {
-                options.add(SingleDeleteOption(getString(R.string.delete_derivatives_only), group.allDerivativeUris, false))
-            }
-            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
-        } else if (hasPhotoDng && hasDerivatives) {
-            options.add(SingleDeleteOption(getString(R.string.delete_photo_raw_only), group.photoMasterUris, false))
-            options.add(SingleDeleteOption(getString(R.string.delete_photo_jpg_only), group.allDerivativeUris, false))
-            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
-        } else if (hasPhotoDng) {
-            options.add(SingleDeleteOption(getString(R.string.delete_photo_raw_only), group.photoMasterUris, true))
-        } else if (hasDerivatives) {
-            if (group.allDerivativeUris.size > 1) {
-                val derivatives = adapter.getDerivativeUris(group)
-                val activeIndex = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
-                val activeUri = derivatives.getOrNull(activeIndex) ?: group.jpgUri ?: group.mp4VideoUri
-                if (activeUri != null) {
-                    options.add(SingleDeleteOption(getString(R.string.delete_this_format_only), listOf(activeUri), false))
-                }
-                options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
-            } else {
-                options.add(SingleDeleteOption(getString(R.string.delete_entire_group), group.allUris, true))
-            }
+        if (hasMultipleComponents) {
+            pendingSingleDeleteGroup = group
+            DarkbagBatchDeleteSheet.newInstance(
+                selectedCount = 1,
+                hasRaw = hasRaw,
+                hasDerivatives = hasDerivatives,
+                hasCinemaDng = hasCdng
+            ).show(childFragmentManager, DarkbagBatchDeleteSheet.TAG)
         } else {
-            options.add(SingleDeleteOption(getString(R.string.delete_entire_group), group.allUris, true))
-        }
-
-        if (group.isSingleFormat() || options.size <= 1) {
             com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.delete_image_title)
                 .setMessage(R.string.delete_image_message)
                 .setPositiveButton(R.string.delete_button_alt) { _, _ ->
-                    val chosen = options.firstOrNull()
-                    deleteImage(group, chosen?.uris ?: group.allUris, chosen?.isEntireGroup ?: true)
+                    deleteImage(group, group.allUris, true)
                 }
                 .setNegativeButton(R.string.cancel, null)
                 .show()
-            return
         }
+    }
 
-        val labels = options.map { it.label }.toTypedArray()
-        var checkedItem = options.size - 1
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.delete_image_title)
-            .setSingleChoiceItems(labels, checkedItem) { _, which ->
-                checkedItem = which
+    private fun executeSingleGroupDelete(group: ImageGroup, deleteMode: Int) {
+        val urisToDelete = mutableListOf<Uri>()
+        var isEntireGroup = false
+        when (deleteMode) {
+            DarkbagBatchDeleteSheet.MODE_ENTIRE_GROUP -> {
+                group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                urisToDelete.addAll(group.allUris)
+                isEntireGroup = true
             }
-            .setPositiveButton(R.string.delete_button_alt) { _, _ ->
-                val chosen = options[checkedItem]
-                deleteImage(group, chosen.uris, chosen.isEntireGroup)
+            DarkbagBatchDeleteSheet.MODE_RAW_ONLY -> {
+                if (group.isCinemaDng || group.cinemaDngFolderUri != null) {
+                    group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                }
+                urisToDelete.addAll(group.allMasterRawUris)
+                val remainingUris = group.allUris.filter { !urisToDelete.contains(it) }
+                isEntireGroup = remainingUris.isEmpty()
             }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+            DarkbagBatchDeleteSheet.MODE_DERIVATIVES_ONLY -> {
+                urisToDelete.addAll(group.allDerivativeUris)
+                val remainingUris = group.allUris.filter { !urisToDelete.contains(it) }
+                isEntireGroup = remainingUris.isEmpty()
+            }
+            DarkbagBatchDeleteSheet.MODE_CINEMADNG_ONLY -> {
+                group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                urisToDelete.addAll(group.allCinemaDngUris)
+                val remainingUris = group.allUris.filter { !urisToDelete.contains(it) }
+                isEntireGroup = remainingUris.isEmpty()
+            }
+        }
+        deleteImage(group, urisToDelete, isEntireGroup)
     }
 
     protected open fun deleteImage(group: ImageGroup, deleteGroup: Boolean) {
@@ -2834,8 +2749,8 @@ open class ImageViewerFragment : Fragment() {
                 } else {
                     exitGalleryMode()
                 }
-            } else if (binding.lutListContainer.visibility == View.VISIBLE) {
-                binding.lutListContainer.visibility = View.GONE
+            } else if (binding.lutListContainer?.visibility == View.VISIBLE) {
+                binding.lutListContainer?.visibility = View.GONE
                 binding.touchOverlay.visibility = View.GONE
                 updateBackPressedCallbackState()
             } else if (isEditingAdjustments) {
@@ -3227,9 +3142,10 @@ open class ImageViewerFragment : Fragment() {
 
             val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
             binding.editAdjustmentPanel.setPadding(
-                0, 0,
+                if (isLandscape) systemBars.left else 0,
+                0,
                 if (isLandscape) systemBars.right else 0,
-                if (isLandscape) 0 else systemBars.bottom
+                systemBars.bottom
             )
 
             insets
@@ -3237,19 +3153,12 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun updateViewportPadding() {
-        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-
         val topPadding: Int
         val bottomPadding: Int
 
         if (isEditingAdjustments) {
             topPadding = systemTopInset + topBarHeight
-            if (isLandscape) {
-                bottomPadding = topPadding
-            } else {
-                // In portrait edit mode, clear the adjustment panel (including its card margins and system insets)
-                bottomPadding = binding.editAdjustmentPanel.height
-            }
+            bottomPadding = binding.editAdjustmentPanel.height
         } else if (isUiVisible) {
             topPadding = systemTopInset + topBarHeight
             bottomPadding = topPadding // SYMMETRIC CENTERING
@@ -3301,7 +3210,7 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun updateBackPressedCallbackState() {
-        backPressedCallback.isEnabled = isGalleryMode || isAdjusted || isEditingAdjustments || binding.lutListContainer.visibility == View.VISIBLE
+        backPressedCallback.isEnabled = isGalleryMode || isAdjusted || isEditingAdjustments || (binding.lutListContainer?.visibility == View.VISIBLE)
     }
 
     protected open fun showDiscardChangesDialog() {

@@ -318,6 +318,8 @@ class ImageViewerAdapter(
             holder.binding.formatToggleGroup.translationY = 0f
             holder.binding.motionPhotoToggleGroup.translationX = 0f
             holder.binding.motionPhotoToggleGroup.translationY = 0f
+            holder.binding.cameraOverlaysVerticalGroup.translationX = 0f
+            holder.binding.cameraOverlaysVerticalGroup.translationY = 0f
             holder.binding.multiCameraToggleContainer.translationX = 0f
             holder.binding.multiCameraToggleContainer.translationY = 0f
             holder.binding.derivativeDotsContainer.translationX = 0f
@@ -350,8 +352,9 @@ class ImageViewerAdapter(
                 holder.binding.formatToggleGroup.translationY = topMargin
                 holder.binding.motionPhotoToggleGroup.translationX = leftMargin
                 holder.binding.motionPhotoToggleGroup.translationY = topMargin
-                holder.binding.multiCameraToggleContainer.translationY = -bottomMargin
-                holder.binding.derivativeDotsContainer.translationY = -bottomMargin
+                holder.binding.cameraOverlaysVerticalGroup.translationY = -bottomMargin
+                holder.binding.multiCameraToggleContainer.translationY = 0f
+                holder.binding.derivativeDotsContainer.translationY = 0f
                 holder.binding.videoDurationGroup.translationX = -rightMargin
                 holder.binding.videoDurationGroup.translationY = -bottomMargin
 
