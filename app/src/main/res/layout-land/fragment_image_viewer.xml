@@ -60,7 +60,7 @@
         android:focusable="true"
         android:background="@android:color/transparent" />
 
-    <!-- Top Bento Header Bar -->
+    <!-- Top Bento Header Bar (Borderless & Pure Bento Float) -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/top_bar_container"
         style="@style/Widget.Material3.CardView.Filled"
@@ -69,10 +69,10 @@
         android:layout_marginStart="12dp"
         android:layout_marginEnd="12dp"
         android:layout_marginTop="8dp"
-        app:cardCornerRadius="26dp"
-        app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
+        app:cardCornerRadius="0dp"
+        app:cardBackgroundColor="@android:color/transparent"
         app:strokeWidth="0dp"
-        app:contentPadding="6dp"
+        app:contentPadding="0dp"
         app:cardElevation="0dp"
         app:layout_constrainedWidth="true"
         app:layout_constraintWidth_max="540dp"
@@ -189,12 +189,14 @@
         style="@style/Widget.Material3.CardView.Filled"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_margin="12dp"
-        app:cardCornerRadius="26dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginBottom="8dp"
+        app:cardCornerRadius="24dp"
         app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
         app:strokeWidth="1dp"
         app:strokeColor="?attr/colorOutlineVariant"
-        app:contentPadding="8dp"
+        app:contentPadding="6dp"
         app:layout_constrainedWidth="true"
         app:layout_constraintWidth_max="540dp"
         app:layout_constraintBottom_toBottomOf="parent"
@@ -210,66 +212,76 @@
             <LinearLayout
                 android:id="@+id/viewer_format_row"
                 android:layout_width="match_parent"
-                android:layout_height="44dp"
-                android:layout_marginBottom="6dp"
-                android:orientation="horizontal">
+                android:layout_height="38dp"
+                android:layout_marginBottom="4dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_format_switch"
                     style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="0dp"
+                    android:layout_width="48dp"
                     android:layout_height="match_parent"
-                    android:layout_weight="1.3"
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
-                    android:padding="2dp"
-                    android:text="VIEW · JPG\n⇄ SWITCH DNG"
-                    android:textSize="10.5sp"
-                    android:lines="2"
+                    android:insetLeft="0dp"
+                    android:insetRight="0dp"
+                    android:padding="0dp"
+                    android:text="RAW"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
                     android:gravity="center"
-                    app:cornerRadius="18dp" />
+                    app:cornerRadius="12dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_derivative_cycle"
                     style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="0dp"
+                    android:layout_width="38dp"
                     android:layout_height="match_parent"
-                    android:layout_weight="0.9"
-                    android:layout_marginStart="5dp"
+                    android:layout_marginStart="4dp"
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
-                    android:padding="2dp"
-                    android:text="LOOK\nV1 ●"
-                    android:textSize="10.5sp"
-                    android:lines="2"
+                    android:insetLeft="0dp"
+                    android:insetRight="0dp"
+                    android:padding="0dp"
+                    app:icon="@drawable/ic_look_dot"
+                    app:iconSize="16dp"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
                     android:gravity="center"
                     android:visibility="gone"
-                    app:cornerRadius="14dp" />
+                    app:cornerRadius="12dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_motion_live"
                     style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="0dp"
+                    android:layout_width="wrap_content"
+                    android:minWidth="76dp"
                     android:layout_height="match_parent"
-                    android:layout_weight="0.95"
-                    android:layout_marginStart="5dp"
+                    android:layout_marginStart="4dp"
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
-                    android:padding="2dp"
-                    android:text="● LIVE\nAUTO ON"
-                    android:textSize="10sp"
-                    android:lines="2"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:text="● LIVE"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold"
                     android:gravity="center"
                     android:visibility="gone"
-                    app:cornerRadius="18dp" />
+                    app:cornerRadius="12dp" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
             </LinearLayout>
 
             <!-- Multi-Camera Focal Length Switcher & Dedicated Collage Studio Entry -->
             <LinearLayout
                 android:id="@+id/viewer_multicam_row"
                 android:layout_width="match_parent"
-                android:layout_height="44dp"
-                android:layout_marginBottom="6dp"
+                android:layout_height="38dp"
+                android:layout_marginBottom="4dp"
                 android:orientation="horizontal"
                 android:visibility="gone">
 
@@ -286,15 +298,15 @@
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
                     android:layout_weight="1.3"
-                    android:layout_marginStart="5dp"
+                    android:layout_marginStart="4dp"
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
                     android:padding="2dp"
                     android:lines="2"
                     android:gravity="center"
-                    android:textSize="10.5sp"
+                    android:textSize="10sp"
                     android:text="⊞ COLLAGE\n多摄拼图"
-                    app:cornerRadius="18dp"
+                    app:cornerRadius="14dp"
                     app:backgroundTint="?attr/colorPrimaryContainer"
                     android:textColor="?attr/colorOnPrimaryContainer" />
             </LinearLayout>
@@ -303,8 +315,8 @@
             <LinearLayout
                 android:id="@+id/hf_extra_controls"
                 android:layout_width="match_parent"
-                android:layout_height="46dp"
-                android:layout_marginBottom="6dp"
+                android:layout_height="38dp"
+                android:layout_marginBottom="4dp"
                 android:orientation="horizontal"
                 android:visibility="gone">
 
@@ -319,12 +331,12 @@
                     android:insetBottom="0dp"
                     android:padding="2dp"
                     android:text="DATE\nOFF"
-                    android:textSize="10sp"
+                    android:textSize="9.5sp"
                     android:lines="2"
                     android:gravity="center"
-                    app:cornerRadius="14dp"
+                    app:cornerRadius="12dp"
                     app:icon="@drawable/ic_time_stamp"
-                    app:iconSize="16dp"
+                    app:iconSize="14dp"
                     app:iconGravity="textStart"
                     app:iconPadding="2dp" />
 
@@ -339,12 +351,12 @@
                     android:insetBottom="0dp"
                     android:padding="2dp"
                     android:text="FLARE\nOFF"
-                    android:textSize="10sp"
+                    android:textSize="9.5sp"
                     android:lines="2"
                     android:gravity="center"
-                    app:cornerRadius="14dp"
+                    app:cornerRadius="12dp"
                     app:icon="@drawable/ic_flare_none"
-                    app:iconSize="16dp"
+                    app:iconSize="14dp"
                     app:iconGravity="textStart"
                     app:iconPadding="2dp" />
 
@@ -359,10 +371,10 @@
                     android:insetBottom="0dp"
                     android:padding="2dp"
                     android:text="⇄ SWAP\nF1 / F2"
-                    android:textSize="10sp"
+                    android:textSize="9.5sp"
                     android:lines="2"
                     android:gravity="center"
-                    app:cornerRadius="14dp"
+                    app:cornerRadius="12dp"
                     app:iconSize="0dp" />
 
                 <com.google.android.material.button.MaterialButton
@@ -375,10 +387,10 @@
                     android:insetBottom="0dp"
                     android:padding="2dp"
                     android:text="SPLIT ↗\n独立导出"
-                    android:textSize="10sp"
+                    android:textSize="9.5sp"
                     android:lines="2"
                     android:gravity="center"
-                    app:cornerRadius="18dp"
+                    app:cornerRadius="14dp"
                     app:backgroundTint="?attr/colorSurfaceContainerHigh" />
             </LinearLayout>
 
@@ -389,13 +401,13 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:visibility="gone"
-                android:layout_marginBottom="6dp">
+                android:layout_marginBottom="4dp">
 
                 <!-- Row 1: Filmstrip Seekbar Row (CinemaDNG) -->
                 <FrameLayout
                     android:id="@+id/filmstrip_bento_container"
                     android:layout_width="match_parent"
-                    android:layout_height="36dp"
+                    android:layout_height="32dp"
                     android:layout_marginBottom="4dp"
                     android:visibility="gone">
 
@@ -408,7 +420,7 @@
                 <!-- Row 2: Video Playback & Action Bar -->
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="48dp"
+                    android:layout_height="40dp"
                     android:orientation="horizontal">
 
                     <com.google.android.material.button.MaterialButton
@@ -422,10 +434,10 @@
                         android:padding="2dp"
                         android:lines="2"
                         android:gravity="center"
-                        android:textSize="10.5sp"
+                        android:textSize="10sp"
                         android:textColor="?attr/colorOnPrimaryContainer"
                         app:backgroundTint="?attr/colorPrimaryContainer"
-                        app:cornerRadius="18dp" />
+                        app:cornerRadius="14dp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_video_export_hub"
@@ -433,74 +445,65 @@
                         android:layout_width="0dp"
                         android:layout_height="match_parent"
                         android:layout_weight="1.4"
-                        android:layout_marginStart="5dp"
+                        android:layout_marginStart="4dp"
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:padding="2dp"
                         android:lines="2"
                         android:gravity="center"
-                        android:textSize="10.5sp"
+                        android:textSize="10sp"
                         android:textColor="?attr/colorOnSecondaryContainer"
                         app:backgroundTint="?attr/colorSecondaryContainer"
-                        app:cornerRadius="14dp" />
+                        app:cornerRadius="12dp" />
                 </LinearLayout>
             </LinearLayout>
 
             <!-- Primary Action Row -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="54dp"
+                android:layout_height="42dp"
                 android:orientation="horizontal">
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_log_curve"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="1.15"
-                    android:layout_marginEnd="5dp"
-                    android:insetTop="0dp"
-                    android:insetBottom="0dp"
-                    android:padding="4dp"
-                    android:text="LOG CURVE\nNone"
-                    android:lines="2"
-                    android:gravity="center"
-                    android:textSize="11sp"
-                    app:cornerRadius="18dp"
-                    app:backgroundTint="?attr/colorTertiaryContainer"
-                    android:textColor="?attr/colorOnTertiaryContainer" />
-
+                <!-- Unified Film Recipe (Log + LUT) Bento Tile -->
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_3d_lut"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
-                    android:layout_weight="1.35"
-                    android:layout_marginEnd="5dp"
+                    android:layout_weight="1.3"
+                    android:layout_marginEnd="4dp"
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
-                    android:padding="4dp"
-                    android:text="3D LUT (.CUBE)\nNone"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
                     android:lines="2"
+                    android:ellipsize="end"
                     android:gravity="center"
-                    android:textSize="11sp"
+                    android:textSize="10.5sp"
                     app:cornerRadius="14dp"
                     app:backgroundTint="?attr/colorTertiaryContainer"
                     android:textColor="?attr/colorOnTertiaryContainer" />
+
+                <!-- Hidden dummy for backwards compatibility -->
+                <View
+                    android:id="@+id/btn_log_curve"
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:visibility="gone" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_adjust_tofu"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
-                    android:layout_weight="1.3"
+                    android:layout_weight="1.2"
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
-                    android:padding="4dp"
-                    android:text="✦ ADJUST\n豆腐块调色台"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
                     android:lines="2"
                     android:gravity="center"
-                    android:textSize="11sp"
+                    android:textSize="10.5sp"
                     app:cornerRadius="14dp"
                     app:backgroundTint="?attr/colorPrimaryContainer"
                     android:textColor="?attr/colorPrimary" />

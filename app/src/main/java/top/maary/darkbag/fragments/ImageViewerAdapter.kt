@@ -430,42 +430,12 @@ class ImageViewerAdapter(
             btnMotionPhotoIndicator.alpha = 0f
             btnMotionPhotoIndicator.setOnClickListener(null)
 
-            // Video Duration indicator setup (Bottom-Right Anchor)
+            // Video Duration indicator setup (Superseded by Bento Deck viewer_video_deck)
             val videoDurationGroup = holder.binding.videoDurationGroup
             val btnVideoDuration = holder.binding.btnVideoDuration
-            val shouldShowDuration = shouldShow && ((isRawSelected && isRawVideo) || isMp4Active)
-
-            if (isRawSelected && isRawVideo) {
-                videoDurationGroup.visibility = if (shouldShowDuration) View.VISIBLE else View.GONE
-                videoDurationGroup.alpha = if (shouldShowDuration) 1f else 0f
-                val currentUri = group.rawVideoUri
-                val durMs = currentUri?.let { videoDurationCache[it] } ?: 0L
-                btnVideoDuration.text = if (durMs > 0) formatVideoTime(durMs) else "00:00"
-                btnVideoDuration.setIconResource(if (holder.isPlayingVideo) R.drawable.ic_pause else R.drawable.ic_play_arrow)
-                btnVideoDuration.setOnClickListener {
-                    val currentPos = holder.bindingAdapterPosition
-                    if (currentPos != RecyclerView.NO_POSITION) {
-                        toggleRawVideoForPosition(currentPos)
-                    }
-                }
-            } else if (isMp4Active) {
-                videoDurationGroup.visibility = if (shouldShowDuration) View.VISIBLE else View.GONE
-                videoDurationGroup.alpha = if (shouldShowDuration) 1f else 0f
-                val currentUri = activeDerivativeUri ?: group.mp4VideoUri
-                val durMs = currentUri?.let { videoDurationCache[it] } ?: 0L
-                btnVideoDuration.text = if (durMs > 0) formatVideoTime(durMs) else "00:00"
-                btnVideoDuration.setIconResource(if (holder.isPlayingVideo) R.drawable.ic_pause else R.drawable.ic_play_arrow)
-                btnVideoDuration.setOnClickListener {
-                    val currentPos = holder.bindingAdapterPosition
-                    if (currentPos != RecyclerView.NO_POSITION) {
-                        toggleMp4VideoForPosition(currentPos)
-                    }
-                }
-            } else {
-                videoDurationGroup.visibility = View.GONE
-                videoDurationGroup.alpha = 0f
-                btnVideoDuration.setOnClickListener(null)
-            }
+            videoDurationGroup.visibility = View.GONE
+            videoDurationGroup.alpha = 0f
+            btnVideoDuration.setOnClickListener(null)
 
             // 2. Master RAW Format indicator setup (Legacy hidden, kept synced)
             val lenses = if (group.isMultiCamera) getMultiCameraLenses(group) else emptyList()
@@ -1649,25 +1619,14 @@ class ImageViewerAdapter(
                     multiCamContainer.alpha = 0f
                     dotsContainer.visibility = View.GONE
                     dotsContainer.alpha = 0f
+                    durationGroup.visibility = View.GONE
+                    durationGroup.alpha = 0f
                     if (shouldBeVisible) {
-                        if (isVideo) {
-                            durationGroup.visibility = View.VISIBLE
-                            durationGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
-                        } else {
-                            durationGroup.visibility = View.GONE
-                            durationGroup.alpha = 0f
-                        }
                         if (isCinemaDngGroup) {
                             filmstripContainer.visibility = View.VISIBLE
                             filmstripContainer.animate().alpha(0.35f).setDuration(200).setListener(null).start()
                         }
                     } else {
-                        durationGroup.animate().alpha(0f).setDuration(200)
-                            .setListener(object : android.animation.AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (!isUiVisible || isFormatSwitcherPersistentHidden || !isVideo) durationGroup.visibility = View.GONE
-                                }
-                            }).start()
                         if (isCinemaDngGroup) {
                             holder.filmstripFadeRunnable?.let { filmstripContainer.removeCallbacks(it) }
                             holder.filmstripFadeRunnable = null
@@ -1676,7 +1635,7 @@ class ImageViewerAdapter(
                                     override fun onAnimationEnd(animation: android.animation.Animator) {
                                         if (!isUiVisible || isFormatSwitcherPersistentHidden) filmstripContainer.visibility = View.GONE
                                     }
-                                    }).start()
+                                }).start()
                         }
                     }
                 }
@@ -1716,25 +1675,14 @@ class ImageViewerAdapter(
                     multiCamContainer.alpha = 0f
                     dotsContainer.visibility = View.GONE
                     dotsContainer.alpha = 0f
+                    durationGroup.visibility = View.GONE
+                    durationGroup.alpha = 0f
                     if (shouldBeVisible) {
-                        if (isVideo) {
-                            durationGroup.visibility = View.VISIBLE
-                            durationGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
-                        } else {
-                            durationGroup.visibility = View.GONE
-                            durationGroup.alpha = 0f
-                        }
                         if (isCinemaDngGroup) {
                             filmstripContainer.visibility = View.VISIBLE
                             filmstripContainer.animate().alpha(0.35f).setDuration(200).setListener(null).start()
                         }
                     } else {
-                        durationGroup.animate().alpha(0f).setDuration(200)
-                            .setListener(object : android.animation.AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (isFormatSwitcherPersistentHidden || !isVideo) durationGroup.visibility = View.GONE
-                                }
-                            }).start()
                         if (isCinemaDngGroup) {
                             holder.filmstripFadeRunnable?.let { filmstripContainer.removeCallbacks(it) }
                             holder.filmstripFadeRunnable = null
