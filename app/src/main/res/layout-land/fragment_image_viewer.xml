@@ -215,7 +215,8 @@
                 android:layout_height="38dp"
                 android:layout_marginBottom="4dp"
                 android:orientation="horizontal"
-                android:gravity="center_vertical">
+                android:gravity="center_vertical"
+                android:visibility="gone">
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_format_switch"
@@ -236,44 +237,42 @@
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_derivative_cycle"
                     style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="38dp"
+                    android:layout_width="0dp"
                     android:layout_height="match_parent"
+                    android:layout_weight="1"
                     android:layout_marginStart="4dp"
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
                     android:insetLeft="0dp"
                     android:insetRight="0dp"
-                    android:padding="0dp"
+                    android:padding="2dp"
+                    android:lines="2"
                     app:icon="@drawable/ic_look_dot"
-                    app:iconSize="16dp"
+                    app:iconSize="14dp"
                     app:iconGravity="textStart"
-                    app:iconPadding="0dp"
+                    app:iconPadding="4dp"
                     android:gravity="center"
+                    android:textSize="10sp"
                     android:visibility="gone"
                     app:cornerRadius="12dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_motion_live"
                     style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="wrap_content"
-                    android:minWidth="76dp"
+                    android:layout_width="0dp"
                     android:layout_height="match_parent"
+                    android:layout_weight="1.2"
                     android:layout_marginStart="4dp"
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
                     android:paddingStart="8dp"
                     android:paddingEnd="8dp"
-                    android:text="● LIVE"
-                    android:textSize="10.5sp"
-                    android:textStyle="bold"
+                    android:lines="2"
+                    android:text="● LIVE\nAUTO ON"
+                    android:textSize="10sp"
                     android:gravity="center"
                     android:visibility="gone"
                     app:cornerRadius="12dp" />
-
-                <View
-                    android:layout_width="0dp"
-                    android:layout_height="1dp"
-                    android:layout_weight="1" />
             </LinearLayout>
 
             <!-- Multi-Camera Focal Length Switcher & Dedicated Collage Studio Entry -->
@@ -463,6 +462,24 @@
                 android:layout_width="match_parent"
                 android:layout_height="42dp"
                 android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_format_switch_compact"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="48dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginEnd="4dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:insetLeft="0dp"
+                    android:insetRight="0dp"
+                    android:padding="0dp"
+                    android:text="RAW"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    app:cornerRadius="12dp"
+                    android:visibility="gone" />
 
                 <!-- Unified Film Recipe (Log + LUT) Bento Tile -->
                 <com.google.android.material.button.MaterialButton

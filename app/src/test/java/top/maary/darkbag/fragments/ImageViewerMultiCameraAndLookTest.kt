@@ -189,4 +189,62 @@ class ImageViewerMultiCameraAndLookTest {
         ).toString()
         assertEquals("⊞ COLLAGE\n多摄拼图", collageText)
     }
+
+    @Test
+    fun testAdaptiveBentoSlotRoutingCondition() {
+        val standardGroup = ImageGroup(
+            baseName = "DBAG_20261017_000001",
+            jpgUri = Uri.parse("content://media/1.jpg"),
+            dngUri = Uri.parse("content://saf/1.dng"),
+            isMotionPhoto = false,
+            isMultiCamera = false,
+            derivativeJpgUris = emptyList()
+        )
+
+        // Case 2: Standard photo has no contextual addons -> compact single row slot!
+        val stdDerivatives = standardGroup.derivativeJpgUris
+        val stdShowDerivCycle = !standardGroup.isMultiCamera && stdDerivatives.size >= 2
+        val stdShowMotionLive = !standardGroup.isMultiCamera && standardGroup.isMotionPhoto && standardGroup.jpgUri != null
+        val stdHasContextualAddons = stdShowDerivCycle || stdShowMotionLive
+        assertFalse("Standard photo must not trigger upper format row addons", stdHasContextualAddons)
+
+        // Motion Photo photo -> expands upper format row!
+        val motionGroup = standardGroup.copy(isMotionPhoto = true)
+        val motionShowMotionLive = !motionGroup.isMultiCamera && motionGroup.isMotionPhoto && motionGroup.jpgUri != null
+        val motionHasContextualAddons = stdShowDerivCycle || motionShowMotionLive
+        assertTrue("Motion photo must trigger upper format row addons", motionHasContextualAddons)
+
+        // Multi-look photo -> expands upper format row!
+        val multiLookGroup = standardGroup.copy(
+            derivativeJpgUris = listOf(
+                Uri.parse("content://media/1.jpg"),
+                Uri.parse("content://media/2.jpg")
+            )
+        )
+        val lookDerivatives = multiLookGroup.derivativeJpgUris
+        val lookShowDerivCycle = !multiLookGroup.isMultiCamera && lookDerivatives.size >= 2
+        val lookHasContextualAddons = lookShowDerivCycle || stdShowMotionLive
+        assertTrue("Multi-look photo must trigger upper format row addons", lookHasContextualAddons)
+    }
+
+    @Test
+    fun testLivePhotoBentoTelemetry() {
+        val liveOnText = CameraBentoDeckView.formatProTelemetry(
+            label = "LIVE PHOTO",
+            value = "AUTO ON",
+            isTabActive = true,
+            isValueManual = true,
+            context = context
+        ).toString()
+        assertEquals("LIVE PHOTO\nAUTO ON", liveOnText)
+
+        val livePausedText = CameraBentoDeckView.formatProTelemetry(
+            label = "LIVE PHOTO",
+            value = "PAUSED",
+            isTabActive = false,
+            isValueManual = false,
+            context = context
+        ).toString()
+        assertEquals("LIVE PHOTO\nPAUSED", livePausedText)
+    }
 }

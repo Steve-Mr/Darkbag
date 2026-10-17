@@ -636,7 +636,21 @@ open class ImageViewerFragment : Fragment() {
         val colorOnSurfaceVariant = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnSurfaceVariant, android.graphics.Color.LTGRAY)
         val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
 
-        currentBinding.btnFormatSwitch?.let { btn ->
+        val showDerivCycle = !currentGroup.isMultiCamera && !isRawSelected && derivatives.size >= 2
+        val showMotionLive = !currentGroup.isMultiCamera && currentGroup.isMotionPhoto && currentGroup.jpgUri != null && !isRawSelected && !isAdjusted
+        val hasContextualAddons = showDerivCycle || showMotionLive
+
+        if (hasContextualAddons) {
+            currentBinding.viewerFormatRow?.visibility = View.VISIBLE
+            currentBinding.btnFormatSwitch?.visibility = View.VISIBLE
+            currentBinding.btnFormatSwitchCompact?.visibility = View.GONE
+        } else {
+            currentBinding.viewerFormatRow?.visibility = View.GONE
+            currentBinding.btnFormatSwitchCompact?.visibility = View.VISIBLE
+        }
+
+        val formatButtons = listOfNotNull(currentBinding.btnFormatSwitch, currentBinding.btnFormatSwitchCompact)
+        for (btn in formatButtons) {
             val isRawAvailable = hasDng
             val rawLabel = when {
                 isRawVideo -> "RAWVID"
@@ -675,25 +689,59 @@ open class ImageViewerFragment : Fragment() {
         }
 
         currentBinding.btnDerivativeCycle?.let { btn ->
-            val showDerivCycle = !currentGroup.isMultiCamera && !isRawSelected && derivatives.size >= 2
             btn.visibility = if (showDerivCycle) View.VISIBLE else View.GONE
             if (showDerivCycle) {
                 val dotColor = LOOK_DOT_COLORS[activeDerivIdx % LOOK_DOT_COLORS.size]
-                btn.text = ""
-                btn.setIconResource(R.drawable.ic_look_dot)
-                btn.iconTint = android.content.res.ColorStateList.valueOf(dotColor)
+                val dotColorAlpha = androidx.core.graphics.ColorUtils.setAlphaComponent(dotColor, 200)
+
+                if (showMotionLive) {
+                    btn.text = ""
+                    btn.setIconResource(R.drawable.ic_look_dot)
+                    btn.iconTint = android.content.res.ColorStateList.valueOf(dotColor)
+                } else {
+                    val line1 = "LOOK"
+                    val line2 = "V${activeDerivIdx + 1} / V${derivatives.size} ●"
+                    val formatted = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                        label = line1,
+                        value = line2,
+                        isTabActive = false,
+                        isValueManual = true,
+                        context = ctx
+                    )
+                    val spannable = formatted as? android.text.SpannableStringBuilder ?: android.text.SpannableStringBuilder(formatted)
+                    val dotIdx = spannable.indexOf("●")
+                    if (dotIdx >= 0) {
+                        spannable.setSpan(
+                            android.text.style.ForegroundColorSpan(dotColor),
+                            dotIdx,
+                            dotIdx + 1,
+                            android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                        )
+                    }
+                    btn.text = spannable
+                    btn.icon = null
+                }
+
                 btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-                btn.strokeColor = android.content.res.ColorStateList.valueOf(androidx.core.graphics.ColorUtils.setAlphaComponent(dotColor, 200))
+                btn.strokeColor = android.content.res.ColorStateList.valueOf(dotColorAlpha)
                 btn.strokeWidth = (1.5f * density).toInt()
                 btn.cornerRadius = (12f * density).toInt()
             }
         }
 
         currentBinding.btnMotionLive?.let { btn ->
-            val showMotionLive = !currentGroup.isMultiCamera && currentGroup.isMotionPhoto && currentGroup.jpgUri != null && !isRawSelected && !isAdjusted
             btn.visibility = if (showMotionLive) View.VISIBLE else View.GONE
             if (showMotionLive) {
-                btn.text = if (isMotionPhotoAutoPlay) "● LIVE ON" else "○ LIVE OFF"
+                val line1 = "LIVE PHOTO"
+                val line2 = if (isMotionPhotoAutoPlay) "AUTO ON" else "PAUSED"
+                val liveText = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                    label = line1,
+                    value = line2,
+                    isTabActive = isMotionPhotoAutoPlay,
+                    isValueManual = isMotionPhotoAutoPlay,
+                    context = ctx
+                )
+                btn.text = liveText
                 if (isMotionPhotoAutoPlay) {
                     btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
                     btn.setTextColor(colorOnPrimaryContainer)
@@ -1101,6 +1149,12 @@ open class ImageViewerFragment : Fragment() {
         }
 
         binding.btnFormatSwitch?.setOnClickListener {
+            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            adapter.cycleOrToggleFormat(binding.imagePager.currentItem)
+        }
+
+        binding.btnFormatSwitchCompact?.setOnClickListener {
             if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
             it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
             adapter.cycleOrToggleFormat(binding.imagePager.currentItem)
