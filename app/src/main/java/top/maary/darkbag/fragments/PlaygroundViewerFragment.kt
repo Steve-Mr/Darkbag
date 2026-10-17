@@ -87,6 +87,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                         onLongPressStarted = { handleLongPressStarted(it) }
                         onLongPressEnded = { handleLongPressEnded(it) }
                         onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
+                        onFormatChanged = { _, _ -> updateControlsVisibility() }
+                        onDerivativeVersionChanged = { _, _ -> updateControlsVisibility() }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
                             val currentIndex = binding.imagePager.currentItem

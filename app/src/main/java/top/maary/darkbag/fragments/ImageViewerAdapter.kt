@@ -54,6 +54,7 @@ class ImageViewerAdapter(
     private val videoDurationCache = java.util.concurrent.ConcurrentHashMap<Uri, Long>()
     var onMultiCameraLensChanged: ((position: Int, lensIndex: Int) -> Unit)? = null
     var onDerivativeVersionChanged: ((position: Int, derivativeUri: Uri) -> Unit)? = null
+    var onFormatChanged: ((position: Int, format: String) -> Unit)? = null
     private var isUiVisible = true
     private var isFormatSwitcherPersistentHidden = false
 
@@ -207,12 +208,10 @@ class ImageViewerAdapter(
         holder.binding.imageView.onPinchToOverview = { onPinchToOverview?.invoke() }
 
         val shouldShow = isUiVisible && !isFormatSwitcherPersistentHidden
-        holder.binding.formatToggleGroup.visibility = if (shouldShow) View.VISIBLE else View.GONE
-        holder.binding.formatToggleGroup.alpha = if (shouldShow) 1f else 0f
-        val isInitialRawSelected = (selectedFormats[group.baseName] ?: getSelectedFormat(group)) == FORMAT_DNG
-        val isInitialMotion = group.isMotionPhoto && group.jpgUri != null && !isInitialRawSelected
-        holder.binding.motionPhotoToggleGroup.visibility = if (shouldShow && isInitialMotion) View.VISIBLE else View.GONE
-        holder.binding.motionPhotoToggleGroup.alpha = if (shouldShow && isInitialMotion) 1f else 0f
+        holder.binding.formatToggleGroup.visibility = View.GONE
+        holder.binding.formatToggleGroup.alpha = 0f
+        holder.binding.motionPhotoToggleGroup.visibility = View.GONE
+        holder.binding.motionPhotoToggleGroup.alpha = 0f
 
         if (isCinemaDngGroup) {
             holder.binding.filmstripContainer.visibility = if (shouldShow) View.VISIBLE else View.GONE
@@ -282,12 +281,11 @@ class ImageViewerAdapter(
         holder.binding.imageView.onZoomChanged = { isZoomed ->
             onZoomChanged?.invoke(isZoomed)
             val currentlyShouldShow = isUiVisible && !isZoomed && !isFormatSwitcherPersistentHidden
-            holder.binding.formatToggleGroup.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
-            holder.binding.formatToggleGroup.alpha = if (currentlyShouldShow) 1f else 0f
+            holder.binding.formatToggleGroup.visibility = View.GONE
+            holder.binding.formatToggleGroup.alpha = 0f
             val isRawSelected = selectedFormats[group.baseName] == FORMAT_DNG
-            val isMotion = group.isMotionPhoto && group.jpgUri != null && !isRawSelected
-            holder.binding.motionPhotoToggleGroup.visibility = if (currentlyShouldShow && isMotion) View.VISIBLE else View.GONE
-            holder.binding.motionPhotoToggleGroup.alpha = if (currentlyShouldShow && isMotion) 1f else 0f
+            holder.binding.motionPhotoToggleGroup.visibility = View.GONE
+            holder.binding.motionPhotoToggleGroup.alpha = 0f
             val hasDots = !group.isMultiCamera && !isRawSelected && getDerivativeUris(group).size >= 2
             if (hasDots) {
                 holder.binding.derivativeDotsContainer.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
@@ -421,33 +419,14 @@ class ImageViewerAdapter(
             val activeDerivativeUri = derivatives.getOrNull(activeDerivativeIndex) ?: group.jpgUri ?: group.mp4VideoUri
             val isMp4Active = !isRawSelected && activeDerivativeUri != null && (activeDerivativeUri.toString().endsWith(".mp4", ignoreCase = true) || group.isMp4Video)
 
-            // 1. Motion Photo button setup (strictly for motion photos, disabled/hidden in RAW state or for video assets)
-            val isMotion = group.isMotionPhoto && group.jpgUri != null && !isFormatSwitcherPersistentHidden && !isRawSelected
-            if (isMotion) {
-                motionPhotoToggleGroup.visibility = if (shouldShow) View.VISIBLE else View.GONE
-                motionPhotoToggleGroup.alpha = if (shouldShow) 1f else 0f
-                btnMotionPhotoIndicator.visibility = if (shouldShow) View.VISIBLE else View.GONE
-                btnMotionPhotoIndicator.alpha = if (shouldShow) 1f else 0f
-                if (isMotionPhotoAutoPlay) {
-                    btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
-                    btnMotionPhotoIndicator.contentDescription = "Motion Photo Auto-play On"
-                } else {
-                    btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
-                    btnMotionPhotoIndicator.contentDescription = "Motion Photo Auto-play Off"
-                }
-                btnMotionPhotoIndicator.setOnClickListener {
-                    val currentPos = holder.bindingAdapterPosition
-                    if (currentPos != RecyclerView.NO_POSITION) {
-                        onMotionPhotoIndicatorTapped?.invoke(currentPos)
-                    }
-                }
-            } else {
-                motionPhotoToggleGroup.visibility = View.GONE
-                motionPhotoToggleGroup.alpha = 0f
-                btnMotionPhotoIndicator.visibility = View.GONE
-                btnMotionPhotoIndicator.alpha = 0f
-                btnMotionPhotoIndicator.setOnClickListener(null)
-            }
+            // 1. Legacy corner groups are replaced by Bento Deck controls, keep GONE
+            formatToggleGroup.visibility = View.GONE
+            formatToggleGroup.alpha = 0f
+            motionPhotoToggleGroup.visibility = View.GONE
+            motionPhotoToggleGroup.alpha = 0f
+            btnMotionPhotoIndicator.visibility = View.GONE
+            btnMotionPhotoIndicator.alpha = 0f
+            btnMotionPhotoIndicator.setOnClickListener(null)
 
             // Video Duration indicator setup (Bottom-Right Anchor)
             val videoDurationGroup = holder.binding.videoDurationGroup
@@ -486,7 +465,7 @@ class ImageViewerAdapter(
                 btnVideoDuration.setOnClickListener(null)
             }
 
-            // 2. Master RAW Format indicator setup (Top-Right Anchor)
+            // 2. Master RAW Format indicator setup (Legacy hidden, kept synced)
             val lenses = if (group.isMultiCamera) getMultiCameraLenses(group) else emptyList()
             val activeLens = if (group.isMultiCamera && lenses.isNotEmpty()) {
                 val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, lenses.size - 1)
@@ -506,13 +485,11 @@ class ImageViewerAdapter(
             }
 
             if (!hasDng) {
-                // Only derivatives exist, hide the indicator completely
                 btnFormatIndicator.visibility = View.GONE
             } else {
-                btnFormatIndicator.visibility = View.VISIBLE
+                btnFormatIndicator.visibility = View.GONE
                 btnFormatIndicator.isSelected = isRawSelected
 
-                // If we have both RAW and derivative versions, it's clickable
                 if (hasDerivatives && hasDng) {
                     btnFormatIndicator.isClickable = true
                     btnFormatIndicator.setOnClickListener {
@@ -526,9 +503,9 @@ class ImageViewerAdapter(
                         stopMotionVideo(holder)
                         setupButtons(holder, currentGroup)
                         loadSelectedFormat(holder, currentGroup, newFormat)
+                        onFormatChanged?.invoke(currentPos, newFormat)
                     }
                 } else {
-                    // Only RAW exists, show badge but make it unclickable
                     btnFormatIndicator.isClickable = false
                     btnFormatIndicator.setOnClickListener(null)
                 }
@@ -599,11 +576,12 @@ class ImageViewerAdapter(
                             if (selectedLensIndices[group.baseName] != i) {
                                 selectedLensIndices[group.baseName] = i
                                 val currentPos = holder.bindingAdapterPosition
+                                val currentFmt = selectedFormats[group.baseName] ?: getSelectedFormat(group)
                                 if (currentPos != RecyclerView.NO_POSITION) {
                                     onMultiCameraLensChanged?.invoke(currentPos, i)
+                                    onFormatChanged?.invoke(currentPos, currentFmt)
                                 }
                                 setupButtons(holder, group)
-                                val currentFmt = selectedFormats[group.baseName] ?: getSelectedFormat(group)
                                 loadSelectedFormat(holder, group, currentFmt)
                             }
                         }
@@ -673,6 +651,7 @@ class ImageViewerAdapter(
                                 val currentPos = holder.bindingAdapterPosition
                                 if (currentPos != RecyclerView.NO_POSITION) {
                                     onDerivativeVersionChanged?.invoke(currentPos, derivatives[i])
+                                    onFormatChanged?.invoke(currentPos, FORMAT_JPG)
                                 }
                                 setupButtons(holder, group)
                                 loadSelectedFormat(holder, group, FORMAT_JPG)
@@ -1479,6 +1458,50 @@ class ImageViewerAdapter(
 
     fun getSelectedDerivativeIndex(baseName: String): Int = selectedDerivativeIndices[baseName] ?: 0
 
+    fun cycleOrToggleFormat(position: Int): String {
+        if (position !in differ.currentList.indices) return FORMAT_JPG
+        val group = differ.currentList[position]
+        val currentFormat = selectedFormats[group.baseName] ?: getSelectedFormat(group)
+        val isRawSelected = currentFormat == FORMAT_DNG
+
+        val lenses = if (group.isMultiCamera) getMultiCameraLenses(group) else emptyList()
+        val activeLens = if (group.isMultiCamera && lenses.isNotEmpty()) {
+            val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, lenses.size - 1)
+            lenses[idx]
+        } else null
+
+        val hasDng = if (group.isMultiCamera) activeLens?.dngUri != null else group.hasMasterRaw
+        val derivatives = getDerivativeUris(group)
+        val hasDerivatives = if (group.isMultiCamera) activeLens?.jpgUri != null else derivatives.isNotEmpty()
+
+        if (hasDng && hasDerivatives) {
+            val newFormat = if (isRawSelected) FORMAT_JPG else FORMAT_DNG
+            forceFormat(group.baseName, newFormat)
+            onFormatChanged?.invoke(position, newFormat)
+            return newFormat
+        }
+        return currentFormat
+    }
+
+    fun cycleDerivativeVersion(position: Int) {
+        if (position !in differ.currentList.indices) return
+        val group = differ.currentList[position]
+        val derivatives = getDerivativeUris(group)
+        if (derivatives.size < 2) return
+        val nextIdx = ((selectedDerivativeIndices[group.baseName] ?: 0) + 1) % derivatives.size
+        selectedDerivativeIndices[group.baseName] = nextIdx
+        selectedFormats[group.baseName] = FORMAT_JPG
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null) {
+            setupButtons(holder, group)
+            loadSelectedFormat(holder, group, FORMAT_JPG)
+        } else {
+            notifyItemChanged(position)
+        }
+        onDerivativeVersionChanged?.invoke(position, derivatives[nextIdx])
+        onFormatChanged?.invoke(position, FORMAT_JPG)
+    }
+
     fun setFormat(position: Int, format: String) {
         if (position >= differ.currentList.size) return
         val group = differ.currentList[position]
@@ -1588,22 +1611,16 @@ class ImageViewerAdapter(
                     val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
                     val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
                     val isRawSelected = selectedFormats[group.baseName] == FORMAT_DNG
-                    val isMotion = group.isMotionPhoto && group.jpgUri != null && !isRawSelected
                     val hasDots = !group.isMultiCamera && !isRawSelected && getDerivativeUris(group).size >= 2
                     val activeDerivUri = getDerivativeUris(group).getOrNull(selectedDerivativeIndices[group.baseName] ?: 0) ?: group.jpgUri ?: group.mp4VideoUri
                     val isMp4 = !isRawSelected && activeDerivUri != null && (activeDerivUri.toString().endsWith(".mp4", ignoreCase = true) || group.isMp4Video)
                     val isVideo = (isRawSelected && (group.isRawVideo || group.rawVideoUri != null)) || isMp4
                     val shouldBeVisible = isVisible && !isFormatSwitcherPersistentHidden
+                    formatGroup.visibility = View.GONE
+                    formatGroup.alpha = 0f
+                    motionGroup.visibility = View.GONE
+                    motionGroup.alpha = 0f
                     if (shouldBeVisible) {
-                        formatGroup.visibility = View.VISIBLE
-                        formatGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
-                        if (isMotion) {
-                            motionGroup.visibility = View.VISIBLE
-                            motionGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
-                        } else {
-                            motionGroup.visibility = View.GONE
-                            motionGroup.alpha = 0f
-                        }
                         if (hasMultiCam) {
                             multiCamContainer.visibility = View.VISIBLE
                             multiCamContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
@@ -1627,18 +1644,6 @@ class ImageViewerAdapter(
                             filmstripContainer.animate().alpha(0.35f).setDuration(200).setListener(null).start()
                         }
                     } else {
-                        formatGroup.animate().alpha(0f).setDuration(200)
-                            .setListener(object : android.animation.AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (!isUiVisible || isFormatSwitcherPersistentHidden) formatGroup.visibility = View.GONE
-                                }
-                            }).start()
-                        motionGroup.animate().alpha(0f).setDuration(200)
-                            .setListener(object : android.animation.AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (!isUiVisible || isFormatSwitcherPersistentHidden || !isMotion) motionGroup.visibility = View.GONE
-                                }
-                            }).start()
                         multiCamContainer.animate().alpha(0f).setDuration(200)
                             .setListener(object : android.animation.AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: android.animation.Animator) {
@@ -1692,22 +1697,16 @@ class ImageViewerAdapter(
                     val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
                     val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
                     val isRawSelected = selectedFormats[group.baseName] == FORMAT_DNG
-                    val isMotion = group.isMotionPhoto && group.jpgUri != null && !isRawSelected
                     val hasDots = !group.isMultiCamera && !isRawSelected && getDerivativeUris(group).size >= 2
                     val activeDerivUri = getDerivativeUris(group).getOrNull(selectedDerivativeIndices[group.baseName] ?: 0) ?: group.jpgUri ?: group.mp4VideoUri
                     val isMp4 = !isRawSelected && activeDerivUri != null && (activeDerivUri.toString().endsWith(".mp4", ignoreCase = true) || group.isMp4Video)
                     val isVideo = (isRawSelected && (group.isRawVideo || group.rawVideoUri != null)) || isMp4
                     val shouldBeVisible = isUiVisible && !isFormatSwitcherPersistentHidden
+                    formatGroup.visibility = View.GONE
+                    formatGroup.alpha = 0f
+                    motionGroup.visibility = View.GONE
+                    motionGroup.alpha = 0f
                     if (shouldBeVisible) {
-                        formatGroup.visibility = View.VISIBLE
-                        formatGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
-                        if (isMotion) {
-                            motionGroup.visibility = View.VISIBLE
-                            motionGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
-                        } else {
-                            motionGroup.visibility = View.GONE
-                            motionGroup.alpha = 0f
-                        }
                         if (hasMultiCam) {
                             multiCamContainer.visibility = View.VISIBLE
                             multiCamContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
@@ -1731,18 +1730,6 @@ class ImageViewerAdapter(
                             filmstripContainer.animate().alpha(0.35f).setDuration(200).setListener(null).start()
                         }
                     } else {
-                        formatGroup.animate().alpha(0f).setDuration(200)
-                            .setListener(object : android.animation.AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (isFormatSwitcherPersistentHidden) formatGroup.visibility = View.GONE
-                                }
-                            }).start()
-                        motionGroup.animate().alpha(0f).setDuration(200)
-                            .setListener(object : android.animation.AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (isFormatSwitcherPersistentHidden || !isMotion) motionGroup.visibility = View.GONE
-                                }
-                            }).start()
                         multiCamContainer.animate().alpha(0f).setDuration(200)
                             .setListener(object : android.animation.AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: android.animation.Animator) {

@@ -149,4 +149,38 @@ class ImageViewerAdapterTest {
         adapter.setFormatForGroup(group.baseName, ImageViewerAdapter.FORMAT_DNG)
         assertEquals(ImageViewerAdapter.FORMAT_DNG, adapter.getSelectedFormat(group))
     }
+
+    @Test
+    fun testCycleOrToggleFormatAndDerivativeVersion() {
+        val group = ImageGroup(
+            baseName = "PHOTO_20261017_120000",
+            jpgUri = Uri.parse("content://media/external/images/media/300"),
+            dngUri = Uri.parse("content://media/external/images/media/301"),
+            derivativeJpgUris = listOf(
+                Uri.parse("content://media/external/images/media/300"),
+                Uri.parse("content://media/external/images/media/302")
+            )
+        )
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val testAdapter = ImageViewerAdapter(listOf(group), scope, context)
+        var lastFormatChanged: String? = null
+        var lastDerivChanged: Uri? = null
+        testAdapter.onFormatChanged = { _, fmt -> lastFormatChanged = fmt }
+        testAdapter.onDerivativeVersionChanged = { _, uri -> lastDerivChanged = uri }
+
+        assertEquals(ImageViewerAdapter.FORMAT_JPG, testAdapter.getSelectedFormat(0))
+        assertEquals(0, testAdapter.getSelectedDerivativeIndex(group.baseName))
+
+        testAdapter.cycleDerivativeVersion(0)
+        assertEquals(1, testAdapter.getSelectedDerivativeIndex(group.baseName))
+        assertEquals(Uri.parse("content://media/external/images/media/302"), lastDerivChanged)
+
+        testAdapter.cycleOrToggleFormat(0)
+        assertEquals(ImageViewerAdapter.FORMAT_DNG, testAdapter.getSelectedFormat(0))
+        assertEquals(ImageViewerAdapter.FORMAT_DNG, lastFormatChanged)
+
+        testAdapter.cycleOrToggleFormat(0)
+        assertEquals(ImageViewerAdapter.FORMAT_JPG, testAdapter.getSelectedFormat(0))
+        assertEquals(ImageViewerAdapter.FORMAT_JPG, lastFormatChanged)
+    }
 }
