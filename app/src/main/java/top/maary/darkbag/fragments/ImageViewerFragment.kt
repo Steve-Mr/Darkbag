@@ -18,6 +18,17 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.style.ForegroundColorSpan
+import android.view.Gravity
+import android.widget.LinearLayout
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.color.MaterialColors
+import top.maary.darkbag.ui.CameraBentoDeckView
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -586,10 +597,15 @@ open class ImageViewerFragment : Fragment() {
         val isRawSelected = currentFormat == ImageViewerAdapter.FORMAT_DNG
 
         val lenses = if (currentGroup.isMultiCamera) adapter.getMultiCameraLenses(currentGroup) else emptyList()
+        val activeLensIndex = if (currentGroup.isMultiCamera && lenses.isNotEmpty()) {
+            adapter.getSelectedLensIndex(currentIndex).coerceIn(0, lenses.size - 1)
+        } else 0
         val activeLens = if (currentGroup.isMultiCamera && lenses.isNotEmpty()) {
-            val idx = adapter.getSelectedLensIndex(currentIndex).coerceIn(0, lenses.size - 1)
-            lenses[idx]
+            lenses[activeLensIndex]
         } else null
+        val activeLensTag = activeLens?.lensTag?.ifEmpty {
+            String.format(java.util.Locale.US, "%.1fx", activeLens.multiplier)
+        } ?: "1.0x"
 
         val hasDng = if (currentGroup.isMultiCamera) {
             activeLens?.dngUri != null
@@ -616,6 +632,7 @@ open class ImageViewerFragment : Fragment() {
         val colorSecondaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorSecondaryContainer, android.graphics.Color.DKGRAY)
         val colorOnSecondaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnSecondaryContainer, android.graphics.Color.WHITE)
         val colorSurfaceContainerHigh = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.GRAY)
+        val colorOnSurfaceVariant = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnSurfaceVariant, android.graphics.Color.LTGRAY)
         val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
 
         currentBinding.btnFormatSwitch?.let { btn ->
@@ -623,7 +640,17 @@ open class ImageViewerFragment : Fragment() {
                 hasDng && hasDerivatives -> {
                     btn.isEnabled = !isAdjusted
                     btn.isClickable = !isAdjusted
-                    if (isRawSelected) {
+                    if (currentGroup.isMultiCamera) {
+                        val line1 = "$activeLensTag · ${if (isRawSelected) "DNG" else "JPG"}"
+                        val line2 = "JPG ⇄ DNG"
+                        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                            label = line1,
+                            value = line2,
+                            isTabActive = isRawSelected,
+                            isValueManual = false,
+                            context = ctx
+                        )
+                    } else if (isRawSelected) {
                         val line1 = if (isRawVideo) "MASTER · RAWVID" else if (isCinemaDng) "MASTER · CDNG" else "MASTER · DNG"
                         val line2 = if (isRawVideo || currentGroup.mp4VideoUri != null) "⇄ SWITCH MP4" else "⇄ SWITCH JPG"
                         btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
@@ -633,11 +660,6 @@ open class ImageViewerFragment : Fragment() {
                             isValueManual = false,
                             context = ctx
                         )
-                        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
-                        btn.setTextColor(colorOnPrimaryContainer)
-                        btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
-                        btn.strokeWidth = (1.5f * density).toInt()
-                        btn.cornerRadius = (12f * density).toInt()
                     } else {
                         val line1 = if (isMp4Active) "VIEW · MP4" else "VIEW · JPG"
                         val line2 = if (isRawVideo) "⇄ SWITCH RAWVID" else if (isCinemaDng) "⇄ SWITCH CDNG" else "⇄ SWITCH DNG"
@@ -648,6 +670,15 @@ open class ImageViewerFragment : Fragment() {
                             isValueManual = false,
                             context = ctx
                         )
+                    }
+
+                    if (isRawSelected) {
+                        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
+                        btn.setTextColor(colorOnPrimaryContainer)
+                        btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                        btn.strokeWidth = (1.5f * density).toInt()
+                        btn.cornerRadius = (12f * density).toInt()
+                    } else {
                         btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSecondaryContainer)
                         btn.setTextColor(colorOnSecondaryContainer)
                         btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
@@ -658,9 +689,10 @@ open class ImageViewerFragment : Fragment() {
                 hasDng && !hasDerivatives -> {
                     btn.isEnabled = false
                     btn.isClickable = false
+                    val line1 = if (currentGroup.isMultiCamera) "$activeLensTag · DNG" else "FORMAT"
                     val line2 = if (isRawVideo) "RAWVID ONLY" else if (isCinemaDng) "CDNG ONLY" else "DNG ONLY"
                     btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                        label = "FORMAT",
+                        label = line1,
                         value = line2,
                         isTabActive = false,
                         isValueManual = false,
@@ -674,9 +706,10 @@ open class ImageViewerFragment : Fragment() {
                 else -> {
                     btn.isEnabled = false
                     btn.isClickable = false
+                    val line1 = if (currentGroup.isMultiCamera) "$activeLensTag · JPG" else "FORMAT"
                     val line2 = if (isMp4Active) "MP4 ONLY" else "JPG ONLY"
                     btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                        label = "FORMAT",
+                        label = line1,
                         value = line2,
                         isTabActive = false,
                         isValueManual = false,
@@ -694,22 +727,37 @@ open class ImageViewerFragment : Fragment() {
             val showDerivCycle = !currentGroup.isMultiCamera && !isRawSelected && derivatives.size >= 2
             btn.visibility = if (showDerivCycle) View.VISIBLE else View.GONE
             if (showDerivCycle) {
-                btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                    label = "VERSION",
-                    value = "V${activeDerivIdx + 1} / V${derivatives.size}",
+                val dotColor = LOOK_DOT_COLORS[activeDerivIdx % LOOK_DOT_COLORS.size]
+                val line1 = "LOOK"
+                val line2 = "V${activeDerivIdx + 1} / V${derivatives.size} ●"
+                val formatted = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                    label = line1,
+                    value = line2,
                     isTabActive = false,
                     isValueManual = true,
                     context = ctx
                 )
+                val dotChar = "●"
+                val textStr = formatted.toString()
+                val dotIdx = textStr.indexOf(dotChar)
+                if (dotIdx >= 0 && formatted is android.text.SpannableStringBuilder) {
+                    formatted.setSpan(
+                        android.text.style.ForegroundColorSpan(dotColor),
+                        dotIdx,
+                        dotIdx + 1,
+                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+                btn.text = formatted
                 btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
-                btn.strokeWidth = (1f * density).toInt()
+                btn.strokeColor = android.content.res.ColorStateList.valueOf(androidx.core.graphics.ColorUtils.setAlphaComponent(dotColor, 180))
+                btn.strokeWidth = (1.5f * density).toInt()
                 btn.cornerRadius = (14f * density).toInt()
             }
         }
 
         currentBinding.btnMotionLive?.let { btn ->
-            val showMotionLive = currentGroup.isMotionPhoto && currentGroup.jpgUri != null && !isRawSelected && !isAdjusted
+            val showMotionLive = !currentGroup.isMultiCamera && currentGroup.isMotionPhoto && currentGroup.jpgUri != null && !isRawSelected && !isAdjusted
             btn.visibility = if (showMotionLive) View.VISIBLE else View.GONE
             if (showMotionLive) {
                 val label = if (isMotionPhotoAutoPlay) "● LIVE" else "○ LIVE"
@@ -733,6 +781,94 @@ open class ImageViewerFragment : Fragment() {
                     btn.cornerRadius = (18f * density).toInt()
                 }
             }
+        }
+
+        if (currentGroup.isMultiCamera && lenses.isNotEmpty()) {
+            currentBinding.viewerMulticamRow?.visibility = View.VISIBLE
+            currentBinding.multicamLensContainer?.let { container ->
+                container.removeAllViews()
+                for ((idx, lens) in lenses.withIndex()) {
+                    val isSelected = (idx == activeLensIndex)
+                    val baseTag = if (lens.lensTag.isNotBlank()) lens.lensTag else String.format(java.util.Locale.US, "%.1fx", lens.multiplier)
+                    val lensLabel = when {
+                        baseTag.contains("(") -> baseTag
+                        lens.multiplier < 0.9f -> "$baseTag (UW)"
+                        lens.multiplier in 0.9f..1.5f -> "$baseTag (W)"
+                        lens.multiplier > 1.5f -> "$baseTag (T)"
+                        else -> baseTag
+                    }
+
+                    val lensBtn = com.google.android.material.button.MaterialButton(
+                        ctx,
+                        null,
+                        com.google.android.material.R.attr.materialButtonTonalStyle
+                    ).apply {
+                        layoutParams = android.widget.LinearLayout.LayoutParams(
+                            0,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            1.0f
+                        ).apply {
+                            if (idx > 0) marginStart = (2f * density).roundToInt()
+                            if (idx < lenses.size - 1) marginEnd = (2f * density).roundToInt()
+                        }
+                        text = lensLabel
+                        textSize = 10.5f
+                        isSingleLine = true
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                        gravity = android.view.Gravity.CENTER
+                        insetTop = 0
+                        insetBottom = 0
+                        setPadding(0, 0, 0, 0)
+                        minWidth = 0
+                        minimumWidth = 0
+
+                        if (isSelected) {
+                            cornerRadius = (10f * density).roundToInt()
+                            backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
+                            setTextColor(colorOnPrimaryContainer)
+                            strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                            strokeWidth = (1.5f * density).roundToInt()
+                        } else {
+                            cornerRadius = (14f * density).roundToInt()
+                            backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                            setTextColor(colorOnSurfaceVariant)
+                            strokeColor = android.content.res.ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
+                            strokeWidth = 0
+                        }
+
+                        setOnClickListener {
+                            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                            val curPos = currentBinding.imagePager.currentItem
+                            if (adapter.getSelectedLensIndex(curPos) != idx) {
+                                adapter.setSelectedLensIndex(curPos, idx)
+                                updateControlsVisibility()
+                            }
+                        }
+                    }
+                    container.addView(lensBtn)
+                }
+            }
+
+            currentBinding.btnMulticamCollage?.apply {
+                text = CameraBentoDeckView.formatProTelemetry(
+                    label = "⊞ COLLAGE",
+                    value = "多摄拼图",
+                    isTabActive = true,
+                    isValueManual = false,
+                    context = ctx
+                )
+                setOnClickListener {
+                    it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                    val curPos = currentBinding.imagePager.currentItem
+                    val grp = adapter.getGroup(curPos)
+                    if (grp.isMultiCamera) {
+                        showMultiCamCollageDialog(grp)
+                    }
+                }
+            }
+        } else {
+            currentBinding.viewerMulticamRow?.visibility = View.GONE
+            currentBinding.multicamLensContainer?.removeAllViews()
         }
 
         val isVideoActive = isRawVideo || isCinemaDng || currentGroup.isMp4Video || currentGroup.mp4VideoUri != null || isMp4Active
@@ -1046,7 +1182,18 @@ open class ImageViewerFragment : Fragment() {
         binding.btnDerivativeCycle?.setOnClickListener {
             if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
             it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            adapter.cycleDerivativeVersion(binding.imagePager.currentItem)
+            val curPos = binding.imagePager.currentItem
+            adapter.cycleDerivativeVersion(curPos)
+            updateFormatBentoRow()
+        }
+
+        binding.btnMulticamCollage?.setOnClickListener {
+            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+            if (currentGroup.isMultiCamera) {
+                showMultiCamCollageDialog(currentGroup)
+            }
         }
 
         binding.btnMotionLive?.setOnClickListener {
@@ -2609,6 +2756,7 @@ open class ImageViewerFragment : Fragment() {
                         onMultiCameraLensChanged = { _, _ ->
                             updateSplitButtons()
                             updateToolbarIcon()
+                            updateControlsVisibility()
                         }
                         onCinemaDngFrameSelected = { group, index, uri ->
                             val currentPosition = binding.imagePager.currentItem
@@ -4092,6 +4240,15 @@ open class ImageViewerFragment : Fragment() {
 
     companion object {
         const val KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY = "viewer_motion_photo_auto_play"
+
+        val LOOK_DOT_COLORS = intArrayOf(
+            Color.parseColor("#FFD0BC"), // Soft Coral / Primary
+            Color.parseColor("#80D8FF"), // Soft Cyan
+            Color.parseColor("#FFE57F"), // Soft Amber / Classic Chrome
+            Color.parseColor("#B9F6CA"), // Soft Mint / Emerald
+            Color.parseColor("#EA80FC"), // Soft Lavender
+            Color.parseColor("#FF8A80")  // Soft Red
+        )
 
         private const val MENU_DETAILS = 1
         private const val MENU_DELETE = 2

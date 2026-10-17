@@ -513,159 +513,14 @@ class ImageViewerAdapter(
                 }
             }
 
-            // 3. Multi-Camera Lens Switcher setup (MD3 Connected Button Group)
-            val multiCamContainer = multiCameraToggleContainer
-            val multiCamGroup = multiCameraToggleGroup
-            if (group.isMultiCamera && lenses.size >= 2 && !isFormatSwitcherPersistentHidden) {
-                multiCamContainer.visibility = if (isUiVisible) View.VISIBLE else View.GONE
-                multiCamGroup.removeAllViews()
+            // 3. Multi-Camera & Derivative overlays are replaced by Bento Deck controls, keep GONE
+            multiCameraToggleContainer.visibility = View.GONE
+            multiCameraToggleContainer.alpha = 0f
+            multiCameraToggleGroup.removeAllViews()
 
-                val activeIndex = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, lenses.size - 1)
-                val density = holder.itemView.context.resources.displayMetrics.density
-                val outerCorner = com.google.android.material.shape.RelativeCornerSize(0.5f)
-                val innerCorner = com.google.android.material.shape.AbsoluteCornerSize(7f * density)
-                val n = lenses.size
-
-                for (i in lenses.indices) {
-                    val lens = lenses[i]
-                    val context = holder.itemView.context
-                    val isChecked = (i == activeIndex)
-
-                    val shapeAppearance = com.google.android.material.shape.ShapeAppearanceModel.builder()
-                        .setTopLeftCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == 0) outerCorner else innerCorner)
-                        .setBottomLeftCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == 0) outerCorner else innerCorner)
-                        .setTopRightCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == n - 1) outerCorner else innerCorner)
-                        .setBottomRightCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == n - 1) outerCorner else innerCorner)
-                        .build()
-
-                    val button = com.google.android.material.button.MaterialButton(
-                        context,
-                        null,
-                        com.google.android.material.R.attr.materialButtonStyle
-                    ).apply {
-                        id = View.generateViewId()
-                        text = lens.lensTag
-                        isCheckable = true
-                        this.isChecked = isChecked
-                        minWidth = 0
-                        minimumWidth = 0
-                        minHeight = 0
-                        minimumHeight = 0
-                        insetTop = 0
-                        insetBottom = 0
-                        strokeWidth = 0
-                        shapeAppearanceModel = shapeAppearance
-                        textSize = 12f
-                        typeface = android.graphics.Typeface.DEFAULT
-                        backgroundTintList = androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_bg_tint)
-                        setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_text_color))
-                        rippleColor = androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_ripple_color)
-                        val padH = (18 * density).toInt()
-                        val padV = (8 * density).toInt()
-                        setPadding(padH, padV, padH, padV)
-
-                        val lp = LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT
-                        ).apply {
-                            if (i < n - 1) {
-                                marginEnd = (3 * density).toInt()
-                            }
-                        }
-                        layoutParams = lp
-
-                        setOnClickListener {
-                            if (selectedLensIndices[group.baseName] != i) {
-                                selectedLensIndices[group.baseName] = i
-                                val currentPos = holder.bindingAdapterPosition
-                                val currentFmt = selectedFormats[group.baseName] ?: getSelectedFormat(group)
-                                if (currentPos != RecyclerView.NO_POSITION) {
-                                    onMultiCameraLensChanged?.invoke(currentPos, i)
-                                    onFormatChanged?.invoke(currentPos, currentFmt)
-                                }
-                                setupButtons(holder, group)
-                                loadSelectedFormat(holder, group, currentFmt)
-                            }
-                        }
-                    }
-                    multiCamGroup.addView(button)
-                }
-            } else {
-                multiCamContainer.visibility = View.GONE
-                multiCamGroup.removeAllViews()
-            }
-
-            // 4. Derivative Version Stacking Dots setup (Bottom Center Colorful Dots)
-            val dotsContainer = derivativeDotsContainer
-            val dotsGroup = derivativeDotsGroup
-            val shouldShowDots = !group.isMultiCamera && !isRawSelected && derivatives.size >= 2 && !isFormatSwitcherPersistentHidden
-            if (shouldShowDots) {
-                dotsContainer.visibility = if (isUiVisible && shouldShowDots) View.VISIBLE else View.GONE
-                dotsGroup.removeAllViews()
-
-                val density = holder.itemView.context.resources.displayMetrics.density
-                val context = holder.itemView.context
-                val dotColors = intArrayOf(
-                    Color.parseColor("#FFD0BC"), // Soft Coral / Primary
-                    Color.parseColor("#80D8FF"), // Soft Cyan
-                    Color.parseColor("#FFE57F"), // Soft Amber / Classic Chrome
-                    Color.parseColor("#B9F6CA"), // Soft Mint / Emerald
-                    Color.parseColor("#EA80FC"), // Soft Lavender
-                    Color.parseColor("#FF8A80")  // Soft Red
-                )
-
-                for (i in derivatives.indices) {
-                    val isDotActive = (!isRawSelected && i == activeDerivativeIndex)
-                    val color = dotColors[i % dotColors.size]
-
-                    val dotWrapper = android.widget.FrameLayout(context).apply {
-                        val touchSizePx = (24 * density).toInt()
-                        layoutParams = LinearLayout.LayoutParams(touchSizePx, touchSizePx).apply {
-                            if (i < derivatives.size - 1) {
-                                marginEnd = (2 * density).toInt()
-                            }
-                        }
-
-                        val dotCircle = View(context).apply {
-                            val sizeDp = if (isDotActive) 10 else 7
-                            val sizePx = (sizeDp * density).toInt()
-                            val shape = android.graphics.drawable.GradientDrawable().apply {
-                                shape = android.graphics.drawable.GradientDrawable.OVAL
-                                setColor(color)
-                                if (isDotActive) {
-                                    setStroke((2 * density).toInt(), Color.WHITE)
-                                }
-                            }
-                            background = shape
-                            alpha = if (isDotActive) 1.0f else 0.55f
-
-                            val lp = android.widget.FrameLayout.LayoutParams(sizePx, sizePx).apply {
-                                gravity = android.view.Gravity.CENTER
-                            }
-                            layoutParams = lp
-                        }
-                        addView(dotCircle)
-
-                        setOnClickListener {
-                            if (selectedDerivativeIndices[group.baseName] != i || isRawSelected) {
-                                selectedDerivativeIndices[group.baseName] = i
-                                selectedFormats[group.baseName] = FORMAT_JPG
-                                val currentPos = holder.bindingAdapterPosition
-                                if (currentPos != RecyclerView.NO_POSITION) {
-                                    onDerivativeVersionChanged?.invoke(currentPos, derivatives[i])
-                                    onFormatChanged?.invoke(currentPos, FORMAT_JPG)
-                                }
-                                setupButtons(holder, group)
-                                loadSelectedFormat(holder, group, FORMAT_JPG)
-                            }
-                        }
-                    }
-                    dotsGroup.addView(dotWrapper)
-                }
-            } else {
-                dotsContainer.visibility = View.GONE
-                dotsGroup.removeAllViews()
-            }
+            derivativeDotsContainer.visibility = View.GONE
+            derivativeDotsContainer.alpha = 0f
+            derivativeDotsGroup.removeAllViews()
         }
     }
 
@@ -1790,18 +1645,11 @@ class ImageViewerAdapter(
                     formatGroup.alpha = 0f
                     motionGroup.visibility = View.GONE
                     motionGroup.alpha = 0f
+                    multiCamContainer.visibility = View.GONE
+                    multiCamContainer.alpha = 0f
+                    dotsContainer.visibility = View.GONE
+                    dotsContainer.alpha = 0f
                     if (shouldBeVisible) {
-                        if (hasMultiCam) {
-                            multiCamContainer.visibility = View.VISIBLE
-                            multiCamContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
-                        }
-                        if (hasDots) {
-                            dotsContainer.visibility = View.VISIBLE
-                            dotsContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
-                        } else {
-                            dotsContainer.visibility = View.GONE
-                            dotsContainer.alpha = 0f
-                        }
                         if (isVideo) {
                             durationGroup.visibility = View.VISIBLE
                             durationGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
@@ -1814,18 +1662,6 @@ class ImageViewerAdapter(
                             filmstripContainer.animate().alpha(0.35f).setDuration(200).setListener(null).start()
                         }
                     } else {
-                        multiCamContainer.animate().alpha(0f).setDuration(200)
-                            .setListener(object : android.animation.AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (!isUiVisible || isFormatSwitcherPersistentHidden) multiCamContainer.visibility = View.GONE
-                                }
-                            }).start()
-                        dotsContainer.animate().alpha(0f).setDuration(200)
-                            .setListener(object : android.animation.AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (!isUiVisible || isFormatSwitcherPersistentHidden) dotsContainer.visibility = View.GONE
-                                }
-                            }).start()
                         durationGroup.animate().alpha(0f).setDuration(200)
                             .setListener(object : android.animation.AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: android.animation.Animator) {
@@ -1876,18 +1712,11 @@ class ImageViewerAdapter(
                     formatGroup.alpha = 0f
                     motionGroup.visibility = View.GONE
                     motionGroup.alpha = 0f
+                    multiCamContainer.visibility = View.GONE
+                    multiCamContainer.alpha = 0f
+                    dotsContainer.visibility = View.GONE
+                    dotsContainer.alpha = 0f
                     if (shouldBeVisible) {
-                        if (hasMultiCam) {
-                            multiCamContainer.visibility = View.VISIBLE
-                            multiCamContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
-                        }
-                        if (hasDots) {
-                            dotsContainer.visibility = View.VISIBLE
-                            dotsContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
-                        } else {
-                            dotsContainer.visibility = View.GONE
-                            dotsContainer.alpha = 0f
-                        }
                         if (isVideo) {
                             durationGroup.visibility = View.VISIBLE
                             durationGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
@@ -1900,18 +1729,6 @@ class ImageViewerAdapter(
                             filmstripContainer.animate().alpha(0.35f).setDuration(200).setListener(null).start()
                         }
                     } else {
-                        multiCamContainer.animate().alpha(0f).setDuration(200)
-                            .setListener(object : android.animation.AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (isFormatSwitcherPersistentHidden) multiCamContainer.visibility = View.GONE
-                                }
-                            }).start()
-                        dotsContainer.animate().alpha(0f).setDuration(200)
-                            .setListener(object : android.animation.AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (isFormatSwitcherPersistentHidden) dotsContainer.visibility = View.GONE
-                                }
-                            }).start()
                         durationGroup.animate().alpha(0f).setDuration(200)
                             .setListener(object : android.animation.AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: android.animation.Animator) {
