@@ -255,4 +255,35 @@
     <string name="hdr_fusion_spatial">Spatial Merge + RCD</string>
     <string name="hdr_fusion_sabre">Sabre (Super-Resolution)</string>
     <string name="hdr_fusion_classic">Classic HDR+ (Wiener)</string>
+
+    <!-- Settings Sections -->
+    <string name="settings_section_shooting_modes">Shooting &amp; Capture Modes</string>
+    <string name="settings_section_optics_hardware">Optics &amp; Hardware</string>
+    <string name="settings_section_color_hdr">Color Science &amp; HDR+</string>
+    <string name="settings_section_storage_formats">Storage &amp; Formats</string>
+    <string name="settings_section_advanced_ui">Advanced UI</string>
+    <string name="settings_section_system_about">System &amp; About</string>
+
+    <!-- Settings Sub-groupings -->
+    <string name="settings_sub_startup_page">Default Startup Page</string>
+    <string name="settings_sub_shutter_video">Shutter Long-Press &amp; Video</string>
+    <string name="settings_sub_color_film">Color Science &amp; Film Simulation</string>
+    <string name="settings_sub_hdr_engine">HDR+ Computation Engine</string>
+    <string name="settings_sub_formats_output">Photo Formats &amp; Output</string>
+    <string name="settings_sub_metadata_media">Capture Metadata &amp; Media</string>
+    <string name="settings_ui_tier_ps">Point &amp; Shoot (P&amp;S) Controls</string>
+    <string name="settings_ui_tier_film">Film Simulation (FILM) Controls</string>
+    <string name="settings_ui_tier_pro">Pro Cine (PRO) Controls</string>
+    <string name="settings_ui_tier_viewer">Navigation &amp; Viewer</string>
+    <string name="settings_ui_lens_controls">Show Lens Controls / Zoom Row</string>
+    <string name="settings_ui_camera_switch">Show Camera Switch Button</string>
+    <string name="settings_ui_settings_tile">Show Quick Settings Tile</string>
+    <string name="settings_ui_lut_switcher">Show Film Recipe (Log/LUT) Switcher</string>
+    <string name="settings_ui_hdr_tile">Show HDR+ Computation Tile</string>
+    <string name="settings_ui_underexposure_tile">Show DYN Underexposure Tile</string>
+    <string name="settings_ui_mode_switch_tile">Show Half-frame / Multi-Cam Mode Tile</string>
+    <string name="settings_ui_manual_controls">Enable Manual Parameter Dials &amp; Bento Tiles</string>
+    <string name="settings_ui_focus_peaking">Focus Peaking Aid</string>
+    <string name="settings_ui_internal_viewer">Use Internal Darkroom Viewer</string>
+    <string name="settings_ui_external_viewer">External Viewer App</string>
 </resources>

@@ -137,6 +137,9 @@ class SettingsFragment : Fragment() {
             binding.tvAppVersion.text = "Version 1.0.0"
         }
 
+        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "Unknown"
+        binding.txtArchInfo.text = "Architecture: $abi"
+
         binding.cardAbout.setOnClickListener {
             aboutClickCount++
             if (aboutClickCount >= 5) {
@@ -506,7 +509,6 @@ class SettingsFragment : Fragment() {
         fun updateSwitchStates() {
             binding.switchEnableCamera.isChecked = enableCamera
             binding.switchEnablePlayground.isChecked = enablePlayground
-            binding.switchShowFloatingToolbar.isChecked = prefs.getBoolean(KEY_SHOW_FLOATING_TOOLBAR, true)
 
             // At least one must be enabled
             if (enableCamera && !enablePlayground) {
@@ -559,10 +561,6 @@ class SettingsFragment : Fragment() {
                 prefs.edit().putString(KEY_DEFAULT_STARTUP, defaultStartup).apply()
             }
             updateSwitchStates()
-        }
-
-        binding.switchShowFloatingToolbar.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_SHOW_FLOATING_TOOLBAR, isChecked).apply()
         }
     }
 
