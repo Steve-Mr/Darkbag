@@ -46,6 +46,7 @@ class ImageViewerAdapter(
     var onPinchToOverview: (() -> Unit)? = null
     var isMotionPhotoAutoPlay: Boolean = true
     var onCinemaDngFrameSelected: ((group: ImageGroup, index: Int, uri: Uri?) -> Unit)? = null
+    var onVideoPlaybackStateChanged: ((position: Int, isPlaying: Boolean, currentMs: Long, totalMs: Long) -> Unit)? = null
 
     private var recyclerView: RecyclerView? = null
     private val selectedFormats = mutableMapOf<String, String>()
@@ -119,6 +120,7 @@ class ImageViewerAdapter(
         var filmstripFadeRunnable: Runnable? = null
         var lastDisplayRect: RectF? = null
         var videoProgressRunnable: Runnable? = null
+        var cinemaDngPlaybackJob: Job? = null
 
         init {
             binding.videoView.clipToOutline = true
@@ -1147,6 +1149,10 @@ class ImageViewerAdapter(
                     binding.btnVideoDuration.text = "${formatVideoTime(curMs)} / ${formatVideoTime(totalMs)}"
                     val isPlaying = holder.isPlayingVideo
                     binding.btnVideoDuration.setIconResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
+                    val pos = holder.bindingAdapterPosition
+                    if (pos != RecyclerView.NO_POSITION) {
+                        onVideoPlaybackStateChanged?.invoke(pos, isPlaying, curMs, totalMs)
+                    }
                 } else if (exo != null) {
                     val curMs = exo.currentPosition.coerceAtLeast(0)
                     val totalMs = exo.duration.takeIf { it > 0 } ?: 0L
@@ -1158,6 +1164,10 @@ class ImageViewerAdapter(
                     }
                     val isPlaying = exo.isPlaying
                     binding.btnVideoDuration.setIconResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
+                    val pos = holder.bindingAdapterPosition
+                    if (pos != RecyclerView.NO_POSITION) {
+                        onVideoPlaybackStateChanged?.invoke(pos, isPlaying, curMs, totalMs)
+                    }
                 }
 
                 if (holder.isPlayingVideo) {
@@ -1178,21 +1188,37 @@ class ImageViewerAdapter(
         val exo = holder.player
         val currentUri = holder.currentUri
         val cached = currentUri?.let { videoDurationCache[it] }
+        val totalMs: Long
+        val curMs: Long
         if (cached != null && cached > 0) {
             holder.binding.btnVideoDuration.text = formatVideoTime(cached)
+            totalMs = cached
+            curMs = 0L
         } else if (rawPlayer != null && rawPlayer.isVideoLoaded) {
             val count = rawPlayer.frameCount
             val fps = rawPlayer.fps.takeIf { it > 0 } ?: 24.0f
-            val totalMs = ((count / fps) * 1000).toLong()
+            totalMs = ((count / fps) * 1000).toLong()
+            curMs = ((rawPlayer.currentFrame / fps) * 1000).toLong()
             holder.binding.btnVideoDuration.text = formatVideoTime(totalMs)
         } else if (exo != null && exo.duration > 0) {
+            totalMs = exo.duration
+            curMs = exo.currentPosition.coerceAtLeast(0)
             holder.binding.btnVideoDuration.text = formatVideoTime(exo.duration)
+        } else {
+            totalMs = 0L
+            curMs = 0L
         }
         holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
+        val pos = holder.bindingAdapterPosition
+        if (pos != RecyclerView.NO_POSITION) {
+            onVideoPlaybackStateChanged?.invoke(pos, false, curMs, totalMs)
+        }
     }
 
     fun stopMotionVideo(holder: ViewHolder) {
         stopVideoProgressTracking(holder)
+        holder.cinemaDngPlaybackJob?.cancel()
+        holder.cinemaDngPlaybackJob = null
         holder.extractJob?.cancel()
         holder.extractJob = null
         holder.player?.stop()
@@ -1200,6 +1226,10 @@ class ImageViewerAdapter(
         holder.binding.videoView.alpha = 0f
         holder.isPlayingVideo = false
         holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
+        val pos = holder.bindingAdapterPosition
+        if (pos != RecyclerView.NO_POSITION) {
+            onVideoPlaybackStateChanged?.invoke(pos, false, 0L, getVideoDuration(pos))
+        }
     }
 
     private fun updateVideoViewBounds(holder: ViewHolder, rect: RectF) {
@@ -1271,6 +1301,13 @@ class ImageViewerAdapter(
                         holder.binding.btnVideoDuration.text = formatVideoTime(cached)
                     }
                 }
+                val pos = holder.bindingAdapterPosition
+                if (pos != RecyclerView.NO_POSITION) {
+                    val p = holder.rawVideoPlayer
+                    val curMs = if (p != null && p.isVideoLoaded) ((p.currentFrame / (p.fps.takeIf { it > 0 } ?: 24.0f)) * 1000).toLong() else 0L
+                    val totalMs = if (p != null && p.isVideoLoaded) ((p.frameCount / (p.fps.takeIf { it > 0 } ?: 24.0f)) * 1000).toLong() else (videoDurationCache[uri] ?: 0L)
+                    onVideoPlaybackStateChanged?.invoke(pos, isPlaying, curMs, totalMs)
+                }
             }
         ).also { holder.rawVideoPlayer = it }
 
@@ -1325,6 +1362,10 @@ class ImageViewerAdapter(
         holder.binding.videoView.visibility = View.GONE
         holder.binding.videoView.alpha = 0f
         holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
+        val pos = holder.bindingAdapterPosition
+        if (pos != RecyclerView.NO_POSITION) {
+            onVideoPlaybackStateChanged?.invoke(pos, false, 0L, getVideoDuration(pos))
+        }
     }
 
     fun toggleRawVideoForPosition(position: Int) {
@@ -1426,12 +1467,141 @@ class ImageViewerAdapter(
         holder?.rawVideoPlayer?.updateAdjustments(editConfig)
     }
 
+    fun playCinemaDng(holder: ViewHolder, group: ImageGroup) {
+        val frames = if (group.cinemaDngFrameUris.isNotEmpty()) group.cinemaDngFrameUris else listOfNotNull(group.cinemaDngFirstFrameUri)
+        if (frames.isEmpty()) return
+        holder.cinemaDngPlaybackJob?.cancel()
+        holder.isPlayingVideo = true
+        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_pause)
+        val fps = 24.0f
+        val frameDurationMs = (1000f / fps).toLong()
+        val totalMs = ((frames.size / fps) * 1000).toLong()
+
+        val pos = holder.bindingAdapterPosition
+        val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        holder.cinemaDngPlaybackJob = scope.launch {
+            var idx = holder.activeCinemaDngFrameIndex
+            if (idx >= frames.size - 1) idx = 0
+            while (isActive && idx < frames.size) {
+                val uri = frames[idx]
+                holder.activeCinemaDngFrameIndex = idx
+                holder.activeCinemaDngFrameUri = uri
+                loadCinemaDngFrame(holder, group, uri, idx)
+                holder.binding.filmstripSeekbar.setProgress(idx, frames.size)
+                val curMs = ((idx / fps) * 1000).toLong()
+                onCinemaDngFrameSelected?.invoke(group, idx, uri)
+                if (pos != RecyclerView.NO_POSITION) {
+                    onVideoPlaybackStateChanged?.invoke(pos, true, curMs, totalMs)
+                }
+                delay(frameDurationMs)
+                idx++
+            }
+            holder.isPlayingVideo = false
+            holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
+            if (pos != RecyclerView.NO_POSITION) {
+                onVideoPlaybackStateChanged?.invoke(pos, false, totalMs, totalMs)
+            }
+        }
+    }
+
+    fun stopCinemaDng(holder: ViewHolder) {
+        holder.cinemaDngPlaybackJob?.cancel()
+        holder.cinemaDngPlaybackJob = null
+        holder.isPlayingVideo = false
+        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
+        val pos = holder.bindingAdapterPosition
+        if (pos != RecyclerView.NO_POSITION && pos in differ.currentList.indices) {
+            val group = differ.currentList[pos]
+            val totalMs = ((group.cinemaDngFrameUris.size / 24.0f) * 1000).toLong()
+            val curMs = ((holder.activeCinemaDngFrameIndex / 24.0f) * 1000).toLong()
+            onVideoPlaybackStateChanged?.invoke(pos, false, curMs, totalMs)
+        }
+    }
+
+    fun toggleCinemaDngForPosition(position: Int) {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null && position in differ.currentList.indices) {
+            val group = differ.currentList[position]
+            if (holder.isPlayingVideo && holder.cinemaDngPlaybackJob?.isActive == true) {
+                stopCinemaDng(holder)
+            } else {
+                playCinemaDng(holder, group)
+            }
+        }
+    }
+
+    fun selectCinemaDngFrame(position: Int, frameIndex: Int, uri: Uri? = null) {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null && position in differ.currentList.indices) {
+            val group = differ.currentList[position]
+            val targetUri = uri ?: group.cinemaDngFrameUris.getOrNull(frameIndex) ?: group.cinemaDngFirstFrameUri
+            holder.activeCinemaDngFrameIndex = frameIndex
+            holder.activeCinemaDngFrameUri = targetUri
+            if (targetUri != null) {
+                loadCinemaDngFrame(holder, group, targetUri, frameIndex)
+            }
+            holder.binding.filmstripSeekbar.setProgress(frameIndex, group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: 1)
+            onCinemaDngFrameSelected?.invoke(group, frameIndex, targetUri)
+        }
+    }
+
+    fun isVideoPlaying(position: Int): Boolean {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder ?: return false
+        return holder.isPlayingVideo || holder.player?.isPlaying == true || holder.rawVideoPlayer?.isPlayingVideo == true || holder.cinemaDngPlaybackJob?.isActive == true
+    }
+
+    fun getVideoDuration(position: Int): Long {
+        if (position !in differ.currentList.indices) return 0L
+        val group = differ.currentList[position]
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        val rawPlayer = holder?.rawVideoPlayer
+        if (rawPlayer != null && rawPlayer.isVideoLoaded) {
+            val fps = rawPlayer.fps.takeIf { it > 0 } ?: 24.0f
+            return ((rawPlayer.frameCount / fps) * 1000).toLong()
+        }
+        if (group.isRawVideo && group.rawVideoDurationMs > 0) {
+            return group.rawVideoDurationMs
+        }
+        if (group.isRawVideo && group.rawVideoFrameCount > 0) {
+            val fps = group.rawVideoFps.takeIf { it > 0 } ?: 24.0f
+            return ((group.rawVideoFrameCount / fps) * 1000).toLong()
+        }
+        if (group.isCinemaDng || group.cinemaDngFrameUris.isNotEmpty()) {
+            val count = group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: group.cinemaDngFrameCount
+            return ((count / 24.0f) * 1000).toLong()
+        }
+        val exo = holder?.player
+        if (exo != null && exo.duration > 0) {
+            return exo.duration
+        }
+        val uri = holder?.currentUri ?: group.mp4VideoUri ?: group.rawVideoUri
+        return uri?.let { videoDurationCache[it] } ?: 0L
+    }
+
+    fun getVideoCurrentPosition(position: Int): Long {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder ?: return 0L
+        val rawPlayer = holder.rawVideoPlayer
+        if (rawPlayer != null && rawPlayer.isVideoLoaded) {
+            val fps = rawPlayer.fps.takeIf { it > 0 } ?: 24.0f
+            return ((rawPlayer.currentFrame / fps) * 1000).toLong()
+        }
+        val exo = holder.player
+        if (exo != null) {
+            return exo.currentPosition.coerceAtLeast(0)
+        }
+        if (holder.activeCinemaDngFrameIndex > 0) {
+            return ((holder.activeCinemaDngFrameIndex / 24.0f) * 1000).toLong()
+        }
+        return 0L
+    }
+
     fun stopAllMotionVideos() {
         recyclerView?.let { rv ->
             for (i in 0 until itemCount) {
                 (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
                     stopMotionVideo(holder)
                     stopRawVideo(holder)
+                    stopCinemaDng(holder)
                 }
             }
         }

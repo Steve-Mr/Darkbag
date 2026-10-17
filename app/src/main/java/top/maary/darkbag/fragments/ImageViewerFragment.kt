@@ -51,6 +51,7 @@ import java.util.Locale
 import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.round
+import kotlin.math.roundToInt
 
 open class ImageViewerFragment : Fragment() {
 
@@ -411,6 +412,12 @@ open class ImageViewerFragment : Fragment() {
                             val currentPosition = binding.imagePager.currentItem
                             if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
                                 currentCinemaDngFrame = Pair(index, uri)
+                                binding.filmstripBentoSeekbar?.setProgress(index, group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: 1)
+                            }
+                        }
+                        onVideoPlaybackStateChanged = { position, isPlaying, currentMs, totalMs ->
+                            if (_binding != null && ::adapter.isInitialized && position == binding.imagePager.currentItem) {
+                                updateVideoPlaybackButton(isPlaying, currentMs, totalMs)
                             }
                         }
                         setFormatSwitcherPersistentHidden(isAdjusted)
@@ -727,6 +734,104 @@ open class ImageViewerFragment : Fragment() {
                 }
             }
         }
+
+        val isVideoActive = isRawVideo || isCinemaDng || currentGroup.isMp4Video || currentGroup.mp4VideoUri != null || isMp4Active
+
+        if (isVideoActive) {
+            currentBinding.viewerVideoDeck?.visibility = View.VISIBLE
+            if (isCinemaDng) {
+                currentBinding.filmstripBentoContainer?.visibility = View.VISIBLE
+                val frameUris = if (currentGroup.cinemaDngFrameUris.isNotEmpty()) {
+                    currentGroup.cinemaDngFrameUris
+                } else if (currentGroup.cinemaDngFirstFrameUri != null) {
+                    listOf(currentGroup.cinemaDngFirstFrameUri)
+                } else {
+                    emptyList()
+                }
+                val activeIndex = currentCinemaDngFrame?.first ?: adapter.getActiveCinemaDngFrame(currentIndex)?.first ?: 0
+                currentBinding.filmstripBentoSeekbar?.setFrames(frameUris, activeIndex)
+            } else {
+                currentBinding.filmstripBentoContainer?.visibility = View.GONE
+            }
+
+            val exportSub = if (isCinemaDng) "CDNG / MP4 / FRAME" else "MP4 / FRAME / DNG"
+            currentBinding.btnVideoExportHub?.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                label = "↗ EXPORT HUB",
+                value = exportSub,
+                isTabActive = false,
+                isValueManual = false,
+                context = ctx
+            )
+
+            val isPlaying = adapter.isVideoPlaying(currentIndex)
+            val curMs = adapter.getVideoCurrentPosition(currentIndex)
+            val totalMs = adapter.getVideoDuration(currentIndex)
+            updateVideoPlaybackButton(isPlaying, curMs, totalMs)
+        } else {
+            currentBinding.viewerVideoDeck?.visibility = View.GONE
+        }
+    }
+
+    protected fun updateVideoPlaybackButton(isPlaying: Boolean, currentMs: Long, totalMs: Long) {
+        val currentBinding = _binding ?: return
+        val btn = currentBinding.btnVideoPlayback ?: return
+        val ctx = context ?: return
+        val density = ctx.resources.displayMetrics.density
+
+        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(ctx, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
+        val colorPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
+        val colorOnPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnPrimaryContainer, android.graphics.Color.WHITE)
+        val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
+
+        val line1 = if (isPlaying) "❚❚ PAUSE" else "▶ PLAY"
+        val line2 = if (totalMs > 0) {
+            "${formatVideoTime(currentMs)} / ${formatVideoTime(totalMs)}"
+        } else {
+            val currentIndex = currentBinding.imagePager.currentItem
+            if (::adapter.isInitialized && currentIndex in adapter.getGroups().indices) {
+                val group = adapter.getGroup(currentIndex)
+                if (group.isCinemaDng || group.cinemaDngFrameUris.isNotEmpty()) {
+                    val count = group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: group.cinemaDngFrameCount
+                    val sec = (count / 24.0f).roundToInt()
+                    "24 FPS · ${sec}s"
+                } else if (group.isRawVideo) {
+                    val fps = group.rawVideoFps.takeIf { it > 0 } ?: 24.0f
+                    val sec = (group.rawVideoFrameCount / fps).roundToInt()
+                    "${fps.toInt()} FPS · ${sec}s"
+                } else {
+                    "00:00 / 00:00"
+                }
+            } else {
+                "00:00 / 00:00"
+            }
+        }
+
+        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = line1,
+            value = line2,
+            isTabActive = isPlaying,
+            isValueManual = false,
+            context = ctx
+        )
+
+        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
+        btn.setTextColor(colorOnPrimaryContainer)
+        if (isPlaying) {
+            btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+            btn.strokeWidth = (1.5f * density).toInt()
+            btn.cornerRadius = (14f * density).toInt()
+        } else {
+            btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+            btn.strokeWidth = (1f * density).toInt()
+            btn.cornerRadius = (18f * density).toInt()
+        }
+    }
+
+    private fun formatVideoTime(millis: Long): String {
+        val totalSec = (millis / 1000).coerceAtLeast(0)
+        val minutes = totalSec / 60
+        val seconds = totalSec % 60
+        return String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
     }
 
     protected fun prepareEditConfig(group: ImageGroup) {
@@ -947,6 +1052,61 @@ open class ImageViewerFragment : Fragment() {
         binding.btnMotionLive?.setOnClickListener {
             if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
             handleMotionPhotoIndicatorTapped(binding.imagePager.currentItem)
+        }
+
+        binding.btnVideoPlayback?.setOnClickListener {
+            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            val currentIndex = binding.imagePager.currentItem
+            if (currentIndex !in adapter.getGroups().indices) return@setOnClickListener
+            val currentGroup = adapter.getGroup(currentIndex)
+            val currentFormat = adapter.getSelectedFormat(currentIndex)
+            val isRawSelected = currentFormat == ImageViewerAdapter.FORMAT_DNG
+            val derivatives = adapter.getDerivativeUris(currentGroup)
+            val activeDerivIdx = adapter.getSelectedDerivativeIndex(currentGroup.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
+            val activeDerivativeUri = derivatives.getOrNull(activeDerivIdx) ?: currentGroup.jpgUri ?: currentGroup.mp4VideoUri
+            val isMp4Active = !isRawSelected && activeDerivativeUri != null && (activeDerivativeUri.toString().endsWith(".mp4", ignoreCase = true) || currentGroup.isMp4Video)
+            val isCinemaDng = currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()
+
+            when {
+                currentGroup.isRawVideo || currentGroup.rawVideoUri != null -> {
+                    adapter.toggleRawVideoForPosition(currentIndex)
+                }
+                isMp4Active || currentGroup.isMp4Video || currentGroup.mp4VideoUri != null -> {
+                    adapter.toggleMp4VideoForPosition(currentIndex)
+                }
+                isCinemaDng -> {
+                    if (currentGroup.mp4VideoUri != null && !isRawSelected) {
+                        adapter.toggleMp4VideoForPosition(currentIndex)
+                    } else {
+                        adapter.toggleCinemaDngForPosition(currentIndex)
+                    }
+                }
+            }
+        }
+
+        binding.btnVideoExportHub?.setOnClickListener {
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            openExportHub()
+        }
+
+        binding.filmstripBentoSeekbar?.onFrameSelected = { frameIndex, uri ->
+            if (::adapter.isInitialized && adapter.itemCount > 0) {
+                val currentIndex = binding.imagePager.currentItem
+                if (currentIndex in adapter.getGroups().indices) {
+                    val group = adapter.getGroup(currentIndex)
+                    val frameUris = if (group.cinemaDngFrameUris.isNotEmpty()) {
+                        group.cinemaDngFrameUris
+                    } else if (group.cinemaDngFirstFrameUri != null) {
+                        listOf(group.cinemaDngFirstFrameUri)
+                    } else {
+                        emptyList()
+                    }
+                    val targetUri = uri ?: frameUris.getOrNull(frameIndex)
+                    currentCinemaDngFrame = Pair(frameIndex, targetUri)
+                    adapter.selectCinemaDngFrame(currentIndex, frameIndex, targetUri)
+                }
+            }
         }
 
         binding.btnTabLight?.setOnClickListener {
@@ -2454,6 +2614,12 @@ open class ImageViewerFragment : Fragment() {
                             val currentPosition = binding.imagePager.currentItem
                             if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
                                 currentCinemaDngFrame = Pair(index, uri)
+                                binding.filmstripBentoSeekbar?.setProgress(index, group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: 1)
+                            }
+                        }
+                        onVideoPlaybackStateChanged = { position, isPlaying, currentMs, totalMs ->
+                            if (_binding != null && ::adapter.isInitialized && position == binding.imagePager.currentItem) {
+                                updateVideoPlaybackButton(isPlaying, currentMs, totalMs)
                             }
                         }
                         setFormatSwitcherPersistentHidden(isAdjusted)

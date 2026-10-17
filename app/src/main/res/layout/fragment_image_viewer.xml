@@ -342,6 +342,70 @@
                     app:backgroundTint="?attr/colorSurfaceContainerHigh" />
             </LinearLayout>
 
+            <!-- Video Playback & Timeline Bento Container -->
+            <LinearLayout
+                android:id="@+id/viewer_video_deck"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone"
+                android:layout_marginBottom="6dp">
+
+                <!-- Row 1: Filmstrip Seekbar Row (CinemaDNG) -->
+                <FrameLayout
+                    android:id="@+id/filmstrip_bento_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="36dp"
+                    android:layout_marginBottom="4dp"
+                    android:visibility="gone">
+
+                    <top.maary.darkbag.ui.FilmstripSeekbar
+                        android:id="@+id/filmstrip_bento_seekbar"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent" />
+                </FrameLayout>
+
+                <!-- Row 2: Video Playback & Action Bar -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_video_playback"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1.6"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="2dp"
+                        android:lines="2"
+                        android:gravity="center"
+                        android:textSize="10.5sp"
+                        android:textColor="?attr/colorOnPrimaryContainer"
+                        app:backgroundTint="?attr/colorPrimaryContainer"
+                        app:cornerRadius="18dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_video_export_hub"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1.4"
+                        android:layout_marginStart="5dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="2dp"
+                        android:lines="2"
+                        android:gravity="center"
+                        android:textSize="10.5sp"
+                        android:textColor="?attr/colorOnSecondaryContainer"
+                        app:backgroundTint="?attr/colorSecondaryContainer"
+                        app:cornerRadius="14dp" />
+                </LinearLayout>
+            </LinearLayout>
+
             <!-- Primary Action Row -->
             <LinearLayout
                 android:layout_width="match_parent"
