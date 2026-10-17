@@ -169,6 +169,10 @@ class PlaygroundGalleryFragment : Fragment() {
 
         binding.toolbar.setOnMenuItemClickListener { menuItem ->
             when (menuItem.itemId) {
+                R.id.action_select_all -> {
+                    toggleSelectAll()
+                    true
+                }
                 R.id.action_settings -> {
                     if (findNavController().currentDestination?.id == R.id.playground_gallery_fragment) {
                         findNavController().navigate(R.id.action_playground_gallery_to_settings)
@@ -216,7 +220,7 @@ class PlaygroundGalleryFragment : Fragment() {
             }
         )
 
-        binding.recyclerView.layoutManager = StaggeredGridLayoutManager(2, StaggeredGridLayoutManager.VERTICAL)
+        binding.recyclerView.layoutManager = GridLayoutManager(context, 3)
         binding.recyclerView.adapter = adapter
         val mainActivity = activity as? top.maary.darkbag.MainActivity
         mainActivity?.let {
@@ -412,6 +416,7 @@ class PlaygroundGalleryFragment : Fragment() {
                 }
                 adapter.submitList(sortedItems) {
                     updateEmptyState()
+                    updateBottomBar()
                 }
             }
         }
@@ -474,6 +479,26 @@ class PlaygroundGalleryFragment : Fragment() {
         updateBottomBar()
     }
 
+    private fun toggleSelectAll() {
+        val allFiles = adapter.currentList.flatMap { item ->
+            when (item) {
+                is PlaygroundItem.Single -> listOf(item.file)
+                is PlaygroundItem.Group -> listOf(item.jpgFile)
+            }
+        }
+        if (allFiles.isEmpty()) return
+
+        if (selectedFiles.size == allFiles.size) {
+            clearSelection()
+        } else {
+            isSelectionMode = true
+            selectedFiles.clear()
+            selectedFiles.addAll(allFiles)
+            adapter.notifyItemRangeChanged(0, adapter.itemCount, "SELECTION_CHANGED")
+            updateBottomBar()
+        }
+    }
+
     private fun clearSelection() {
         val oldSelections = selectedFiles.toList()
         selectedFiles.clear()
@@ -492,6 +517,9 @@ class PlaygroundGalleryFragment : Fragment() {
     }
 
     private fun updateBottomBar() {
+        val sandboxCount = adapter.currentList.size
+        binding.toolbar.subtitle = "外部导入暗房 ($sandboxCount SANDBOX)"
+
         if (isSelectionMode) {
             binding.bottomAppBar.visibility = View.VISIBLE
             (activity as? top.maary.darkbag.MainActivity)?.setFloatingToolbarForcedHidden(true)
@@ -510,12 +538,20 @@ class PlaygroundGalleryFragment : Fragment() {
             }
             binding.btnDisband.visibility = if (allGroups) View.VISIBLE else View.GONE
 
-            binding.toolbar.title = "${selectedFiles.size} selected"
+            binding.toolbar.title = "${selectedFiles.size} SELECTED"
         } else {
             binding.bottomAppBar.visibility = View.GONE
             (activity as? top.maary.darkbag.MainActivity)?.setFloatingToolbarForcedHidden(false)
             binding.fabAdd.visibility = View.VISIBLE
-            binding.toolbar.title = "Playground"
+            binding.toolbar.title = "PLAYGROUND"
+        }
+
+        val selectAllItem = binding.toolbar.menu.findItem(R.id.action_select_all)
+        if (selectAllItem != null) {
+            val allFilesCount = adapter.currentList.size
+            val isAllSelected = isSelectionMode && selectedFiles.size >= allFilesCount && allFilesCount > 0
+            selectAllItem.setIcon(if (isAllSelected) R.drawable.ic_deselect else R.drawable.ic_select_all)
+            selectAllItem.title = if (isAllSelected) "Deselect All" else "Select All"
         }
     }
 
@@ -1166,6 +1202,7 @@ class PlaygroundAdapter(
 
         when (item) {
             is PlaygroundItem.Single -> {
+                holder.binding.badgeFormat.text = if (item.file.extension.lowercase() == "dng") "EXT DNG" else "EXT JPG"
                 holder.binding.iconLayer.visibility = View.GONE
                 holder.binding.subImagesContainer.visibility = View.GONE
 
@@ -1178,6 +1215,7 @@ class PlaygroundAdapter(
                 }
             }
             is PlaygroundItem.Group -> {
+                holder.binding.badgeFormat.text = "HF MERGED"
                 holder.binding.iconLayer.visibility = View.VISIBLE
                 holder.binding.subImagesContainer.visibility = if (item.isExpanded) View.VISIBLE else View.GONE
 
@@ -1246,6 +1284,5 @@ class PlaygroundAdapter(
         holder.bitmapSub2?.recycle()
         holder.bitmapMain = null
         holder.bitmapSub1 = null
-        holder.bitmapSub2 = null
     }
 }

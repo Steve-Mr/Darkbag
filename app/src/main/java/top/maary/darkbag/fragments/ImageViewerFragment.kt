@@ -527,15 +527,17 @@ open class ImageViewerFragment : Fragment() {
         val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
         val canEdit = ((currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial) || isRawVideo
 
-        val showBottomLeft = isUiVisible && !isEditingAdjustments && !isGalleryMode
-        binding.bottomLeftControls.visibility = if (showBottomLeft) View.VISIBLE else View.GONE
-        binding.btnLogLut.isEnabled = canEdit
-        binding.btnLogLut.isClickable = canEdit
-        binding.btnLogLut.alpha = if (canEdit) 1.0f else 0.65f
-
-        val editVisibility = if (canEdit && isUiVisible && !isEditingAdjustments && !isGalleryMode) View.VISIBLE else View.GONE
-        binding.bottomRightControls.visibility = editVisibility
-        binding.fabAdjust.visibility = editVisibility
+        val showDeck = isUiVisible && !isEditingAdjustments && !isGalleryMode
+        binding.viewerBentoDeck.visibility = if (showDeck) View.VISIBLE else View.GONE
+        binding.btnLogCurve.isEnabled = canEdit
+        binding.btnLogCurve.isClickable = canEdit
+        binding.btnLogCurve.alpha = if (canEdit) 1.0f else 0.65f
+        binding.btn3dLut.isEnabled = canEdit
+        binding.btn3dLut.isClickable = canEdit
+        binding.btn3dLut.alpha = if (canEdit) 1.0f else 0.65f
+        binding.btnAdjustTofu.isEnabled = canEdit
+        binding.btnAdjustTofu.isClickable = canEdit
+        binding.btnAdjustTofu.alpha = if (canEdit) 1.0f else 0.65f
 
         if (canEdit && currentEditConfig == null) {
             prepareEditConfig(currentGroup)
@@ -694,9 +696,9 @@ open class ImageViewerFragment : Fragment() {
 
     private fun updateToolbarIcon() {
         if (isAdjusted || isEditingAdjustments) {
-            binding.btnNavigation.setIconResource(R.drawable.ic_close)
+            binding.btnBack.setIconResource(R.drawable.ic_close)
         } else {
-            binding.btnNavigation.setIconResource(R.drawable.ic_back)
+            binding.btnBack.setIconResource(R.drawable.ic_back)
         }
     }
 
@@ -732,8 +734,26 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
-        binding.btnLogLut.setOnClickListener {
+        binding.btnLogCurve.setOnClickListener {
             showLutMenu()
+        }
+
+        binding.btn3dLut.setOnClickListener {
+            showLutMenu()
+        }
+
+        binding.btnDelete.setOnClickListener {
+            if (::adapter.isInitialized && adapter.itemCount > 0) {
+                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                showDeleteDialog(currentGroup)
+            }
+        }
+
+        binding.btnSeparateDng.setOnClickListener {
+            if (::adapter.isInitialized && adapter.itemCount > 0) {
+                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                showHalfFrameShareSheet(currentGroup)
+            }
         }
 
         binding.touchOverlay.setOnClickListener {
@@ -781,7 +801,7 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
-        binding.fabAdjust.setOnClickListener {
+        binding.btnAdjustTofu.setOnClickListener {
             showAdjustmentsBottomSheet()
             lifecycleScope.launch {
                 ensureDngBytesLoaded()
@@ -1106,13 +1126,11 @@ open class ImageViewerFragment : Fragment() {
         if (!currentGroup.metadataLoaded) return
 
         val config = currentEditConfig ?: currentGroup.editConfig
-        if (config != null) {
-            val lutName = if (config.lut == "None" || config.lut == null) null else config.lut.substringBeforeLast(".")
-            val logName = if (config.log == "None" || config.log == null) null else config.log
-            binding.btnLogLut.text = lutName ?: logName ?: "None"
-        } else {
-            binding.btnLogLut.text = "None"
-        }
+        val logName = if (config != null && config.log != null && config.log != "None") config.log else "None"
+        val lutName = if (config != null && config.lut != null && config.lut != "None") config.lut.substringBeforeLast(".") else "None"
+
+        binding.btnLogCurve.text = "LOG CURVE\n$logName"
+        binding.btn3dLut.text = "3D LUT (.CUBE)\n$lutName"
     }
 
     private fun updateEffectsButtons() {
@@ -1126,13 +1144,21 @@ open class ImageViewerFragment : Fragment() {
         val activeLayout = config.hfLayout ?: currentGroup.hfLayout
         val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
 
+        binding.btnTimestamp.text = if (config.showTimestamp) "DATE\nON" else "DATE\nOFF"
         binding.btnTimestamp.setIconTintResource(if (config.showTimestamp) R.color.vibrant_orange else android.R.color.white)
         binding.btnTimestamp.alpha = if (config.showTimestamp) 1.0f else 0.6f
 
+        val flareSub = when (config.flareType) {
+            1 -> "LEAK #1"
+            2 -> "LEAK #2"
+            else -> "OFF"
+        }
+        binding.btnFlare.text = "FLARE\n$flareSub"
         binding.btnFlare.setIconTintResource(if (config.flareType != -1) R.color.vibrant_pink else android.R.color.white)
-        binding.btnFlare.setIconResource( iconRes )
+        binding.btnFlare.setIconResource(iconRes)
         binding.btnFlare.alpha = if (config.flareType != -1) 1.0f else 0.6f
 
+        binding.btnSwap.text = if (isTB) "⇄ SWAP\nT / B" else "⇄ SWAP\nF1 / F2"
         binding.btnSwap.setIconResource(if (isTB) R.drawable.ic_swap_vert else R.drawable.ic_swap_horiz)
         binding.btnSwap.setIconTintResource(if (config.isSwapped) R.color.vibrant_cyan else android.R.color.white)
         binding.btnSwap.alpha = if (config.isSwapped) 1.0f else 0.6f
@@ -1270,8 +1296,7 @@ open class ImageViewerFragment : Fragment() {
         updateViewportPadding()
 
         // Hide standard controls
-        binding.bottomLeftControls.visibility = View.GONE
-        binding.bottomRightControls.visibility = View.GONE
+        binding.viewerBentoDeck.visibility = View.GONE
 
         // Show edit panel with animation
         binding.editAdjustmentPanel.visibility = View.VISIBLE
@@ -2741,7 +2766,7 @@ open class ImageViewerFragment : Fragment() {
     private fun setupToolbar() {
         updateSplitButtons()
         updateToolbarIcon()
-        binding.btnNavigation.setOnClickListener {
+        binding.btnBack.setOnClickListener {
             if (isGalleryMode) {
                 if (::galleryAdapter.isInitialized && galleryAdapter.isSelectionMode) {
                     galleryAdapter.setSelectionMode(false)
@@ -2822,7 +2847,9 @@ open class ImageViewerFragment : Fragment() {
             binding.btnGalleryPill.visibility = View.GONE
         } else {
             val currentPos = (position + 1).coerceIn(1, totalCount)
-            binding.btnGalleryPill.text = getString(R.string.gallery_pill_format, currentPos, totalCount)
+            val posStr = if (totalCount >= 10) String.format("%02d", currentPos) else "$currentPos"
+            val countStr = if (totalCount >= 10) String.format("%02d", totalCount) else "$totalCount"
+            binding.btnGalleryPill.text = "▦ $posStr / $countStr"
             binding.btnGalleryPill.visibility = if (isUiVisible && !isEditingAdjustments && !isGalleryMode) View.VISIBLE else View.GONE
         }
     }
@@ -2843,8 +2870,7 @@ open class ImageViewerFragment : Fragment() {
         binding.galleryContainer.animate().alpha(1f).setDuration(200).start()
 
         binding.topBarContainer.visibility = View.GONE
-        binding.bottomLeftControls.visibility = View.GONE
-        binding.bottomRightControls.visibility = View.GONE
+        binding.viewerBentoDeck.visibility = View.GONE
         binding.imagePager.visibility = View.INVISIBLE
 
         val currentCount = if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0
@@ -3044,12 +3070,10 @@ open class ImageViewerFragment : Fragment() {
         adapter.setUiVisibility(true)
 
         binding.topBarContainer.animate().cancel()
-        binding.bottomLeftControls.animate().cancel()
-        binding.bottomRightControls.animate().cancel()
+        binding.viewerBentoDeck.animate().cancel()
 
         binding.topBarContainer.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
-        binding.bottomLeftControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
-        binding.bottomRightControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
+        binding.viewerBentoDeck.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         updateViewportPadding()
     }
 
@@ -3061,18 +3085,15 @@ open class ImageViewerFragment : Fragment() {
         adapter.setUiVisibility(false)
 
         binding.topBarContainer.animate().cancel()
-        binding.bottomLeftControls.animate().cancel()
-        binding.bottomRightControls.animate().cancel()
+        binding.viewerBentoDeck.animate().cancel()
 
         val topShift = -(binding.topBarContainer.height + (binding.topBarContainer.layoutParams as ViewGroup.MarginLayoutParams).topMargin).toFloat()
-        val bottomShift = (binding.bottomLeftControls.height + (binding.bottomLeftControls.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin).toFloat()
+        val bottomShift = (binding.viewerBentoDeck.height + (binding.viewerBentoDeck.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin).toFloat()
 
         binding.topBarContainer.animate().translationY(topShift).alpha(0f).setDuration(200)
             .withEndAction { binding.topBarContainer.visibility = View.GONE }.start()
-        binding.bottomLeftControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
-            .withEndAction { binding.bottomLeftControls.visibility = View.GONE }.start()
-        binding.bottomRightControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
-            .withEndAction { binding.bottomRightControls.visibility = View.GONE }.start()
+        binding.viewerBentoDeck.animate().translationY(bottomShift).alpha(0f).setDuration(200)
+            .withEndAction { binding.viewerBentoDeck.visibility = View.GONE }.start()
         updateViewportPadding()
     }
 
@@ -3100,20 +3121,13 @@ open class ImageViewerFragment : Fragment() {
 
             binding.topBarContainer.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 topMargin = systemBars.top
-            }
-            binding.btnNavigation.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                leftMargin = marginMedium
-            }
-            binding.splitAction?.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                rightMargin = systemBars.right + marginMedium
-            }
-            binding.bottomLeftControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + marginMedium
-                leftMargin = systemBars.left + marginMedium
-            }
-            binding.bottomRightControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom
+                leftMargin = systemBars.left
                 rightMargin = systemBars.right
+            }
+            binding.viewerBentoDeck.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                bottomMargin = systemBars.bottom + (12 * resources.displayMetrics.density).toInt()
+                leftMargin = systemBars.left + (12 * resources.displayMetrics.density).toInt()
+                rightMargin = systemBars.right + (12 * resources.displayMetrics.density).toInt()
             }
 
             binding.galleryToolbar.updateLayoutParams<ViewGroup.MarginLayoutParams> {

@@ -46,21 +46,19 @@
         android:textAppearance="?attr/textAppearanceBodyLarge"
         android:visibility="gone" />
 
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
         android:id="@+id/fabAdd"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
+        android:text="＋ IMPORT"
+        android:textColor="?attr/colorPrimary"
         android:contentDescription="Import DNG"
-        app:srcCompat="@drawable/ic_add"
-        app:tint="?attr/colorOnPrimaryContainer"
-        app:backgroundTint="?attr/colorPrimaryContainer" />
-
-
-
-
-
+        app:icon="@drawable/ic_add"
+        app:iconTint="?attr/colorPrimary"
+        app:backgroundTint="?attr/colorPrimaryContainer"
+        app:cornerRadius="16dp" />
 
     <com.google.android.material.bottomappbar.BottomAppBar
         android:id="@+id/bottomAppBar"
@@ -77,12 +75,12 @@
             android:layout_height="wrap_content"
             android:layout_gravity="center"
             android:layout_marginVertical="8dp"
-            app:cardCornerRadius="24dp"
+            app:cardCornerRadius="26dp"
             app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
             app:cardElevation="0dp"
             app:strokeWidth="1dp"
             app:strokeColor="?attr/colorOutlineVariant"
-            app:contentPadding="6dp">
+            app:contentPadding="8dp">
 
             <LinearLayout
                 android:layout_width="wrap_content"
@@ -94,39 +92,49 @@
                     android:id="@+id/btnExport"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
+                    android:layout_height="44dp"
                     android:layout_marginEnd="6dp"
-                    app:cornerRadius="12dp"
-                    android:text="Export" />
+                    app:cornerRadius="14dp"
+                    android:text="↗ EXPORT" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnMerge"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    app:cornerRadius="14dp"
+                    app:backgroundTint="?attr/colorPrimaryContainer"
+                    android:textColor="?attr/colorPrimary"
+                    android:text="⊞ MERGE HF"
+                    android:visibility="gone" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnDisband"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
+                    android:layout_height="44dp"
                     android:layout_marginEnd="6dp"
-                    app:cornerRadius="12dp"
+                    app:cornerRadius="14dp"
                     android:text="@string/playground_btn_disband"
                     android:visibility="gone" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnDelete"
                     style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="6dp"
-                    app:cornerRadius="12dp"
-                    android:text="@string/playground_btn_delete"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
+                    android:padding="0dp"
+                    app:cornerRadius="14dp"
                     app:icon="@drawable/ic_delete"
-                    android:visibility="gone" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnMerge"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    app:cornerRadius="12dp"
-                    android:text="Merge"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconTint="?attr/colorOnErrorContainer"
+                    app:backgroundTint="?attr/colorErrorContainer"
                     android:visibility="gone" />
 
             </LinearLayout>

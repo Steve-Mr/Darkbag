@@ -871,119 +871,173 @@
                     android:orientation="vertical"
                     android:padding="@dimen/padding_medium">
 
-                    <!-- Tier 1: Point & Shoot (P&S) Controls -->
-                    <TextView
+                    <com.google.android.material.button.MaterialButtonToggleGroup
+                        android:id="@+id/toggle_ui_tiers"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/settings_ui_tier_ps"
-                        android:textAppearance="?attr/textAppearanceTitleSmall"
-                        android:textColor="?attr/colorPrimary"
-                        android:layout_marginBottom="@dimen/spacing_small" />
+                        android:layout_marginBottom="@dimen/spacing_medium"
+                        app:singleSelection="true"
+                        app:selectionRequired="true">
 
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/switch_show_lens_controls"
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_tier_ps"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="P&amp;S 极简层"
+                            android:textSize="12sp"
+                            android:paddingStart="4dp"
+                            android:paddingEnd="4dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_tier_film"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="FILM 胶片层"
+                            android:textSize="12sp"
+                            android:paddingStart="4dp"
+                            android:paddingEnd="4dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_tier_pro"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="PRO 专业层"
+                            android:textSize="12sp"
+                            android:paddingStart="4dp"
+                            android:paddingEnd="4dp" />
+
+                    </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                    <!-- Container Tier 1: Point & Shoot (P&S) Controls -->
+                    <LinearLayout
+                        android:id="@+id/container_tier_ps"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/settings_ui_lens_controls"
-                        android:textSize="16sp" />
+                        android:orientation="vertical"
+                        android:visibility="gone">
 
-                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_ui_tier_ps"
+                            android:textAppearance="?attr/textAppearanceTitleSmall"
+                            android:textColor="?attr/colorPrimary"
+                            android:layout_marginBottom="@dimen/spacing_small" />
 
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/switch_show_camera_switch_button"
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_show_lens_controls"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_ui_lens_controls"
+                            android:textSize="16sp" />
+
+                        <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_show_camera_switch_button"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_ui_camera_switch"
+                            android:textSize="16sp" />
+
+                        <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_show_settings_button"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_ui_settings_tile"
+                            android:textSize="16sp" />
+                    </LinearLayout>
+
+                    <!-- Container Tier 2: Film Simulation (FILM) Controls -->
+                    <LinearLayout
+                        android:id="@+id/container_tier_film"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/settings_ui_camera_switch"
-                        android:textSize="16sp" />
+                        android:orientation="vertical">
 
-                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_ui_tier_film"
+                            android:textAppearance="?attr/textAppearanceTitleSmall"
+                            android:textColor="?attr/colorPrimary"
+                            android:layout_marginBottom="@dimen/spacing_small" />
 
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/switch_show_settings_button"
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_show_lut_switcher"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_ui_lut_switcher"
+                            android:textSize="16sp" />
+
+                        <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_show_hdr_plus_switch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_ui_hdr_tile"
+                            android:textSize="16sp" />
+
+                        <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_show_underexposure_button"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_ui_underexposure_tile"
+                            android:textSize="16sp" />
+
+                        <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_show_mode_switch_button"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_ui_mode_switch_tile"
+                            android:textSize="16sp" />
+                    </LinearLayout>
+
+                    <!-- Container Tier 3: Pro Cine (PRO) Controls -->
+                    <LinearLayout
+                        android:id="@+id/container_tier_pro"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/settings_ui_settings_tile"
-                        android:textSize="16sp" />
+                        android:orientation="vertical"
+                        android:visibility="gone">
 
-                    <com.google.android.material.divider.MaterialDivider
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/spacing_medium"
-                        android:layout_marginBottom="@dimen/spacing_medium" />
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_ui_tier_pro"
+                            android:textAppearance="?attr/textAppearanceTitleSmall"
+                            android:textColor="?attr/colorPrimary"
+                            android:layout_marginBottom="@dimen/spacing_small" />
 
-                    <!-- Tier 2: Film Simulation (FILM) Controls -->
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_ui_tier_film"
-                        android:textAppearance="?attr/textAppearanceTitleSmall"
-                        android:textColor="?attr/colorPrimary"
-                        android:layout_marginBottom="@dimen/spacing_small" />
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_manual_controls"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_ui_manual_controls"
+                            android:textSize="16sp" />
 
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/switch_show_lut_switcher"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_ui_lut_switcher"
-                        android:textSize="16sp" />
+                        <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
 
-                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
-
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/switch_show_hdr_plus_switch"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_ui_hdr_tile"
-                        android:textSize="16sp" />
-
-                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
-
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/switch_show_underexposure_button"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_ui_underexposure_tile"
-                        android:textSize="16sp" />
-
-                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
-
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/switch_show_mode_switch_button"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_ui_mode_switch_tile"
-                        android:textSize="16sp" />
-
-                    <com.google.android.material.divider.MaterialDivider
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/spacing_medium"
-                        android:layout_marginBottom="@dimen/spacing_medium" />
-
-                    <!-- Tier 3: Pro Cine (PRO) Controls -->
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_ui_tier_pro"
-                        android:textAppearance="?attr/textAppearanceTitleSmall"
-                        android:textColor="?attr/colorPrimary"
-                        android:layout_marginBottom="@dimen/spacing_small" />
-
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/switch_manual_controls"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_ui_manual_controls"
-                        android:textSize="16sp" />
-
-                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
-
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/switch_exp_focus_peaking"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_ui_focus_peaking"
-                        android:textSize="16sp" />
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_exp_focus_peaking"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_ui_focus_peaking"
+                            android:textSize="16sp" />
+                    </LinearLayout>
 
                     <com.google.android.material.divider.MaterialDivider
                         android:layout_width="match_parent"

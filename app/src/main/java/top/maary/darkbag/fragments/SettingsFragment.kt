@@ -634,6 +634,15 @@ class SettingsFragment : Fragment() {
             binding.layoutExternalViewerMenu.visibility = if (isChecked) View.GONE else View.VISIBLE
         }
 
+        binding.toggleUiTiers.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked) {
+                binding.containerTierPs.visibility = if (checkedId == R.id.btn_tier_ps) View.VISIBLE else View.GONE
+                binding.containerTierFilm.visibility = if (checkedId == R.id.btn_tier_film) View.VISIBLE else View.GONE
+                binding.containerTierPro.visibility = if (checkedId == R.id.btn_tier_pro) View.VISIBLE else View.GONE
+            }
+        }
+        binding.toggleUiTiers.check(R.id.btn_tier_film)
+
         setupSwitch(binding.switchShowHdrPlusSwitch, KEY_SHOW_HDR_PLUS_SWITCH)
         setupSwitch(binding.switchShowUnderexposureButton, KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON)
         setupSwitch(binding.switchShowSettingsButton, KEY_SHOW_SETTINGS_BUTTON)
