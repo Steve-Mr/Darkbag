@@ -649,8 +649,107 @@ open class ImageViewerFragment : Fragment() {
             currentBinding.btnFormatSwitchCompact?.visibility = View.VISIBLE
         }
 
-        val formatButtons = listOfNotNull(currentBinding.btnFormatSwitch, currentBinding.btnFormatSwitchCompact)
-        for (btn in formatButtons) {
+        currentBinding.btnFormatSwitch?.let { btn ->
+            when {
+                hasDng && hasDerivatives -> {
+                    btn.isEnabled = !isAdjusted
+                    btn.isClickable = !isAdjusted
+                    if (currentGroup.isMultiCamera) {
+                        val line1 = "$activeLensTag · ${if (isRawSelected) "DNG" else "JPG"}"
+                        val line2 = "JPG ⇄ DNG"
+                        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                            label = line1,
+                            value = line2,
+                            isTabActive = isRawSelected,
+                            isValueManual = false,
+                            context = ctx
+                        )
+                    } else if (isRawSelected) {
+                        val line1 = when {
+                            isRawVideo -> "MASTER · RAWVID"
+                            isCinemaDng -> "MASTER · CDNG"
+                            else -> "MASTER · DNG"
+                        }
+                        val line2 = if (isRawVideo || currentGroup.mp4VideoUri != null) "⇄ SWITCH MP4" else "⇄ SWITCH JPG"
+                        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                            label = line1,
+                            value = line2,
+                            isTabActive = true,
+                            isValueManual = false,
+                            context = ctx
+                        )
+                    } else {
+                        val line1 = if (isMp4Active) "VIEW · MP4" else "VIEW · JPG"
+                        val line2 = when {
+                            isRawVideo -> "⇄ SWITCH RAWVID"
+                            isCinemaDng -> "⇄ SWITCH CDNG"
+                            else -> "⇄ SWITCH DNG"
+                        }
+                        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                            label = line1,
+                            value = line2,
+                            isTabActive = false,
+                            isValueManual = false,
+                            context = ctx
+                        )
+                    }
+
+                    if (isRawSelected) {
+                        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
+                        btn.setTextColor(colorOnPrimaryContainer)
+                        btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                        btn.strokeWidth = (1.5f * density).toInt()
+                        btn.cornerRadius = (10f * density).toInt()
+                    } else {
+                        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSecondaryContainer)
+                        btn.setTextColor(colorOnSecondaryContainer)
+                        btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+                        btn.strokeWidth = (1f * density).toInt()
+                        btn.cornerRadius = (14f * density).toInt()
+                    }
+                }
+                hasDng && !hasDerivatives -> {
+                    btn.isEnabled = false
+                    btn.isClickable = false
+                    val line1 = if (currentGroup.isMultiCamera) "$activeLensTag · DNG" else "FORMAT"
+                    val line2 = when {
+                        isRawVideo -> "RAWVID ONLY"
+                        isCinemaDng -> "CDNG ONLY"
+                        else -> "DNG ONLY"
+                    }
+                    btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                        label = line1,
+                        value = line2,
+                        isTabActive = false,
+                        isValueManual = false,
+                        context = ctx
+                    )
+                    btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+                    btn.strokeWidth = (1f * density).toInt()
+                    btn.cornerRadius = (14f * density).toInt()
+                }
+                else -> {
+                    btn.isEnabled = false
+                    btn.isClickable = false
+                    val line1 = if (currentGroup.isMultiCamera) "$activeLensTag · JPG" else "FORMAT"
+                    val line2 = if (isMp4Active) "MP4 ONLY" else "JPG ONLY"
+                    btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                        label = line1,
+                        value = line2,
+                        isTabActive = false,
+                        isValueManual = false,
+                        context = ctx
+                    )
+                    btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+                    btn.strokeWidth = (1f * density).toInt()
+                    btn.cornerRadius = (14f * density).toInt()
+                }
+            }
+        }
+
+        currentBinding.btnFormatSwitchCompact?.let { btn ->
             val isRawAvailable = hasDng
             val rawLabel = when {
                 isRawVideo -> "RAWVID"
@@ -694,38 +793,32 @@ open class ImageViewerFragment : Fragment() {
                 val dotColor = LOOK_DOT_COLORS[activeDerivIdx % LOOK_DOT_COLORS.size]
                 val dotColorAlpha = androidx.core.graphics.ColorUtils.setAlphaComponent(dotColor, 200)
 
-                if (showMotionLive) {
-                    btn.text = ""
-                    btn.setIconResource(R.drawable.ic_look_dot)
-                    btn.iconTint = android.content.res.ColorStateList.valueOf(dotColor)
-                } else {
-                    val line1 = "LOOK"
-                    val line2 = "V${activeDerivIdx + 1} / V${derivatives.size} ●"
-                    val formatted = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                        label = line1,
-                        value = line2,
-                        isTabActive = false,
-                        isValueManual = true,
-                        context = ctx
+                val line1 = "LOOK"
+                val line2 = "V${activeDerivIdx + 1} / V${derivatives.size} ●"
+                val formatted = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                    label = line1,
+                    value = line2,
+                    isTabActive = false,
+                    isValueManual = true,
+                    context = ctx
+                )
+                val spannable = formatted as? android.text.SpannableStringBuilder ?: android.text.SpannableStringBuilder(formatted)
+                val dotIdx = spannable.indexOf("●")
+                if (dotIdx >= 0) {
+                    spannable.setSpan(
+                        android.text.style.ForegroundColorSpan(dotColor),
+                        dotIdx,
+                        dotIdx + 1,
+                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
                     )
-                    val spannable = formatted as? android.text.SpannableStringBuilder ?: android.text.SpannableStringBuilder(formatted)
-                    val dotIdx = spannable.indexOf("●")
-                    if (dotIdx >= 0) {
-                        spannable.setSpan(
-                            android.text.style.ForegroundColorSpan(dotColor),
-                            dotIdx,
-                            dotIdx + 1,
-                            android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-                        )
-                    }
-                    btn.text = spannable
-                    btn.icon = null
                 }
+                btn.text = spannable
+                btn.icon = null
 
                 btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
                 btn.strokeColor = android.content.res.ColorStateList.valueOf(dotColorAlpha)
                 btn.strokeWidth = (1.5f * density).toInt()
-                btn.cornerRadius = (12f * density).toInt()
+                btn.cornerRadius = (14f * density).toInt()
             }
         }
 

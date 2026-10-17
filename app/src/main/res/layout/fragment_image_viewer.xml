@@ -216,18 +216,18 @@
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_format_switch"
                     style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="48dp"
+                    android:layout_width="0dp"
                     android:layout_height="match_parent"
+                    android:layout_weight="1.15"
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
                     android:insetLeft="0dp"
                     android:insetRight="0dp"
-                    android:padding="0dp"
-                    android:text="RAW"
-                    android:textSize="11sp"
-                    android:textStyle="bold"
+                    android:padding="2dp"
+                    android:lines="2"
                     android:gravity="center"
-                    app:cornerRadius="12dp" />
+                    android:textSize="10sp"
+                    app:cornerRadius="14dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_derivative_cycle"
@@ -242,32 +242,28 @@
                     android:insetRight="0dp"
                     android:padding="2dp"
                     android:lines="2"
-                    app:icon="@drawable/ic_look_dot"
-                    app:iconSize="14dp"
-                    app:iconGravity="textStart"
-                    app:iconPadding="4dp"
                     android:gravity="center"
                     android:textSize="10sp"
                     android:visibility="gone"
-                    app:cornerRadius="12dp" />
+                    app:cornerRadius="14dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_motion_live"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
-                    android:layout_weight="1.2"
+                    android:layout_weight="1.15"
                     android:layout_marginStart="4dp"
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
-                    android:paddingStart="8dp"
-                    android:paddingEnd="8dp"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
                     android:lines="2"
                     android:text="● LIVE\nAUTO ON"
                     android:textSize="10sp"
                     android:gravity="center"
                     android:visibility="gone"
-                    app:cornerRadius="12dp" />
+                    app:cornerRadius="14dp" />
             </LinearLayout>
 
             <!-- Multi-Camera Focal Length Switcher & Dedicated Collage Studio Entry -->
@@ -461,16 +457,18 @@
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_format_switch_compact"
                     style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="48dp"
+                    android:layout_width="wrap_content"
                     android:layout_height="match_parent"
                     android:layout_marginEnd="4dp"
+                    android:minWidth="50dp"
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
                     android:insetLeft="0dp"
                     android:insetRight="0dp"
-                    android:padding="0dp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
                     android:text="RAW"
-                    android:textSize="11sp"
+                    android:textSize="10.5sp"
                     android:textStyle="bold"
                     android:gravity="center"
                     app:cornerRadius="12dp"
