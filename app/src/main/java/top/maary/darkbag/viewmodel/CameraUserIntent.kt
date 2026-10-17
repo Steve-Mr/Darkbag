@@ -17,4 +17,17 @@ sealed interface CameraUserIntent {
     data class UpdateThumbnail(val uri: Uri?, val path: String?) : CameraUserIntent
     data class UpdateShutterDotRotation(val rotation: Float) : CameraUserIntent
     data class SetSwitchingLens(val switching: Boolean) : CameraUserIntent
+    data class SetUiTier(val tier: CameraUiTier) : CameraUserIntent
+    data object CycleUiTier : CameraUserIntent
+    data class UpdateColorRecipe(val logName: String, val lutName: String) : CameraUserIntent
+    data class SetMotionPhotoEnabled(val enabled: Boolean) : CameraUserIntent
+    data class SetFlashEnabled(val enabled: Boolean) : CameraUserIntent
+    data class SetUnderexposureMode(val mode: String) : CameraUserIntent
+    data class SetActiveManualTab(val tab: String?) : CameraUserIntent
+    data class UpdateManualFlags(
+        val isManualFocus: Boolean,
+        val isManualIso: Boolean,
+        val isManualShutter: Boolean,
+        val isProLinked: Boolean = true
+    ) : CameraUserIntent
 }

@@ -228,4 +228,35 @@
     <string name="setting_raw_format_hint">RAW 格式</string>
     <string name="raw_output_type_bayer">Bayer CFA RAW (~12MB, 默认)</string>
     <string name="raw_output_type_linear">线性 RGB RAW (~50MB)</string>
+
+    <!-- 设置分组 -->
+    <string name="settings_section_shooting_modes">拍摄与捕获模式</string>
+    <string name="settings_section_optics_hardware">光学与硬件</string>
+    <string name="settings_section_color_hdr">色彩科学与 HDR+</string>
+    <string name="settings_section_storage_formats">存储与格式</string>
+    <string name="settings_section_advanced_ui">界面控件布局</string>
+    <string name="settings_section_system_about">系统与关于</string>
+
+    <!-- 设置子分组 -->
+    <string name="settings_sub_startup_page">默认启动页面</string>
+    <string name="settings_sub_shutter_video">快门长按与视频录制</string>
+    <string name="settings_sub_color_film">色彩渲染与胶片模拟</string>
+    <string name="settings_sub_hdr_engine">HDR+ 计算合成引擎</string>
+    <string name="settings_sub_formats_output">照片格式与输出目标</string>
+    <string name="settings_sub_metadata_media">拍摄元数据与动态多媒体</string>
+    <string name="settings_ui_tier_ps">便携快拍 (P&amp;S) 控件</string>
+    <string name="settings_ui_tier_film">胶片模拟 (FILM) 控件</string>
+    <string name="settings_ui_tier_pro">专业电影 (PRO) 控件</string>
+    <string name="settings_ui_tier_viewer">导航与相册查看器</string>
+    <string name="settings_ui_lens_controls">显示镜头控制与变焦行</string>
+    <string name="settings_ui_camera_switch">显示前后置镜头切换按钮</string>
+    <string name="settings_ui_settings_tile">显示快捷设置入口磁贴</string>
+    <string name="settings_ui_lut_switcher">显示胶片色彩配方 (Log/LUT) 切换器</string>
+    <string name="settings_ui_hdr_tile">显示 HDR+ 计算摄影磁贴</string>
+    <string name="settings_ui_underexposure_tile">显示 DYN 欠曝高光磁贴</string>
+    <string name="settings_ui_mode_switch_tile">显示半格 / 多机位同开模式磁贴</string>
+    <string name="settings_ui_manual_controls">启用专业手动拨盘与 Bento 磁贴</string>
+    <string name="settings_ui_focus_peaking">对焦峰值辅助高亮</string>
+    <string name="settings_ui_internal_viewer">使用内置暗房查看器</string>
+    <string name="settings_ui_external_viewer">第三方查看器应用</string>
 </resources>

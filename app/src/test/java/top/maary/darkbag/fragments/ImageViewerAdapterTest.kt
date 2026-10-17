@@ -149,4 +149,108 @@ class ImageViewerAdapterTest {
         adapter.setFormatForGroup(group.baseName, ImageViewerAdapter.FORMAT_DNG)
         assertEquals(ImageViewerAdapter.FORMAT_DNG, adapter.getSelectedFormat(group))
     }
+
+    @Test
+    fun testCycleOrToggleFormatAndDerivativeVersion() {
+        val group = ImageGroup(
+            baseName = "PHOTO_20261017_120000",
+            jpgUri = Uri.parse("content://media/external/images/media/300"),
+            dngUri = Uri.parse("content://media/external/images/media/301"),
+            derivativeJpgUris = listOf(
+                Uri.parse("content://media/external/images/media/300"),
+                Uri.parse("content://media/external/images/media/302")
+            )
+        )
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val testAdapter = ImageViewerAdapter(listOf(group), scope, context)
+        var lastFormatChanged: String? = null
+        var lastDerivChanged: Uri? = null
+        testAdapter.onFormatChanged = { _, fmt -> lastFormatChanged = fmt }
+        testAdapter.onDerivativeVersionChanged = { _, uri -> lastDerivChanged = uri }
+
+        assertEquals(ImageViewerAdapter.FORMAT_JPG, testAdapter.getSelectedFormat(0))
+        assertEquals(0, testAdapter.getSelectedDerivativeIndex(group.baseName))
+
+        testAdapter.cycleDerivativeVersion(0)
+        assertEquals(1, testAdapter.getSelectedDerivativeIndex(group.baseName))
+        assertEquals(Uri.parse("content://media/external/images/media/302"), lastDerivChanged)
+
+        testAdapter.cycleOrToggleFormat(0)
+        assertEquals(ImageViewerAdapter.FORMAT_DNG, testAdapter.getSelectedFormat(0))
+        assertEquals(ImageViewerAdapter.FORMAT_DNG, lastFormatChanged)
+
+        testAdapter.cycleOrToggleFormat(0)
+        assertEquals(ImageViewerAdapter.FORMAT_JPG, testAdapter.getSelectedFormat(0))
+        assertEquals(ImageViewerAdapter.FORMAT_JPG, lastFormatChanged)
+    }
+
+    @Test
+    fun testVideoDurationAndPlaybackQueries() {
+        val rawVideoGroup = ImageGroup(
+            baseName = "RAWVID_20261017_120000",
+            isRawVideo = true,
+            rawVideoUri = Uri.parse("content://media/external/video/media/500"),
+            rawVideoFps = 24.0f,
+            rawVideoFrameCount = 48,
+            rawVideoDurationMs = 2000L
+        )
+
+        val cdngGroup = ImageGroup(
+            baseName = "CDNG_20261017_120000",
+            isCinemaDng = true,
+            cinemaDngFolderUri = Uri.parse("content://documents/tree/cdng"),
+            cinemaDngFrameUris = listOf(
+                Uri.parse("content://documents/tree/cdng/0.dng"),
+                Uri.parse("content://documents/tree/cdng/1.dng"),
+                Uri.parse("content://documents/tree/cdng/2.dng")
+            )
+        )
+
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val testAdapter = ImageViewerAdapter(listOf(rawVideoGroup, cdngGroup), scope, context)
+
+        // Verify video durations
+        assertEquals(2000L, testAdapter.getVideoDuration(0))
+        assertEquals(((3 / 24.0f) * 1000).toLong(), testAdapter.getVideoDuration(1))
+
+        // Initially not playing
+        assertFalse(testAdapter.isVideoPlaying(0))
+        assertFalse(testAdapter.isVideoPlaying(1))
+        assertEquals(0L, testAdapter.getVideoCurrentPosition(0))
+        assertEquals(0L, testAdapter.getVideoCurrentPosition(1))
+    }
+
+    @Test
+    fun testOnVideoPlaybackStateChangedCallback() {
+        val group = ImageGroup(
+            baseName = "RAWVID_20261017_120000",
+            isRawVideo = true,
+            rawVideoUri = Uri.parse("content://media/external/video/media/500"),
+            rawVideoFps = 24.0f,
+            rawVideoDurationMs = 5000L
+        )
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val testAdapter = ImageViewerAdapter(listOf(group), scope, context)
+
+        var notifiedPos = -1
+        var notifiedPlaying = false
+        var notifiedCurMs = -1L
+        var notifiedTotalMs = -1L
+
+        testAdapter.onVideoPlaybackStateChanged = { pos, isPlaying, curMs, totalMs ->
+            notifiedPos = pos
+            notifiedPlaying = isPlaying
+            notifiedCurMs = curMs
+            notifiedTotalMs = totalMs
+        }
+
+        // Manually trigger callback to verify signature and invocation
+        testAdapter.onVideoPlaybackStateChanged?.invoke(0, true, 1000L, 5000L)
+
+        assertEquals(0, notifiedPos)
+        assertTrue(notifiedPlaying)
+        assertEquals(1000L, notifiedCurMs)
+        assertEquals(5000L, notifiedTotalMs)
+    }
 }
+

@@ -2,6 +2,7 @@ package top.maary.darkbag.fragments
 
 import android.net.Uri
 import top.maary.darkbag.models.ImageGroup
+import top.maary.darkbag.pipeline.composer.HalfFrameComposer
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.fragments.SettingsFragment
 
@@ -94,36 +95,21 @@ class PlaygroundGalleryFragment : Fragment() {
     ): View {
         _binding = FragmentPlaygroundGalleryBinding.inflate(inflater, container, false)
 
-        // Observe toolbar height for dynamic padding
-        val mainActivity = activity as? top.maary.darkbag.MainActivity
-        mainActivity?.let {
-            viewLifecycleOwner.lifecycleScope.launch {
-                viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-                    it.toolbarHeightFlow.collect { height ->
-                        binding.recyclerView.setPadding(
-                            binding.recyclerView.paddingLeft,
-                            binding.recyclerView.paddingTop,
-                            binding.recyclerView.paddingRight,
-                            height + 16 // 16px extra clearance
-                        )
-                    }
-                }
-            }
-        }
         return binding.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        val initialPaddingBottom = binding.recyclerView.paddingBottom
-        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+        val dockClearancePx = (88 * resources.displayMetrics.density).toInt()
+        binding.recyclerView.updatePadding(bottom = dockClearancePx)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             binding.appBarLayout.updatePadding(top = systemBars.top)
-            binding.recyclerView.updatePadding(bottom = systemBars.bottom + initialPaddingBottom)
+            binding.recyclerView.updatePadding(bottom = systemBars.bottom + dockClearancePx)
 
-            binding.fabAdd.updateLayoutParams<MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + (16 * resources.displayMetrics.density).toInt()
+            binding.playgroundBentoDock.updateLayoutParams<MarginLayoutParams> {
+                bottomMargin = systemBars.bottom + (12 * resources.displayMetrics.density).toInt()
             }
             binding.bottomAppBar.updatePadding(bottom = systemBars.bottom)
 
@@ -131,7 +117,7 @@ class PlaygroundGalleryFragment : Fragment() {
         }
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val showToolbar = prefs.getBoolean(SettingsFragment.KEY_SHOW_FLOATING_TOOLBAR, true)
+        val showToolbar = prefs.getBoolean(SettingsFragment.KEY_SHOW_FLOATING_TOOLBAR, false)
         val defaultStartup = prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA)
         val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
 
@@ -166,8 +152,37 @@ class PlaygroundGalleryFragment : Fragment() {
             cameraMenu?.isVisible = false
         }
 
+        binding.btnPlaygroundBack.visibility = if (enableCamera || isSelectionMode) View.VISIBLE else View.GONE
+        binding.btnPlaygroundBack.setOnClickListener {
+            if (isSelectionMode) {
+                clearSelection()
+            } else if (enableCamera) {
+                if (!findNavController().navigateUp()) {
+                    if (findNavController().currentDestination?.id == R.id.playground_gallery_fragment) {
+                        findNavController().navigate(R.id.action_playground_gallery_to_camera)
+                    }
+                }
+            } else {
+                requireActivity().onBackPressedDispatcher.onBackPressed()
+            }
+        }
+
+        binding.btnPlaygroundSelectAll.setOnClickListener {
+            toggleSelectAll()
+        }
+
+        binding.btnPlaygroundSettings.setOnClickListener {
+            if (findNavController().currentDestination?.id == R.id.playground_gallery_fragment) {
+                findNavController().navigate(R.id.action_playground_gallery_to_settings)
+            }
+        }
+
         binding.toolbar.setOnMenuItemClickListener { menuItem ->
             when (menuItem.itemId) {
+                R.id.action_select_all -> {
+                    toggleSelectAll()
+                    true
+                }
                 R.id.action_settings -> {
                     if (findNavController().currentDestination?.id == R.id.playground_gallery_fragment) {
                         findNavController().navigate(R.id.action_playground_gallery_to_settings)
@@ -215,34 +230,24 @@ class PlaygroundGalleryFragment : Fragment() {
             }
         )
 
-        binding.recyclerView.layoutManager = StaggeredGridLayoutManager(2, StaggeredGridLayoutManager.VERTICAL)
+        binding.recyclerView.layoutManager = GridLayoutManager(context, 3)
         binding.recyclerView.adapter = adapter
-        val mainActivity = activity as? top.maary.darkbag.MainActivity
-        mainActivity?.let {
-            viewLifecycleOwner.lifecycleScope.launch {
-                viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-                    it.toolbarHeightFlow.collect { height ->
-                        binding.recyclerView.setPadding(
-                            binding.recyclerView.paddingLeft,
-                            binding.recyclerView.paddingTop,
-                            binding.recyclerView.paddingRight,
-                            height + 16
-                        )
-                    }
-                }
-            }
-        }
 
         binding.fabAdd.setOnClickListener {
             importDngLauncher.launch("image/x-adobe-dng")
         }
 
         binding.btnExport.setOnClickListener {
-            exportSelected()
+            if (selectedFiles.isEmpty()) {
+                Toast.makeText(requireContext(), "Long-press or tap ALL to select files to export", Toast.LENGTH_SHORT).show()
+            } else {
+                exportSelected()
+            }
         }
 
         binding.btnMerge.setOnClickListener {
-            if (selectedFiles.size == 2) {
+            val allDngs = selectedFiles.all { it.extension.lowercase() == "dng" }
+            if (selectedFiles.size == 2 && allDngs) {
                 val paths = selectedFiles.map { it.absolutePath }
                 com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
                     .setTitle("Select Merge Layout")
@@ -253,7 +258,7 @@ class PlaygroundGalleryFragment : Fragment() {
                     }
                     .show()
             } else {
-                Toast.makeText(requireContext(), "Select exactly 2 images to merge", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "Select exactly 2 DNG images to merge", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -313,6 +318,7 @@ class PlaygroundGalleryFragment : Fragment() {
                 .show()
         }
 
+        updateBottomBar()
         loadFiles()
     }
 
@@ -411,6 +417,7 @@ class PlaygroundGalleryFragment : Fragment() {
                 }
                 adapter.submitList(sortedItems) {
                     updateEmptyState()
+                    updateBottomBar()
                 }
             }
         }
@@ -473,6 +480,26 @@ class PlaygroundGalleryFragment : Fragment() {
         updateBottomBar()
     }
 
+    private fun toggleSelectAll() {
+        val allFiles = adapter.currentList.flatMap { item ->
+            when (item) {
+                is PlaygroundItem.Single -> listOf(item.file)
+                is PlaygroundItem.Group -> listOf(item.jpgFile)
+            }
+        }
+        if (allFiles.isEmpty()) return
+
+        if (selectedFiles.size == allFiles.size) {
+            clearSelection()
+        } else {
+            isSelectionMode = true
+            selectedFiles.clear()
+            selectedFiles.addAll(allFiles)
+            adapter.notifyItemRangeChanged(0, adapter.itemCount, "SELECTION_CHANGED")
+            updateBottomBar()
+        }
+    }
+
     private fun clearSelection() {
         val oldSelections = selectedFiles.toList()
         selectedFiles.clear()
@@ -491,31 +518,116 @@ class PlaygroundGalleryFragment : Fragment() {
     }
 
     private fun updateBottomBar() {
-        if (isSelectionMode) {
-            binding.bottomAppBar.visibility = View.VISIBLE
-            (activity as? top.maary.darkbag.MainActivity)?.setFloatingToolbarForcedHidden(true)
-            binding.fabAdd.visibility = View.GONE
+        val ctx = context ?: return
+        val sandboxCount = adapter.currentList.size
+        val subtitleText = "外部导入暗房 ($sandboxCount SANDBOX)"
+        binding.toolbar.subtitle = subtitleText
+        binding.tvPlaygroundSubtitle.text = subtitleText
 
-            // Only allow merge if exactly 2 individual DNGs are selected
-            val allDngs = selectedFiles.all { it.extension.lowercase() == "dng" }
-            binding.btnMerge.visibility = if (selectedFiles.size == 2 && allDngs) View.VISIBLE else View.GONE
+        val prefs = ctx.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
+        binding.btnPlaygroundBack.visibility = if (enableCamera || isSelectionMode) View.VISIBLE else View.GONE
 
-            // Delete button logic
-            binding.btnDelete.visibility = if (selectedFiles.isNotEmpty()) View.VISIBLE else View.GONE
-
-            // Disband button logic
-            val allGroups = selectedFiles.isNotEmpty() && selectedFiles.all { selectedFile ->
-                adapter.currentList.any { item -> item is PlaygroundItem.Group && item.jpgFile == selectedFile }
-            }
-            binding.btnDisband.visibility = if (allGroups) View.VISIBLE else View.GONE
-
-            binding.toolbar.title = "${selectedFiles.size} selected"
+        val titleText = if (isSelectionMode && selectedFiles.isNotEmpty()) {
+            "${selectedFiles.size} SELECTED"
         } else {
-            binding.bottomAppBar.visibility = View.GONE
-            (activity as? top.maary.darkbag.MainActivity)?.setFloatingToolbarForcedHidden(false)
-            binding.fabAdd.visibility = View.VISIBLE
-            binding.toolbar.title = "Playground"
+            "PLAYGROUND"
         }
+        binding.toolbar.title = titleText
+        binding.tvPlaygroundTitle.text = titleText
+
+        val allFilesCount = adapter.currentList.size
+        val isAllSelected = isSelectionMode && selectedFiles.size >= allFilesCount && allFilesCount > 0
+        binding.btnPlaygroundSelectAll.text = if (isAllSelected) "☒ NONE" else "☑ ALL"
+
+        val selectAllItem = binding.toolbar.menu.findItem(R.id.action_select_all)
+        if (selectAllItem != null) {
+            selectAllItem.setIcon(if (isAllSelected) R.drawable.ic_deselect else R.drawable.ic_select_all)
+            selectAllItem.title = if (isAllSelected) "Deselect All" else "Select All"
+        }
+
+        // Always keep playground_bento_dock and fabAdd visible
+        binding.playgroundBentoDock.visibility = View.VISIBLE
+        binding.fabAdd.visibility = View.VISIBLE
+        binding.fabAdd.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = "＋ IMPORT",
+            value = "导入外部 DNG",
+            isTabActive = false,
+            context = ctx
+        )
+
+        val density = resources.displayMetrics.density
+        val stroke1dp = (1f * density).toInt()
+        val stroke1_5dp = (1.5f * density).toInt()
+        val radius12dp = (12f * density).toInt()
+        val radius14dp = (14f * density).toInt()
+
+        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
+        val colorPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
+        val colorSecondaryContainer = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondaryContainer, android.graphics.Color.DKGRAY)
+        val colorOnSecondaryContainer = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSecondaryContainer, android.graphics.Color.WHITE)
+        val colorSurfaceContainerHigh = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.GRAY)
+        val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.DKGRAY)
+
+        // Merge button: always visible in dock; active when exactly 2 DNGs are selected
+        val allDngs = selectedFiles.isNotEmpty() && selectedFiles.all { it.extension.lowercase() == "dng" }
+        val isMergeActive = isSelectionMode && selectedFiles.size == 2 && allDngs
+        binding.btnMerge.visibility = View.VISIBLE
+        binding.btnMerge.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = "⊞ MERGE HF",
+            value = "半格拼图",
+            isTabActive = isMergeActive,
+            context = ctx
+        )
+        if (isMergeActive) {
+            binding.btnMerge.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
+            binding.btnMerge.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+            binding.btnMerge.strokeWidth = stroke1_5dp
+            binding.btnMerge.cornerRadius = radius12dp
+            binding.btnMerge.alpha = 1.0f
+        } else {
+            binding.btnMerge.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+            binding.btnMerge.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+            binding.btnMerge.strokeWidth = stroke1dp
+            binding.btnMerge.cornerRadius = radius14dp
+            binding.btnMerge.alpha = 0.5f
+        }
+
+        // Disband button: visible when all selected items are merged Half-Frame groups
+        val allGroups = isSelectionMode && selectedFiles.isNotEmpty() && selectedFiles.all { selectedFile ->
+            adapter.currentList.any { item -> item is PlaygroundItem.Group && item.jpgFile == selectedFile }
+        }
+        binding.btnDisband.visibility = if (allGroups) View.VISIBLE else View.GONE
+        binding.btnDisband.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = "✂ DISBAND",
+            value = "拆分半格",
+            isTabActive = allGroups,
+            context = ctx
+        )
+
+        // Export button: always visible in dock
+        val hasSelection = isSelectionMode && selectedFiles.isNotEmpty()
+        binding.btnExport.visibility = View.VISIBLE
+        binding.btnExport.isEnabled = true
+        binding.btnExport.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = "↗ EXPORT",
+            value = if (hasSelection) "导出 (${selectedFiles.size})" else "批量导出",
+            isTabActive = false,
+            context = ctx
+        )
+        if (hasSelection) {
+            binding.btnExport.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSecondaryContainer)
+            binding.btnExport.setTextColor(colorOnSecondaryContainer)
+            binding.btnExport.alpha = 1.0f
+        } else {
+            binding.btnExport.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+            binding.btnExport.alpha = 0.5f
+        }
+
+        // Delete button: always visible in dock
+        binding.btnDelete.visibility = View.VISIBLE
+        binding.btnDelete.isEnabled = hasSelection
+        binding.btnDelete.alpha = if (hasSelection) 1.0f else 0.4f
     }
 
     private fun clearSelectionAndReload() {
@@ -839,69 +951,22 @@ class PlaygroundGalleryFragment : Fragment() {
                             val f1 = processFullSafe(item.dng1, dngUri1, 0)
                             val f2 = processFullSafe(item.dng2, dngUri2, 1)
 
-                            val b1 = if (config.isSwapped) f2 else f1
-                            val b2 = if (config.isSwapped) f1 else f2
+                            val time1 = repository.getCaptureMetadata(dngUri1)?.dateTimeOriginal ?: item.dng1.lastModified()
+                            val time2 = repository.getCaptureMetadata(dngUri2)?.dateTimeOriginal ?: item.dng2.lastModified()
 
-                            val finalCompositeBitmap: android.graphics.Bitmap? = if (b1 != null || b2 != null) {
-                                val isSBS = config.hfLayout ?: "SBS" != "TB"
-
-                                val refW = b1?.width ?: b2?.width ?: 0
-                                val refH = b1?.height ?: b2?.height ?: 0
-
-                                val oriented1 = b1?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-                                val oriented2 = b2?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-
-                                // Recycle original un-oriented bitmaps immediately to save memory
-                                if (oriented1 != b1) b1?.recycle()
-                                if (oriented2 != b2) b2?.recycle()
-
-                                val w1 = oriented1?.width ?: refW
-                                val h1 = oriented1?.height ?: refH
-                                val w2 = oriented2?.width ?: refW
-                                val h2 = oriented2?.height ?: refH
-
-                                val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-                                val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-
-                                var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
-
-                                // Recycle oriented/temp bitmaps immediately after compose
-                                if (tempB1 != oriented1) tempB1.recycle()
-                                if (tempB2 != oriented2) tempB2.recycle()
-                                oriented1?.recycle()
-                                oriented2?.recycle()
-
-                                val economical = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample
-                                if (economical) {
-                                    val scale = 0.707f
-                                    val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
-                                    val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
-                                    val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
-                                    if (scaled != composite) {
-                                        composite.recycle()
-                                        composite = scaled
-                                    }
-                                }
-
-                                val time1 = repository.getCaptureMetadata(dngUri1)?.dateTimeOriginal ?: item.dng1.lastModified()
-                                val time2 = repository.getCaptureMetadata(dngUri2)?.dateTimeOriginal ?: item.dng2.lastModified()
-                                val t1 = if (config.isSwapped) time2 else time1
-                                val t2 = if (config.isSwapped) time1 else time2
-
-                                val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
-                                    composite,
-                                    config.showTimestamp,
-                                    config.flareType >= 0,
-                                    config.hfLayout ?: "SBS",
-                                    time1 = t1,
-                                    time2 = t2,
-                                    flareType = config.flareType
-                                )
-                                if (finalComposite != composite) {
-                                    composite.recycle()
-                                }
-                                finalComposite
-                            } else null
+                            val finalCompositeBitmap = HalfFrameComposer.compose(
+                                frame1 = f1,
+                                frame2 = f2,
+                                layout = config.hfLayout,
+                                isSwapped = config.isSwapped,
+                                showTimestamp = config.showTimestamp,
+                                flareType = config.flareType,
+                                time1 = time1,
+                                time2 = time2,
+                                downsample = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample
+                            )
+                            f1?.recycle()
+                            f2?.recycle()
 
                             finalCompositeBitmap?.let { bitmap ->
                                 val captureMetadata = repository.getCaptureMetadata(dngUri1) ?: repository.getCaptureMetadata(jpgUri)
@@ -1128,36 +1193,12 @@ class PlaygroundAdapter(
             var decodedBitmap: Bitmap? = null
             var bitmapAssigned = false
             try {
-                decodedBitmap = top.maary.darkbag.utils.ImageUtils.decodeDngThumbnail(
+                decodedBitmap = top.maary.darkbag.utils.GalleryThumbnailLoader.loadDngThumbnail(
                     context = context,
                     uri = Uri.fromFile(file),
                     reqWidth = 400,
                     reqHeight = 400
                 )
-
-                if (decodedBitmap == null) {
-                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeFile(file.absolutePath, options)
-                    val inSampleSize = top.maary.darkbag.utils.ImageUtils.calculateInSampleSize(options, 400, 400)
-                    val decodeOpts = BitmapFactory.Options().apply {
-                        this.inSampleSize = inSampleSize
-                        inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
-                    }
-                    decodedBitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
-                    if (decodedBitmap != null) {
-                        val orientation = try {
-                            ExifInterface(file.absolutePath).getAttributeInt(
-                                ExifInterface.TAG_ORIENTATION,
-                                ExifInterface.ORIENTATION_NORMAL
-                            )
-                        } catch (e: Exception) {
-                            ExifInterface.ORIENTATION_NORMAL
-                        }
-                        if (orientation != ExifInterface.ORIENTATION_NORMAL) {
-                            decodedBitmap = top.maary.darkbag.utils.ImageUtils.rotateBitmap(decodedBitmap!!, orientation)
-                        }
-                    }
-                }
 
                 ensureActive()
 
@@ -1236,6 +1277,7 @@ class PlaygroundAdapter(
 
         when (item) {
             is PlaygroundItem.Single -> {
+                holder.binding.badgeFormat.text = if (item.file.extension.lowercase() == "dng") "EXT DNG" else "EXT JPG"
                 holder.binding.iconLayer.visibility = View.GONE
                 holder.binding.subImagesContainer.visibility = View.GONE
 
@@ -1248,6 +1290,7 @@ class PlaygroundAdapter(
                 }
             }
             is PlaygroundItem.Group -> {
+                holder.binding.badgeFormat.text = "HF MERGED"
                 holder.binding.iconLayer.visibility = View.VISIBLE
                 holder.binding.subImagesContainer.visibility = if (item.isExpanded) View.VISIBLE else View.GONE
 
@@ -1316,6 +1359,5 @@ class PlaygroundAdapter(
         holder.bitmapSub2?.recycle()
         holder.bitmapMain = null
         holder.bitmapSub1 = null
-        holder.bitmapSub2 = null
     }
 }

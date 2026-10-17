@@ -135,4 +135,22 @@ class FilmstripSeekBarViewTest {
         assertEquals(2, seekbar.totalFrames)
         assertEquals(uris, seekbar.frameUris)
     }
+
+    @Test
+    fun testFilmstripSeekbarSubclassAndSetPlayheadIndex() {
+        val bentoSeekbar = FilmstripSeekbar(context)
+        val uris = listOf(
+            Uri.parse("file:///dng/0.dng"),
+            Uri.parse("file:///dng/1.dng"),
+            Uri.parse("file:///dng/2.dng"),
+            Uri.parse("file:///dng/3.dng")
+        )
+        bentoSeekbar.setFrames(uris, 0)
+        assertEquals(4, bentoSeekbar.totalFrames)
+
+        bentoSeekbar.setPlayheadIndex(2)
+        assertEquals(2, bentoSeekbar.currentFrameIndex)
+        assertEquals(2f / 3f, bentoSeekbar.progress, 0.001f)
+    }
 }
+

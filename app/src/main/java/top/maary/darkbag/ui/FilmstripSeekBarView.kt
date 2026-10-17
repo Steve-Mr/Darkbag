@@ -28,7 +28,7 @@ import kotlin.math.roundToInt
  * Seamlessly tiles evenly sampled thumbnail slices across the bar with a rounded capsule clip,
  * an interactive scrubber cursor playhead, and frame index feedback.
  */
-class FilmstripSeekBarView @JvmOverloads constructor(
+open class FilmstripSeekBarView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
@@ -157,6 +157,13 @@ class FilmstripSeekBarView @JvmOverloads constructor(
         if (this.currentFrameIndex != clamped) {
             this.currentFrameIndex = clamped
             invalidate()
+        }
+    }
+
+    fun setPlayheadIndex(index: Int) {
+        val total = totalFrames
+        if (total > 0) {
+            setProgress(index, total)
         }
     }
 
@@ -380,3 +387,12 @@ class FilmstripSeekBarView @JvmOverloads constructor(
         }
     }
 }
+
+/**
+ * Bento Timeline Seekbar alias for XML layouts.
+ */
+class FilmstripSeekbar @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null,
+    defStyleAttr: Int = 0
+) : FilmstripSeekBarView(context, attrs, defStyleAttr)
