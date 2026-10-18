@@ -12,9 +12,11 @@ import android.text.style.ForegroundColorSpan
 import android.text.style.MetricAffectingSpan
 import android.text.style.StyleSpan
 import android.util.AttributeSet
+import android.content.res.Resources
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.LinearLayout
 import androidx.core.graphics.ColorUtils
 import com.google.android.material.button.MaterialButton
@@ -75,68 +77,193 @@ class CameraBentoDeckView @JvmOverloads constructor(
         styleBentoProLink(button, isLinked)
     }
 
+    enum class BentoScreenTier {
+        COMPACT,
+        STANDARD,
+        TALL;
+
+        companion object {
+            fun resolve(aspectRatio: Float, maxDp: Int): BentoScreenTier {
+                return when {
+                    aspectRatio < 1.88f || maxDp < 720 -> COMPACT
+                    aspectRatio > 2.05f && maxDp >= 840 -> TALL
+                    else -> STANDARD
+                }
+            }
+        }
+    }
+
+    data class BentoDimensions(
+        val shutterRowDp: Int,
+        val lensRowDp: Int,
+        val recipeRowDp: Int,
+        val proBarDp: Int,
+        val dialWheelDp: Int,
+        val cardPaddingDp: Int,
+        val rowMarginDp: Int
+    )
+
     companion object {
 
         const val PREF_KEY_UI_TIER = "pref_camera_bento_ui_tier"
 
-        /**
-         * Dynamically calculates and applies Bento row heights based on screen height and aspect ratio.
-         *
-         * On standard screens (< 750dp or aspect ratio < 1.9):
-         * - Pro bar: 42dp
-         * - Recipe row: 48dp
-         * - Lens row: 48dp
-         * - Shutter row: 78dp
-         *
-         * On tall screens (>= 750dp or aspect ratio >= 1.9):
-         * - Pro bar: 48dp
-         * - Recipe row: 54dp
-         * - Lens row: 54dp
-         * - Shutter row: 88dp
-         */
         @JvmStatic
-        fun applyDynamicRowHeights(view: View) {
-            val resources = view.resources
-            val density = resources.displayMetrics.density
+        fun resolveScreenTier(resources: Resources): BentoScreenTier {
             val metrics = resources.displayMetrics
             val maxDimension = maxOf(metrics.heightPixels, metrics.widthPixels)
             val minDimension = minOf(metrics.heightPixels, metrics.widthPixels)
             val aspectRatio = if (minDimension > 0) maxDimension.toFloat() / minDimension.toFloat() else 1.77f
             val maxDp = maxOf(resources.configuration.screenHeightDp, resources.configuration.screenWidthDp)
+            return BentoScreenTier.resolve(aspectRatio, maxDp)
+        }
 
-            val isTallScreen = maxDp >= 750 || aspectRatio >= 1.9f
+        @JvmStatic
+        fun getBentoDimensions(resources: Resources): BentoDimensions {
+            val tier = resolveScreenTier(resources)
+            return when (tier) {
+                BentoScreenTier.COMPACT -> BentoDimensions(
+                    shutterRowDp = 68,
+                    lensRowDp = 38,
+                    recipeRowDp = 38,
+                    proBarDp = 38,
+                    dialWheelDp = 38,
+                    cardPaddingDp = 5,
+                    rowMarginDp = 3
+                )
+                BentoScreenTier.STANDARD -> BentoDimensions(
+                    shutterRowDp = 78,
+                    lensRowDp = 48,
+                    recipeRowDp = 48,
+                    proBarDp = 44,
+                    dialWheelDp = 44,
+                    cardPaddingDp = 8,
+                    rowMarginDp = 5
+                )
+                BentoScreenTier.TALL -> BentoDimensions(
+                    shutterRowDp = 88,
+                    lensRowDp = 54,
+                    recipeRowDp = 54,
+                    proBarDp = 48,
+                    dialWheelDp = 46,
+                    cardPaddingDp = 10,
+                    rowMarginDp = 6
+                )
+            }
+        }
 
-            val proBarDp = 48
-            val recipeRowDp = if (isTallScreen) 54 else 48
-            val lensRowDp = if (isTallScreen) 54 else 48
-            val shutterRowDp = if (isTallScreen) 88 else 78
+        /**
+         * Adaptive 3-tier Bento row heights and spacing based on screen height and aspect ratio:
+         *
+         * 1. COMPACT tier (aspectRatio < 1.88f or maxDp < 720dp, e.g. 16:9, split screen, compact devices):
+         *    - Pro info bar: 38dp
+         *    - Recipe row: 38dp
+         *    - Lens row: 38dp
+         *    - Shutter row: 68dp
+         *    - Dial wheel: 38dp
+         *    - Card padding: 5dp
+         *    - Row bottom margin: 3dp
+         *
+         * 2. STANDARD tier (aspectRatio in 1.88f..2.05f and maxDp in 720..840dp, e.g. 18:9, 19:9):
+         *    - Pro info bar: 44dp
+         *    - Recipe row: 48dp
+         *    - Lens row: 48dp
+         *    - Shutter row: 78dp
+         *    - Dial wheel: 44dp
+         *    - Card padding: 8dp
+         *    - Row bottom margin: 5dp
+         *
+         * 3. TALL tier (aspectRatio > 2.05f and maxDp >= 840dp, e.g. 20:9, 21:9 modern flagships):
+         *    - Pro info bar: 48dp
+         *    - Recipe row: 54dp
+         *    - Lens row: 54dp
+         *    - Shutter row: 88dp
+         *    - Dial wheel: 46dp
+         *    - Card padding: 10dp
+         *    - Row bottom margin: 6dp
+         */
+        @JvmStatic
+        fun applyDynamicRowHeights(view: View) {
+            val resources = view.resources
+            val density = resources.displayMetrics.density
+            val dims = getBentoDimensions(resources)
+            val tier = resolveScreenTier(resources)
 
-            val proBarPx = (proBarDp * density).roundToInt()
-            val recipeRowPx = (recipeRowDp * density).roundToInt()
-            val lensRowPx = (lensRowDp * density).roundToInt()
-            val shutterRowPx = (shutterRowDp * density).roundToInt()
+            val proBarPx = (dims.proBarDp * density).roundToInt()
+            val recipeRowPx = (dims.recipeRowDp * density).roundToInt()
+            val lensRowPx = (dims.lensRowDp * density).roundToInt()
+            val shutterRowPx = (dims.shutterRowDp * density).roundToInt()
+            val dialWheelPx = (dims.dialWheelDp * density).roundToInt()
+            val cardPaddingPx = (dims.cardPaddingDp * density).roundToInt()
+            val rowMarginPx = (dims.rowMarginDp * density).roundToInt()
 
+            // 1. Pro parameter bar
             view.findViewById<View>(top.maary.darkbag.R.id.pro_info_bar_card)?.let { v ->
-                val lp = v.layoutParams
-                if (lp != null && lp.height != proBarPx) {
-                    lp.height = proBarPx
+                val lp = v.layoutParams as? ViewGroup.MarginLayoutParams
+                if (lp != null) {
+                    var changed = false
+                    if (lp.height != proBarPx) {
+                        lp.height = proBarPx
+                        changed = true
+                    }
+                    if (lp.bottomMargin != rowMarginPx) {
+                        lp.bottomMargin = rowMarginPx
+                        changed = true
+                    }
+                    if (changed) v.layoutParams = lp
+                }
+            }
+
+            // 2. Dial wheel panel & view
+            view.findViewById<View>(top.maary.darkbag.R.id.manual_controls_root)?.let { v ->
+                val lp = v.layoutParams as? ViewGroup.MarginLayoutParams
+                if (lp != null && lp.bottomMargin != rowMarginPx) {
+                    lp.bottomMargin = rowMarginPx
                     v.layoutParams = lp
                 }
             }
+            view.findViewById<View>(top.maary.darkbag.R.id.dial_wheel_view)?.let { v ->
+                val lp = v.layoutParams
+                if (lp != null && lp.height != dialWheelPx) {
+                    lp.height = dialWheelPx
+                    v.layoutParams = lp
+                }
+            }
+
+            // 3. Film recipe row
             view.findViewById<View>(top.maary.darkbag.R.id.bento_film_row)?.let { v ->
-                val lp = v.layoutParams
-                if (lp != null && lp.height != recipeRowPx) {
-                    lp.height = recipeRowPx
-                    v.layoutParams = lp
+                val lp = v.layoutParams as? ViewGroup.MarginLayoutParams
+                if (lp != null) {
+                    var changed = false
+                    if (lp.height != recipeRowPx) {
+                        lp.height = recipeRowPx
+                        changed = true
+                    }
+                    if (lp.bottomMargin != rowMarginPx) {
+                        lp.bottomMargin = rowMarginPx
+                        changed = true
+                    }
+                    if (changed) v.layoutParams = lp
                 }
             }
+
+            // 4. Lens control row
             view.findViewById<View>(top.maary.darkbag.R.id.lens_control_row)?.let { v ->
-                val lp = v.layoutParams
-                if (lp != null && lp.height != lensRowPx) {
-                    lp.height = lensRowPx
-                    v.layoutParams = lp
+                val lp = v.layoutParams as? ViewGroup.MarginLayoutParams
+                if (lp != null) {
+                    var changed = false
+                    if (lp.height != lensRowPx) {
+                        lp.height = lensRowPx
+                        changed = true
+                    }
+                    if (lp.bottomMargin != rowMarginPx) {
+                        lp.bottomMargin = rowMarginPx
+                        changed = true
+                    }
+                    if (changed) v.layoutParams = lp
                 }
             }
+
+            // 5. Shutter row
             view.findViewById<View>(top.maary.darkbag.R.id.bento_shutter_row)?.let { v ->
                 val lp = v.layoutParams
                 if (lp != null && lp.height != shutterRowPx) {
@@ -144,11 +271,32 @@ class CameraBentoDeckView @JvmOverloads constructor(
                     v.layoutParams = lp
                 }
             }
+
+            // 6. Photo thumbnail card width adjustment for compact tier
+            view.findViewById<View>(top.maary.darkbag.R.id.photo_view_card)?.let { v ->
+                val lp = v.layoutParams
+                val photoWidthDp = when (tier) {
+                    BentoScreenTier.COMPACT -> 66
+                    BentoScreenTier.TALL -> 76
+                    BentoScreenTier.STANDARD -> 72
+                }
+                val photoWidthPx = (photoWidthDp * density).roundToInt()
+                if (lp != null && lp.width != photoWidthPx) {
+                    lp.width = photoWidthPx
+                    v.layoutParams = lp
+                }
+            }
+
+            // 7. Outer Card Padding
+            val cardView = (view as? com.google.android.material.card.MaterialCardView)
+                ?: (view.parent as? com.google.android.material.card.MaterialCardView)
+                ?: (view.findViewById<View>(top.maary.darkbag.R.id.bottom_island_card) as? com.google.android.material.card.MaterialCardView)
+            cardView?.setContentPadding(cardPaddingPx, cardPaddingPx, cardPaddingPx, cardPaddingPx)
         }
 
         @JvmStatic
         fun applyDynamicRowHeights(binding: CameraUiContainerBinding) {
-            val root = binding.bentoDeckView ?: binding.bottomIslandCard ?: binding.root
+            val root = binding.bottomIslandCard ?: binding.bentoDeckView ?: binding.root
             applyDynamicRowHeights(root)
         }
 

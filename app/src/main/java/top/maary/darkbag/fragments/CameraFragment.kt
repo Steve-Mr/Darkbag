@@ -1182,6 +1182,12 @@ class CameraFragment : Fragment() {
 
         // Enable or disable switching between cameras
         updateCameraSwitchButton()
+
+        // Re-apply adaptive row heights and viewfinder boundary constraints on configuration/orientation changes
+        cameraUiContainerBinding?.let {
+            CameraBentoDeckView.applyDynamicRowHeights(it)
+        }
+        updateViewFinderConstraints()
     }
 
     private fun refreshLenses(force: Boolean = false) {
@@ -1497,6 +1503,12 @@ class CameraFragment : Fragment() {
             root
         )
 
+        // Apply dynamic row heights and viewfinder boundary constraints immediately upon inflation
+        cameraUiContainerBinding?.let {
+            CameraBentoDeckView.applyDynamicRowHeights(it)
+        }
+        updateViewFinderConstraints()
+
         // Update shutter dot on UI update
         updateShutterOrientation()
 
@@ -1557,33 +1569,8 @@ class CameraFragment : Fragment() {
                 currentBottomInset = insets.bottom
                 updateContainerPadding()
 
-                // Update Viewfinder and Lens Group constraints
-                val uiBinding = cameraUiContainerBinding
-                val vfBinding = _fragmentCameraBinding
-                if (uiBinding != null && vfBinding != null) {
-                    val constraintSet = androidx.constraintlayout.widget.ConstraintSet()
-                    val root = vfBinding.root as androidx.constraintlayout.widget.ConstraintLayout
-                    constraintSet.clone(root)
-
-                    val containerId = vfBinding.viewFinderContainer.id
-                    val topId = uiBinding.topRightControls?.id
-                    if (topId != null) {
-                        val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
-                        constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START, marginMedium)
-                        constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END, marginMedium)
-
-                        constraintSet.constrainHeight(containerId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
-                        constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.TOP, topId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
-                        constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
-                        constraintSet.setVerticalBias(containerId, 0.08f)
-                    }
-
-                    constraintSet.applyTo(root)
-
-                    // Ensure clipping
-                    vfBinding.viewFinderContainer.clipToOutline = true
-                    vfBinding.viewFinderStage.clipToOutline = true
-                }
+                // Update Viewfinder constraints when insets are resolved
+                updateViewFinderConstraints()
 
                 WindowInsetsCompat.CONSUMED
             }
@@ -1619,6 +1606,14 @@ class CameraFragment : Fragment() {
 
         cameraUiContainerBinding?.btnBentoTier?.setOnClickListener { v ->
             v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            val root = _fragmentCameraBinding?.root as? ViewGroup
+            if (root != null) {
+                val transition = android.transition.AutoTransition().apply {
+                    duration = 200
+                    ordering = android.transition.TransitionSet.ORDERING_TOGETHER
+                }
+                android.transition.TransitionManager.beginDelayedTransition(root, transition)
+            }
             val nextTier = cameraViewModel.uiState.value.uiTier.next()
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                 .edit().putString(CameraBentoDeckView.PREF_KEY_UI_TIER, nextTier.key).apply()
@@ -1857,6 +1852,62 @@ class CameraFragment : Fragment() {
         updateLiveLut()
     }
 
+    private fun updateViewFinderConstraints() {
+        val uiBinding = cameraUiContainerBinding ?: return
+        val vfBinding = _fragmentCameraBinding ?: return
+        val root = vfBinding.root as? androidx.constraintlayout.widget.ConstraintLayout ?: return
+        val bottomIsland = uiBinding.bottomIslandCard ?: return
+        val topControls = uiBinding.topRightControls ?: return
+
+        val constraintSet = androidx.constraintlayout.widget.ConstraintSet()
+        constraintSet.clone(root)
+
+        val containerId = vfBinding.viewFinderContainer.id
+        val topId = topControls.id
+        val bottomIslandId = bottomIsland.id
+
+        val density = resources.displayMetrics.density
+        val marginHorizontal = (10 * density).roundToInt()
+        val marginVertical = (6 * density).roundToInt()
+
+        val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        val ratio = if (isPortrait) "3:4" else "4:3"
+
+        if (isPortrait) {
+            constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START, marginHorizontal)
+            constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END, marginHorizontal)
+
+            constraintSet.constrainWidth(containerId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
+            constraintSet.constrainHeight(containerId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
+            constraintSet.setDimensionRatio(containerId, ratio)
+            constraintSet.constrainedWidth(containerId, true)
+            constraintSet.constrainedHeight(containerId, true)
+
+            constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.TOP, topId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, marginVertical)
+            constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomIslandId, androidx.constraintlayout.widget.ConstraintSet.TOP, marginVertical)
+            constraintSet.setVerticalBias(containerId, 0.5f)
+        } else {
+            // Landscape mode: bottom_island_card is docked to the right edge
+            constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START, marginHorizontal)
+            constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.END, bottomIslandId, androidx.constraintlayout.widget.ConstraintSet.START, marginHorizontal)
+
+            constraintSet.constrainWidth(containerId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
+            constraintSet.constrainHeight(containerId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
+            constraintSet.setDimensionRatio(containerId, ratio)
+            constraintSet.constrainedWidth(containerId, true)
+            constraintSet.constrainedHeight(containerId, true)
+
+            constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.TOP, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.TOP, marginVertical)
+            constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, marginVertical)
+            constraintSet.setHorizontalBias(containerId, 0.5f)
+        }
+
+        constraintSet.applyTo(root)
+
+        vfBinding.viewFinderContainer.clipToOutline = true
+        vfBinding.viewFinderStage.clipToOutline = true
+    }
+
     private fun updateTierUi(tier: CameraUiTier = cameraViewModel.uiState.value.uiTier) {
         val binding = cameraUiContainerBinding ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -1869,6 +1920,7 @@ class CameraFragment : Fragment() {
             hasActiveManualTab = activeManualTab != null,
             showLutSwitcherPref = showLutSwitcher
         )
+        CameraBentoDeckView.applyDynamicRowHeights(binding)
     }
 
     /** Enabled or disabled a button to switch cameras depending on the available cameras */
@@ -2415,6 +2467,14 @@ class CameraFragment : Fragment() {
         if (binding.manualControlsRoot?.visibility == View.VISIBLE ||
             activeManualTab != null
         ) {
+            val root = _fragmentCameraBinding?.root as? ViewGroup
+            if (root != null) {
+                val transition = android.transition.AutoTransition().apply {
+                    duration = 200
+                    ordering = android.transition.TransitionSet.ORDERING_TOGETHER
+                }
+                android.transition.TransitionManager.beginDelayedTransition(root, transition)
+            }
             binding.manualControlsRoot?.visibility = View.GONE
             activeManualTab = null
             cameraViewModel.setActiveManualTab(null)
@@ -2430,22 +2490,27 @@ class CameraFragment : Fragment() {
     private fun updateBentoFolding(isDialOpen: Boolean) {
         val binding = cameraUiContainerBinding ?: return
         val density = resources.displayMetrics.density
+        val tier = CameraBentoDeckView.resolveScreenTier(resources)
+        val isCompact = tier == CameraBentoDeckView.BentoScreenTier.COMPACT
+
         if (isDialOpen) {
-            // Collapse bento_film_row to View.GONE (reclaims 54dp!)
+            // Collapse bento_film_row to View.GONE (reclaims vertical space!)
             binding.bentoFilmRow?.visibility = View.GONE
-            // Compact lens_control_row height to 42dp
+            // Compact lens_control_row height: 34dp on compact, 42dp on standard/tall
+            val lensHeightDp = if (isCompact) 34 else 42
             binding.lensControlRow?.let { v ->
                 val lp = v.layoutParams
-                val h = (42 * density).roundToInt()
+                val h = (lensHeightDp * density).roundToInt()
                 if (lp != null && lp.height != h) {
                     lp.height = h
                     v.layoutParams = lp
                 }
             }
-            // Compact bento_shutter_row height to 72dp
+            // Compact bento_shutter_row height: 64dp on compact, 72dp on standard/tall
+            val shutterHeightDp = if (isCompact) 64 else 72
             binding.bentoShutterRow?.let { v ->
                 val lp = v.layoutParams
-                val h = (72 * density).roundToInt()
+                val h = (shutterHeightDp * density).roundToInt()
                 if (lp != null && lp.height != h) {
                     lp.height = h
                     v.layoutParams = lp
@@ -2453,11 +2518,11 @@ class CameraFragment : Fragment() {
             }
         } else {
             // Restore bento_film_row to View.VISIBLE
-            val tier = cameraViewModel.uiState.value.uiTier
-            if (tier == CameraUiTier.FILM || tier == CameraUiTier.PRO) {
+            val uiTier = cameraViewModel.uiState.value.uiTier
+            if (uiTier == CameraUiTier.FILM || uiTier == CameraUiTier.PRO) {
                 binding.bentoFilmRow?.visibility = View.VISIBLE
             }
-            // Restore lens_control_row and bento_shutter_row to standard/tall heights via applyDynamicRowHeights()
+            // Restore lens_control_row and bento_shutter_row to dynamic heights via applyDynamicRowHeights()
             CameraBentoDeckView.applyDynamicRowHeights(binding)
         }
     }
@@ -2538,6 +2603,14 @@ class CameraFragment : Fragment() {
 
     private fun toggleManualTab(tab: String) {
         val binding = cameraUiContainerBinding ?: return
+        val root = _fragmentCameraBinding?.root as? ViewGroup
+        if (root != null) {
+            val transition = android.transition.AutoTransition().apply {
+                duration = 200
+                ordering = android.transition.TransitionSet.ORDERING_TOGETHER
+            }
+            android.transition.TransitionManager.beginDelayedTransition(root, transition)
+        }
         if (activeManualTab == tab) {
             // Collapse dial
             activeManualTab = null
