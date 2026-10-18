@@ -80,11 +80,9 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <LinearLayout
+        <androidx.constraintlayout.widget.ConstraintLayout
             android:layout_width="match_parent"
-            android:layout_height="42dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:layout_height="42dp">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_back"
@@ -101,14 +99,16 @@
                 app:iconGravity="textStart"
                 app:iconPadding="0dp"
                 app:iconTint="?attr/colorOnSurface"
-                app:backgroundTint="?attr/colorSurfaceContainerHigh" />
+                app:backgroundTint="?attr/colorSurfaceContainerHigh"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_gallery_pill"
                 style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="0dp"
                 android:layout_height="42dp"
-                android:layout_weight="1"
                 android:layout_marginStart="6dp"
                 android:layout_marginEnd="6dp"
                 android:insetLeft="0dp"
@@ -123,7 +123,11 @@
                 android:paddingEnd="8dp"
                 app:cornerRadius="14dp"
                 app:backgroundTint="?attr/colorSecondaryContainer"
-                android:textColor="?attr/colorOnSecondaryContainer" />
+                android:textColor="?attr/colorOnSecondaryContainer"
+                app:layout_constraintStart_toEndOf="@id/btn_back"
+                app:layout_constraintEnd_toStartOf="@id/btn_delete"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_delete"
@@ -141,7 +145,10 @@
                 app:iconGravity="textStart"
                 app:iconPadding="0dp"
                 app:iconTint="?attr/colorOnErrorContainer"
-                app:backgroundTint="?attr/colorErrorContainer" />
+                app:backgroundTint="?attr/colorErrorContainer"
+                app:layout_constraintEnd_toStartOf="@id/btn_action_main"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent" />
 
             <!-- Top Right: Bento Action Tile -->
             <com.google.android.material.button.MaterialButton
@@ -166,21 +173,30 @@
                 android:text="SHARE"
                 android:textSize="11sp"
                 android:textStyle="bold"
-                android:contentDescription="@string/share_button_alt" />
+                android:contentDescription="@string/share_button_alt"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent" />
 
             <!-- Hidden dummy views for backwards compatibility -->
             <View
                 android:id="@+id/split_action"
                 android:layout_width="0dp"
                 android:layout_height="0dp"
-                android:visibility="gone" />
+                android:visibility="gone"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_action_menu"
+                style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="0dp"
                 android:layout_height="0dp"
-                android:visibility="gone" />
-        </LinearLayout>
+                android:visibility="gone"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
     </com.google.android.material.card.MaterialCardView>
 
     <!-- Bottom Modular Bento Deck -->

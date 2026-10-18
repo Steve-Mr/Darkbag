@@ -230,7 +230,11 @@ class PlaygroundGalleryFragment : Fragment() {
             }
         )
 
-        binding.recyclerView.layoutManager = GridLayoutManager(context, 3)
+        val spanCount = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 3 else 2
+        val staggeredLayoutManager = StaggeredGridLayoutManager(spanCount, StaggeredGridLayoutManager.VERTICAL).apply {
+            gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_NONE
+        }
+        binding.recyclerView.layoutManager = staggeredLayoutManager
         binding.recyclerView.adapter = adapter
 
         binding.fabAdd.setOnClickListener {
@@ -1008,6 +1012,12 @@ class PlaygroundGalleryFragment : Fragment() {
         // Re-synchronize the bottom bar state which updates the forced hidden state
         // of the floating toolbar based on selection mode.
         updateBottomBar()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val spanCount = if (newConfig.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 3 else 2
+        (binding.recyclerView.layoutManager as? StaggeredGridLayoutManager)?.spanCount = spanCount
     }
 
     override fun onDestroyView() {
