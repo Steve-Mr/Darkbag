@@ -13,6 +13,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.shape.ShapeAppearanceModel
+import top.maary.darkbag.ui.BentoSelectionBottomSheet
+import top.maary.darkbag.ui.RawVideoSettingsBottomSheet
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -507,37 +510,39 @@ class SettingsFragment : Fragment() {
         // 1. Default Lens
         binding.btnMenuDefaultLens.setOnClickListener {
             val lenses = cameraRepository.getAllFocalLengthPresets()
-            val names = lenses.map { it.name }.toTypedArray()
+            val names = lenses.map { it.name }
             val savedLensId = prefs.getString(KEY_DEFAULT_LENS_ID, null)
             val selectedIndex = lenses.indexOfFirst { it.sensorId == savedLensId }.coerceAtLeast(0)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.pref_default_lens)
-                .setSingleChoiceItems(names, selectedIndex) { dialog, which ->
-                    prefs.edit().putString(KEY_DEFAULT_LENS_ID, lenses[which].sensorId).apply()
-                    updateDefaultLensTile()
-                    dialog.dismiss()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.pref_default_lens),
+                options = names,
+                selectedIndex = selectedIndex,
+                badge = "LENS"
+            ) { which ->
+                prefs.edit().putString(KEY_DEFAULT_LENS_ID, lenses[which].sensorId).apply()
+                updateDefaultLensTile()
+            }
         }
 
         // 2. 1.0x Focal Base
         binding.btnMenuDefaultFocal1x.setOnClickListener {
             val mainWide = cameraRepository.getMainWideLens()
             val presets1x = if (mainWide != null) cameraRepository.get1xPresets(mainWide) else emptyList()
-            val names1x = presets1x.map { it.name }.toTypedArray()
+            val names1x = presets1x.map { it.name }
             if (names1x.isNotEmpty()) {
                 val savedFocal = prefs.getString(KEY_DEFAULT_FOCAL_1X, names1x.first())
                 val selectedIndex = names1x.indexOf(savedFocal).coerceAtLeast(0)
-                MaterialAlertDialogBuilder(requireContext())
-                    .setTitle(R.string.pref_default_focal_1x)
-                    .setSingleChoiceItems(names1x, selectedIndex) { dialog, which ->
-                        prefs.edit().putString(KEY_DEFAULT_FOCAL_1X, names1x[which]).apply()
-                        updateDefaultFocal1xTile()
-                        dialog.dismiss()
-                    }
-                    .setNegativeButton(R.string.cancel, null)
-                    .show()
+                BentoSelectionBottomSheet.show(
+                    fragmentManager = childFragmentManager,
+                    title = getString(R.string.pref_default_focal_1x),
+                    options = names1x,
+                    selectedIndex = selectedIndex,
+                    badge = "1.0X"
+                ) { which ->
+                    prefs.edit().putString(KEY_DEFAULT_FOCAL_1X, names1x[which]).apply()
+                    updateDefaultFocal1xTile()
+                }
             }
         }
 
@@ -545,137 +550,153 @@ class SettingsFragment : Fragment() {
         binding.btnMenuTargetLog.setOnClickListener {
             val currentLog = prefs.getString(KEY_TARGET_LOG, "None") ?: "None"
             val selectedIndex = LOG_CURVES.indexOf(currentLog).coerceAtLeast(0)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.target_log_hint)
-                .setSingleChoiceItems(LOG_CURVES.toTypedArray(), selectedIndex) { dialog, which ->
-                    val selected = LOG_CURVES[which]
-                    val editor = prefs.edit().putString(KEY_TARGET_LOG, selected)
-                    if (selected == "None") {
-                        editor.remove(KEY_ACTIVE_LUT)
-                    }
-                    editor.apply()
-                    updateTargetLogTile()
-                    updateLutsTile()
-                    updateCheckboxStates()
-                    updateStorageVisibility()
-                    dialog.dismiss()
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.target_log_hint),
+                options = LOG_CURVES,
+                selectedIndex = selectedIndex,
+                badge = "LOG"
+            ) { which ->
+                val selected = LOG_CURVES[which]
+                val editor = prefs.edit().putString(KEY_TARGET_LOG, selected)
+                if (selected == "None") {
+                    editor.remove(KEY_ACTIVE_LUT)
                 }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+                editor.apply()
+                updateTargetLogTile()
+                updateLutsTile()
+                updateCheckboxStates()
+                updateStorageVisibility()
+            }
         }
 
         // 4. HDR+ Fusion Engine
         binding.btnMenuHdrFusionMode.setOnClickListener {
             val savedFusion = prefs.getString(KEY_HDR_FUSION_MODE, HDR_FUSION_SABRE) ?: HDR_FUSION_SABRE
             val selectedIndex = HDR_FUSION_MODES.indexOf(savedFusion).coerceAtLeast(0)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.pref_hdr_fusion_mode_title)
-                .setSingleChoiceItems(HDR_FUSION_MODES.toTypedArray(), selectedIndex) { dialog, which ->
-                    prefs.edit().putString(KEY_HDR_FUSION_MODE, HDR_FUSION_MODES[which]).apply()
-                    updateHdrFusionTile()
-                    dialog.dismiss()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            val descriptions = listOf(
+                "Adaptive spatial merge or Sabre super-resolution",
+                "High detail spatial alignment with RCD demosaicing",
+                "Super-resolution & optical subpixel alignment",
+                "Traditional Wiener filter HDR+ multi-frame blending"
+            )
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.pref_hdr_fusion_mode_title),
+                options = HDR_FUSION_MODES,
+                selectedIndex = selectedIndex,
+                badge = "COMPUTE",
+                descriptions = descriptions
+            ) { which ->
+                prefs.edit().putString(KEY_HDR_FUSION_MODE, HDR_FUSION_MODES[which]).apply()
+                updateHdrFusionTile()
+            }
         }
 
         // 5. HDR+ Burst Frames
         binding.btnMenuHdrBurstMode.setOnClickListener {
             val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "5") ?: "5"
             val selectedIndex = BURST_SIZES.indexOf(savedBurst).coerceAtLeast(0)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.pref_burst_frames)
-                .setSingleChoiceItems(BURST_SIZES.map { "$it Frames" }.toTypedArray(), selectedIndex) { dialog, which ->
-                    prefs.edit().putString(KEY_HDR_BURST_COUNT, BURST_SIZES[which]).apply()
-                    updateHdrBurstTile()
-                    dialog.dismiss()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            val options = BURST_SIZES.map { "$it Frames" }
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.pref_burst_frames),
+                options = options,
+                selectedIndex = selectedIndex,
+                badge = "BURST"
+            ) { which ->
+                prefs.edit().putString(KEY_HDR_BURST_COUNT, BURST_SIZES[which]).apply()
+                updateHdrBurstTile()
+            }
         }
 
         // 6. HDR+ Underexposure
         binding.btnMenuUnderexposureMode.setOnClickListener {
             val saved = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic") ?: "Dynamic"
             val selectedIndex = HDR_UNDEREXPOSURE_MODES.indexOf(saved).coerceAtLeast(0)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.pref_hdr_underexposure)
-                .setSingleChoiceItems(HDR_UNDEREXPOSURE_MODES.toTypedArray(), selectedIndex) { dialog, which ->
-                    prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[which]).apply()
-                    updateUnderexposureTile()
-                    dialog.dismiss()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.pref_hdr_underexposure),
+                options = HDR_UNDEREXPOSURE_MODES,
+                selectedIndex = selectedIndex,
+                badge = "EXPOSURE"
+            ) { which ->
+                prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[which]).apply()
+                updateUnderexposureTile()
+            }
         }
 
         // 7. Color Engine Mode
         binding.btnMenuColorEngine.setOnClickListener {
             val savedIndex = prefs.getInt(KEY_COLOR_ENGINE_MODE, 2).coerceIn(0, COLOR_ENGINE_MODES.size - 1)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.pref_color_engine_mode)
-                .setSingleChoiceItems(COLOR_ENGINE_MODES.toTypedArray(), savedIndex) { dialog, which ->
-                    prefs.edit().putInt(KEY_COLOR_ENGINE_MODE, which).apply()
-                    updateColorEngineTile()
-                    dialog.dismiss()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.pref_color_engine_mode),
+                options = COLOR_ENGINE_MODES,
+                selectedIndex = savedIndex,
+                badge = "MATRIX"
+            ) { which ->
+                prefs.edit().putInt(KEY_COLOR_ENGINE_MODE, which).apply()
+                updateColorEngineTile()
+            }
         }
 
         // 8. Antibanding
         binding.btnMenuAntibanding.setOnClickListener {
             val saved = prefs.getString(KEY_ANTIBANDING, "Auto") ?: "Auto"
             val selectedIndex = ANTIBANDING_MODES.indexOf(saved).coerceAtLeast(0)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.pref_antibanding)
-                .setSingleChoiceItems(ANTIBANDING_MODES.toTypedArray(), selectedIndex) { dialog, which ->
-                    prefs.edit().putString(KEY_ANTIBANDING, ANTIBANDING_MODES[which]).apply()
-                    updateAntibandingTile()
-                    dialog.dismiss()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.pref_antibanding),
+                options = ANTIBANDING_MODES,
+                selectedIndex = selectedIndex,
+                badge = "FLICKER"
+            ) { which ->
+                prefs.edit().putString(KEY_ANTIBANDING, ANTIBANDING_MODES[which]).apply()
+                updateAntibandingTile()
+            }
         }
 
         // 9. Burst Processing Strategy
         binding.btnMenuBurstProcessingStrategy.setOnClickListener {
             val saved = prefs.getString(KEY_BURST_PROCESSING_STRATEGY, BURST_STRATEGY_BALANCED) ?: BURST_STRATEGY_BALANCED
             val selectedIndex = BURST_PROCESSING_STRATEGIES.indexOf(saved).coerceAtLeast(0)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.pref_burst_processing_strategy)
-                .setSingleChoiceItems(BURST_PROCESSING_STRATEGIES.toTypedArray(), selectedIndex) { dialog, which ->
-                    prefs.edit().putString(KEY_BURST_PROCESSING_STRATEGY, BURST_PROCESSING_STRATEGIES[which]).apply()
-                    updateBurstStrategyTile()
-                    dialog.dismiss()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.pref_burst_processing_strategy),
+                options = BURST_PROCESSING_STRATEGIES,
+                selectedIndex = selectedIndex,
+                badge = "QUEUE"
+            ) { which ->
+                prefs.edit().putString(KEY_BURST_PROCESSING_STRATEGY, BURST_PROCESSING_STRATEGIES[which]).apply()
+                updateBurstStrategyTile()
+            }
         }
 
         // 10. Shutter Long-Press Action
         binding.btnMenuShutterLongPress.setOnClickListener {
             val saved = prefs.getString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_MP4) ?: SHUTTER_LONG_PRESS_MP4
             val selectedIndex = SHUTTER_LONG_PRESS_OPTIONS.indexOf(saved).coerceAtLeast(0)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.pref_shutter_long_press_action)
-                .setSingleChoiceItems(SHUTTER_LONG_PRESS_OPTIONS.toTypedArray(), selectedIndex) { dialog, which ->
-                    val selectedAction = SHUTTER_LONG_PRESS_OPTIONS[which]
-                    prefs.edit().putString(KEY_SHUTTER_LONG_PRESS_ACTION, selectedAction).apply()
-                    updateShutterLongPressTile()
-                    if (selectedAction == SHUTTER_LONG_PRESS_MP4 || selectedAction == SHUTTER_LONG_PRESS_RAW_VIDEO) {
-                        if (ContextCompat.checkSelfPermission(
-                                requireContext(),
-                                android.Manifest.permission.RECORD_AUDIO
-                            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-                        ) {
-                            audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                        }
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.pref_shutter_long_press_action),
+                options = SHUTTER_LONG_PRESS_OPTIONS,
+                selectedIndex = selectedIndex,
+                badge = "SHUTTER"
+            ) { which ->
+                val selectedAction = SHUTTER_LONG_PRESS_OPTIONS[which]
+                prefs.edit().putString(KEY_SHUTTER_LONG_PRESS_ACTION, selectedAction).apply()
+                updateShutterLongPressTile()
+                if (selectedAction == SHUTTER_LONG_PRESS_MP4 || selectedAction == SHUTTER_LONG_PRESS_RAW_VIDEO) {
+                    if (ContextCompat.checkSelfPermission(
+                            requireContext(),
+                            android.Manifest.permission.RECORD_AUDIO
+                        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                     }
-                    dialog.dismiss()
                 }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            }
         }
 
         setupRawVideoSettings()
@@ -683,68 +704,10 @@ class SettingsFragment : Fragment() {
     }
 
     private fun setupRawVideoSettings() {
-        val cameraManager = requireContext().getSystemService(Context.CAMERA_SERVICE) as? CameraManager
-        val backCameraChars = try {
-            val backId = cameraManager?.cameraIdList?.firstOrNull { id ->
-                val c = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, id)
-                c.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
-            } ?: cameraManager?.cameraIdList?.firstOrNull()
-            backId?.let { id -> cameraManager?.let { top.maary.darkbag.utils.CameraRepository.getCharacteristics(it, id) } }
-        } catch (_: Exception) {
-            null
-        }
-
-        val maxHardwareFps = HardwareCapabilities.getMaxSupportedFps(backCameraChars)
-        val is4kSupported = HardwareCapabilities.is4kCropSupported(backCameraChars)
-
         binding.btnMenuRawVideo.setOnClickListener {
-            val options = arrayOf("Frame Rate (FPS)", "Resolution & Gate")
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle("RAW Video Settings")
-                .setItems(options) { _, which ->
-                    if (which == 0) {
-                        val fpsDisplayOptions = RAW_VIDEO_FPS_OPTIONS.map { fpsStr ->
-                            val fpsVal = fpsStr.toIntOrNull() ?: 24
-                            if (fpsVal > maxHardwareFps) {
-                                getString(R.string.raw_video_option_unsupported_suffix, fpsStr)
-                            } else {
-                                fpsStr
-                            }
-                        }.toTypedArray()
-                        val savedFps = prefs.getString(KEY_RAW_VIDEO_FPS, "24") ?: "24"
-                        val selectedIndex = RAW_VIDEO_FPS_OPTIONS.indexOf(savedFps).coerceAtLeast(0)
-                        MaterialAlertDialogBuilder(requireContext())
-                            .setTitle(R.string.raw_video_fps_hint)
-                            .setSingleChoiceItems(fpsDisplayOptions, selectedIndex) { dialog, idx ->
-                                prefs.edit().putString(KEY_RAW_VIDEO_FPS, RAW_VIDEO_FPS_OPTIONS[idx]).apply()
-                                updateRawVideoTile()
-                                dialog.dismiss()
-                            }
-                            .setNegativeButton(R.string.cancel, null)
-                            .show()
-                    } else {
-                        val resDisplayOptions = RAW_VIDEO_RESOLUTION_OPTIONS.map { resStr ->
-                            if (resStr.contains("4K") && !is4kSupported) {
-                                getString(R.string.raw_video_option_unsupported_suffix, resStr)
-                            } else {
-                                resStr
-                            }
-                        }.toTypedArray()
-                        val savedRes = prefs.getString(KEY_RAW_VIDEO_RESOLUTION, DEFAULT_RAW_VIDEO_RESOLUTION) ?: DEFAULT_RAW_VIDEO_RESOLUTION
-                        val selectedIndex = RAW_VIDEO_RESOLUTION_OPTIONS.indexOf(savedRes).coerceAtLeast(0)
-                        MaterialAlertDialogBuilder(requireContext())
-                            .setTitle(R.string.raw_video_resolution_hint)
-                            .setSingleChoiceItems(resDisplayOptions, selectedIndex) { dialog, idx ->
-                                prefs.edit().putString(KEY_RAW_VIDEO_RESOLUTION, RAW_VIDEO_RESOLUTION_OPTIONS[idx]).apply()
-                                updateRawVideoTile()
-                                dialog.dismiss()
-                            }
-                            .setNegativeButton(R.string.cancel, null)
-                            .show()
-                    }
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            RawVideoSettingsBottomSheet.show(childFragmentManager) {
+                updateRawVideoTile()
+            }
         }
     }
 
@@ -767,18 +730,19 @@ class SettingsFragment : Fragment() {
         binding.btnMenuExternalViewer.setOnClickListener {
             val savedName = prefs.getString(KEY_EXTERNAL_VIEWER_NAME, defaultName) ?: defaultName
             val selectedIndex = appNames.indexOf(savedName).coerceAtLeast(0)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.settings_ui_external_viewer)
-                .setSingleChoiceItems(appNames.toTypedArray(), selectedIndex) { dialog, which ->
-                    prefs.edit()
-                        .putString(KEY_EXTERNAL_VIEWER_NAME, appNames[which])
-                        .putString(KEY_EXTERNAL_VIEWER_PACKAGE, packageNames[which])
-                        .apply()
-                    updateExternalViewerTile()
-                    dialog.dismiss()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.settings_ui_external_viewer),
+                options = appNames,
+                selectedIndex = selectedIndex,
+                badge = "VIEWER"
+            ) { which ->
+                prefs.edit()
+                    .putString(KEY_EXTERNAL_VIEWER_NAME, appNames[which])
+                    .putString(KEY_EXTERNAL_VIEWER_PACKAGE, packageNames[which])
+                    .apply()
+                updateExternalViewerTile()
+            }
         }
 
         binding.btnMenuExternalViewer.visibility = if (prefs.getBoolean(KEY_USE_INTERNAL_VIEWER, true)) View.GONE else View.VISIBLE
@@ -1005,17 +969,21 @@ class SettingsFragment : Fragment() {
             val colorPrimaryContainer = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
             val colorSurfaceContainerHigh = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.GRAY)
             val colorOutlineVariant = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.DKGRAY)
+            val targetRadius = if (isActive) 10f * density else 14f * density
+            btn.shapeAppearanceModel = ShapeAppearanceModel.builder()
+                .setAllCornerSizes(targetRadius)
+                .build()
 
             if (isActive) {
                 btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
                 btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
                 btn.strokeWidth = stroke1_5dp
-                btn.cornerRadius = radius10dp
+                btn.cornerRadius = targetRadius.toInt()
             } else {
                 btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
                 btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
                 btn.strokeWidth = stroke1dp
-                btn.cornerRadius = radius14dp
+                btn.cornerRadius = targetRadius.toInt()
             }
         }
 
@@ -1031,10 +999,12 @@ class SettingsFragment : Fragment() {
                 binding.containerTierFilm.visibility = if (checkedId == R.id.btn_tier_film) View.VISIBLE else View.GONE
                 binding.containerTierPro.visibility = if (checkedId == R.id.btn_tier_pro) View.VISIBLE else View.GONE
                 updateUiTierButtons(checkedId)
+                binding.toggleUiTiers.enforceConcentricShapes()
             }
         }
         binding.toggleUiTiers.check(R.id.btn_tier_film)
         updateUiTierButtons(R.id.btn_tier_film)
+        binding.toggleUiTiers.enforceConcentricShapes()
 
         setupSwitch(binding.switchShowHdrPlusSwitch, KEY_SHOW_HDR_PLUS_SWITCH)
         setupSwitch(binding.switchShowUnderexposureButton, KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON)
@@ -1156,16 +1126,17 @@ class SettingsFragment : Fragment() {
         binding.btnMenuMultiCameraCount.setOnClickListener {
             val savedCountKey = prefs.getString(KEY_MULTI_CAMERA_COUNT_PREF, MultiCameraCountPreference.AUTO_MAX.key)
             val currentCountIndex = countKeys.indexOf(savedCountKey).coerceAtLeast(0)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.pref_multi_camera_count)
-                .setSingleChoiceItems(countOptions.toTypedArray(), currentCountIndex) { dialog, which ->
-                    prefs.edit().putString(KEY_MULTI_CAMERA_COUNT_PREF, countKeys[which]).apply()
-                    updateMultiCameraCountTile()
-                    updateMultiCameraVisibility()
-                    dialog.dismiss()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.pref_multi_camera_count),
+                options = countOptions,
+                selectedIndex = currentCountIndex,
+                badge = "MULTI-CAM"
+            ) { which ->
+                prefs.edit().putString(KEY_MULTI_CAMERA_COUNT_PREF, countKeys[which]).apply()
+                updateMultiCameraCountTile()
+                updateMultiCameraVisibility()
+            }
         }
 
         val pairOptions = listOf(
@@ -1182,15 +1153,16 @@ class SettingsFragment : Fragment() {
         binding.btnMenuMultiCameraDualPair.setOnClickListener {
             val savedPairKey = prefs.getString(KEY_MULTI_CAMERA_DUAL_PAIR, DualLensPairPreference.WIDE_ULTRAWIDE.key)
             val currentPairIndex = pairKeys.indexOf(savedPairKey).coerceAtLeast(0)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.pref_multi_camera_dual_pair)
-                .setSingleChoiceItems(pairOptions.toTypedArray(), currentPairIndex) { dialog, which ->
-                    prefs.edit().putString(KEY_MULTI_CAMERA_DUAL_PAIR, pairKeys[which]).apply()
-                    updateMultiCameraDualPairTile()
-                    dialog.dismiss()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.pref_multi_camera_dual_pair),
+                options = pairOptions,
+                selectedIndex = currentPairIndex,
+                badge = "DUAL"
+            ) { which ->
+                prefs.edit().putString(KEY_MULTI_CAMERA_DUAL_PAIR, pairKeys[which]).apply()
+                updateMultiCameraDualPairTile()
+            }
         }
 
         binding.cbMultiCameraSaveRaw.isChecked = prefs.getBoolean(KEY_MULTI_CAMERA_SAVE_RAW, false)
@@ -1228,32 +1200,34 @@ class SettingsFragment : Fragment() {
     private fun setupStorageSettings() {
         binding.btnMenuDngCompression.setOnClickListener {
             val savedIndex = prefs.getInt(KEY_DNG_COMPRESSION_MODE, 0).coerceIn(0, DNG_COMPRESSION_MODES.size - 1)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.pref_dng_compression)
-                .setSingleChoiceItems(DNG_COMPRESSION_MODES.toTypedArray(), savedIndex) { dialog, which ->
-                    prefs.edit().putInt(KEY_DNG_COMPRESSION_MODE, which).apply()
-                    updateDngCompressionTile()
-                    dialog.dismiss()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.pref_dng_compression),
+                options = DNG_COMPRESSION_MODES,
+                selectedIndex = savedIndex,
+                badge = "CODEC"
+            ) { which ->
+                prefs.edit().putInt(KEY_DNG_COMPRESSION_MODE, which).apply()
+                updateDngCompressionTile()
+            }
         }
 
         binding.btnMenuDngFormat.setOnClickListener {
             val rawOutputOptions = listOf(
                 getString(R.string.raw_output_type_bayer),
                 getString(R.string.raw_output_type_linear)
-            ).toTypedArray()
+            )
             val savedFormatIndex = prefs.getInt(KEY_RAW_OUTPUT_TYPE, 0).coerceIn(0, rawOutputOptions.size - 1)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.setting_raw_format_hint)
-                .setSingleChoiceItems(rawOutputOptions, savedFormatIndex) { dialog, which ->
-                    prefs.edit().putInt(KEY_RAW_OUTPUT_TYPE, which).apply()
-                    updateDngFormatTile()
-                    dialog.dismiss()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            BentoSelectionBottomSheet.show(
+                fragmentManager = childFragmentManager,
+                title = getString(R.string.setting_raw_format_hint),
+                options = rawOutputOptions,
+                selectedIndex = savedFormatIndex,
+                badge = "CFA"
+            ) { which ->
+                prefs.edit().putInt(KEY_RAW_OUTPUT_TYPE, which).apply()
+                updateDngFormatTile()
+            }
         }
 
         binding.btnMenuDngCompression.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE

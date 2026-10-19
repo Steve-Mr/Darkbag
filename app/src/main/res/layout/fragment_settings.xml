@@ -17,12 +17,12 @@
         android:layout_marginStart="12dp"
         android:layout_marginEnd="12dp"
         android:layout_marginTop="8dp"
-        android:layout_marginBottom="12dp"
-        app:cardCornerRadius="26dp"
-        app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
-        app:strokeWidth="1dp"
-        app:strokeColor="?attr/colorOutlineVariant"
-        app:contentPadding="6dp">
+        android:layout_marginBottom="8dp"
+        app:cardCornerRadius="0dp"
+        app:cardElevation="0dp"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:strokeWidth="0dp"
+        app:contentPadding="0dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -47,26 +47,16 @@
                 app:iconTint="?attr/colorOnSurface"
                 app:backgroundTint="?attr/colorSurfaceContainerHigh" />
 
-            <com.google.android.material.card.MaterialCardView
+            <TextView
                 android:layout_width="0dp"
-                android:layout_height="42dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginStart="6dp"
-                android:layout_marginEnd="6dp"
-                app:cardCornerRadius="14dp"
-                app:cardBackgroundColor="?attr/colorPrimaryContainer"
-                app:strokeWidth="0dp">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:gravity="center"
-                    android:text="DARKBAG SETTINGS"
-                    android:textStyle="bold"
-                    android:textSize="12sp"
-                    android:letterSpacing="0.06"
-                    android:textColor="?attr/colorOnPrimaryContainer" />
-            </com.google.android.material.card.MaterialCardView>
+                android:gravity="center"
+                android:text="DARKBAG SETTINGS"
+                android:textStyle="bold"
+                android:textSize="14sp"
+                android:letterSpacing="0.08"
+                android:textColor="?attr/colorOnSurface" />
 
             <View
                 android:layout_width="42dp"
@@ -95,7 +85,7 @@
             android:paddingBottom="24dp">
 
             <!-- ====================================================================== -->
-            <!-- 1. 常规设置：拍摄与模式 (SHOOTING & CAPTURE MODES)                        -->
+            <!-- 1A. 默认启动模块 (STARTUP MODULE)                                        -->
             <!-- ====================================================================== -->
             <com.google.android.material.card.MaterialCardView
                 style="@style/Widget.Darkbag.BentoTray"
@@ -108,7 +98,7 @@
                     android:layout_height="wrap_content"
                     android:orientation="vertical">
 
-                    <!-- Header Row: SHOOTING & CAPTURE MODES + Badge STANDARD -->
+                    <!-- Header Row: STARTUP MODULE + Badge SYSTEM -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -122,7 +112,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="SHOOTING &amp; CAPTURE MODES"
+                            android:text="STARTUP MODULE"
                             android:textSize="11sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorPrimary" />
@@ -133,7 +123,7 @@
                             android:background="@drawable/bg_bento_badge_primary"
                             android:paddingHorizontal="8dp"
                             android:paddingVertical="2dp"
-                            android:text="STANDARD"
+                            android:text="STARTUP"
                             android:textSize="10.5sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorPrimary" />
@@ -305,6 +295,53 @@
                                     android:layout_height="wrap_content" />
                             </LinearLayout>
                         </com.google.android.material.card.MaterialCardView>
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ====================================================================== -->
+            <!-- 1B. 拍摄与输出 (CAPTURE & OUTPUT)                                         -->
+            <!-- ====================================================================== -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.Darkbag.BentoTray"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <!-- Header Row: CAPTURE & OUTPUT + Badge STANDARD -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:paddingHorizontal="4dp"
+                        android:paddingVertical="2dp"
+                        android:layout_marginBottom="8dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="CAPTURE &amp; OUTPUT"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:textColor="?attr/colorPrimary" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_bento_badge_primary"
+                            android:paddingHorizontal="8dp"
+                            android:paddingVertical="2dp"
+                            android:text="STANDARD"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold"
+                            android:textColor="?attr/colorPrimary" />
                     </LinearLayout>
 
                     <!-- Format tile: tile_save_format (cb_save_jpg & cb_save_raw Bento row) -->
@@ -518,6 +555,106 @@
                             android:text="1.0X FOCAL BASE\n24mm" />
                     </LinearLayout>
 
+                    <!-- Mirror front camera (switch_mirror_front) -->
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        app:cardCornerRadius="14dp"
+                        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                        app:strokeWidth="1dp"
+                        app:strokeColor="?attr/colorOutlineVariant">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:gravity="center_vertical"
+                            android:paddingHorizontal="10dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/pref_mirror_front"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                android:textColor="?attr/colorOnSurface" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:background="@drawable/bg_bento_badge_primary"
+                                android:paddingHorizontal="6dp"
+                                android:paddingVertical="1dp"
+                                android:text="MIRROR"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold"
+                                android:textColor="?attr/colorPrimary"
+                                android:layout_marginEnd="6dp" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/switch_mirror_front"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ====================================================================== -->
+            <!-- 1C. 半格胶片相机 (HALF-FRAME FILM)                                       -->
+            <!-- ====================================================================== -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.Darkbag.BentoTray"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <!-- Header Row: HALF-FRAME FILM + Badge FILM (Tertiary) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:paddingHorizontal="4dp"
+                        android:paddingVertical="2dp"
+                        android:layout_marginBottom="4dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="HALF-FRAME FILM"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:textColor="?attr/colorTertiary" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_bento_badge_tertiary"
+                            android:paddingHorizontal="8dp"
+                            android:paddingVertical="2dp"
+                            android:text="FILM"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold"
+                            android:textColor="?attr/colorTertiary" />
+                    </LinearLayout>
+
+                    <!-- Sub-label: 半格胶片相机 -->
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingHorizontal="4dp"
+                        android:paddingBottom="6dp"
+                        android:text="双格画幅 · 胶片创作"
+                        android:textSize="10sp"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
                     <!-- Half-Frame mode tile: switch_half_frame_mode -->
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
@@ -708,49 +845,6 @@
                             </com.google.android.material.card.MaterialCardView>
                         </LinearLayout>
                     </LinearLayout>
-
-                    <!-- Mirror front camera (switch_mirror_front) -->
-                    <com.google.android.material.card.MaterialCardView
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        app:cardCornerRadius="14dp"
-                        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                        app:strokeWidth="1dp"
-                        app:strokeColor="?attr/colorOutlineVariant">
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:gravity="center_vertical"
-                            android:paddingHorizontal="10dp">
-
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="@string/pref_mirror_front"
-                                android:textSize="11.5sp"
-                                android:textStyle="bold"
-                                android:textColor="?attr/colorOnSurface" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:background="@drawable/bg_bento_badge_primary"
-                                android:paddingHorizontal="6dp"
-                                android:paddingVertical="1dp"
-                                android:text="MIRROR"
-                                android:textSize="9.5sp"
-                                android:textStyle="bold"
-                                android:textColor="?attr/colorPrimary"
-                                android:layout_marginEnd="6dp" />
-
-                            <com.google.android.material.materialswitch.MaterialSwitch
-                                android:id="@+id/switch_mirror_front"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -951,7 +1045,20 @@
                         android:layout_marginTop="6dp"
                         android:visibility="gone">
 
-                        <!-- Group A: HDR+ 计算摄影 (COMPUTE PIPELINE) -->
+                        <com.google.android.material.card.MaterialCardView
+                            style="@style/Widget.Darkbag.BentoTray"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            app:cardCornerRadius="18dp"
+                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                            android:layout_marginBottom="10dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical">
+
+                                <!-- Group A: HDR+ 计算摄影 (COMPUTE PIPELINE) -->
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -1086,8 +1193,23 @@
                             android:layout_height="50dp"
                             android:layout_marginBottom="10dp"
                             android:text="BURST STRATEGY\nBalanced" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
 
-                        <!-- Group B: 视频录制 (VIDEO CAPTURE) -->
+                        <com.google.android.material.card.MaterialCardView
+                            style="@style/Widget.Darkbag.BentoTray"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            app:cardCornerRadius="18dp"
+                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                            android:layout_marginBottom="10dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical">
+
+                                <!-- Group B: 视频录制 (VIDEO CAPTURE) -->
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -1124,8 +1246,23 @@
                                 android:layout_marginStart="4dp"
                                 android:text="RAW VIDEO\n24 FPS · 4K UHD" />
                         </LinearLayout>
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
 
-                        <!-- Group C: 多摄同拍 (MULTI-CAMERA) -->
+                        <com.google.android.material.card.MaterialCardView
+                            style="@style/Widget.Darkbag.BentoTray"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            app:cardCornerRadius="18dp"
+                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                            android:layout_marginBottom="10dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical">
+
+                                <!-- Group C: 多摄同拍 (MULTI-CAMERA) -->
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -1312,8 +1449,23 @@
                                 </LinearLayout>
                             </com.google.android.material.card.MaterialCardView>
                         </LinearLayout>
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
 
-                        <!-- Group D: 底片编码与存储 (DNG & STORAGE) -->
+                        <com.google.android.material.card.MaterialCardView
+                            style="@style/Widget.Darkbag.BentoTray"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            app:cardCornerRadius="18dp"
+                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                            android:layout_marginBottom="10dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical">
+
+                                <!-- Group D: 底片编码与存储 (DNG & STORAGE) -->
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -1444,8 +1596,23 @@
                                 </LinearLayout>
                             </com.google.android.material.card.MaterialCardView>
                         </LinearLayout>
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
 
-                        <!-- Group E: 取景器界面定制 (VIEWFINDER UI) -->
+                        <com.google.android.material.card.MaterialCardView
+                            style="@style/Widget.Darkbag.BentoTray"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            app:cardCornerRadius="18dp"
+                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                            android:layout_marginBottom="4dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical">
+
+                                <!-- Group E: 取景器界面定制 (VIEWFINDER UI) -->
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -1468,7 +1635,7 @@
                             app:strokeColor="?attr/colorOutlineVariant"
                             app:contentPadding="5dp">
 
-                            <com.google.android.material.button.MaterialButtonToggleGroup
+                            <top.maary.darkbag.ui.BentoSegmentedButtonGroup
                                 android:id="@+id/toggle_ui_tiers"
                                 android:layout_width="match_parent"
                                 android:layout_height="48dp"
@@ -1515,7 +1682,7 @@
                                     app:cornerRadius="12dp"
                                     android:text="PRO\n专业层"
                                     android:textSize="10.5sp" />
-                            </com.google.android.material.button.MaterialButtonToggleGroup>
+                            </top.maary.darkbag.ui.BentoSegmentedButtonGroup>
                         </com.google.android.material.card.MaterialCardView>
 
                         <!-- P&S Tier Container -->
@@ -1896,6 +2063,8 @@
                             android:layout_marginBottom="4dp"
                             android:visibility="gone"
                             android:text="EXTERNAL VIEWER\nSystem Default" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

@@ -229,6 +229,7 @@
     <string name="multi_camera_hw_relay">Fast Relay Burst Mode</string>
     <string name="multi_camera_hw_none">Single Camera Only</string>
 
+    <string name="pref_raw_video">RAW Video Settings</string>
     <string name="raw_video_fps_hint">RAW Video Frame Rate</string>
     <string name="raw_video_resolution_hint">RAW Video Resolution</string>
     <string name="raw_video_fps_unsupported_warning">Sensor max AE rate is %1$d fps. %2$s fps is not supported and may drop frames.</string>
