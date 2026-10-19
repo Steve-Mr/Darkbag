@@ -215,4 +215,21 @@ class SettingsFragmentTest {
         assertEquals(0, mapPreferenceToFusionMode("Unknown"))
         assertEquals(0, mapPreferenceToFusionMode(null))
     }
+
+    @Test
+    fun testFragmentSettingsBindingParity() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val themedContext = android.view.ContextThemeWrapper(context, top.maary.darkbag.R.style.AppTheme)
+        val inflater = android.view.LayoutInflater.from(themedContext)
+        val binding = top.maary.darkbag.databinding.FragmentSettingsBinding.inflate(inflater)
+
+        org.junit.Assert.assertNotNull(binding.cardAdvancedContainer)
+        org.junit.Assert.assertNotNull(binding.headerAdvancedToggle)
+        org.junit.Assert.assertNotNull(binding.ivAdvancedArrow)
+        org.junit.Assert.assertNotNull(binding.containerAdvancedContent)
+        org.junit.Assert.assertNotNull(binding.btnCloseExperimental)
+        org.junit.Assert.assertNotNull(binding.cardStartupCamera)
+        org.junit.Assert.assertNotNull(binding.cardStartupPlayground)
+        org.junit.Assert.assertNotNull(binding.sectionDebug)
+    }
 }

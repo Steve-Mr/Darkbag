@@ -102,6 +102,7 @@ class SettingsFragment : Fragment() {
 
         setupToolbar()
         setupAboutSection()
+        setupAdvancedSection()
         setupMenus()
         setupStartupSettings()
         setupCheckboxes()
@@ -113,6 +114,17 @@ class SettingsFragment : Fragment() {
         updateDebugVisibility()
     }
 
+    private var isAdvancedExpanded = false
+    private fun setupAdvancedSection() {
+        binding.headerAdvancedToggle.setOnClickListener {
+            isAdvancedExpanded = !isAdvancedExpanded
+            binding.containerAdvancedContent.visibility = if (isAdvancedExpanded) View.VISIBLE else View.GONE
+            binding.ivAdvancedArrow.animate()
+                .rotation(if (isAdvancedExpanded) 180f else 0f)
+                .setDuration(200)
+                .start()
+        }
+    }
 
     override fun onResume() {
         super.onResume()
@@ -146,7 +158,7 @@ class SettingsFragment : Fragment() {
                 if (!prefs.getBoolean(KEY_DEBUG_ENABLED, false)) {
                     prefs.edit().putBoolean(KEY_DEBUG_ENABLED, true).apply()
                     updateDebugVisibility()
-                    Toast.makeText(requireContext(), "Debug Mode Enabled", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), R.string.experimental_unlocked_toast, Toast.LENGTH_SHORT).show()
                 }
                 aboutClickCount = 0
             }
@@ -156,7 +168,6 @@ class SettingsFragment : Fragment() {
     private fun updateDebugVisibility() {
         val isDebug = prefs.getBoolean(KEY_DEBUG_ENABLED, false)
         binding.sectionDebug.visibility = if (isDebug) View.VISIBLE else View.GONE
-        binding.switchCloseDebug.isChecked = false
     }
 
     private fun updateDebugStats() {
@@ -230,7 +241,7 @@ class SettingsFragment : Fragment() {
         // HDR+ Fusion Engine
         val fusionAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, HDR_FUSION_MODES)
         binding.menuHdrFusionMode.setAdapter(fusionAdapter)
-        val savedFusion = prefs.getString(KEY_HDR_FUSION_MODE, HDR_FUSION_AUTO) ?: HDR_FUSION_AUTO
+        val savedFusion = prefs.getString(KEY_HDR_FUSION_MODE, HDR_FUSION_SABRE) ?: HDR_FUSION_SABRE
         binding.menuHdrFusionMode.setText(savedFusion, false)
         binding.menuHdrFusionMode.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_HDR_FUSION_MODE, HDR_FUSION_MODES[position]).apply()
@@ -280,15 +291,6 @@ class SettingsFragment : Fragment() {
         binding.menuAntibanding.setText(savedAntibanding, false)
         binding.menuAntibanding.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_ANTIBANDING, ANTIBANDING_MODES[position]).apply()
-        }
-
-        // Half-frame Layout
-        val halfFrameLayoutAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, HALF_FRAME_LAYOUTS)
-        binding.menuHalfFrameLayout.setAdapter(halfFrameLayoutAdapter)
-        val savedHalfFrameLayout = prefs.getString(KEY_HALF_FRAME_LAYOUT, HALF_FRAME_LAYOUT_SBS)
-        binding.menuHalfFrameLayout.setText(savedHalfFrameLayout, false)
-        binding.menuHalfFrameLayout.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_HALF_FRAME_LAYOUT, HALF_FRAME_LAYOUTS[position]).apply()
         }
 
         // Color Engine Mode
@@ -490,19 +492,28 @@ class SettingsFragment : Fragment() {
         var enablePlayground = prefs.getBoolean(KEY_ENABLE_PLAYGROUND, true)
 
         fun updateStartupCards() {
-
-            val typedValue = android.util.TypedValue()
-            requireContext().theme.resolveAttribute(com.google.android.material.R.attr.colorTertiaryContainer, typedValue, true)
-            val primaryColor = typedValue.data
-
-            val defaultColor = ContextCompat.getColor(requireContext(), android.R.color.transparent)
+            val colorPrimary = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
+            val colorPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
+            val colorSurfaceContainerHigh = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.DKGRAY)
+            val density = resources.displayMetrics.density
+            val stroke2dp = (2f * density).toInt()
 
             if (defaultStartup == STARTUP_CAMERA) {
-                binding.cardStartupCamera.strokeColor = primaryColor
-                binding.cardStartupPlayground.strokeColor = defaultColor
+                binding.cardStartupCamera.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(colorPrimaryContainer))
+                binding.cardStartupCamera.strokeColor = colorPrimary
+                binding.cardStartupCamera.strokeWidth = stroke2dp
+
+                binding.cardStartupPlayground.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh))
+                binding.cardStartupPlayground.strokeColor = android.graphics.Color.TRANSPARENT
+                binding.cardStartupPlayground.strokeWidth = 0
             } else {
-                binding.cardStartupCamera.strokeColor = defaultColor
-                binding.cardStartupPlayground.strokeColor = primaryColor
+                binding.cardStartupCamera.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh))
+                binding.cardStartupCamera.strokeColor = android.graphics.Color.TRANSPARENT
+                binding.cardStartupCamera.strokeWidth = 0
+
+                binding.cardStartupPlayground.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(colorPrimaryContainer))
+                binding.cardStartupPlayground.strokeColor = colorPrimary
+                binding.cardStartupPlayground.strokeWidth = stroke2dp
             }
         }
 
@@ -616,7 +627,6 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchHalfFrameDownsample, KEY_HALF_FRAME_DOWNSAMPLE)
         setupSwitch(binding.switchHalfFrameDateStamp, KEY_HALF_FRAME_DATE_STAMP, false)
         setupSwitch(binding.switchHalfFrameLightLeak, KEY_HALF_FRAME_LIGHT_LEAK, false)
-        setupSwitch(binding.switchHalfFrameAutoBurst, KEY_HALF_FRAME_AUTO_BURST, false)
 
         binding.cbHfSaveRaw.isChecked = prefs.getBoolean(KEY_HALF_FRAME_SAVE_RAW, false)
         binding.cbHfSaveRaw.setOnCheckedChangeListener { _, isChecked ->
@@ -693,12 +703,11 @@ class SettingsFragment : Fragment() {
 
         setupSwitch(binding.switchForce60fps, KEY_FORCE_60FPS, false)
 
-        binding.switchCloseDebug.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                prefs.edit().putBoolean(KEY_DEBUG_ENABLED, false).apply()
-                updateDebugVisibility()
-                aboutClickCount = 0
-            }
+        binding.btnCloseExperimental.setOnClickListener {
+            prefs.edit().putBoolean(KEY_DEBUG_ENABLED, false).apply()
+            updateDebugVisibility()
+            aboutClickCount = 0
+            Toast.makeText(requireContext(), R.string.experimental_locked_toast, Toast.LENGTH_SHORT).show()
         }
 
         binding.btnClearDebugLogs.setOnClickListener {

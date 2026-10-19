@@ -4249,7 +4249,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
 
                 val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
-                val fusionMode = when (prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_AUTO)) {
+                val fusionMode = when (prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_SABRE)) {
                     SettingsFragment.HDR_FUSION_SPATIAL_RCD -> 1
                     SettingsFragment.HDR_FUSION_SABRE -> 2
                     SettingsFragment.HDR_FUSION_CLASSIC -> 3
@@ -5313,7 +5313,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             val combinedOrientation = getCombinedOrientation()
 
-            val fusionModePref = prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_AUTO)
+            val fusionModePref = prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_SABRE)
             val fusionModeInt = when (fusionModePref) {
                 SettingsFragment.HDR_FUSION_SPATIAL_RCD -> 1
                 SettingsFragment.HDR_FUSION_SABRE -> 2
