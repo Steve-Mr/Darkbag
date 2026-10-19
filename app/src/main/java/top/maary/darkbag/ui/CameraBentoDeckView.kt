@@ -915,7 +915,8 @@ class CameraBentoDeckView @JvmOverloads constructor(
             isValueManual: Boolean = false,
             context: Context
         ): CharSequence {
-            val text = "$label\n$value"
+            val truncatedValue = if (value.length > 16 && !value.endsWith("…")) value.take(15) + "…" else value
+            val text = "$label\n$truncatedValue"
             val builder = SpannableStringBuilder(text)
             val displayMetrics = context.resources.displayMetrics
             val labelPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 9.5f, displayMetrics).roundToInt()

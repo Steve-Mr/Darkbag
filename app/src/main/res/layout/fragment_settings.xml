@@ -149,10 +149,10 @@
                         android:textSize="10sp"
                         android:textColor="?attr/colorOnSurfaceVariant" />
 
-                    <!-- Split Starter Cards (cardStartupCamera and cardStartupPlayground, height 54dp, 2-column) -->
+                    <!-- Split Starter Cards (cardStartupCamera and cardStartupPlayground, height 64dp, 2-column) -->
                     <LinearLayout
                         android:layout_width="match_parent"
-                        android:layout_height="54dp"
+                        android:layout_height="64dp"
                         android:orientation="horizontal"
                         android:layout_marginBottom="8dp">
 
@@ -311,7 +311,7 @@
                     <LinearLayout
                         android:id="@+id/tile_save_format"
                         android:layout_width="match_parent"
-                        android:layout_height="44dp"
+                        android:layout_height="50dp"
                         android:orientation="horizontal"
                         android:layout_marginBottom="8dp">
 
@@ -407,7 +407,7 @@
                     <!-- Motion Photo tile (switch_motion_photo) -->
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
-                        android:layout_height="42dp"
+                        android:layout_height="48dp"
                         android:layout_marginBottom="8dp"
                         app:cardCornerRadius="14dp"
                         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
@@ -451,7 +451,7 @@
                     <!-- Location tile (switch_save_location) -->
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
-                        android:layout_height="42dp"
+                        android:layout_height="48dp"
                         android:layout_marginBottom="8dp"
                         app:cardCornerRadius="14dp"
                         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
@@ -492,10 +492,10 @@
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 
-                    <!-- Default Lens & 1.0x Focal length: 2-column Bento row (layout_height="48dp") -->
+                    <!-- Default Lens & 1.0x Focal length: 2-column Bento row (layout_height="54dp") -->
                     <LinearLayout
                         android:layout_width="match_parent"
-                        android:layout_height="48dp"
+                        android:layout_height="54dp"
                         android:orientation="horizontal"
                         android:layout_marginBottom="8dp">
 
@@ -521,7 +521,7 @@
                     <!-- Half-Frame mode tile: switch_half_frame_mode -->
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
-                        android:layout_height="42dp"
+                        android:layout_height="48dp"
                         android:layout_marginBottom="8dp"
                         app:cardCornerRadius="14dp"
                         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
@@ -572,7 +572,7 @@
 
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="40dp"
+                            android:layout_height="46dp"
                             android:orientation="horizontal"
                             android:layout_marginBottom="8dp">
 
@@ -641,7 +641,7 @@
 
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="40dp"
+                            android:layout_height="46dp"
                             android:orientation="horizontal"
                             android:layout_marginBottom="8dp">
 
@@ -712,7 +712,7 @@
                     <!-- Mirror front camera (switch_mirror_front) -->
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
-                        android:layout_height="42dp"
+                        android:layout_height="48dp"
                         app:cardCornerRadius="14dp"
                         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                         app:strokeWidth="1dp"
@@ -791,7 +791,7 @@
                     <!-- 2-Column Bento Row: btn_menu_target_log & btn_manage_luts -->
                     <LinearLayout
                         android:layout_width="match_parent"
-                        android:layout_height="48dp"
+                        android:layout_height="54dp"
                         android:orientation="horizontal"
                         android:layout_marginBottom="8dp">
 
@@ -802,7 +802,9 @@
                             android:layout_height="match_parent"
                             android:layout_weight="1.2"
                             android:layout_marginEnd="4dp"
-                            android:text="TARGET LOG\nApple Log (Rec.709)" />
+                            android:maxLines="2"
+                            android:ellipsize="end"
+                            android:text="TARGET LOG\nApple Log" />
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btn_manage_luts"
@@ -813,13 +815,15 @@
                             android:layout_marginStart="4dp"
                             app:backgroundTint="?attr/colorTertiaryContainer"
                             app:strokeColor="?attr/colorTertiary"
-                            android:text="3D LUT RECIPES\nClassic Neg / Portra" />
+                            android:maxLines="2"
+                            android:ellipsize="end"
+                            android:text="3D LUT RECIPES\nClassic Neg" />
                     </LinearLayout>
 
                     <!-- Live Preview Switch (switch_live_preview) -->
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
-                        android:layout_height="42dp"
+                        android:layout_height="48dp"
                         app:cardCornerRadius="14dp"
                         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                         app:strokeWidth="1dp"
@@ -877,11 +881,11 @@
                     android:layout_height="wrap_content"
                     android:orientation="vertical">
 
-                    <!-- Header Bar: header_advanced_toggle (height 50dp, corner radius 18dp, background colorSurfaceContainerHigh) -->
+                    <!-- Header Bar: header_advanced_toggle (height 54dp, corner radius 18dp, background colorSurfaceContainerHigh) -->
                     <LinearLayout
                         android:id="@+id/header_advanced_toggle"
                         android:layout_width="match_parent"
-                        android:layout_height="50dp"
+                        android:layout_height="54dp"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
                         android:paddingHorizontal="12dp"
@@ -962,7 +966,7 @@
                         <!-- Row 1: HDR+ Merge & Burst Frames -->
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="48dp"
+                            android:layout_height="54dp"
                             android:orientation="horizontal"
                             android:layout_marginBottom="8dp">
 
@@ -990,7 +994,7 @@
                         <!-- Row 2: Underexposure & Color Engine -->
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="48dp"
+                            android:layout_height="54dp"
                             android:orientation="horizontal"
                             android:layout_marginBottom="8dp">
 
@@ -1016,7 +1020,7 @@
                         <!-- Row 3: HDR+ OIS switch & Antibanding -->
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="44dp"
+                            android:layout_height="50dp"
                             android:orientation="horizontal"
                             android:layout_marginBottom="8dp">
 
@@ -1079,7 +1083,7 @@
                             android:id="@+id/btn_menu_burst_processing_strategy"
                             style="@style/Widget.Darkbag.BentoTile.Button"
                             android:layout_width="match_parent"
-                            android:layout_height="44dp"
+                            android:layout_height="50dp"
                             android:layout_marginBottom="10dp"
                             android:text="BURST STRATEGY\nBalanced" />
 
@@ -1098,7 +1102,7 @@
                         <!-- Row 1: Shutter Long Press & RAW Video -->
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="48dp"
+                            android:layout_height="54dp"
                             android:orientation="horizontal"
                             android:layout_marginBottom="10dp">
 
@@ -1147,7 +1151,7 @@
                         <!-- Row 1: switch_multi_camera_mode -->
                         <com.google.android.material.card.MaterialCardView
                             android:layout_width="match_parent"
-                            android:layout_height="42dp"
+                            android:layout_height="48dp"
                             android:layout_marginBottom="6dp"
                             app:cardCornerRadius="14dp"
                             app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
@@ -1191,7 +1195,7 @@
                         <!-- Row 2: btn_menu_multi_camera_count + btn_menu_multi_camera_dual_pair -->
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="48dp"
+                            android:layout_height="54dp"
                             android:orientation="horizontal"
                             android:layout_marginBottom="8dp">
 
@@ -1217,7 +1221,7 @@
                         <!-- Row 3: switch_multi_camera_force_enable + cb_multi_camera_save_raw -->
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="42dp"
+                            android:layout_height="48dp"
                             android:orientation="horizontal"
                             android:layout_marginBottom="10dp">
 
@@ -1324,7 +1328,7 @@
                         <!-- Row 1: DNG Compress & CFA Format -->
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="48dp"
+                            android:layout_height="54dp"
                             android:orientation="horizontal"
                             android:layout_marginBottom="8dp">
 
@@ -1352,7 +1356,7 @@
                         <!-- Row 2: Custom Storage Paths (JPG & RAW) 2-column -->
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="48dp"
+                            android:layout_height="54dp"
                             android:orientation="horizontal"
                             android:layout_marginBottom="10dp">
 
@@ -1467,7 +1471,7 @@
                             <com.google.android.material.button.MaterialButtonToggleGroup
                                 android:id="@+id/toggle_ui_tiers"
                                 android:layout_width="match_parent"
-                                android:layout_height="44dp"
+                                android:layout_height="48dp"
                                 app:selectionRequired="true"
                                 app:singleSelection="true">
 
@@ -1525,7 +1529,7 @@
                             <!-- Row 1: Lens controls + Camera switch -->
                             <LinearLayout
                                 android:layout_width="match_parent"
-                                android:layout_height="42dp"
+                                android:layout_height="46dp"
                                 android:orientation="horizontal"
                                 android:layout_marginBottom="8dp">
 
@@ -1595,7 +1599,7 @@
                             <!-- Row 2: Settings button -->
                             <com.google.android.material.card.MaterialCardView
                                 android:layout_width="match_parent"
-                                android:layout_height="42dp"
+                                android:layout_height="46dp"
                                 android:layout_marginBottom="8dp"
                                 app:cardCornerRadius="14dp"
                                 app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
@@ -1635,7 +1639,7 @@
                             <!-- Row 1: LUT switcher + HDR+ switch -->
                             <LinearLayout
                                 android:layout_width="match_parent"
-                                android:layout_height="42dp"
+                                android:layout_height="46dp"
                                 android:orientation="horizontal"
                                 android:layout_marginBottom="8dp">
 
@@ -1705,7 +1709,7 @@
                             <!-- Row 2: Underexposure button + Mode switch button -->
                             <LinearLayout
                                 android:layout_width="match_parent"
-                                android:layout_height="42dp"
+                                android:layout_height="46dp"
                                 android:orientation="horizontal"
                                 android:layout_marginBottom="8dp">
 
@@ -1784,7 +1788,7 @@
                             <!-- Row 1: Manual controls + Focus peaking -->
                             <LinearLayout
                                 android:layout_width="match_parent"
-                                android:layout_height="42dp"
+                                android:layout_height="46dp"
                                 android:orientation="horizontal"
                                 android:layout_marginBottom="8dp">
 
@@ -1855,7 +1859,7 @@
                         <!-- Internal / External Viewer -->
                         <com.google.android.material.card.MaterialCardView
                             android:layout_width="match_parent"
-                            android:layout_height="42dp"
+                            android:layout_height="48dp"
                             android:layout_marginBottom="8dp"
                             app:cardCornerRadius="14dp"
                             app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
@@ -1888,7 +1892,7 @@
                             android:id="@+id/btn_menu_external_viewer"
                             style="@style/Widget.Darkbag.BentoTile.Button"
                             android:layout_width="match_parent"
-                            android:layout_height="44dp"
+                            android:layout_height="50dp"
                             android:layout_marginBottom="4dp"
                             android:visibility="gone"
                             android:text="EXTERNAL VIEWER\nSystem Default" />
@@ -1940,7 +1944,7 @@
                     <!-- Row 1: Clear Cache & Version Card -->
                     <LinearLayout
                         android:layout_width="match_parent"
-                        android:layout_height="48dp"
+                        android:layout_height="54dp"
                         android:orientation="horizontal">
 
                         <com.google.android.material.button.MaterialButton
@@ -2058,7 +2062,7 @@
                     <!-- Row 1: Force 60fps toggle Bento tile -->
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
-                        android:layout_height="42dp"
+                        android:layout_height="48dp"
                         android:layout_marginBottom="8dp"
                         app:cardCornerRadius="14dp"
                         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
@@ -2122,7 +2126,7 @@
                     <!-- Debug logs buttons -->
                     <LinearLayout
                         android:layout_width="match_parent"
-                        android:layout_height="38dp"
+                        android:layout_height="44dp"
                         android:orientation="horizontal"
                         android:layout_marginBottom="8dp">
 
@@ -2158,7 +2162,7 @@
                         android:id="@+id/btn_close_experimental"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="match_parent"
-                        android:layout_height="44dp"
+                        android:layout_height="48dp"
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         app:cornerRadius="14dp"

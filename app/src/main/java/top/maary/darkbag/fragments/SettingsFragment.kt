@@ -231,9 +231,15 @@ class SettingsFragment : Fragment() {
         val ctx = context ?: return
         val savedLog = prefs.getString(KEY_TARGET_LOG, "None") ?: "None"
         val isLogActive = savedLog != "None"
+        val rawLog = savedLog.replace(" (Rec.709)", "").replace(" (BT.709)", "")
+        val displayLog = if (rawLog.length > 14) {
+            rawLog.take(13) + "…"
+        } else {
+            rawLog
+        }
         binding.btnMenuTargetLog.text = CameraBentoDeckView.formatProTelemetry(
             label = "TARGET LOG",
-            value = savedLog,
+            value = displayLog,
             isTabActive = isLogActive,
             isValueManual = isLogActive,
             context = ctx
@@ -243,10 +249,15 @@ class SettingsFragment : Fragment() {
     private fun updateLutsTile() {
         val ctx = context ?: return
         val activeLut = prefs.getString(KEY_ACTIVE_LUT, null)
-        val lutTitle = activeLut ?: "Classic Neg / Portra"
+        val rawName = activeLut?.removeSuffix(".cube")?.removeSuffix(".CUBE") ?: "Classic Neg"
+        val displayLut = if (rawName.length > 14) {
+            rawName.take(13) + "…"
+        } else {
+            rawName
+        }
         binding.btnManageLuts.text = CameraBentoDeckView.formatProTelemetry(
             label = "3D LUT RECIPES",
-            value = lutTitle,
+            value = displayLut,
             isTabActive = activeLut != null,
             isValueManual = true,
             context = ctx

@@ -145,6 +145,18 @@ class CameraBentoDeckViewTest {
     }
 
     @Test
+    fun testFormatProTelemetryTruncation() {
+        val longVal = "SuperDuperLongLutRecipeName"
+        val telemetry = CameraBentoDeckView.formatProTelemetry("3D LUT", longVal, isTabActive = false, isValueManual = true, context = themedContext)
+        val expected = "3D LUT\n" + longVal.take(15) + "…"
+        assertEquals(expected, telemetry.toString())
+
+        val alreadyEllipsized = "ShortRecipe…"
+        val telemetry2 = CameraBentoDeckView.formatProTelemetry("3D LUT", alreadyEllipsized, isTabActive = false, isValueManual = true, context = themedContext)
+        assertEquals("3D LUT\n$alreadyEllipsized", telemetry2.toString())
+    }
+
+    @Test
     fun testResolveScreenTier() {
         // 16:9 aspect ratio (compact)
         assertEquals(
