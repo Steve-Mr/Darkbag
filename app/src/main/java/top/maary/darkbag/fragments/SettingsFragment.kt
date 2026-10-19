@@ -1,4 +1,5 @@
 package top.maary.darkbag.fragments
+
 import top.maary.darkbag.utils.MediaStoreUtils
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.CameraRepository
@@ -21,14 +22,11 @@ import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.Build
 import android.util.Size
+import android.util.TypedValue
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -36,11 +34,9 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
 import androidx.navigation.Navigation
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentSettingsBinding
-import top.maary.darkbag.utils.LutManager
+import top.maary.darkbag.ui.CameraBentoDeckView
 import com.google.android.material.color.MaterialColors
 import java.io.File
 
@@ -87,9 +83,12 @@ class SettingsFragment : Fragment() {
         cameraRepository = CameraRepository(requireContext())
 
         // Apply Edge-to-Edge Insets
-        ViewCompat.setOnApplyWindowInsetsListener(binding.appBar) { v, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(binding.cardSettingsHeader) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(v.paddingLeft, systemBars.top, v.paddingRight, v.paddingBottom)
+            val lp = v.layoutParams as? ViewGroup.MarginLayoutParams
+            val defaultMarginTop = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 8f, resources.displayMetrics).toInt()
+            lp?.topMargin = defaultMarginTop + systemBars.top
+            v.layoutParams = lp
             insets
         }
 
@@ -112,6 +111,7 @@ class SettingsFragment : Fragment() {
         setupNavigation()
         updateDebugStats()
         updateDebugVisibility()
+        updateAllBentoTiles()
     }
 
     private var isAdvancedExpanded = false
@@ -129,8 +129,7 @@ class SettingsFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         updateDebugStats()
-        // Re-apply adapters to fix dropdown disappearance bug
-        setupMenus()
+        updateAllBentoTiles()
         setupStorageSettings()
         updateCheckboxStates()
         syncLocationSettingState()
@@ -142,15 +141,13 @@ class SettingsFragment : Fragment() {
     private fun setupAboutSection() {
         try {
             val packageInfo = requireContext().packageManager.getPackageInfo(requireContext().packageName, 0)
-            binding.tvAppName.text = getString(R.string.app_name)
-            binding.tvAppVersion.text = "Version ${packageInfo.versionName} (${packageInfo.versionCode})"
-        } catch (e: Exception) {
-            binding.tvAppName.text = "Camera"
-            binding.tvAppVersion.text = "Version 1.0.0"
+            binding.tvAppVersion.text = "VERSION ${packageInfo.versionName}"
+        } catch (_: Exception) {
+            binding.tvAppVersion.text = "VERSION 1.0.0"
         }
 
-        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "Unknown"
-        binding.txtArchInfo.text = "Architecture: $abi"
+        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+        binding.txtArchInfo.text = "$abi (Tap 5x to unlock 🧪)"
 
         binding.cardAbout.setOnClickListener {
             aboutClickCount++
@@ -172,19 +169,19 @@ class SettingsFragment : Fragment() {
 
     private fun updateDebugStats() {
         val logs = DebugLogManager.getLogs()
-        binding.tvDebugStats.text = if (logs.isNotBlank()) logs else "No logs yet."
+        binding.tvDebugStats.text = if (logs.isNotBlank()) logs else "No timing stats logged yet."
     }
 
     private fun setupToolbar() {
-        binding.toolbar.setNavigationOnClickListener {
-             Navigation.findNavController(requireActivity(), R.id.fragment_container).navigateUp()
+        binding.btnSettingsBack.setOnClickListener {
+            Navigation.findNavController(requireActivity(), R.id.fragment_container).navigateUp()
         }
     }
 
     private fun setupNavigation() {
         binding.btnManageLuts.setOnClickListener {
-             Navigation.findNavController(requireActivity(), R.id.fragment_container)
-                 .navigate(SettingsFragmentDirections.actionSettingsToLutManagement())
+            Navigation.findNavController(requireActivity(), R.id.fragment_container)
+                .navigate(SettingsFragmentDirections.actionSettingsToLutManagement())
         }
     }
 
@@ -194,148 +191,484 @@ class SettingsFragment : Fragment() {
         return (log != null && log != "None") || lut != null
     }
 
-    private fun setupMenus() {
-        // Target Log Curve
-        val logAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, LOG_CURVES)
-        binding.menuTargetLog.setAdapter(logAdapter)
-        val savedLog = prefs.getString(KEY_TARGET_LOG, "None")
-        binding.menuTargetLog.setText(savedLog, false)
-        binding.menuTargetLog.setOnItemClickListener { _, _, position, _ ->
-            val selectedLog = LOG_CURVES[position]
-            val editor = prefs.edit().putString(KEY_TARGET_LOG, selectedLog)
-            if (selectedLog == "None") {
-                editor.remove(KEY_ACTIVE_LUT)
-            }
-            editor.apply()
-            updateCheckboxStates()
-            updateStorageVisibility()
-        }
+    // =========================================================================
+    // Bento Tile Telemetry Updaters
+    // =========================================================================
 
-        // HDR+ Burst Frames
-        val burstAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, BURST_SIZES)
-        binding.menuHdrBurst.setAdapter(burstAdapter)
-        val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "5")
-        binding.menuHdrBurst.setText(savedBurst, false)
-        binding.menuHdrBurst.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_HDR_BURST_COUNT, BURST_SIZES[position]).apply()
-        }
-
-        // HDR+ Underexposure
-        val underexposureAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, HDR_UNDEREXPOSURE_MODES)
-        binding.menuHdrUnderexposure.setAdapter(underexposureAdapter)
-        val savedUnderexposure = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic")
-        binding.menuHdrUnderexposure.setText(savedUnderexposure, false)
-        binding.menuHdrUnderexposure.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[position]).apply()
-        }
-
-        // Burst Processing Strategy
-        val burstStrategyAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, BURST_PROCESSING_STRATEGIES)
-        binding.menuBurstProcessingStrategy.setAdapter(burstStrategyAdapter)
-        val savedBurstStrategy = prefs.getString(KEY_BURST_PROCESSING_STRATEGY, BURST_STRATEGY_BALANCED) ?: BURST_STRATEGY_BALANCED
-        binding.menuBurstProcessingStrategy.setText(savedBurstStrategy, false)
-        binding.menuBurstProcessingStrategy.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_BURST_PROCESSING_STRATEGY, BURST_PROCESSING_STRATEGIES[position]).apply()
-        }
-
-        // HDR+ Fusion Engine
-        val fusionAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, HDR_FUSION_MODES)
-        binding.menuHdrFusionMode.setAdapter(fusionAdapter)
-        val savedFusion = prefs.getString(KEY_HDR_FUSION_MODE, HDR_FUSION_SABRE) ?: HDR_FUSION_SABRE
-        binding.menuHdrFusionMode.setText(savedFusion, false)
-        binding.menuHdrFusionMode.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_HDR_FUSION_MODE, HDR_FUSION_MODES[position]).apply()
-        }
-
-        // Default Lens (Startup)
+    private fun updateDefaultLensTile() {
+        val ctx = context ?: return
         val lenses = cameraRepository.getAllFocalLengthPresets()
-        val lensDisplayNames = lenses.map { it.name }
-        val lensAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, lensDisplayNames)
-        binding.menuDefaultLens.setAdapter(lensAdapter)
-
         val savedLensId = prefs.getString(KEY_DEFAULT_LENS_ID, null)
-        val initialLens = lenses.find { it.sensorId == savedLensId }
+        val currentLens = lenses.find { it.sensorId == savedLensId }
             ?: lenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
             ?: lenses.firstOrNull()
+        val lensName = currentLens?.name ?: "Wide (1.0x)"
+        binding.btnMenuDefaultLens.text = CameraBentoDeckView.formatProTelemetry(
+            label = "DEFAULT LENS",
+            value = lensName,
+            isTabActive = false,
+            isValueManual = true,
+            context = ctx
+        )
+    }
 
-        if (initialLens != null) {
-            val index = lenses.indexOf(initialLens)
-            binding.menuDefaultLens.setText(lensDisplayNames[index], false)
-        }
-
-        binding.menuDefaultLens.setOnItemClickListener { _, _, position, _ ->
-            val selected = lenses[position]
-            prefs.edit().putString(KEY_DEFAULT_LENS_ID, selected.sensorId).apply()
-        }
-
-        // 1.0x Default Focal Length
+    private fun updateDefaultFocal1xTile() {
+        val ctx = context ?: return
         val mainWide = cameraRepository.getMainWideLens()
-        if (mainWide != null) {
-            val presets1x = cameraRepository.get1xPresets(mainWide)
-            val names1x = presets1x.map { it.name }
-            val adapter1x = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, names1x)
-            binding.menuDefaultFocal1x.setAdapter(adapter1x)
+        val presets1x = if (mainWide != null) cameraRepository.get1xPresets(mainWide) else emptyList()
+        val baseFocalName = presets1x.firstOrNull()?.name ?: "24mm"
+        val savedFocal = prefs.getString(KEY_DEFAULT_FOCAL_1X, baseFocalName) ?: baseFocalName
+        binding.btnMenuDefaultFocal1x.text = CameraBentoDeckView.formatProTelemetry(
+            label = "1.0X FOCAL BASE",
+            value = savedFocal,
+            isTabActive = false,
+            isValueManual = true,
+            context = ctx
+        )
+    }
 
-            val baseFocalName = presets1x.firstOrNull()?.name ?: "24mm"
-            val savedFocal1x = prefs.getString(KEY_DEFAULT_FOCAL_1X, baseFocalName)
-            binding.menuDefaultFocal1x.setText(savedFocal1x, false)
-            binding.menuDefaultFocal1x.setOnItemClickListener { _, _, position, _ ->
-                prefs.edit().putString(KEY_DEFAULT_FOCAL_1X, names1x[position]).apply()
-            }
+    private fun updateTargetLogTile() {
+        val ctx = context ?: return
+        val savedLog = prefs.getString(KEY_TARGET_LOG, "None") ?: "None"
+        val isLogActive = savedLog != "None"
+        binding.btnMenuTargetLog.text = CameraBentoDeckView.formatProTelemetry(
+            label = "TARGET LOG",
+            value = savedLog,
+            isTabActive = isLogActive,
+            isValueManual = isLogActive,
+            context = ctx
+        )
+    }
+
+    private fun updateLutsTile() {
+        val ctx = context ?: return
+        val activeLut = prefs.getString(KEY_ACTIVE_LUT, null)
+        val lutTitle = activeLut ?: "Classic Neg / Portra"
+        binding.btnManageLuts.text = CameraBentoDeckView.formatProTelemetry(
+            label = "3D LUT RECIPES",
+            value = lutTitle,
+            isTabActive = activeLut != null,
+            isValueManual = true,
+            context = ctx
+        )
+    }
+
+    private fun updateHdrFusionTile() {
+        val ctx = context ?: return
+        val savedFusion = prefs.getString(KEY_HDR_FUSION_MODE, HDR_FUSION_SABRE) ?: HDR_FUSION_SABRE
+        val displayLabel = when (savedFusion) {
+            HDR_FUSION_SABRE -> "Sabre (Default 默认)"
+            HDR_FUSION_SPATIAL_RCD -> "Spatial Merge + RCD"
+            HDR_FUSION_CLASSIC -> "Classic (Wiener)"
+            HDR_FUSION_AUTO -> "Auto (Sabre Zoom)"
+            else -> savedFusion
         }
+        binding.btnMenuHdrFusionMode.text = CameraBentoDeckView.formatProTelemetry(
+            label = "HDR+ MERGE",
+            value = displayLabel,
+            isTabActive = true,
+            isValueManual = true,
+            context = ctx
+        )
+    }
 
-        // Antibanding
-        val antibandingAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, ANTIBANDING_MODES)
-        binding.menuAntibanding.setAdapter(antibandingAdapter)
-        val savedAntibanding = prefs.getString(KEY_ANTIBANDING, "Auto")
-        binding.menuAntibanding.setText(savedAntibanding, false)
-        binding.menuAntibanding.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_ANTIBANDING, ANTIBANDING_MODES[position]).apply()
+    private fun updateHdrBurstTile() {
+        val ctx = context ?: return
+        val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "5") ?: "5"
+        binding.btnMenuHdrBurstMode.text = CameraBentoDeckView.formatProTelemetry(
+            label = "BURST FRAMES",
+            value = "Auto ($savedBurst Frames)",
+            isTabActive = false,
+            isValueManual = true,
+            context = ctx
+        )
+    }
+
+    private fun updateUnderexposureTile() {
+        val ctx = context ?: return
+        val saved = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic") ?: "Dynamic"
+        binding.btnMenuUnderexposureMode.text = CameraBentoDeckView.formatProTelemetry(
+            label = "UNDEREXPOSURE",
+            value = "$saved EV",
+            isTabActive = false,
+            isValueManual = saved != "Off",
+            context = ctx
+        )
+    }
+
+    private fun updateColorEngineTile() {
+        val ctx = context ?: return
+        val savedIndex = prefs.getInt(KEY_COLOR_ENGINE_MODE, 2).coerceIn(0, COLOR_ENGINE_MODES.size - 1)
+        val name = when (savedIndex) {
+            0 -> "Khronos Neutral"
+            1 -> "Natural Filmic"
+            2 -> "Sony Uchimura (Default)"
+            3 -> "Legacy ACES"
+            else -> COLOR_ENGINE_MODES[savedIndex]
         }
+        binding.btnMenuColorEngine.text = CameraBentoDeckView.formatProTelemetry(
+            label = "COLOR ENGINE",
+            value = name,
+            isTabActive = false,
+            isValueManual = true,
+            context = ctx
+        )
+    }
 
-        // Color Engine Mode
-        val colorEngineAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, COLOR_ENGINE_MODES)
-        binding.menuColorEngine.setAdapter(colorEngineAdapter)
-        val savedColorEngineIndex = prefs.getInt(KEY_COLOR_ENGINE_MODE, 2)
-        val safeColorEngineIndex = savedColorEngineIndex.coerceIn(0, COLOR_ENGINE_MODES.size - 1)
-        binding.menuColorEngine.setText(COLOR_ENGINE_MODES[safeColorEngineIndex], false)
-        binding.menuColorEngine.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putInt(KEY_COLOR_ENGINE_MODE, position).apply()
+    private fun updateAntibandingTile() {
+        val ctx = context ?: return
+        val saved = prefs.getString(KEY_ANTIBANDING, "Auto") ?: "Auto"
+        val display = if (saved == "Auto") "Auto (50Hz/60Hz)" else saved
+        binding.btnMenuAntibanding.text = CameraBentoDeckView.formatProTelemetry(
+            label = "ANTIBANDING",
+            value = display,
+            isTabActive = false,
+            isValueManual = saved != "Off",
+            context = ctx
+        )
+    }
+
+    private fun updateBurstStrategyTile() {
+        val ctx = context ?: return
+        val saved = prefs.getString(KEY_BURST_PROCESSING_STRATEGY, BURST_STRATEGY_BALANCED) ?: BURST_STRATEGY_BALANCED
+        val display = if (saved == BURST_STRATEGY_BALANCED) "Balanced (Smooth)" else "Rapid Burst (Max)"
+        binding.btnMenuBurstProcessingStrategy.text = CameraBentoDeckView.formatProTelemetry(
+            label = "BURST STRATEGY",
+            value = display,
+            isTabActive = false,
+            isValueManual = true,
+            context = ctx
+        )
+    }
+
+    private fun updateShutterLongPressTile() {
+        val ctx = context ?: return
+        val saved = prefs.getString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_MP4) ?: SHUTTER_LONG_PRESS_MP4
+        val display = when (saved) {
+            SHUTTER_LONG_PRESS_MP4 -> "Standard MP4 (Default)"
+            SHUTTER_LONG_PRESS_RAW_VIDEO -> "RAW Video (10-bit)"
+            else -> "Disabled"
         }
+        binding.btnMenuShutterLongPress.text = CameraBentoDeckView.formatProTelemetry(
+            label = "SHUTTER HOLD ACTION",
+            value = display,
+            isTabActive = false,
+            isValueManual = saved != SHUTTER_LONG_PRESS_DISABLED,
+            context = ctx
+        )
+    }
 
-        // DNG Compression Mode
-        val dngCompressionAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, DNG_COMPRESSION_MODES)
-        binding.menuDngCompression.setAdapter(dngCompressionAdapter)
-        val savedDngCompressionIndex = prefs.getInt(KEY_DNG_COMPRESSION_MODE, 0)
-        val safeDngCompressionIndex = savedDngCompressionIndex.coerceIn(0, DNG_COMPRESSION_MODES.size - 1)
-        binding.menuDngCompression.setText(DNG_COMPRESSION_MODES[safeDngCompressionIndex], false)
-        binding.menuDngCompression.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putInt(KEY_DNG_COMPRESSION_MODE, position).apply()
+    private fun updateRawVideoTile() {
+        val ctx = context ?: return
+        val savedFps = prefs.getString(KEY_RAW_VIDEO_FPS, "24") ?: "24"
+        val savedRes = prefs.getString(KEY_RAW_VIDEO_RESOLUTION, DEFAULT_RAW_VIDEO_RESOLUTION) ?: DEFAULT_RAW_VIDEO_RESOLUTION
+        val shortRes = when {
+            savedRes.contains("4K") -> "4K UHD"
+            savedRes.contains("2K") -> "2K Open Gate"
+            savedRes.contains("1080p") -> "1080p"
+            else -> "Max Native"
         }
+        binding.btnMenuRawVideo.text = CameraBentoDeckView.formatProTelemetry(
+            label = "RAW VIDEO",
+            value = "$savedFps FPS · $shortRes",
+            isTabActive = false,
+            isValueManual = true,
+            context = ctx
+        )
+    }
 
-        // Shutter Long-Press Action
-        val shutterLongPressAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, SHUTTER_LONG_PRESS_OPTIONS)
-        binding.menuShutterLongPress.setAdapter(shutterLongPressAdapter)
-        val savedShutterAction = prefs.getString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_MP4)
-        binding.menuShutterLongPress.setText(savedShutterAction, false)
-        binding.menuShutterLongPress.setOnItemClickListener { _, _, position, _ ->
-            val selectedAction = SHUTTER_LONG_PRESS_OPTIONS[position]
-            prefs.edit().putString(KEY_SHUTTER_LONG_PRESS_ACTION, selectedAction).apply()
-            if (selectedAction == SHUTTER_LONG_PRESS_MP4 || selectedAction == SHUTTER_LONG_PRESS_RAW_VIDEO) {
-                if (ContextCompat.checkSelfPermission(
-                        requireContext(),
-                        android.Manifest.permission.RECORD_AUDIO
-                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-                ) {
-                    audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+    private fun updateExternalViewerTile() {
+        val ctx = context ?: return
+        val defaultName = getString(R.string.pref_external_viewer_default)
+        val savedName = prefs.getString(KEY_EXTERNAL_VIEWER_NAME, defaultName) ?: defaultName
+        binding.btnMenuExternalViewer.text = CameraBentoDeckView.formatProTelemetry(
+            label = "EXTERNAL VIEWER",
+            value = savedName,
+            isTabActive = false,
+            isValueManual = savedName != defaultName,
+            context = ctx
+        )
+    }
+
+    private fun updateDngCompressionTile() {
+        val ctx = context ?: return
+        val savedDngIndex = prefs.getInt(KEY_DNG_COMPRESSION_MODE, 0).coerceIn(0, DNG_COMPRESSION_MODES.size - 1)
+        val modeName = when (savedDngIndex) {
+            0 -> "16-bit Lossless JPEG"
+            else -> "Uncompressed"
+        }
+        binding.btnMenuDngCompression.text = CameraBentoDeckView.formatProTelemetry(
+            label = "DNG COMPRESS",
+            value = modeName,
+            isTabActive = true,
+            isValueManual = true,
+            context = ctx
+        )
+    }
+
+    private fun updateDngFormatTile() {
+        val ctx = context ?: return
+        val savedFormatIndex = prefs.getInt(KEY_RAW_OUTPUT_TYPE, 0).coerceIn(0, RAW_OUTPUT_TYPES.size - 1)
+        val formatName = when (savedFormatIndex) {
+            0 -> "Bayer CFA (~12MB)"
+            else -> "Linear RGB (~50MB)"
+        }
+        binding.btnMenuDngFormat.text = CameraBentoDeckView.formatProTelemetry(
+            label = "CFA FORMAT",
+            value = formatName,
+            isTabActive = false,
+            isValueManual = true,
+            context = ctx
+        )
+    }
+
+    private fun updateMultiCameraCountTile() {
+        val ctx = context ?: return
+        val countOptions = listOf(
+            MultiCameraCountPreference.AUTO_MAX.title,
+            MultiCameraCountPreference.DUAL.title,
+            MultiCameraCountPreference.TRIPLE.title
+        )
+        val countKeys = listOf(
+            MultiCameraCountPreference.AUTO_MAX.key,
+            MultiCameraCountPreference.DUAL.key,
+            MultiCameraCountPreference.TRIPLE.key
+        )
+        val savedCountKey = prefs.getString(KEY_MULTI_CAMERA_COUNT_PREF, MultiCameraCountPreference.AUTO_MAX.key)
+        val currentCountIndex = countKeys.indexOf(savedCountKey).coerceAtLeast(0)
+        binding.btnMenuMultiCameraCount.text = CameraBentoDeckView.formatProTelemetry(
+            label = "CAMERA COUNT",
+            value = countOptions[currentCountIndex],
+            isTabActive = false,
+            isValueManual = true,
+            context = ctx
+        )
+    }
+
+    private fun updateMultiCameraDualPairTile() {
+        val ctx = context ?: return
+        val pairOptions = listOf(
+            DualLensPairPreference.WIDE_ULTRAWIDE.title,
+            DualLensPairPreference.WIDE_TELE.title,
+            DualLensPairPreference.ULTRAWIDE_TELE.title
+        )
+        val pairKeys = listOf(
+            DualLensPairPreference.WIDE_ULTRAWIDE.key,
+            DualLensPairPreference.WIDE_TELE.key,
+            DualLensPairPreference.ULTRAWIDE_TELE.key
+        )
+        val savedPairKey = prefs.getString(KEY_MULTI_CAMERA_DUAL_PAIR, DualLensPairPreference.WIDE_ULTRAWIDE.key)
+        val currentPairIndex = pairKeys.indexOf(savedPairKey).coerceAtLeast(0)
+        binding.btnMenuMultiCameraDualPair.text = CameraBentoDeckView.formatProTelemetry(
+            label = "MULTI-CAMERA",
+            value = pairOptions[currentPairIndex],
+            isTabActive = false,
+            isValueManual = true,
+            context = ctx
+        )
+    }
+
+    private fun updateAllBentoTiles() {
+        updateDefaultLensTile()
+        updateDefaultFocal1xTile()
+        updateTargetLogTile()
+        updateLutsTile()
+        updateHdrFusionTile()
+        updateHdrBurstTile()
+        updateUnderexposureTile()
+        updateColorEngineTile()
+        updateAntibandingTile()
+        updateBurstStrategyTile()
+        updateShutterLongPressTile()
+        updateRawVideoTile()
+        updateExternalViewerTile()
+        updateDngCompressionTile()
+        updateDngFormatTile()
+        updateMultiCameraCountTile()
+        updateMultiCameraDualPairTile()
+    }
+
+    // =========================================================================
+    // Click Listeners Setup
+    // =========================================================================
+
+    private fun setupMenus() {
+        // 1. Default Lens
+        binding.btnMenuDefaultLens.setOnClickListener {
+            val lenses = cameraRepository.getAllFocalLengthPresets()
+            val names = lenses.map { it.name }.toTypedArray()
+            val savedLensId = prefs.getString(KEY_DEFAULT_LENS_ID, null)
+            val selectedIndex = lenses.indexOfFirst { it.sensorId == savedLensId }.coerceAtLeast(0)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_default_lens)
+                .setSingleChoiceItems(names, selectedIndex) { dialog, which ->
+                    prefs.edit().putString(KEY_DEFAULT_LENS_ID, lenses[which].sensorId).apply()
+                    updateDefaultLensTile()
+                    dialog.dismiss()
                 }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+
+        // 2. 1.0x Focal Base
+        binding.btnMenuDefaultFocal1x.setOnClickListener {
+            val mainWide = cameraRepository.getMainWideLens()
+            val presets1x = if (mainWide != null) cameraRepository.get1xPresets(mainWide) else emptyList()
+            val names1x = presets1x.map { it.name }.toTypedArray()
+            if (names1x.isNotEmpty()) {
+                val savedFocal = prefs.getString(KEY_DEFAULT_FOCAL_1X, names1x.first())
+                val selectedIndex = names1x.indexOf(savedFocal).coerceAtLeast(0)
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(R.string.pref_default_focal_1x)
+                    .setSingleChoiceItems(names1x, selectedIndex) { dialog, which ->
+                        prefs.edit().putString(KEY_DEFAULT_FOCAL_1X, names1x[which]).apply()
+                        updateDefaultFocal1xTile()
+                        dialog.dismiss()
+                    }
+                    .setNegativeButton(R.string.cancel, null)
+                    .show()
             }
+        }
+
+        // 3. Target Log Curve
+        binding.btnMenuTargetLog.setOnClickListener {
+            val currentLog = prefs.getString(KEY_TARGET_LOG, "None") ?: "None"
+            val selectedIndex = LOG_CURVES.indexOf(currentLog).coerceAtLeast(0)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.target_log_hint)
+                .setSingleChoiceItems(LOG_CURVES.toTypedArray(), selectedIndex) { dialog, which ->
+                    val selected = LOG_CURVES[which]
+                    val editor = prefs.edit().putString(KEY_TARGET_LOG, selected)
+                    if (selected == "None") {
+                        editor.remove(KEY_ACTIVE_LUT)
+                    }
+                    editor.apply()
+                    updateTargetLogTile()
+                    updateLutsTile()
+                    updateCheckboxStates()
+                    updateStorageVisibility()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+
+        // 4. HDR+ Fusion Engine
+        binding.btnMenuHdrFusionMode.setOnClickListener {
+            val savedFusion = prefs.getString(KEY_HDR_FUSION_MODE, HDR_FUSION_SABRE) ?: HDR_FUSION_SABRE
+            val selectedIndex = HDR_FUSION_MODES.indexOf(savedFusion).coerceAtLeast(0)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_hdr_fusion_mode_title)
+                .setSingleChoiceItems(HDR_FUSION_MODES.toTypedArray(), selectedIndex) { dialog, which ->
+                    prefs.edit().putString(KEY_HDR_FUSION_MODE, HDR_FUSION_MODES[which]).apply()
+                    updateHdrFusionTile()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+
+        // 5. HDR+ Burst Frames
+        binding.btnMenuHdrBurstMode.setOnClickListener {
+            val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "5") ?: "5"
+            val selectedIndex = BURST_SIZES.indexOf(savedBurst).coerceAtLeast(0)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_burst_frames)
+                .setSingleChoiceItems(BURST_SIZES.map { "$it Frames" }.toTypedArray(), selectedIndex) { dialog, which ->
+                    prefs.edit().putString(KEY_HDR_BURST_COUNT, BURST_SIZES[which]).apply()
+                    updateHdrBurstTile()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+
+        // 6. HDR+ Underexposure
+        binding.btnMenuUnderexposureMode.setOnClickListener {
+            val saved = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic") ?: "Dynamic"
+            val selectedIndex = HDR_UNDEREXPOSURE_MODES.indexOf(saved).coerceAtLeast(0)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_hdr_underexposure)
+                .setSingleChoiceItems(HDR_UNDEREXPOSURE_MODES.toTypedArray(), selectedIndex) { dialog, which ->
+                    prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[which]).apply()
+                    updateUnderexposureTile()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+
+        // 7. Color Engine Mode
+        binding.btnMenuColorEngine.setOnClickListener {
+            val savedIndex = prefs.getInt(KEY_COLOR_ENGINE_MODE, 2).coerceIn(0, COLOR_ENGINE_MODES.size - 1)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_color_engine_mode)
+                .setSingleChoiceItems(COLOR_ENGINE_MODES.toTypedArray(), savedIndex) { dialog, which ->
+                    prefs.edit().putInt(KEY_COLOR_ENGINE_MODE, which).apply()
+                    updateColorEngineTile()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+
+        // 8. Antibanding
+        binding.btnMenuAntibanding.setOnClickListener {
+            val saved = prefs.getString(KEY_ANTIBANDING, "Auto") ?: "Auto"
+            val selectedIndex = ANTIBANDING_MODES.indexOf(saved).coerceAtLeast(0)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_antibanding)
+                .setSingleChoiceItems(ANTIBANDING_MODES.toTypedArray(), selectedIndex) { dialog, which ->
+                    prefs.edit().putString(KEY_ANTIBANDING, ANTIBANDING_MODES[which]).apply()
+                    updateAntibandingTile()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+
+        // 9. Burst Processing Strategy
+        binding.btnMenuBurstProcessingStrategy.setOnClickListener {
+            val saved = prefs.getString(KEY_BURST_PROCESSING_STRATEGY, BURST_STRATEGY_BALANCED) ?: BURST_STRATEGY_BALANCED
+            val selectedIndex = BURST_PROCESSING_STRATEGIES.indexOf(saved).coerceAtLeast(0)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_burst_processing_strategy)
+                .setSingleChoiceItems(BURST_PROCESSING_STRATEGIES.toTypedArray(), selectedIndex) { dialog, which ->
+                    prefs.edit().putString(KEY_BURST_PROCESSING_STRATEGY, BURST_PROCESSING_STRATEGIES[which]).apply()
+                    updateBurstStrategyTile()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+
+        // 10. Shutter Long-Press Action
+        binding.btnMenuShutterLongPress.setOnClickListener {
+            val saved = prefs.getString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_MP4) ?: SHUTTER_LONG_PRESS_MP4
+            val selectedIndex = SHUTTER_LONG_PRESS_OPTIONS.indexOf(saved).coerceAtLeast(0)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_shutter_long_press_action)
+                .setSingleChoiceItems(SHUTTER_LONG_PRESS_OPTIONS.toTypedArray(), selectedIndex) { dialog, which ->
+                    val selectedAction = SHUTTER_LONG_PRESS_OPTIONS[which]
+                    prefs.edit().putString(KEY_SHUTTER_LONG_PRESS_ACTION, selectedAction).apply()
+                    updateShutterLongPressTile()
+                    if (selectedAction == SHUTTER_LONG_PRESS_MP4 || selectedAction == SHUTTER_LONG_PRESS_RAW_VIDEO) {
+                        if (ContextCompat.checkSelfPermission(
+                                requireContext(),
+                                android.Manifest.permission.RECORD_AUDIO
+                            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                        ) {
+                            audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        }
+                    }
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
         }
 
         setupRawVideoSettings()
-
         setupExternalViewerMenu()
-
     }
 
     private fun setupRawVideoSettings() {
@@ -352,79 +685,63 @@ class SettingsFragment : Fragment() {
 
         val maxHardwareFps = HardwareCapabilities.getMaxSupportedFps(backCameraChars)
         val is4kSupported = HardwareCapabilities.is4kCropSupported(backCameraChars)
-        val maxRawSize = HardwareCapabilities.getMaxRawSize(backCameraChars)
 
-        // 1. RAW Video FPS 联动
-        val fpsDisplayOptions = RAW_VIDEO_FPS_OPTIONS.map { fpsStr ->
-            val fpsVal = fpsStr.toIntOrNull() ?: 24
-            if (fpsVal > maxHardwareFps) {
-                getString(R.string.raw_video_option_unsupported_suffix, fpsStr)
-            } else {
-                fpsStr
-            }
-        }
-        val rawFpsAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, fpsDisplayOptions)
-        binding.menuRawVideoFps.setAdapter(rawFpsAdapter)
-
-        val savedRawFps = prefs.getString(KEY_RAW_VIDEO_FPS, "24") ?: "24"
-        val savedFpsIndex = RAW_VIDEO_FPS_OPTIONS.indexOf(savedRawFps).coerceAtLeast(0)
-        binding.menuRawVideoFps.setText(fpsDisplayOptions[savedFpsIndex], false)
-
-        fun updateFpsHelperText(selectedFps: String) {
-            val fpsVal = selectedFps.toIntOrNull() ?: 24
-            if (fpsVal > maxHardwareFps) {
-                binding.layoutRawVideoFps.helperText = getString(R.string.raw_video_fps_unsupported_warning, maxHardwareFps, selectedFps)
-            } else {
-                binding.layoutRawVideoFps.helperText = null
-            }
-        }
-        updateFpsHelperText(savedRawFps)
-
-        binding.menuRawVideoFps.setOnItemClickListener { _, _, position, _ ->
-            val actualFps = RAW_VIDEO_FPS_OPTIONS[position]
-            prefs.edit().putString(KEY_RAW_VIDEO_FPS, actualFps).apply()
-            updateFpsHelperText(actualFps)
-        }
-
-        // 2. RAW Video Resolution 联动
-        val resDisplayOptions = RAW_VIDEO_RESOLUTION_OPTIONS.map { resStr ->
-            if (resStr.contains("4K") && !is4kSupported) {
-                getString(R.string.raw_video_option_unsupported_suffix, resStr)
-            } else {
-                resStr
-            }
-        }
-        val rawResAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, resDisplayOptions)
-        binding.menuRawVideoResolution.setAdapter(rawResAdapter)
-
-        val savedRawRes = prefs.getString(KEY_RAW_VIDEO_RESOLUTION, DEFAULT_RAW_VIDEO_RESOLUTION) ?: DEFAULT_RAW_VIDEO_RESOLUTION
-        val savedResIndex = RAW_VIDEO_RESOLUTION_OPTIONS.indexOf(savedRawRes).coerceAtLeast(0)
-        binding.menuRawVideoResolution.setText(resDisplayOptions[savedResIndex], false)
-
-        fun updateResHelperText(selectedRes: String) {
-            if (selectedRes.contains("4K") && !is4kSupported) {
-                val sizeDesc = maxRawSize?.let { "${it.width}x${it.height}" } ?: "Unknown"
-                binding.layoutRawVideoResolution.helperText = getString(R.string.raw_video_res_4k_unsupported_warning, sizeDesc)
-            } else {
-                binding.layoutRawVideoResolution.helperText = null
-            }
-        }
-        updateResHelperText(savedRawRes)
-
-        binding.menuRawVideoResolution.setOnItemClickListener { _, _, position, _ ->
-            val actualRes = RAW_VIDEO_RESOLUTION_OPTIONS[position]
-            prefs.edit().putString(KEY_RAW_VIDEO_RESOLUTION, actualRes).apply()
-            updateResHelperText(actualRes)
+        binding.btnMenuRawVideo.setOnClickListener {
+            val options = arrayOf("Frame Rate (FPS)", "Resolution & Gate")
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle("RAW Video Settings")
+                .setItems(options) { _, which ->
+                    if (which == 0) {
+                        val fpsDisplayOptions = RAW_VIDEO_FPS_OPTIONS.map { fpsStr ->
+                            val fpsVal = fpsStr.toIntOrNull() ?: 24
+                            if (fpsVal > maxHardwareFps) {
+                                getString(R.string.raw_video_option_unsupported_suffix, fpsStr)
+                            } else {
+                                fpsStr
+                            }
+                        }.toTypedArray()
+                        val savedFps = prefs.getString(KEY_RAW_VIDEO_FPS, "24") ?: "24"
+                        val selectedIndex = RAW_VIDEO_FPS_OPTIONS.indexOf(savedFps).coerceAtLeast(0)
+                        MaterialAlertDialogBuilder(requireContext())
+                            .setTitle(R.string.raw_video_fps_hint)
+                            .setSingleChoiceItems(fpsDisplayOptions, selectedIndex) { dialog, idx ->
+                                prefs.edit().putString(KEY_RAW_VIDEO_FPS, RAW_VIDEO_FPS_OPTIONS[idx]).apply()
+                                updateRawVideoTile()
+                                dialog.dismiss()
+                            }
+                            .setNegativeButton(R.string.cancel, null)
+                            .show()
+                    } else {
+                        val resDisplayOptions = RAW_VIDEO_RESOLUTION_OPTIONS.map { resStr ->
+                            if (resStr.contains("4K") && !is4kSupported) {
+                                getString(R.string.raw_video_option_unsupported_suffix, resStr)
+                            } else {
+                                resStr
+                            }
+                        }.toTypedArray()
+                        val savedRes = prefs.getString(KEY_RAW_VIDEO_RESOLUTION, DEFAULT_RAW_VIDEO_RESOLUTION) ?: DEFAULT_RAW_VIDEO_RESOLUTION
+                        val selectedIndex = RAW_VIDEO_RESOLUTION_OPTIONS.indexOf(savedRes).coerceAtLeast(0)
+                        MaterialAlertDialogBuilder(requireContext())
+                            .setTitle(R.string.raw_video_resolution_hint)
+                            .setSingleChoiceItems(resDisplayOptions, selectedIndex) { dialog, idx ->
+                                prefs.edit().putString(KEY_RAW_VIDEO_RESOLUTION, RAW_VIDEO_RESOLUTION_OPTIONS[idx]).apply()
+                                updateRawVideoTile()
+                                dialog.dismiss()
+                            }
+                            .setNegativeButton(R.string.cancel, null)
+                            .show()
+                    }
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
         }
     }
-
 
     private fun setupExternalViewerMenu() {
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(Uri.parse("content://dummy/image.jpg"), "image/*")
         }
         val resolveInfos = requireContext().packageManager.queryIntentActivities(intent, 0)
-
         val defaultName = getString(R.string.pref_external_viewer_default)
         val appNames = mutableListOf(defaultName)
         val packageNames = mutableListOf("")
@@ -436,21 +753,24 @@ class SettingsFragment : Fragment() {
             packageNames.add(packageName)
         }
 
-        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, appNames)
-        binding.menuExternalViewer.setAdapter(adapter)
-
-        val savedName = prefs.getString(KEY_EXTERNAL_VIEWER_NAME, defaultName)
-        binding.menuExternalViewer.setText(savedName, false)
-
-        binding.menuExternalViewer.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit()
-                .putString(KEY_EXTERNAL_VIEWER_NAME, appNames[position])
-                .putString(KEY_EXTERNAL_VIEWER_PACKAGE, packageNames[position])
-                .apply()
+        binding.btnMenuExternalViewer.setOnClickListener {
+            val savedName = prefs.getString(KEY_EXTERNAL_VIEWER_NAME, defaultName) ?: defaultName
+            val selectedIndex = appNames.indexOf(savedName).coerceAtLeast(0)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.settings_ui_external_viewer)
+                .setSingleChoiceItems(appNames.toTypedArray(), selectedIndex) { dialog, which ->
+                    prefs.edit()
+                        .putString(KEY_EXTERNAL_VIEWER_NAME, appNames[which])
+                        .putString(KEY_EXTERNAL_VIEWER_PACKAGE, packageNames[which])
+                        .apply()
+                    updateExternalViewerTile()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
         }
 
-        // Initial visibility
-        binding.layoutExternalViewerMenu.visibility = if (prefs.getBoolean(KEY_USE_INTERNAL_VIEWER, true)) View.GONE else View.VISIBLE
+        binding.btnMenuExternalViewer.visibility = if (prefs.getBoolean(KEY_USE_INTERNAL_VIEWER, true)) View.GONE else View.VISIBLE
     }
 
     private fun updateCheckboxStates() {
@@ -459,16 +779,14 @@ class SettingsFragment : Fragment() {
         var isRaw = binding.cbSaveRaw.isChecked
 
         if (isLut) {
-            // Requirement: JPG must be selected if LUT is active, as we don't save LUT to RAW.
             if (!isJpg) {
                 isJpg = true
                 binding.cbSaveJpg.isChecked = true
                 prefs.edit().putBoolean(KEY_SAVE_JPG, true).apply()
             }
-            binding.cbSaveJpg.isEnabled = false // Force JPG if LUT active
+            binding.cbSaveJpg.isEnabled = false
             binding.cbSaveRaw.isEnabled = true
         } else {
-            // Requirement: at least one of (jpg, raw) selected.
             val count = (if (isJpg) 1 else 0) + (if (isRaw) 1 else 0)
             binding.cbSaveJpg.isEnabled = !(isJpg && count == 1)
             binding.cbSaveRaw.isEnabled = !(isRaw && count == 1)
@@ -495,33 +813,34 @@ class SettingsFragment : Fragment() {
             val colorPrimary = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
             val colorPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
             val colorSurfaceContainerHigh = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.DKGRAY)
+            val colorOutlineVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
+            val colorOnSurface = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface, android.graphics.Color.WHITE)
+            val colorOnPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimaryContainer, colorPrimary)
             val density = resources.displayMetrics.density
+            val stroke1dp = (1f * density).toInt()
             val stroke2dp = (2f * density).toInt()
+            val radius10dp = (10f * density).toInt()
+            val radius14dp = (14f * density).toInt()
 
-            if (defaultStartup == STARTUP_CAMERA) {
-                binding.cardStartupCamera.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(colorPrimaryContainer))
-                binding.cardStartupCamera.strokeColor = colorPrimary
-                binding.cardStartupCamera.strokeWidth = stroke2dp
+            val isCameraActive = defaultStartup == STARTUP_CAMERA
 
-                binding.cardStartupPlayground.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh))
-                binding.cardStartupPlayground.strokeColor = android.graphics.Color.TRANSPARENT
-                binding.cardStartupPlayground.strokeWidth = 0
-            } else {
-                binding.cardStartupCamera.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh))
-                binding.cardStartupCamera.strokeColor = android.graphics.Color.TRANSPARENT
-                binding.cardStartupCamera.strokeWidth = 0
+            binding.cardStartupCamera.radius = (if (isCameraActive) radius10dp else radius14dp).toFloat()
+            binding.cardStartupCamera.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (isCameraActive) colorPrimaryContainer else colorSurfaceContainerHigh))
+            binding.cardStartupCamera.strokeColor = if (isCameraActive) colorPrimary else colorOutlineVariant
+            binding.cardStartupCamera.strokeWidth = if (isCameraActive) stroke2dp else stroke1dp
+            binding.txtStartupCameraTitle.setTextColor(if (isCameraActive) colorOnPrimaryContainer else colorOnSurface)
 
-                binding.cardStartupPlayground.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(colorPrimaryContainer))
-                binding.cardStartupPlayground.strokeColor = colorPrimary
-                binding.cardStartupPlayground.strokeWidth = stroke2dp
-            }
+            binding.cardStartupPlayground.radius = (if (!isCameraActive) radius10dp else radius14dp).toFloat()
+            binding.cardStartupPlayground.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (!isCameraActive) colorPrimaryContainer else colorSurfaceContainerHigh))
+            binding.cardStartupPlayground.strokeColor = if (!isCameraActive) colorPrimary else colorOutlineVariant
+            binding.cardStartupPlayground.strokeWidth = if (!isCameraActive) stroke2dp else stroke1dp
+            binding.txtStartupPlaygroundTitle.setTextColor(if (!isCameraActive) colorOnPrimaryContainer else colorOnSurface)
         }
 
         fun updateSwitchStates() {
             binding.switchEnableCamera.isChecked = enableCamera
             binding.switchEnablePlayground.isChecked = enablePlayground
 
-            // At least one must be enabled
             if (enableCamera && !enablePlayground) {
                 binding.switchEnableCamera.isEnabled = false
                 binding.switchEnablePlayground.isEnabled = true
@@ -581,6 +900,17 @@ class SettingsFragment : Fragment() {
         binding.cbSaveJpg.isChecked = prefs.getBoolean(KEY_SAVE_JPG, true)
         binding.cbSaveRaw.isChecked = prefs.getBoolean(KEY_SAVE_RAW, true)
 
+        binding.tileFormatJpg.setOnClickListener {
+            if (binding.cbSaveJpg.isEnabled) {
+                binding.cbSaveJpg.toggle()
+            }
+        }
+        binding.tileFormatRaw.setOnClickListener {
+            if (binding.cbSaveRaw.isEnabled) {
+                binding.cbSaveRaw.toggle()
+            }
+        }
+
         binding.cbSaveJpg.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_SAVE_JPG, isChecked).apply()
             updateCheckboxStates()
@@ -621,8 +951,10 @@ class SettingsFragment : Fragment() {
         }
 
         setupSwitch(binding.switchHalfFrameMode, KEY_HALF_FRAME_MODE, false)
+        binding.layoutHalfFrameOptions.visibility = if (prefs.getBoolean(KEY_HALF_FRAME_MODE, false)) View.VISIBLE else View.GONE
         binding.switchHalfFrameMode.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_HALF_FRAME_MODE, isChecked).apply()
+            binding.layoutHalfFrameOptions.visibility = if (isChecked) View.VISIBLE else View.GONE
         }
         setupSwitch(binding.switchHalfFrameDownsample, KEY_HALF_FRAME_DOWNSAMPLE)
         setupSwitch(binding.switchHalfFrameDateStamp, KEY_HALF_FRAME_DATE_STAMP, false)
@@ -641,7 +973,7 @@ class SettingsFragment : Fragment() {
         binding.switchUseInternalViewer.isChecked = prefs.getBoolean(KEY_USE_INTERNAL_VIEWER, true)
         binding.switchUseInternalViewer.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_USE_INTERNAL_VIEWER, isChecked).apply()
-            binding.layoutExternalViewerMenu.visibility = if (isChecked) View.GONE else View.VISIBLE
+            binding.btnMenuExternalViewer.visibility = if (isChecked) View.GONE else View.VISIBLE
         }
 
         fun styleTierButton(btn: com.google.android.material.button.MaterialButton, title: String, subtitle: String, isActive: Boolean) {
@@ -732,8 +1064,8 @@ class SettingsFragment : Fragment() {
     private fun updateStorageVisibility() {
         binding.layoutJpgStorage.visibility = if (binding.cbSaveJpg.isChecked) View.VISIBLE else View.GONE
         binding.layoutRawStorage.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
-        binding.layoutDngCompressionMenu.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
-        binding.layoutRawOutputTypeMenu.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
+        binding.btnMenuDngCompression.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
+        binding.btnMenuDngFormat.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
 
         binding.tvJpgPath.text = prefs.getString(KEY_JPG_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
         binding.tvRawPath.text = prefs.getString(KEY_RAW_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
@@ -752,7 +1084,6 @@ class SettingsFragment : Fragment() {
             updateStorageVisibility()
         }
     }
-
 
     private val rawPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let {
@@ -784,8 +1115,8 @@ class SettingsFragment : Fragment() {
             binding.tvMultiCameraStatus.text = getString(R.string.multi_camera_status_unsupported)
             binding.switchMultiCameraMode.isEnabled = false
             binding.switchMultiCameraMode.isChecked = false
-            binding.layoutMultiCameraCount.isEnabled = false
-            binding.layoutMultiCameraDualPair.isEnabled = false
+            binding.btnMenuMultiCameraCount.isEnabled = false
+            binding.btnMenuMultiCameraDualPair.isEnabled = false
             binding.cbMultiCameraSaveRaw.isEnabled = false
             return
         }
@@ -810,15 +1141,20 @@ class SettingsFragment : Fragment() {
             MultiCameraCountPreference.DUAL.key,
             MultiCameraCountPreference.TRIPLE.key
         )
-        val savedCountKey = prefs.getString(KEY_MULTI_CAMERA_COUNT_PREF, MultiCameraCountPreference.AUTO_MAX.key)
-        val currentCountIndex = countKeys.indexOf(savedCountKey).coerceAtLeast(0)
-        binding.menuMultiCameraCount.setText(countOptions[currentCountIndex], false)
 
-        val countAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, countOptions)
-        binding.menuMultiCameraCount.setAdapter(countAdapter)
-        binding.menuMultiCameraCount.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_MULTI_CAMERA_COUNT_PREF, countKeys[position]).apply()
-            updateMultiCameraVisibility()
+        binding.btnMenuMultiCameraCount.setOnClickListener {
+            val savedCountKey = prefs.getString(KEY_MULTI_CAMERA_COUNT_PREF, MultiCameraCountPreference.AUTO_MAX.key)
+            val currentCountIndex = countKeys.indexOf(savedCountKey).coerceAtLeast(0)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_multi_camera_count)
+                .setSingleChoiceItems(countOptions.toTypedArray(), currentCountIndex) { dialog, which ->
+                    prefs.edit().putString(KEY_MULTI_CAMERA_COUNT_PREF, countKeys[which]).apply()
+                    updateMultiCameraCountTile()
+                    updateMultiCameraVisibility()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
         }
 
         val pairOptions = listOf(
@@ -831,14 +1167,19 @@ class SettingsFragment : Fragment() {
             DualLensPairPreference.WIDE_TELE.key,
             DualLensPairPreference.ULTRAWIDE_TELE.key
         )
-        val savedPairKey = prefs.getString(KEY_MULTI_CAMERA_DUAL_PAIR, DualLensPairPreference.WIDE_ULTRAWIDE.key)
-        val currentPairIndex = pairKeys.indexOf(savedPairKey).coerceAtLeast(0)
-        binding.menuMultiCameraDualPair.setText(pairOptions[currentPairIndex], false)
 
-        val pairAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, pairOptions)
-        binding.menuMultiCameraDualPair.setAdapter(pairAdapter)
-        binding.menuMultiCameraDualPair.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_MULTI_CAMERA_DUAL_PAIR, pairKeys[position]).apply()
+        binding.btnMenuMultiCameraDualPair.setOnClickListener {
+            val savedPairKey = prefs.getString(KEY_MULTI_CAMERA_DUAL_PAIR, DualLensPairPreference.WIDE_ULTRAWIDE.key)
+            val currentPairIndex = pairKeys.indexOf(savedPairKey).coerceAtLeast(0)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_multi_camera_dual_pair)
+                .setSingleChoiceItems(pairOptions.toTypedArray(), currentPairIndex) { dialog, which ->
+                    prefs.edit().putString(KEY_MULTI_CAMERA_DUAL_PAIR, pairKeys[which]).apply()
+                    updateMultiCameraDualPairTile()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
         }
 
         binding.cbMultiCameraSaveRaw.isChecked = prefs.getBoolean(KEY_MULTI_CAMERA_SAVE_RAW, false)
@@ -852,8 +1193,8 @@ class SettingsFragment : Fragment() {
     private fun updateMultiCameraVisibility() {
         val isEnabled = prefs.getBoolean(KEY_MULTI_CAMERA_MODE, false)
         val countKey = prefs.getString(KEY_MULTI_CAMERA_COUNT_PREF, MultiCameraCountPreference.AUTO_MAX.key)
-        binding.layoutMultiCameraCount.visibility = if (isEnabled) View.VISIBLE else View.GONE
-        binding.layoutMultiCameraDualPair.visibility = if (isEnabled && countKey == MultiCameraCountPreference.DUAL.key) View.VISIBLE else View.GONE
+        binding.btnMenuMultiCameraCount.visibility = if (isEnabled) View.VISIBLE else View.GONE
+        binding.btnMenuMultiCameraDualPair.visibility = if (isEnabled && countKey == MultiCameraCountPreference.DUAL.key) View.VISIBLE else View.GONE
         binding.cbMultiCameraSaveRaw.visibility = if (isEnabled) View.VISIBLE else View.GONE
     }
 
@@ -874,19 +1215,38 @@ class SettingsFragment : Fragment() {
     }
 
     private fun setupStorageSettings() {
-        val rawOutputOptions = listOf(
-            getString(R.string.raw_output_type_bayer),
-            getString(R.string.raw_output_type_linear)
-        )
-        val rawOutputTypeAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, rawOutputOptions)
-        binding.menuRawOutputType.setAdapter(rawOutputTypeAdapter)
-        val savedRawOutputType = prefs.getInt(KEY_RAW_OUTPUT_TYPE, 0)
-        val safeRawOutputType = savedRawOutputType.coerceIn(0, rawOutputOptions.size - 1)
-        binding.menuRawOutputType.setText(rawOutputOptions[safeRawOutputType], false)
-        binding.menuRawOutputType.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putInt(KEY_RAW_OUTPUT_TYPE, position).apply()
+        binding.btnMenuDngCompression.setOnClickListener {
+            val savedIndex = prefs.getInt(KEY_DNG_COMPRESSION_MODE, 0).coerceIn(0, DNG_COMPRESSION_MODES.size - 1)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_dng_compression)
+                .setSingleChoiceItems(DNG_COMPRESSION_MODES.toTypedArray(), savedIndex) { dialog, which ->
+                    prefs.edit().putInt(KEY_DNG_COMPRESSION_MODE, which).apply()
+                    updateDngCompressionTile()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
         }
-        binding.layoutRawOutputTypeMenu.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
+
+        binding.btnMenuDngFormat.setOnClickListener {
+            val rawOutputOptions = listOf(
+                getString(R.string.raw_output_type_bayer),
+                getString(R.string.raw_output_type_linear)
+            ).toTypedArray()
+            val savedFormatIndex = prefs.getInt(KEY_RAW_OUTPUT_TYPE, 0).coerceIn(0, rawOutputOptions.size - 1)
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.setting_raw_format_hint)
+                .setSingleChoiceItems(rawOutputOptions, savedFormatIndex) { dialog, which ->
+                    prefs.edit().putInt(KEY_RAW_OUTPUT_TYPE, which).apply()
+                    updateDngFormatTile()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+
+        binding.btnMenuDngCompression.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
+        binding.btnMenuDngFormat.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
     }
 
     private fun setupCacheManagement() {
@@ -898,13 +1258,25 @@ class SettingsFragment : Fragment() {
                 .setPositiveButton(R.string.btn_clear_cache) { _, _ ->
                     val appContext = requireContext().applicationContext
                     binding.btnClearCache.isEnabled = false
-                    binding.tvCacheSize.text = getString(R.string.pref_cache_calculating)
+                    binding.btnClearCache.text = CameraBentoDeckView.formatProTelemetry(
+                        label = "CLEAR CACHE",
+                        value = getString(R.string.pref_cache_calculating),
+                        isTabActive = false,
+                        isValueManual = false,
+                        context = appContext
+                    )
                     lifecycleScope.launch(Dispatchers.IO) {
                         val freedBytes = CacheManager.clearCache(appContext)
                         val freedFormatted = CacheManager.formatSize(freedBytes)
                         withContext(Dispatchers.Main) {
                             _binding?.btnClearCache?.isEnabled = true
-                            _binding?.tvCacheSize?.text = CacheManager.formatSize(0L)
+                            _binding?.btnClearCache?.text = CameraBentoDeckView.formatProTelemetry(
+                                label = "CLEAR CACHE",
+                                value = CacheManager.formatSize(0L),
+                                isTabActive = false,
+                                isValueManual = false,
+                                context = appContext
+                            )
                             if (freedBytes > 0) {
                                 Toast.makeText(
                                     appContext,
@@ -928,13 +1300,25 @@ class SettingsFragment : Fragment() {
     private fun updateCacheSize() {
         val appContext = context?.applicationContext ?: return
         binding.btnClearCache.isEnabled = false
-        binding.tvCacheSize.text = getString(R.string.pref_cache_calculating)
+        binding.btnClearCache.text = CameraBentoDeckView.formatProTelemetry(
+            label = "CLEAR CACHE",
+            value = getString(R.string.pref_cache_calculating),
+            isTabActive = false,
+            isValueManual = false,
+            context = appContext
+        )
         lifecycleScope.launch(Dispatchers.IO) {
             val size = CacheManager.calculateCacheSize(appContext)
             val formatted = CacheManager.formatSize(size)
             withContext(Dispatchers.Main) {
                 _binding?.btnClearCache?.isEnabled = true
-                _binding?.tvCacheSize?.text = formatted
+                _binding?.btnClearCache?.text = CameraBentoDeckView.formatProTelemetry(
+                    label = "CLEAR CACHE",
+                    value = formatted,
+                    isTabActive = false,
+                    isValueManual = false,
+                    context = appContext
+                )
             }
         }
     }
@@ -1124,19 +1508,12 @@ class SettingsFragment : Fragment() {
     }
 
     object HardwareCapabilities {
-        /**
-         * 读取指定 CameraCharacteristics 支持的最大 AE 目标帧率。
-         * 若 characteristics 为空或没有有效区间，安全返回 30。
-         */
         fun getMaxSupportedFps(chars: CameraCharacteristics?): Int {
             if (chars == null) return 30
             val ranges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return 30
             return ranges.maxOfOrNull { it.upper } ?: 30
         }
 
-        /**
-         * 判断传感器 RAW_SENSOR 输出是否能够支持 4K UHD (3840 x 2160) 裁剪。
-         */
         fun is4kCropSupported(chars: CameraCharacteristics?): Boolean {
             if (chars == null) return false
             val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return false
@@ -1145,9 +1522,6 @@ class SettingsFragment : Fragment() {
             return maxRaw.width >= 3840 && maxRaw.height >= 2160
         }
 
-        /**
-         * 获取最大 RAW 输出尺寸
-         */
         fun getMaxRawSize(chars: CameraCharacteristics?): Size? {
             if (chars == null) return null
             val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return null
