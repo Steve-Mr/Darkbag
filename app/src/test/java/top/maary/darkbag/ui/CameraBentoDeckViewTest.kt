@@ -262,22 +262,61 @@ class CameraBentoDeckViewTest {
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0
             )
         }
+        val photoCard = android.view.View(themedContext).apply {
+            id = R.id.photo_view_card
+            layoutParams = android.widget.LinearLayout.LayoutParams(100, 100)
+        }
+        val rightStack = android.view.View(themedContext).apply {
+            id = R.id.bento_right_stack
+            layoutParams = android.widget.LinearLayout.LayoutParams(100, 100)
+        }
+        val captureBtn = android.view.View(themedContext).apply {
+            id = R.id.camera_capture_button
+            layoutParams = android.widget.LinearLayout.LayoutParams(100, 100)
+        }
         root.addView(proBar)
         root.addView(dialWheel)
         root.addView(filmRow)
         root.addView(lensRow)
         root.addView(shutterRow)
+        root.addView(photoCard)
+        root.addView(rightStack)
+        root.addView(captureBtn)
 
         CameraBentoDeckView.applyDynamicRowHeights(root)
 
         val density = themedContext.resources.displayMetrics.density
         val dims = CameraBentoDeckView.getBentoDimensions(themedContext.resources)
+        val tier = CameraBentoDeckView.resolveScreenTier(themedContext.resources)
 
         assertEquals((dims.proBarDp * density).roundToInt(), proBar.layoutParams.height)
         assertEquals((dims.recipeRowDp * density).roundToInt(), filmRow.layoutParams.height)
         assertEquals((dims.lensRowDp * density).roundToInt(), lensRow.layoutParams.height)
         assertEquals((dims.shutterRowDp * density).roundToInt(), shutterRow.layoutParams.height)
         assertEquals((dims.dialWheelDp * density).roundToInt(), dialWheel.layoutParams.height)
+
+        val expectedPhotoWidthDp = when (tier) {
+            CameraBentoDeckView.BentoScreenTier.COMPACT -> 66
+            CameraBentoDeckView.BentoScreenTier.STANDARD -> 72
+            CameraBentoDeckView.BentoScreenTier.TALL -> 76
+        }
+        assertEquals((expectedPhotoWidthDp * density).roundToInt(), photoCard.layoutParams.width)
+
+        val expectedStackWidthDp = when (tier) {
+            CameraBentoDeckView.BentoScreenTier.COMPACT -> 92
+            CameraBentoDeckView.BentoScreenTier.STANDARD -> 98
+            CameraBentoDeckView.BentoScreenTier.TALL -> 102
+        }
+        assertEquals((expectedStackWidthDp * density).roundToInt(), rightStack.layoutParams.width)
+
+        val expectedCaptureBtnDp = when (tier) {
+            CameraBentoDeckView.BentoScreenTier.COMPACT -> 60
+            CameraBentoDeckView.BentoScreenTier.STANDARD -> 68
+            CameraBentoDeckView.BentoScreenTier.TALL -> 72
+        }
+        assertEquals((expectedCaptureBtnDp * density).roundToInt(), captureBtn.layoutParams.width)
+        assertEquals((expectedCaptureBtnDp * density).roundToInt(), captureBtn.layoutParams.height)
+
         val expectedPadding = (dims.cardPaddingDp * density).roundToInt()
         assertEquals(expectedPadding, root.contentPaddingLeft)
         assertEquals(expectedPadding, root.contentPaddingTop)

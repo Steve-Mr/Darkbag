@@ -287,7 +287,38 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 }
             }
 
-            // 7. Outer Card Padding
+            // 7. Right Bento stack width adjustment for compact tier
+            view.findViewById<View>(top.maary.darkbag.R.id.bento_right_stack)?.let { v ->
+                val lp = v.layoutParams
+                val stackWidthDp = when (tier) {
+                    BentoScreenTier.COMPACT -> 92
+                    BentoScreenTier.STANDARD -> 98
+                    BentoScreenTier.TALL -> 102
+                }
+                val stackWidthPx = (stackWidthDp * density).roundToInt()
+                if (lp != null && lp.width != stackWidthPx) {
+                    lp.width = stackWidthPx
+                    v.layoutParams = lp
+                }
+            }
+
+            // 8. Capture button size adjustment for compact tier
+            view.findViewById<View>(top.maary.darkbag.R.id.camera_capture_button)?.let { v ->
+                val lp = v.layoutParams
+                val shutterBtnDp = when (tier) {
+                    BentoScreenTier.COMPACT -> 60
+                    BentoScreenTier.STANDARD -> 68
+                    BentoScreenTier.TALL -> 72
+                }
+                val shutterBtnPx = (shutterBtnDp * density).roundToInt()
+                if (lp != null && (lp.width != shutterBtnPx || lp.height != shutterBtnPx)) {
+                    lp.width = shutterBtnPx
+                    lp.height = shutterBtnPx
+                    v.layoutParams = lp
+                }
+            }
+
+            // 9. Outer Card Padding
             val cardView = (view as? com.google.android.material.card.MaterialCardView)
                 ?: (view.parent as? com.google.android.material.card.MaterialCardView)
                 ?: (view.findViewById<View>(top.maary.darkbag.R.id.bottom_island_card) as? com.google.android.material.card.MaterialCardView)

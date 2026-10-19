@@ -616,6 +616,7 @@
 
                 <!-- 3. Right Bento Stack: P&S / FILM / PRO Tier Button + Playground / Settings -->
                 <LinearLayout
+                    android:id="@+id/bento_right_stack"
                     android:layout_width="102dp"
                     android:layout_height="match_parent"
                     android:orientation="vertical">
@@ -624,8 +625,9 @@
                         android:id="@+id/btn_bento_tier"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="match_parent"
-                        android:layout_height="40dp"
-                        android:layout_marginBottom="4dp"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:layout_marginBottom="3dp"
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:minWidth="0dp"
@@ -640,7 +642,8 @@
 
                     <LinearLayout
                         android:layout_width="match_parent"
-                        android:layout_height="40dp"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
                         android:orientation="horizontal">
 
                         <com.google.android.material.button.MaterialButton
