@@ -74,11 +74,19 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     private val recordingDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
+    private val outerShellPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+    private val outerShellStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+    }
 
     // Geometry caches
     private val boundsRect = RectF()
+    private val innerRect = RectF()
     private val leftMiniRect = RectF()
     private val rightMiniRect = RectF()
+    private val outerShellPath = Path()
     private val activeBlockPath = Path()
     private val standbyBlockPath = Path()
     private val lockedBlockPath = Path()
@@ -92,6 +100,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     private var colorOnPrimaryContainer: Int = 0
     private var colorSecondaryContainer: Int = 0
     private var colorOnSecondaryContainer: Int = 0
+    private var colorSurfaceContainerHigh: Int = 0
     private var colorSurfaceContainerHighest: Int = 0
     private var colorOutlineVariant: Int = 0
     private var colorOnSurfaceVariant: Int = 0
@@ -166,6 +175,11 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         colorSecondaryContainer = MaterialColors.getColor(this, com.google.android.material.R.attr.colorSecondaryContainer)
         colorOnSecondaryContainer = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSecondaryContainer)
         colorSurfaceContainerHighest = MaterialColors.getColor(this, com.google.android.material.R.attr.colorSurfaceContainerHighest)
+        colorSurfaceContainerHigh = MaterialColors.getColor(
+            this,
+            com.google.android.material.R.attr.colorSurfaceContainerHigh,
+            colorSurfaceContainerHighest
+        )
         colorOutlineVariant = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOutlineVariant)
         colorOnSurfaceVariant = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant)
     }
@@ -373,6 +387,25 @@ class ExpressiveShutterButton @JvmOverloads constructor(
 
     fun getHalfFrameStep(): Int = halfFrameStep
 
+    fun getSplitRatio(): Float = splitRatio
+
+    fun isSplitRatioAnimating(): Boolean = splitRatioAnimator?.isRunning == true
+
+    @androidx.annotation.VisibleForTesting
+    internal val splitRatioAnimatorForTest: ValueAnimator? get() = splitRatioAnimator
+
+    @androidx.annotation.VisibleForTesting
+    internal val boundsRectForTest: RectF get() = boundsRect
+
+    @androidx.annotation.VisibleForTesting
+    internal val innerRectForTest: RectF get() = innerRect
+
+    @androidx.annotation.VisibleForTesting
+    internal val leftMiniRectForTest: RectF get() = leftMiniRect
+
+    @androidx.annotation.VisibleForTesting
+    internal val rightMiniRectForTest: RectF get() = rightMiniRect
+
     override fun onDraw(canvas: Canvas) {
         if (width <= 0 || height <= 0) return
         val dp = resources.displayMetrics.density
@@ -384,15 +417,33 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         if (!isHalfFrame) {
             drawActiveBlock(canvas, boundsRect, activeCornerRadius, dp)
         } else {
-            val gap = 6f * dp
-            val availableW = boundsRect.width() - gap
+            // 1. Outer Bento Tray / Shell (boundsRect)
+            outerShellPath.reset()
+            outerShellPath.addRoundRect(boundsRect, activeCornerRadius, activeCornerRadius, Path.Direction.CW)
+            outerShellPaint.color = colorSurfaceContainerHigh
+            canvas.drawPath(outerShellPath, outerShellPaint)
+
+            outerShellStrokePaint.strokeWidth = 1.5f * dp
+            outerShellStrokePaint.color = colorOutlineVariant
+            canvas.drawPath(outerShellPath, outerShellStrokePaint)
+
+            // 2. Inner Concentric Bento Partitioning
+            val innerPad = 4f * dp
+            innerRect.set(
+                boundsRect.left + innerPad,
+                boundsRect.top + innerPad,
+                boundsRect.right - innerPad,
+                boundsRect.bottom - innerPad
+            )
+            val gap = 4f * dp
+            val availableW = innerRect.width() - gap
             val leftW = availableW * splitRatio
             val rightW = availableW * (1f - splitRatio)
 
-            leftMiniRect.set(boundsRect.left, boundsRect.top, boundsRect.left + leftW, boundsRect.bottom)
-            rightMiniRect.set(boundsRect.left + leftW + gap, boundsRect.top, boundsRect.right, boundsRect.bottom)
+            leftMiniRect.set(innerRect.left, innerRect.top, innerRect.left + leftW, innerRect.bottom)
+            rightMiniRect.set(innerRect.left + leftW + gap, innerRect.top, innerRect.right, innerRect.bottom)
 
-            val miniCornerRadius = activeCornerRadius * 0.75f
+            val miniCornerRadius = maxOf(4f * dp, activeCornerRadius - innerPad)
 
             if (halfFrameStep == 0) {
                 // Step 0: Frame 1 (Left active 54%), Standby (Right 46%)
@@ -532,7 +583,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     }
 
     private fun drawOrientationPill(canvas: Canvas, rect: RectF, dp: Float) {
-        val edgeInset = 6f * dp
+        val edgeInset = (if (isHalfFrame) 4f else 6f) * dp
         val baseHorizW = (if (isHalfFrame) 18f else 24f) * dp
         val horizW = minOf(baseHorizW, rect.width() - 2 * edgeInset)
         val horizH = 4f * dp
