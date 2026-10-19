@@ -302,19 +302,34 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 }
             }
 
-            // 8. Capture button size adjustment for compact tier
+            // 8. Capture button & weighted container layout (Bento Tofu Block)
             view.findViewById<View>(top.maary.darkbag.R.id.camera_capture_button)?.let { v ->
-                val lp = v.layoutParams
-                val shutterBtnDp = when (tier) {
-                    BentoScreenTier.COMPACT -> 60
-                    BentoScreenTier.STANDARD -> 68
-                    BentoScreenTier.TALL -> 72
-                }
-                val shutterBtnPx = (shutterBtnDp * density).roundToInt()
-                if (lp != null && (lp.width != shutterBtnPx || lp.height != shutterBtnPx)) {
-                    lp.width = shutterBtnPx
-                    lp.height = shutterBtnPx
-                    v.layoutParams = lp
+                val isBento = view.id == top.maary.darkbag.R.id.bento_shutter_row ||
+                    view.findViewById<View>(top.maary.darkbag.R.id.bento_shutter_row) != null
+                if (isBento) {
+                    val lp = v.layoutParams
+                    if (lp != null && (lp.width != ViewGroup.LayoutParams.MATCH_PARENT || lp.height != ViewGroup.LayoutParams.MATCH_PARENT)) {
+                        lp.width = ViewGroup.LayoutParams.MATCH_PARENT
+                        lp.height = ViewGroup.LayoutParams.MATCH_PARENT
+                        v.layoutParams = lp
+                    }
+                    (v.parent as? ViewGroup)?.let { parent ->
+                        val parentLp = parent.layoutParams as? LinearLayout.LayoutParams
+                        if (parentLp != null) {
+                            var parentChanged = false
+                            if (parentLp.height != ViewGroup.LayoutParams.MATCH_PARENT) {
+                                parentLp.height = ViewGroup.LayoutParams.MATCH_PARENT
+                                parentChanged = true
+                            }
+                            if (parentLp.weight != 1f) {
+                                parentLp.weight = 1f
+                                parentChanged = true
+                            }
+                            if (parentChanged) {
+                                parent.layoutParams = parentLp
+                            }
+                        }
+                    }
                 }
             }
 

@@ -309,18 +309,98 @@ class CameraBentoDeckViewTest {
         }
         assertEquals((expectedStackWidthDp * density).roundToInt(), rightStack.layoutParams.width)
 
-        val expectedCaptureBtnDp = when (tier) {
-            CameraBentoDeckView.BentoScreenTier.COMPACT -> 60
-            CameraBentoDeckView.BentoScreenTier.STANDARD -> 68
-            CameraBentoDeckView.BentoScreenTier.TALL -> 72
-        }
-        assertEquals((expectedCaptureBtnDp * density).roundToInt(), captureBtn.layoutParams.width)
-        assertEquals((expectedCaptureBtnDp * density).roundToInt(), captureBtn.layoutParams.height)
+        // 8. Bento Tofu Block: shutter button retains MATCH_PARENT x MATCH_PARENT instead of being shrunk to a small square
+        assertEquals(android.view.ViewGroup.LayoutParams.MATCH_PARENT, captureBtn.layoutParams.width)
+        assertEquals(android.view.ViewGroup.LayoutParams.MATCH_PARENT, captureBtn.layoutParams.height)
 
         val expectedPadding = (dims.cardPaddingDp * density).roundToInt()
         assertEquals(expectedPadding, root.contentPaddingLeft)
         assertEquals(expectedPadding, root.contentPaddingTop)
         assertEquals(expectedPadding, root.contentPaddingRight)
         assertEquals(expectedPadding, root.contentPaddingBottom)
+    }
+
+    @Test
+    fun testBentoShutterTofuBlockMaintainsMatchParentAndStretchingContainer() {
+        val root = com.google.android.material.card.MaterialCardView(themedContext).apply {
+            id = R.id.bottom_island_card
+        }
+        val shutterRow = android.widget.LinearLayout(themedContext).apply {
+            id = R.id.bento_shutter_row
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0
+            )
+        }
+        val photoCard = android.view.View(themedContext).apply {
+            id = R.id.photo_view_card
+            layoutParams = android.widget.LinearLayout.LayoutParams(100, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        val shutterContainer = android.widget.FrameLayout(themedContext).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                0,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                1.0f
+            )
+        }
+        val captureBtn = ExpressiveShutterButton(themedContext).apply {
+            id = R.id.camera_capture_button
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        shutterContainer.addView(captureBtn)
+
+        val rightStack = android.view.View(themedContext).apply {
+            id = R.id.bento_right_stack
+            layoutParams = android.widget.LinearLayout.LayoutParams(100, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+
+        shutterRow.addView(photoCard)
+        shutterRow.addView(shutterContainer)
+        shutterRow.addView(rightStack)
+        root.addView(shutterRow)
+
+        CameraBentoDeckView.applyDynamicRowHeights(root)
+
+        val density = themedContext.resources.displayMetrics.density
+        val dims = CameraBentoDeckView.getBentoDimensions(themedContext.resources)
+
+        // Shutter row height set according to tier
+        assertEquals((dims.shutterRowDp * density).roundToInt(), shutterRow.layoutParams.height)
+
+        // FrameLayout container retains full stretch (height = MATCH_PARENT, weight = 1f)
+        val containerLp = shutterContainer.layoutParams as android.widget.LinearLayout.LayoutParams
+        assertEquals(android.view.ViewGroup.LayoutParams.MATCH_PARENT, containerLp.height)
+        assertEquals(1.0f, containerLp.weight, 0.001f)
+
+        // Bento Tofu Block: capture button fills match_parent x match_parent
+        assertEquals(android.view.ViewGroup.LayoutParams.MATCH_PARENT, captureBtn.layoutParams.width)
+        assertEquals(android.view.ViewGroup.LayoutParams.MATCH_PARENT, captureBtn.layoutParams.height)
+
+        // Verify button is NOT forced into a small square (e.g. 60dp, 68dp, 72dp)
+        assertNotEquals((60 * density).roundToInt(), captureBtn.layoutParams.width)
+        assertNotEquals((68 * density).roundToInt(), captureBtn.layoutParams.width)
+        assertNotEquals((72 * density).roundToInt(), captureBtn.layoutParams.width)
+    }
+
+    @Test
+    fun testApplyDynamicRowHeightsInLandscapePreservesCircularShutterButton() {
+        // In landscape layout, bottom_island_card does NOT contain bento_shutter_row
+        val root = com.google.android.material.card.MaterialCardView(themedContext).apply {
+            id = R.id.bottom_island_card
+        }
+        val circularCaptureBtn = ExpressiveShutterButton(themedContext).apply {
+            id = R.id.camera_capture_button
+            layoutParams = android.view.ViewGroup.LayoutParams(200, 200)
+        }
+        root.addView(circularCaptureBtn)
+
+        CameraBentoDeckView.applyDynamicRowHeights(root)
+
+        // Capture button fixed size must be preserved and not overwritten to MATCH_PARENT
+        assertEquals(200, circularCaptureBtn.layoutParams.width)
+        assertEquals(200, circularCaptureBtn.layoutParams.height)
     }
 }
