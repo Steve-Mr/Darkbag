@@ -17,7 +17,7 @@
         android:layout_marginStart="12dp"
         android:layout_marginEnd="12dp"
         android:layout_marginTop="8dp"
-        android:layout_marginBottom="4dp"
+        android:layout_marginBottom="12dp"
         app:cardCornerRadius="26dp"
         app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
         app:strokeWidth="1dp"
@@ -101,7 +101,7 @@
                 style="@style/Widget.Darkbag.BentoTray"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="10dp">
+                android:layout_marginBottom="12dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -139,13 +139,13 @@
                             android:textColor="?attr/colorPrimary" />
                     </LinearLayout>
 
-                    <!-- Sub-label: 默认启动页面 (Bento 双联选择)： -->
+                    <!-- Sub-label: 默认启动模块 -->
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:paddingHorizontal="4dp"
                         android:paddingBottom="4dp"
-                        android:text="默认启动页面 (Bento 双联选择)："
+                        android:text="默认启动模块"
                         android:textSize="10sp"
                         android:textColor="?attr/colorOnSurfaceVariant" />
 
@@ -154,14 +154,14 @@
                         android:layout_width="match_parent"
                         android:layout_height="54dp"
                         android:orientation="horizontal"
-                        android:layout_marginBottom="5dp">
+                        android:layout_marginBottom="8dp">
 
                         <com.google.android.material.card.MaterialCardView
                             android:id="@+id/cardStartupCamera"
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:layout_marginEnd="3dp"
+                            android:layout_marginEnd="4dp"
                             android:clickable="true"
                             android:focusable="true"
                             app:cardCornerRadius="14dp"
@@ -201,7 +201,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:layout_marginStart="3dp"
+                            android:layout_marginStart="4dp"
                             android:clickable="true"
                             android:focusable="true"
                             app:cardCornerRadius="14dp"
@@ -242,13 +242,13 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:layout_marginBottom="5dp">
+                        android:layout_marginBottom="8dp">
 
                         <com.google.android.material.card.MaterialCardView
                             android:layout_width="0dp"
                             android:layout_height="40dp"
                             android:layout_weight="1"
-                            android:layout_marginEnd="3dp"
+                            android:layout_marginEnd="4dp"
                             app:cardCornerRadius="12dp"
                             app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                             app:strokeWidth="1dp"
@@ -279,7 +279,7 @@
                             android:layout_width="0dp"
                             android:layout_height="40dp"
                             android:layout_weight="1"
-                            android:layout_marginStart="3dp"
+                            android:layout_marginStart="4dp"
                             app:cardCornerRadius="12dp"
                             app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                             app:strokeWidth="1dp"
@@ -313,14 +313,14 @@
                         android:layout_width="match_parent"
                         android:layout_height="44dp"
                         android:orientation="horizontal"
-                        android:layout_marginBottom="5dp">
+                        android:layout_marginBottom="8dp">
 
                         <com.google.android.material.card.MaterialCardView
                             android:id="@+id/tile_format_jpg"
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:layout_marginEnd="3dp"
+                            android:layout_marginEnd="4dp"
                             app:cardCornerRadius="14dp"
                             app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                             app:strokeWidth="1dp"
@@ -364,7 +364,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:layout_marginStart="3dp"
+                            android:layout_marginStart="4dp"
                             app:cardCornerRadius="14dp"
                             app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                             app:strokeWidth="1dp"
@@ -408,7 +408,7 @@
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
                         android:layout_height="42dp"
-                        android:layout_marginBottom="5dp"
+                        android:layout_marginBottom="8dp"
                         app:cardCornerRadius="14dp"
                         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                         app:strokeWidth="1dp"
@@ -452,7 +452,7 @@
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
                         android:layout_height="42dp"
-                        android:layout_marginBottom="5dp"
+                        android:layout_marginBottom="8dp"
                         app:cardCornerRadius="14dp"
                         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                         app:strokeWidth="1dp"
@@ -497,7 +497,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="48dp"
                         android:orientation="horizontal"
-                        android:layout_marginBottom="5dp">
+                        android:layout_marginBottom="8dp">
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btn_menu_default_lens"
@@ -505,7 +505,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:layout_marginEnd="3dp"
+                            android:layout_marginEnd="4dp"
                             android:text="DEFAULT LENS\nWide (1.0x)" />
 
                         <com.google.android.material.button.MaterialButton
@@ -514,7 +514,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:layout_marginStart="3dp"
+                            android:layout_marginStart="4dp"
                             android:text="1.0X FOCAL BASE\n24mm" />
                     </LinearLayout>
 
@@ -522,7 +522,7 @@
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
                         android:layout_height="42dp"
-                        android:layout_marginBottom="5dp"
+                        android:layout_marginBottom="8dp"
                         app:cardCornerRadius="14dp"
                         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                         app:strokeWidth="1dp"
@@ -574,13 +574,13 @@
                             android:layout_width="match_parent"
                             android:layout_height="40dp"
                             android:orientation="horizontal"
-                            android:layout_marginBottom="5dp">
+                            android:layout_marginBottom="8dp">
 
                             <com.google.android.material.card.MaterialCardView
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
                                 android:layout_weight="1"
-                                android:layout_marginEnd="3dp"
+                                android:layout_marginEnd="4dp"
                                 app:cardCornerRadius="12dp"
                                 app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                                 app:strokeWidth="1dp"
@@ -611,7 +611,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
                                 android:layout_weight="1"
-                                android:layout_marginStart="3dp"
+                                android:layout_marginStart="4dp"
                                 app:cardCornerRadius="12dp"
                                 app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                                 app:strokeWidth="1dp"
@@ -643,13 +643,13 @@
                             android:layout_width="match_parent"
                             android:layout_height="40dp"
                             android:orientation="horizontal"
-                            android:layout_marginBottom="5dp">
+                            android:layout_marginBottom="8dp">
 
                             <com.google.android.material.card.MaterialCardView
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
                                 android:layout_weight="1"
-                                android:layout_marginEnd="3dp"
+                                android:layout_marginEnd="4dp"
                                 app:cardCornerRadius="12dp"
                                 app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                                 app:strokeWidth="1dp"
@@ -680,7 +680,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
                                 android:layout_weight="1"
-                                android:layout_marginStart="3dp"
+                                android:layout_marginStart="4dp"
                                 app:cardCornerRadius="12dp"
                                 app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                                 app:strokeWidth="1dp"
@@ -761,7 +761,7 @@
                 style="@style/Widget.Darkbag.BentoTray"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="10dp">
+                android:layout_marginBottom="12dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -793,7 +793,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="48dp"
                         android:orientation="horizontal"
-                        android:layout_marginBottom="6dp">
+                        android:layout_marginBottom="8dp">
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btn_menu_target_log"
@@ -801,7 +801,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1.2"
-                            android:layout_marginEnd="3dp"
+                            android:layout_marginEnd="4dp"
                             android:text="TARGET LOG\nApple Log (Rec.709)" />
 
                         <com.google.android.material.button.MaterialButton
@@ -810,7 +810,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1.4"
-                            android:layout_marginStart="3dp"
+                            android:layout_marginStart="4dp"
                             app:backgroundTint="?attr/colorTertiaryContainer"
                             app:strokeColor="?attr/colorTertiary"
                             android:text="3D LUT RECIPES\nClassic Neg / Portra" />
@@ -870,7 +870,7 @@
                 style="@style/Widget.Darkbag.BentoTray"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="10dp">
+                android:layout_marginBottom="12dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -924,7 +924,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Sabre 计算 · RAW 视频 · 多摄同拍 · UI 定制"
+                                android:text="计算摄影 · 视频录制 · 多摄同拍 · 界面定制"
                                 android:textAppearance="?attr/textAppearanceBodySmall"
                                 android:textColor="?attr/colorOnSurfaceVariant"
                                 android:textSize="9.5sp" />
@@ -947,13 +947,14 @@
                         android:layout_marginTop="6dp"
                         android:visibility="gone">
 
-                        <!-- Sub-Matrix A: HDR+ & COMPUTE PIPELINE -->
+                        <!-- Group A: HDR+ 计算摄影 (COMPUTE PIPELINE) -->
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:paddingHorizontal="4dp"
                             android:paddingVertical="2dp"
-                            android:text="A. HDR+ &amp; COMPUTE PIPELINE"
+                            android:layout_marginBottom="4dp"
+                            android:text="A. HDR+ 计算摄影 (COMPUTE PIPELINE)"
                             android:textSize="10sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorSecondary" />
@@ -963,28 +964,27 @@
                             android:layout_width="match_parent"
                             android:layout_height="48dp"
                             android:orientation="horizontal"
-                            android:layout_marginBottom="5dp">
+                            android:layout_marginBottom="8dp">
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btn_menu_hdr_fusion_mode"
                                 style="@style/Widget.Darkbag.BentoTile.Button"
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
-                                android:layout_weight="1.2"
-                                android:layout_marginEnd="3dp"
-                                app:cornerRadius="10dp"
+                                android:layout_weight="1.1"
+                                android:layout_marginEnd="4dp"
                                 app:backgroundTint="?attr/colorSecondaryContainer"
                                 app:strokeColor="?attr/colorSecondary"
-                                android:text="HDR+ MERGE\nSabre (Default 默认)" />
+                                android:text="HDR+ MERGE\nSabre (Default)" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btn_menu_hdr_burst_mode"
                                 style="@style/Widget.Darkbag.BentoTile.Button"
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
-                                android:layout_weight="1"
-                                android:layout_marginStart="3dp"
-                                android:text="BURST FRAMES\nAuto (7 Frames)" />
+                                android:layout_weight="1.0"
+                                android:layout_marginStart="4dp"
+                                android:text="BURST FRAMES\n5 Frames" />
                         </LinearLayout>
 
                         <!-- Row 2: Underexposure & Color Engine -->
@@ -992,158 +992,163 @@
                             android:layout_width="match_parent"
                             android:layout_height="48dp"
                             android:orientation="horizontal"
-                            android:layout_marginBottom="5dp">
+                            android:layout_marginBottom="8dp">
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btn_menu_underexposure_mode"
                                 style="@style/Widget.Darkbag.BentoTile.Button"
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
-                                android:layout_weight="1"
-                                android:layout_marginEnd="3dp"
-                                android:text="UNDEREXPOSURE\n-0.7 EV (Default)" />
+                                android:layout_weight="1.0"
+                                android:layout_marginEnd="4dp"
+                                android:text="UNDEREXPOSURE\nDynamic EV" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btn_menu_color_engine"
                                 style="@style/Widget.Darkbag.BentoTile.Button"
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
-                                android:layout_weight="1"
-                                android:layout_marginStart="3dp"
-                                android:text="COLOR ENGINE\nRec.709 Matrix" />
+                                android:layout_weight="1.0"
+                                android:layout_marginStart="4dp"
+                                android:text="COLOR ENGINE\nSony Uchimura" />
                         </LinearLayout>
 
-                        <!-- Row 3: HDR+ OIS switch -->
-                        <com.google.android.material.card.MaterialCardView
-                            android:layout_width="match_parent"
-                            android:layout_height="42dp"
-                            android:layout_marginBottom="5dp"
-                            app:cardCornerRadius="14dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                            app:strokeWidth="1dp"
-                            app:strokeColor="?attr/colorOutlineVariant">
-
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="match_parent"
-                                android:gravity="center_vertical"
-                                android:paddingHorizontal="10dp">
-
-                                <TextView
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:text="@string/pref_hdr_ois"
-                                    android:textSize="11.5sp"
-                                    android:textStyle="bold"
-                                    android:textColor="?attr/colorOnSurface" />
-
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:background="@drawable/bg_bento_badge_secondary"
-                                    android:paddingHorizontal="6dp"
-                                    android:paddingVertical="1dp"
-                                    android:text="OIS"
-                                    android:textSize="9.5sp"
-                                    android:textStyle="bold"
-                                    android:textColor="?attr/colorSecondary"
-                                    android:layout_marginEnd="6dp" />
-
-                                <com.google.android.material.materialswitch.MaterialSwitch
-                                    android:id="@+id/switch_hdr_plus_ois"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content" />
-                            </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
-
-                        <!-- Row 4: Antibanding & Burst Strategy -->
+                        <!-- Row 3: HDR+ OIS switch & Antibanding -->
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="48dp"
+                            android:layout_height="44dp"
                             android:orientation="horizontal"
-                            android:layout_marginBottom="5dp">
+                            android:layout_marginBottom="8dp">
+
+                            <com.google.android.material.card.MaterialCardView
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1.1"
+                                android:layout_marginEnd="4dp"
+                                app:cardCornerRadius="14dp"
+                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:strokeWidth="1dp"
+                                app:strokeColor="?attr/colorOutlineVariant">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:gravity="center_vertical"
+                                    android:paddingHorizontal="10dp">
+
+                                    <TextView
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_weight="1"
+                                        android:text="@string/pref_hdr_ois"
+                                        android:textSize="11.5sp"
+                                        android:textStyle="bold"
+                                        android:textColor="?attr/colorOnSurface" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:background="@drawable/bg_bento_badge_secondary"
+                                        android:paddingHorizontal="6dp"
+                                        android:paddingVertical="1dp"
+                                        android:text="OIS"
+                                        android:textSize="9.5sp"
+                                        android:textStyle="bold"
+                                        android:textColor="?attr/colorSecondary"
+                                        android:layout_marginEnd="6dp" />
+
+                                    <com.google.android.material.materialswitch.MaterialSwitch
+                                        android:id="@+id/switch_hdr_plus_ois"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content" />
+                                </LinearLayout>
+                            </com.google.android.material.card.MaterialCardView>
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btn_menu_antibanding"
                                 style="@style/Widget.Darkbag.BentoTile.Button"
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
-                                android:layout_weight="1"
-                                android:layout_marginEnd="3dp"
-                                android:text="ANTIBANDING\nAuto (50Hz/60Hz)" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btn_menu_burst_processing_strategy"
-                                style="@style/Widget.Darkbag.BentoTile.Button"
-                                android:layout_width="0dp"
-                                android:layout_height="match_parent"
-                                android:layout_weight="1"
-                                android:layout_marginStart="3dp"
-                                android:text="BURST STRATEGY\nBalanced" />
+                                android:layout_weight="1.0"
+                                android:layout_marginStart="4dp"
+                                android:text="ANTIBANDING\nAuto" />
                         </LinearLayout>
 
-                        <!-- Row 5: Shutter Long Press Action -->
+                        <!-- Row 4: Burst Processing Strategy (full width) -->
                         <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btn_menu_shutter_long_press"
+                            android:id="@+id/btn_menu_burst_processing_strategy"
                             style="@style/Widget.Darkbag.BentoTile.Button"
                             android:layout_width="match_parent"
-                            android:layout_height="48dp"
-                            android:layout_marginBottom="8dp"
-                            android:text="SHUTTER HOLD ACTION\nStandard MP4 (Default)" />
+                            android:layout_height="44dp"
+                            android:layout_marginBottom="10dp"
+                            android:text="BURST STRATEGY\nBalanced" />
 
-                        <!-- Sub-Matrix B: RAW VIDEO & MULTI-CAMERA -->
+                        <!-- Group B: 视频录制 (VIDEO CAPTURE) -->
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:paddingHorizontal="4dp"
                             android:paddingVertical="2dp"
-                            android:text="B. RAW VIDEO &amp; MULTI-CAMERA"
+                            android:layout_marginBottom="4dp"
+                            android:text="B. 视频录制 (VIDEO CAPTURE)"
                             android:textSize="10sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorSecondary" />
 
-                        <!-- Row 1: RAW Video & Multi-Camera Dual Pair -->
+                        <!-- Row 1: Shutter Long Press & RAW Video -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="48dp"
                             android:orientation="horizontal"
-                            android:layout_marginBottom="5dp">
+                            android:layout_marginBottom="10dp">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_menu_shutter_long_press"
+                                style="@style/Widget.Darkbag.BentoTile.Button"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1.1"
+                                android:layout_marginEnd="4dp"
+                                android:text="SHUTTER HOLD ACTION\nStandard MP4" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btn_menu_raw_video"
                                 style="@style/Widget.Darkbag.BentoTile.Button"
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
-                                android:layout_weight="1"
-                                android:layout_marginEnd="3dp"
+                                android:layout_weight="1.0"
+                                android:layout_marginStart="4dp"
                                 android:text="RAW VIDEO\n24 FPS · 4K UHD" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btn_menu_multi_camera_dual_pair"
-                                style="@style/Widget.Darkbag.BentoTile.Button"
-                                android:layout_width="0dp"
-                                android:layout_height="match_parent"
-                                android:layout_weight="1"
-                                android:layout_marginStart="3dp"
-                                android:text="MULTI-CAMERA\nUW + Wide Dual Pair" />
                         </LinearLayout>
+
+                        <!-- Group C: 多摄同拍 (MULTI-CAMERA) -->
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingHorizontal="4dp"
+                            android:paddingVertical="2dp"
+                            android:layout_marginBottom="4dp"
+                            android:text="C. 多摄同拍 (MULTI-CAMERA)"
+                            android:textSize="10sp"
+                            android:textStyle="bold"
+                            android:textColor="?attr/colorSecondary" />
 
                         <!-- Multi-camera status text -->
                         <TextView
                             android:id="@+id/tv_multi_camera_status"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginBottom="5dp"
+                            android:layout_marginBottom="4dp"
+                            android:paddingHorizontal="4dp"
                             android:fontFamily="monospace"
                             android:textSize="10sp"
                             android:textColor="?attr/colorOnSurfaceVariant" />
 
-                        <!-- Multi-camera mode switch -->
+                        <!-- Row 1: switch_multi_camera_mode -->
                         <com.google.android.material.card.MaterialCardView
                             android:layout_width="match_parent"
                             android:layout_height="42dp"
-                            android:layout_marginBottom="5dp"
+                            android:layout_marginBottom="6dp"
                             app:cardCornerRadius="14dp"
                             app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                             app:strokeWidth="1dp"
@@ -1183,108 +1188,135 @@
                             </LinearLayout>
                         </com.google.android.material.card.MaterialCardView>
 
-                        <!-- Multi-camera count button -->
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btn_menu_multi_camera_count"
-                            style="@style/Widget.Darkbag.BentoTile.Button"
+                        <!-- Row 2: btn_menu_multi_camera_count + btn_menu_multi_camera_dual_pair -->
+                        <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="44dp"
-                            android:layout_marginBottom="5dp"
-                            android:text="CAMERA COUNT\nAuto (Max 3)" />
+                            android:layout_height="48dp"
+                            android:orientation="horizontal"
+                            android:layout_marginBottom="8dp">
 
-                        <!-- Force Multi-Camera & Save Multi-Cam RAW -->
-                        <com.google.android.material.card.MaterialCardView
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_menu_multi_camera_count"
+                                style="@style/Widget.Darkbag.BentoTile.Button"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1.0"
+                                android:layout_marginEnd="4dp"
+                                android:text="CAMERA COUNT\nAuto (Max 3)" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_menu_multi_camera_dual_pair"
+                                style="@style/Widget.Darkbag.BentoTile.Button"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1.1"
+                                android:layout_marginStart="4dp"
+                                android:text="MULTI-CAMERA\nUW + Wide Dual Pair" />
+                        </LinearLayout>
+
+                        <!-- Row 3: switch_multi_camera_force_enable + cb_multi_camera_save_raw -->
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="42dp"
-                            android:layout_marginBottom="5dp"
-                            app:cardCornerRadius="14dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                            app:strokeWidth="1dp"
-                            app:strokeColor="?attr/colorOutlineVariant">
+                            android:orientation="horizontal"
+                            android:layout_marginBottom="10dp">
 
-                            <LinearLayout
-                                android:layout_width="match_parent"
+                            <com.google.android.material.card.MaterialCardView
+                                android:layout_width="0dp"
                                 android:layout_height="match_parent"
-                                android:gravity="center_vertical"
-                                android:paddingHorizontal="10dp">
+                                android:layout_weight="1.1"
+                                android:layout_marginEnd="4dp"
+                                app:cardCornerRadius="14dp"
+                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:strokeWidth="1dp"
+                                app:strokeColor="?attr/colorOutlineVariant">
 
-                                <TextView
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:text="@string/pref_multi_camera_force_enable"
-                                    android:textSize="11.5sp"
-                                    android:textStyle="bold"
-                                    android:textColor="?attr/colorOnSurface" />
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:gravity="center_vertical"
+                                    android:paddingHorizontal="8dp">
 
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:background="@drawable/bg_bento_badge_primary"
-                                    android:paddingHorizontal="6dp"
-                                    android:paddingVertical="1dp"
-                                    android:text="BYPASS"
-                                    android:textSize="9.5sp"
-                                    android:textStyle="bold"
-                                    android:textColor="?attr/colorPrimary"
-                                    android:layout_marginEnd="6dp" />
+                                    <TextView
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_weight="1"
+                                        android:text="@string/pref_multi_camera_force_enable"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:textColor="?attr/colorOnSurface" />
 
-                                <com.google.android.material.materialswitch.MaterialSwitch
-                                    android:id="@+id/switch_multi_camera_force_enable"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content" />
-                            </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:background="@drawable/bg_bento_badge_primary"
+                                        android:paddingHorizontal="5dp"
+                                        android:paddingVertical="1dp"
+                                        android:text="BYPASS"
+                                        android:textSize="9sp"
+                                        android:textStyle="bold"
+                                        android:textColor="?attr/colorPrimary"
+                                        android:layout_marginEnd="4dp" />
 
-                        <com.google.android.material.card.MaterialCardView
-                            android:layout_width="match_parent"
-                            android:layout_height="42dp"
-                            android:layout_marginBottom="8dp"
-                            app:cardCornerRadius="14dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                            app:strokeWidth="1dp"
-                            app:strokeColor="?attr/colorOutlineVariant">
+                                    <com.google.android.material.materialswitch.MaterialSwitch
+                                        android:id="@+id/switch_multi_camera_force_enable"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content" />
+                                </LinearLayout>
+                            </com.google.android.material.card.MaterialCardView>
 
-                            <LinearLayout
-                                android:layout_width="match_parent"
+                            <com.google.android.material.card.MaterialCardView
+                                android:layout_width="0dp"
                                 android:layout_height="match_parent"
-                                android:gravity="center_vertical"
-                                android:paddingHorizontal="10dp">
+                                android:layout_weight="1.0"
+                                android:layout_marginStart="4dp"
+                                app:cardCornerRadius="14dp"
+                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:strokeWidth="1dp"
+                                app:strokeColor="?attr/colorOutlineVariant">
 
-                                <com.google.android.material.checkbox.MaterialCheckBox
-                                    android:id="@+id/cb_multi_camera_save_raw"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content" />
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:gravity="center_vertical"
+                                    android:paddingHorizontal="8dp">
 
-                                <TextView
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:text="@string/pref_multi_camera_save_raw"
-                                    android:textSize="11.5sp"
-                                    android:textStyle="bold"
-                                    android:textColor="?attr/colorOnSurface" />
+                                    <com.google.android.material.checkbox.MaterialCheckBox
+                                        android:id="@+id/cb_multi_camera_save_raw"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content" />
 
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:background="@drawable/bg_bento_badge_secondary"
-                                    android:paddingHorizontal="6dp"
-                                    android:paddingVertical="1dp"
-                                    android:text="DNG"
-                                    android:textSize="9.5sp"
-                                    android:textStyle="bold"
-                                    android:textColor="?attr/colorSecondary" />
-                            </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
+                                    <TextView
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_weight="1"
+                                        android:text="独立 RAW"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:textColor="?attr/colorOnSurface" />
 
-                        <!-- Sub-Matrix C: DNG FORMAT & STORAGE -->
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:background="@drawable/bg_bento_badge_secondary"
+                                        android:paddingHorizontal="5dp"
+                                        android:paddingVertical="1dp"
+                                        android:text="DNG"
+                                        android:textSize="9sp"
+                                        android:textStyle="bold"
+                                        android:textColor="?attr/colorSecondary" />
+                                </LinearLayout>
+                            </com.google.android.material.card.MaterialCardView>
+                        </LinearLayout>
+
+                        <!-- Group D: 底片编码与存储 (DNG & STORAGE) -->
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:paddingHorizontal="4dp"
                             android:paddingVertical="2dp"
-                            android:text="C. DNG FORMAT &amp; STORAGE"
+                            android:layout_marginBottom="4dp"
+                            android:text="D. 底片编码与存储 (DNG &amp; STORAGE)"
                             android:textSize="10sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorSecondary" />
@@ -1294,16 +1326,15 @@
                             android:layout_width="match_parent"
                             android:layout_height="48dp"
                             android:orientation="horizontal"
-                            android:layout_marginBottom="5dp">
+                            android:layout_marginBottom="8dp">
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btn_menu_dng_compression"
                                 style="@style/Widget.Darkbag.BentoTile.Button"
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
-                                android:layout_weight="1"
-                                android:layout_marginEnd="3dp"
-                                app:cornerRadius="10dp"
+                                android:layout_weight="1.1"
+                                android:layout_marginEnd="4dp"
                                 app:backgroundTint="?attr/colorPrimaryContainer"
                                 app:strokeColor="?attr/colorPrimary"
                                 android:text="DNG COMPRESS\n16-bit Lossless JPEG" />
@@ -1313,26 +1344,27 @@
                                 style="@style/Widget.Darkbag.BentoTile.Button"
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
-                                android:layout_weight="1"
-                                android:layout_marginStart="3dp"
-                                android:text="CFA FORMAT\nBayer CFA (~12MB)" />
+                                android:layout_weight="1.0"
+                                android:layout_marginStart="4dp"
+                                android:text="CFA FORMAT\nBayer CFA" />
                         </LinearLayout>
 
-                        <!-- Row 2: Custom Storage Paths (JPG & RAW) -->
+                        <!-- Row 2: Custom Storage Paths (JPG & RAW) 2-column -->
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:layout_marginBottom="8dp">
+                            android:layout_height="48dp"
+                            android:orientation="horizontal"
+                            android:layout_marginBottom="10dp">
 
                             <com.google.android.material.card.MaterialCardView
                                 android:id="@+id/layout_jpg_storage"
-                                android:layout_width="match_parent"
-                                android:layout_height="44dp"
-                                android:layout_marginBottom="4dp"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1.0"
+                                android:layout_marginEnd="4dp"
                                 android:clickable="true"
                                 android:focusable="true"
-                                app:cardCornerRadius="12dp"
+                                app:cardCornerRadius="14dp"
                                 app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
@@ -1340,40 +1372,41 @@
                                 <LinearLayout
                                     android:layout_width="match_parent"
                                     android:layout_height="match_parent"
-                                    android:orientation="horizontal"
-                                    android:gravity="center_vertical"
-                                    android:paddingHorizontal="10dp">
+                                    android:orientation="vertical"
+                                    android:gravity="center"
+                                    android:paddingHorizontal="8dp">
 
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="@string/pref_custom_jpg_folder"
+                                        android:text="JPG 目录"
                                         android:textSize="11sp"
                                         android:textStyle="bold"
                                         android:textColor="?attr/colorOnSurface" />
 
                                     <TextView
                                         android:id="@+id/tv_jpg_path"
-                                        android:layout_width="0dp"
+                                        android:layout_width="match_parent"
                                         android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:gravity="end"
+                                        android:gravity="center"
                                         android:text="Default (Pictures/Darkbag)"
-                                        android:textSize="10sp"
+                                        android:textSize="9.5sp"
                                         android:textColor="?attr/colorOnSurfaceVariant"
                                         android:singleLine="true"
                                         android:ellipsize="middle"
-                                        android:layout_marginStart="8dp" />
+                                        android:layout_marginTop="2dp" />
                                 </LinearLayout>
                             </com.google.android.material.card.MaterialCardView>
 
                             <com.google.android.material.card.MaterialCardView
                                 android:id="@+id/layout_raw_storage"
-                                android:layout_width="match_parent"
-                                android:layout_height="44dp"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1.0"
+                                android:layout_marginStart="4dp"
                                 android:clickable="true"
                                 android:focusable="true"
-                                app:cardCornerRadius="12dp"
+                                app:cardCornerRadius="14dp"
                                 app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
@@ -1381,41 +1414,41 @@
                                 <LinearLayout
                                     android:layout_width="match_parent"
                                     android:layout_height="match_parent"
-                                    android:orientation="horizontal"
-                                    android:gravity="center_vertical"
-                                    android:paddingHorizontal="10dp">
+                                    android:orientation="vertical"
+                                    android:gravity="center"
+                                    android:paddingHorizontal="8dp">
 
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="@string/pref_custom_raw_folder"
+                                        android:text="RAW 目录"
                                         android:textSize="11sp"
                                         android:textStyle="bold"
                                         android:textColor="?attr/colorOnSurface" />
 
                                     <TextView
                                         android:id="@+id/tv_raw_path"
-                                        android:layout_width="0dp"
+                                        android:layout_width="match_parent"
                                         android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:gravity="end"
+                                        android:gravity="center"
                                         android:text="Default (Pictures/Darkbag)"
-                                        android:textSize="10sp"
+                                        android:textSize="9.5sp"
                                         android:textColor="?attr/colorOnSurfaceVariant"
                                         android:singleLine="true"
                                         android:ellipsize="middle"
-                                        android:layout_marginStart="8dp" />
+                                        android:layout_marginTop="2dp" />
                                 </LinearLayout>
                             </com.google.android.material.card.MaterialCardView>
                         </LinearLayout>
 
-                        <!-- Sub-Matrix D: ADVANCED UI CUSTOMIZATION -->
+                        <!-- Group E: 取景器界面定制 (VIEWFINDER UI) -->
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:paddingHorizontal="4dp"
                             android:paddingVertical="2dp"
-                            android:text="D. ADVANCED UI CUSTOMIZATION"
+                            android:layout_marginBottom="4dp"
+                            android:text="E. 取景器界面定制 (VIEWFINDER UI)"
                             android:textSize="10sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorSecondary" />
@@ -1424,7 +1457,7 @@
                         <com.google.android.material.card.MaterialCardView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginBottom="6dp"
+                            android:layout_marginBottom="8dp"
                             app:cardCornerRadius="20dp"
                             app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
                             app:strokeWidth="1dp"
@@ -1489,71 +1522,82 @@
                             android:orientation="vertical"
                             android:visibility="gone">
 
-                            <com.google.android.material.card.MaterialCardView
+                            <!-- Row 1: Lens controls + Camera switch -->
+                            <LinearLayout
                                 android:layout_width="match_parent"
-                                android:layout_height="40dp"
-                                android:layout_marginBottom="4dp"
-                                app:cardCornerRadius="12dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                                app:strokeWidth="1dp"
-                                app:strokeColor="?attr/colorOutlineVariant">
+                                android:layout_height="42dp"
+                                android:orientation="horizontal"
+                                android:layout_marginBottom="8dp">
 
-                                <LinearLayout
-                                    android:layout_width="match_parent"
+                                <com.google.android.material.card.MaterialCardView
+                                    android:layout_width="0dp"
                                     android:layout_height="match_parent"
-                                    android:gravity="center_vertical"
-                                    android:paddingHorizontal="10dp">
+                                    android:layout_weight="1"
+                                    android:layout_marginEnd="4dp"
+                                    app:cardCornerRadius="14dp"
+                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:strokeWidth="1dp"
+                                    app:strokeColor="?attr/colorOutlineVariant">
 
-                                    <TextView
-                                        android:layout_width="0dp"
-                                        android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:text="@string/settings_ui_lens_controls"
-                                        android:textSize="11sp"
-                                        android:textColor="?attr/colorOnSurface" />
+                                    <LinearLayout
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent"
+                                        android:gravity="center_vertical"
+                                        android:paddingHorizontal="8dp">
 
-                                    <com.google.android.material.materialswitch.MaterialSwitch
-                                        android:id="@+id/switch_show_lens_controls"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content" />
-                                </LinearLayout>
-                            </com.google.android.material.card.MaterialCardView>
+                                        <TextView
+                                            android:layout_width="0dp"
+                                            android:layout_height="wrap_content"
+                                            android:layout_weight="1"
+                                            android:text="@string/settings_ui_lens_controls"
+                                            android:textSize="10.5sp"
+                                            android:textColor="?attr/colorOnSurface" />
 
-                            <com.google.android.material.card.MaterialCardView
-                                android:layout_width="match_parent"
-                                android:layout_height="40dp"
-                                android:layout_marginBottom="4dp"
-                                app:cardCornerRadius="12dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                                app:strokeWidth="1dp"
-                                app:strokeColor="?attr/colorOutlineVariant">
+                                        <com.google.android.material.materialswitch.MaterialSwitch
+                                            android:id="@+id/switch_show_lens_controls"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content" />
+                                    </LinearLayout>
+                                </com.google.android.material.card.MaterialCardView>
 
-                                <LinearLayout
-                                    android:layout_width="match_parent"
+                                <com.google.android.material.card.MaterialCardView
+                                    android:layout_width="0dp"
                                     android:layout_height="match_parent"
-                                    android:gravity="center_vertical"
-                                    android:paddingHorizontal="10dp">
+                                    android:layout_weight="1"
+                                    android:layout_marginStart="4dp"
+                                    app:cardCornerRadius="14dp"
+                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:strokeWidth="1dp"
+                                    app:strokeColor="?attr/colorOutlineVariant">
 
-                                    <TextView
-                                        android:layout_width="0dp"
-                                        android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:text="@string/settings_ui_camera_switch"
-                                        android:textSize="11sp"
-                                        android:textColor="?attr/colorOnSurface" />
+                                    <LinearLayout
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent"
+                                        android:gravity="center_vertical"
+                                        android:paddingHorizontal="8dp">
 
-                                    <com.google.android.material.materialswitch.MaterialSwitch
-                                        android:id="@+id/switch_show_camera_switch_button"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content" />
-                                </LinearLayout>
-                            </com.google.android.material.card.MaterialCardView>
+                                        <TextView
+                                            android:layout_width="0dp"
+                                            android:layout_height="wrap_content"
+                                            android:layout_weight="1"
+                                            android:text="@string/settings_ui_camera_switch"
+                                            android:textSize="10.5sp"
+                                            android:textColor="?attr/colorOnSurface" />
 
+                                        <com.google.android.material.materialswitch.MaterialSwitch
+                                            android:id="@+id/switch_show_camera_switch_button"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content" />
+                                    </LinearLayout>
+                                </com.google.android.material.card.MaterialCardView>
+                            </LinearLayout>
+
+                            <!-- Row 2: Settings button -->
                             <com.google.android.material.card.MaterialCardView
                                 android:layout_width="match_parent"
-                                android:layout_height="40dp"
-                                android:layout_marginBottom="4dp"
-                                app:cardCornerRadius="12dp"
+                                android:layout_height="42dp"
+                                android:layout_marginBottom="8dp"
+                                app:cardCornerRadius="14dp"
                                 app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
@@ -1588,125 +1632,145 @@
                             android:orientation="vertical"
                             android:visibility="visible">
 
-                            <com.google.android.material.card.MaterialCardView
+                            <!-- Row 1: LUT switcher + HDR+ switch -->
+                            <LinearLayout
                                 android:layout_width="match_parent"
-                                android:layout_height="40dp"
-                                android:layout_marginBottom="4dp"
-                                app:cardCornerRadius="12dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                                app:strokeWidth="1dp"
-                                app:strokeColor="?attr/colorOutlineVariant">
+                                android:layout_height="42dp"
+                                android:orientation="horizontal"
+                                android:layout_marginBottom="8dp">
 
-                                <LinearLayout
-                                    android:layout_width="match_parent"
+                                <com.google.android.material.card.MaterialCardView
+                                    android:layout_width="0dp"
                                     android:layout_height="match_parent"
-                                    android:gravity="center_vertical"
-                                    android:paddingHorizontal="10dp">
+                                    android:layout_weight="1"
+                                    android:layout_marginEnd="4dp"
+                                    app:cardCornerRadius="14dp"
+                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:strokeWidth="1dp"
+                                    app:strokeColor="?attr/colorOutlineVariant">
 
-                                    <TextView
-                                        android:layout_width="0dp"
-                                        android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:text="@string/settings_ui_lut_switcher"
-                                        android:textSize="11sp"
-                                        android:textColor="?attr/colorOnSurface" />
+                                    <LinearLayout
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent"
+                                        android:gravity="center_vertical"
+                                        android:paddingHorizontal="8dp">
 
-                                    <com.google.android.material.materialswitch.MaterialSwitch
-                                        android:id="@+id/switch_show_lut_switcher"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content" />
-                                </LinearLayout>
-                            </com.google.android.material.card.MaterialCardView>
+                                        <TextView
+                                            android:layout_width="0dp"
+                                            android:layout_height="wrap_content"
+                                            android:layout_weight="1"
+                                            android:text="@string/settings_ui_lut_switcher"
+                                            android:textSize="10.5sp"
+                                            android:textColor="?attr/colorOnSurface" />
 
-                            <com.google.android.material.card.MaterialCardView
+                                        <com.google.android.material.materialswitch.MaterialSwitch
+                                            android:id="@+id/switch_show_lut_switcher"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content" />
+                                    </LinearLayout>
+                                </com.google.android.material.card.MaterialCardView>
+
+                                <com.google.android.material.card.MaterialCardView
+                                    android:layout_width="0dp"
+                                    android:layout_height="match_parent"
+                                    android:layout_weight="1"
+                                    android:layout_marginStart="4dp"
+                                    app:cardCornerRadius="14dp"
+                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:strokeWidth="1dp"
+                                    app:strokeColor="?attr/colorOutlineVariant">
+
+                                    <LinearLayout
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent"
+                                        android:gravity="center_vertical"
+                                        android:paddingHorizontal="8dp">
+
+                                        <TextView
+                                            android:layout_width="0dp"
+                                            android:layout_height="wrap_content"
+                                            android:layout_weight="1"
+                                            android:text="@string/settings_ui_hdr_tile"
+                                            android:textSize="10.5sp"
+                                            android:textColor="?attr/colorOnSurface" />
+
+                                        <com.google.android.material.materialswitch.MaterialSwitch
+                                            android:id="@+id/switch_show_hdr_plus_switch"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content" />
+                                    </LinearLayout>
+                                </com.google.android.material.card.MaterialCardView>
+                            </LinearLayout>
+
+                            <!-- Row 2: Underexposure button + Mode switch button -->
+                            <LinearLayout
                                 android:layout_width="match_parent"
-                                android:layout_height="40dp"
-                                android:layout_marginBottom="4dp"
-                                app:cardCornerRadius="12dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                                app:strokeWidth="1dp"
-                                app:strokeColor="?attr/colorOutlineVariant">
+                                android:layout_height="42dp"
+                                android:orientation="horizontal"
+                                android:layout_marginBottom="8dp">
 
-                                <LinearLayout
-                                    android:layout_width="match_parent"
+                                <com.google.android.material.card.MaterialCardView
+                                    android:layout_width="0dp"
                                     android:layout_height="match_parent"
-                                    android:gravity="center_vertical"
-                                    android:paddingHorizontal="10dp">
+                                    android:layout_weight="1"
+                                    android:layout_marginEnd="4dp"
+                                    app:cardCornerRadius="14dp"
+                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:strokeWidth="1dp"
+                                    app:strokeColor="?attr/colorOutlineVariant">
 
-                                    <TextView
-                                        android:layout_width="0dp"
-                                        android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:text="@string/settings_ui_hdr_tile"
-                                        android:textSize="11sp"
-                                        android:textColor="?attr/colorOnSurface" />
+                                    <LinearLayout
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent"
+                                        android:gravity="center_vertical"
+                                        android:paddingHorizontal="8dp">
 
-                                    <com.google.android.material.materialswitch.MaterialSwitch
-                                        android:id="@+id/switch_show_hdr_plus_switch"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content" />
-                                </LinearLayout>
-                            </com.google.android.material.card.MaterialCardView>
+                                        <TextView
+                                            android:layout_width="0dp"
+                                            android:layout_height="wrap_content"
+                                            android:layout_weight="1"
+                                            android:text="@string/settings_ui_underexposure_tile"
+                                            android:textSize="10.5sp"
+                                            android:textColor="?attr/colorOnSurface" />
 
-                            <com.google.android.material.card.MaterialCardView
-                                android:layout_width="match_parent"
-                                android:layout_height="40dp"
-                                android:layout_marginBottom="4dp"
-                                app:cardCornerRadius="12dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                                app:strokeWidth="1dp"
-                                app:strokeColor="?attr/colorOutlineVariant">
+                                        <com.google.android.material.materialswitch.MaterialSwitch
+                                            android:id="@+id/switch_show_underexposure_button"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content" />
+                                    </LinearLayout>
+                                </com.google.android.material.card.MaterialCardView>
 
-                                <LinearLayout
-                                    android:layout_width="match_parent"
+                                <com.google.android.material.card.MaterialCardView
+                                    android:layout_width="0dp"
                                     android:layout_height="match_parent"
-                                    android:gravity="center_vertical"
-                                    android:paddingHorizontal="10dp">
+                                    android:layout_weight="1"
+                                    android:layout_marginStart="4dp"
+                                    app:cardCornerRadius="14dp"
+                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:strokeWidth="1dp"
+                                    app:strokeColor="?attr/colorOutlineVariant">
 
-                                    <TextView
-                                        android:layout_width="0dp"
-                                        android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:text="@string/settings_ui_underexposure_tile"
-                                        android:textSize="11sp"
-                                        android:textColor="?attr/colorOnSurface" />
+                                    <LinearLayout
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent"
+                                        android:gravity="center_vertical"
+                                        android:paddingHorizontal="8dp">
 
-                                    <com.google.android.material.materialswitch.MaterialSwitch
-                                        android:id="@+id/switch_show_underexposure_button"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content" />
-                                </LinearLayout>
-                            </com.google.android.material.card.MaterialCardView>
+                                        <TextView
+                                            android:layout_width="0dp"
+                                            android:layout_height="wrap_content"
+                                            android:layout_weight="1"
+                                            android:text="@string/settings_ui_mode_switch_tile"
+                                            android:textSize="10.5sp"
+                                            android:textColor="?attr/colorOnSurface" />
 
-                            <com.google.android.material.card.MaterialCardView
-                                android:layout_width="match_parent"
-                                android:layout_height="40dp"
-                                android:layout_marginBottom="4dp"
-                                app:cardCornerRadius="12dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                                app:strokeWidth="1dp"
-                                app:strokeColor="?attr/colorOutlineVariant">
-
-                                <LinearLayout
-                                    android:layout_width="match_parent"
-                                    android:layout_height="match_parent"
-                                    android:gravity="center_vertical"
-                                    android:paddingHorizontal="10dp">
-
-                                    <TextView
-                                        android:layout_width="0dp"
-                                        android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:text="@string/settings_ui_mode_switch_tile"
-                                        android:textSize="11sp"
-                                        android:textColor="?attr/colorOnSurface" />
-
-                                    <com.google.android.material.materialswitch.MaterialSwitch
-                                        android:id="@+id/switch_show_mode_switch_button"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content" />
-                                </LinearLayout>
-                            </com.google.android.material.card.MaterialCardView>
+                                        <com.google.android.material.materialswitch.MaterialSwitch
+                                            android:id="@+id/switch_show_mode_switch_button"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content" />
+                                    </LinearLayout>
+                                </com.google.android.material.card.MaterialCardView>
+                            </LinearLayout>
                         </LinearLayout>
 
                         <!-- PRO Tier Container -->
@@ -1717,72 +1781,82 @@
                             android:orientation="vertical"
                             android:visibility="gone">
 
-                            <com.google.android.material.card.MaterialCardView
+                            <!-- Row 1: Manual controls + Focus peaking -->
+                            <LinearLayout
                                 android:layout_width="match_parent"
-                                android:layout_height="40dp"
-                                android:layout_marginBottom="4dp"
-                                app:cardCornerRadius="12dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                                app:strokeWidth="1dp"
-                                app:strokeColor="?attr/colorOutlineVariant">
+                                android:layout_height="42dp"
+                                android:orientation="horizontal"
+                                android:layout_marginBottom="8dp">
 
-                                <LinearLayout
-                                    android:layout_width="match_parent"
+                                <com.google.android.material.card.MaterialCardView
+                                    android:layout_width="0dp"
                                     android:layout_height="match_parent"
-                                    android:gravity="center_vertical"
-                                    android:paddingHorizontal="10dp">
+                                    android:layout_weight="1"
+                                    android:layout_marginEnd="4dp"
+                                    app:cardCornerRadius="14dp"
+                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:strokeWidth="1dp"
+                                    app:strokeColor="?attr/colorOutlineVariant">
 
-                                    <TextView
-                                        android:layout_width="0dp"
-                                        android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:text="@string/settings_ui_manual_controls"
-                                        android:textSize="11sp"
-                                        android:textColor="?attr/colorOnSurface" />
+                                    <LinearLayout
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent"
+                                        android:gravity="center_vertical"
+                                        android:paddingHorizontal="8dp">
 
-                                    <com.google.android.material.materialswitch.MaterialSwitch
-                                        android:id="@+id/switch_manual_controls"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content" />
-                                </LinearLayout>
-                            </com.google.android.material.card.MaterialCardView>
+                                        <TextView
+                                            android:layout_width="0dp"
+                                            android:layout_height="wrap_content"
+                                            android:layout_weight="1"
+                                            android:text="@string/settings_ui_manual_controls"
+                                            android:textSize="10.5sp"
+                                            android:textColor="?attr/colorOnSurface" />
 
-                            <com.google.android.material.card.MaterialCardView
-                                android:layout_width="match_parent"
-                                android:layout_height="40dp"
-                                android:layout_marginBottom="4dp"
-                                app:cardCornerRadius="12dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                                app:strokeWidth="1dp"
-                                app:strokeColor="?attr/colorOutlineVariant">
+                                        <com.google.android.material.materialswitch.MaterialSwitch
+                                            android:id="@+id/switch_manual_controls"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content" />
+                                    </LinearLayout>
+                                </com.google.android.material.card.MaterialCardView>
 
-                                <LinearLayout
-                                    android:layout_width="match_parent"
+                                <com.google.android.material.card.MaterialCardView
+                                    android:layout_width="0dp"
                                     android:layout_height="match_parent"
-                                    android:gravity="center_vertical"
-                                    android:paddingHorizontal="10dp">
+                                    android:layout_weight="1"
+                                    android:layout_marginStart="4dp"
+                                    app:cardCornerRadius="14dp"
+                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:strokeWidth="1dp"
+                                    app:strokeColor="?attr/colorOutlineVariant">
 
-                                    <TextView
-                                        android:layout_width="0dp"
-                                        android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:text="@string/settings_ui_focus_peaking"
-                                        android:textSize="11sp"
-                                        android:textColor="?attr/colorOnSurface" />
+                                    <LinearLayout
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent"
+                                        android:gravity="center_vertical"
+                                        android:paddingHorizontal="8dp">
 
-                                    <com.google.android.material.materialswitch.MaterialSwitch
-                                        android:id="@+id/switch_exp_focus_peaking"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content" />
-                                </LinearLayout>
-                            </com.google.android.material.card.MaterialCardView>
+                                        <TextView
+                                            android:layout_width="0dp"
+                                            android:layout_height="wrap_content"
+                                            android:layout_weight="1"
+                                            android:text="@string/settings_ui_focus_peaking"
+                                            android:textSize="10.5sp"
+                                            android:textColor="?attr/colorOnSurface" />
+
+                                        <com.google.android.material.materialswitch.MaterialSwitch
+                                            android:id="@+id/switch_exp_focus_peaking"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content" />
+                                    </LinearLayout>
+                                </com.google.android.material.card.MaterialCardView>
+                            </LinearLayout>
                         </LinearLayout>
 
                         <!-- Internal / External Viewer -->
                         <com.google.android.material.card.MaterialCardView
                             android:layout_width="match_parent"
                             android:layout_height="42dp"
-                            android:layout_marginBottom="5dp"
+                            android:layout_marginBottom="8dp"
                             app:cardCornerRadius="14dp"
                             app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                             app:strokeWidth="1dp"
@@ -1829,7 +1903,7 @@
                 style="@style/Widget.Darkbag.BentoTray"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="10dp">
+                android:layout_marginBottom="12dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -1858,7 +1932,7 @@
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:gravity="end"
-                            android:text="(连点 5 次版本号解锁实验功能)"
+                            android:text="连按 5 次版本号解锁实验室"
                             android:textSize="10sp"
                             android:textColor="?attr/colorOnSurfaceVariant" />
                     </LinearLayout>
@@ -1875,7 +1949,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:layout_marginEnd="3dp"
+                            android:layout_marginEnd="4dp"
                             android:text="CLEAR CACHE\nCalculating..." />
 
                         <com.google.android.material.card.MaterialCardView
@@ -1883,7 +1957,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:layout_marginStart="3dp"
+                            android:layout_marginStart="4dp"
                             android:clickable="true"
                             android:focusable="true"
                             app:cardCornerRadius="14dp"
@@ -1911,7 +1985,7 @@
                                     android:id="@+id/txt_arch_info"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="arm64-v8a (Tap 5x to unlock 🧪)"
+                                    android:text="arm64-v8a"
                                     android:textSize="9sp"
                                     android:fontFamily="monospace"
                                     android:textColor="?attr/colorOnSurfaceVariant"
@@ -1930,7 +2004,7 @@
                 style="@style/Widget.Darkbag.BentoTray"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="10dp"
+                android:layout_marginBottom="12dp"
                 android:visibility="gone"
                 app:strokeWidth="1.5dp"
                 app:strokeColor="?attr/colorTertiary">
@@ -1977,7 +2051,7 @@
                         android:layout_height="wrap_content"
                         android:paddingHorizontal="4dp"
                         android:paddingBottom="6dp"
-                        android:text="高发热/未完全稳定的硬件实验特性："
+                        android:text="硬件实验性特性"
                         android:textSize="10sp"
                         android:textColor="?attr/colorOnSurfaceVariant" />
 
@@ -1985,7 +2059,7 @@
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
                         android:layout_height="42dp"
-                        android:layout_marginBottom="6dp"
+                        android:layout_marginBottom="8dp"
                         app:cardCornerRadius="14dp"
                         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                         app:strokeWidth="1dp"
@@ -2029,7 +2103,7 @@
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginBottom="6dp"
+                        android:layout_marginBottom="8dp"
                         app:cardCornerRadius="12dp"
                         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                         app:strokeWidth="0dp">

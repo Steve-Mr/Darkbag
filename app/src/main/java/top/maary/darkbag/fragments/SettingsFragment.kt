@@ -147,7 +147,7 @@ class SettingsFragment : Fragment() {
         }
 
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
-        binding.txtArchInfo.text = "$abi (Tap 5x to unlock 🧪)"
+        binding.txtArchInfo.text = abi
 
         binding.cardAbout.setOnClickListener {
             aboutClickCount++
@@ -257,7 +257,7 @@ class SettingsFragment : Fragment() {
         val ctx = context ?: return
         val savedFusion = prefs.getString(KEY_HDR_FUSION_MODE, HDR_FUSION_SABRE) ?: HDR_FUSION_SABRE
         val displayLabel = when (savedFusion) {
-            HDR_FUSION_SABRE -> "Sabre (Default 默认)"
+            HDR_FUSION_SABRE -> "Sabre (Default)"
             HDR_FUSION_SPATIAL_RCD -> "Spatial Merge + RCD"
             HDR_FUSION_CLASSIC -> "Classic (Wiener)"
             HDR_FUSION_AUTO -> "Auto (Sabre Zoom)"
@@ -277,7 +277,7 @@ class SettingsFragment : Fragment() {
         val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "5") ?: "5"
         binding.btnMenuHdrBurstMode.text = CameraBentoDeckView.formatProTelemetry(
             label = "BURST FRAMES",
-            value = "Auto ($savedBurst Frames)",
+            value = "$savedBurst Frames",
             isTabActive = false,
             isValueManual = true,
             context = ctx
@@ -302,7 +302,7 @@ class SettingsFragment : Fragment() {
         val name = when (savedIndex) {
             0 -> "Khronos Neutral"
             1 -> "Natural Filmic"
-            2 -> "Sony Uchimura (Default)"
+            2 -> "Sony Uchimura"
             3 -> "Legacy ACES"
             else -> COLOR_ENGINE_MODES[savedIndex]
         }
@@ -318,7 +318,7 @@ class SettingsFragment : Fragment() {
     private fun updateAntibandingTile() {
         val ctx = context ?: return
         val saved = prefs.getString(KEY_ANTIBANDING, "Auto") ?: "Auto"
-        val display = if (saved == "Auto") "Auto (50Hz/60Hz)" else saved
+        val display = saved
         binding.btnMenuAntibanding.text = CameraBentoDeckView.formatProTelemetry(
             label = "ANTIBANDING",
             value = display,
@@ -331,7 +331,7 @@ class SettingsFragment : Fragment() {
     private fun updateBurstStrategyTile() {
         val ctx = context ?: return
         val saved = prefs.getString(KEY_BURST_PROCESSING_STRATEGY, BURST_STRATEGY_BALANCED) ?: BURST_STRATEGY_BALANCED
-        val display = if (saved == BURST_STRATEGY_BALANCED) "Balanced (Smooth)" else "Rapid Burst (Max)"
+        val display = if (saved == BURST_STRATEGY_BALANCED) "Balanced" else "Rapid Burst (Max)"
         binding.btnMenuBurstProcessingStrategy.text = CameraBentoDeckView.formatProTelemetry(
             label = "BURST STRATEGY",
             value = display,
@@ -345,7 +345,7 @@ class SettingsFragment : Fragment() {
         val ctx = context ?: return
         val saved = prefs.getString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_MP4) ?: SHUTTER_LONG_PRESS_MP4
         val display = when (saved) {
-            SHUTTER_LONG_PRESS_MP4 -> "Standard MP4 (Default)"
+            SHUTTER_LONG_PRESS_MP4 -> "Standard MP4"
             SHUTTER_LONG_PRESS_RAW_VIDEO -> "RAW Video (10-bit)"
             else -> "Disabled"
         }
@@ -410,8 +410,8 @@ class SettingsFragment : Fragment() {
         val ctx = context ?: return
         val savedFormatIndex = prefs.getInt(KEY_RAW_OUTPUT_TYPE, 0).coerceIn(0, RAW_OUTPUT_TYPES.size - 1)
         val formatName = when (savedFormatIndex) {
-            0 -> "Bayer CFA (~12MB)"
-            else -> "Linear RGB (~50MB)"
+            0 -> "Bayer CFA"
+            else -> "Linear RGB"
         }
         binding.btnMenuDngFormat.text = CameraBentoDeckView.formatProTelemetry(
             label = "CFA FORMAT",
