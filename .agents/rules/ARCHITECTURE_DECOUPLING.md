@@ -55,6 +55,21 @@ When implementing, modifying, or reviewing code in `app/src/main/` or related te
 
 ---
 
+## 5. Mandatory Bento Matrix & Material 3 Expressive Design System
+- **Location**:
+  - All UI surfaces (`Camera`, `Settings`, `Playground`, `ImageViewer`, `BottomSheet`, `Dialogs`)
+  - Bento UI Kit: `top.maary.darkbag.ui.bento.*`
+- **Contract**: All user interfaces must mandatory adopt the Bento Matrix design language and Material 3 Expressive container role specifications.
+- **Rules**:
+  1. Outer Bento trays MUST use semantic M3 Expressive container fills (`colorPrimaryContainer`, `colorSecondaryContainer`, `colorTertiaryContainer`, `colorErrorContainer`, `colorSurfaceContainerHigh`, `colorSurfaceContainer`) with `strokeWidth = 0` (no flat 1dp border-only monotony).
+  2. Inner tiles/buttons/switches MUST use porcelain `?attr/colorSurface` with `?attr/colorOnSurface` typography for high contrast.
+  3. Dynamic Mode Reactivity: Mode switches (Camera Bento Deck, Settings Half-Frame tray, Startup cards) MUST immediately update container background colors.
+  4. Concentric Geometry: 26dp/18dp outer radius, 14dp inner blocks, 10dp squircle morphing when selected. Standard 8dp row and 8dp column gutters.
+  5. Plain & Professional Copywriting: No verbose/flamboyant wording, no redundant parenthetical explanations, defensive 2-line micro-telemetry (<=16 chars, maxLines="2", ellipsize="end").
+  6. Frameless Floating Islands: Top floating cards must have transparent AppBarLayout, 0 elevation, elevation on card, and smooth scrolling underneath.
+
+---
+
 ## References
 - Full Blueprint: `docs/ARCHITECTURE_DECOUPLING_DESIGN.md`
 - Cross-Repo Boundaries: `.agents/rules/ARCHITECTURE_BOUNDARIES.md`

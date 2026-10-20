@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Bento Container Roles according to Material 3 Expressive guidelines -->
+    <attr name="bentoContainerRole" format="enum">
+        <enum name="surfaceContainer" value="0" />
+        <enum name="surfaceContainerHigh" value="1" />
+        <enum name="surfaceContainerLow" value="2" />
+        <enum name="primaryContainer" value="3" />
+        <enum name="secondaryContainer" value="4" />
+        <enum name="tertiaryContainer" value="5" />
+        <enum name="errorContainer" value="6" />
+    </attr>
+
+    <!-- BentoTrayCard custom attributes -->
+    <declare-styleable name="BentoTrayCard">
+        <attr name="bentoContainerRole" />
+        <attr name="bentoRadius" format="dimension" />
+    </declare-styleable>
+
+    <!-- BentoTileButton custom attributes -->
+    <declare-styleable name="BentoTileButton">
+        <attr name="bentoActiveSquircle" format="boolean" />
+        <attr name="bentoTelemetryLabel" format="string" />
+        <attr name="bentoTelemetryValue" format="string" />
+    </declare-styleable>
+
+    <!-- BentoSwitchTile custom attributes -->
+    <declare-styleable name="BentoSwitchTile">
+        <attr name="bentoSwitchTitle" format="string" />
+        <attr name="bentoSwitchBadge" format="string" />
+        <attr name="bentoSwitchBadgeStyle" format="enum">
+            <enum name="primary" value="0" />
+            <enum name="secondary" value="1" />
+            <enum name="tertiary" value="2" />
+        </attr>
+        <attr name="bentoSwitchChecked" format="boolean" />
+    </declare-styleable>
+
+    <!-- BentoRowLayout custom attributes -->
+    <declare-styleable name="BentoRowLayout">
+        <attr name="bentoGutter" format="dimension" />
+        <attr name="bentoRowScreenTier" format="enum">
+            <enum name="autoTier" value="0" />
+            <enum name="compact" value="1" />
+            <enum name="standard" value="2" />
+            <enum name="tall" value="3" />
+        </attr>
+    </declare-styleable>
+</resources>
