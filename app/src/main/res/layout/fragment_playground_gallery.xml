@@ -10,9 +10,10 @@
         android:id="@+id/appBarLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:elevation="8dp"
+        app:elevation="8dp"
         app:liftOnScroll="false"
-        app:elevation="0dp"
-        android:background="@android:color/transparent">
+        android:background="@drawable/bg_playground_header_frosted">
 
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"

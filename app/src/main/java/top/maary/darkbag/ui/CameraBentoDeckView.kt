@@ -20,6 +20,7 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import androidx.core.graphics.ColorUtils
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
 import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.modes.CaptureMode
@@ -544,6 +545,16 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 android.R.attr.colorPrimary,
                 Color.WHITE
             )
+            val colorPrimaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorPrimaryContainer,
+                Color.DKGRAY
+            )
+            val colorOnPrimaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOnPrimaryContainer,
+                colorPrimary
+            )
             val colorSecondaryContainer = MaterialColors.getColor(
                 button,
                 com.google.android.material.R.attr.colorSecondaryContainer,
@@ -559,6 +570,11 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 com.google.android.material.R.attr.colorTertiaryContainer,
                 colorSecondaryContainer
             )
+            val colorOnTertiaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOnTertiaryContainer,
+                colorTertiary
+            )
             val colorSurfaceContainerHigh = MaterialColors.getColor(
                 button,
                 com.google.android.material.R.attr.colorSurfaceContainerHigh,
@@ -572,9 +588,9 @@ class CameraBentoDeckView @JvmOverloads constructor(
 
             when {
                 isActive && !isDigitalCrop -> {
-                    button.backgroundTintList = ColorStateList.valueOf(colorSecondaryContainer)
-                    button.setTextColor(colorPrimary)
-                    button.iconTint = ColorStateList.valueOf(colorPrimary)
+                    button.backgroundTintList = ColorStateList.valueOf(colorPrimaryContainer)
+                    button.setTextColor(colorOnPrimaryContainer)
+                    button.iconTint = ColorStateList.valueOf(colorOnPrimaryContainer)
                     button.strokeColor = ColorStateList.valueOf(colorPrimary)
                     button.strokeWidth = stroke1_5dp
                     button.cornerRadius = radius12dp
@@ -582,8 +598,8 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 }
                 isActive && isDigitalCrop -> {
                     button.backgroundTintList = ColorStateList.valueOf(colorTertiaryContainer)
-                    button.setTextColor(colorTertiary)
-                    button.iconTint = ColorStateList.valueOf(colorTertiary)
+                    button.setTextColor(colorOnTertiaryContainer)
+                    button.iconTint = ColorStateList.valueOf(colorOnTertiaryContainer)
                     button.strokeColor = ColorStateList.valueOf(colorTertiary)
                     button.strokeWidth = stroke1_5dp
                     button.cornerRadius = radius12dp
@@ -686,11 +702,12 @@ class CameraBentoDeckView @JvmOverloads constructor(
         /**
          * Applies Material 3 Expressive styling to capture mode switch button.
          *
-         * - Normal mode: colorSurfaceContainerHigh fill, colorOnSurfaceVariant icon, 0dp stroke, 14dp radius.
-         * - Half-Frame / Multi-Camera: colorSecondaryContainer fill, colorOnSecondaryContainer icon, 1.5dp colorPrimary stroke, 12dp radius.
+         * - Normal mode: colorSurfaceContainerHigh fill, colorOnSurfaceVariant icon, 0dp stroke, 18dp radius.
+         * - Half-Frame: colorTertiaryContainer fill, colorOnTertiaryContainer icon, 1.5dp colorTertiary stroke, 12dp radius.
+         * - Multi-Camera: colorSecondaryContainer fill, colorOnSecondaryContainer icon, 1.5dp colorSecondary stroke, 12dp radius.
          */
         @JvmStatic
-        fun styleModeSwitchButton(button: MaterialButton, isSpecialMode: Boolean) {
+        fun styleModeSwitchButton(button: MaterialButton, mode: CaptureMode) {
             val density = button.resources.displayMetrics.density
             val radius12dp = (12f * density).roundToInt()
             val radius18dp = (18f * density).roundToInt()
@@ -701,6 +718,11 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 android.R.attr.colorPrimary,
                 Color.WHITE
             )
+            val colorSecondary = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorSecondary,
+                colorPrimary
+            )
             val colorSecondaryContainer = MaterialColors.getColor(
                 button,
                 com.google.android.material.R.attr.colorSecondaryContainer,
@@ -710,6 +732,21 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 button,
                 com.google.android.material.R.attr.colorOnSecondaryContainer,
                 Color.WHITE
+            )
+            val colorTertiary = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorTertiary,
+                colorPrimary
+            )
+            val colorTertiaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorTertiaryContainer,
+                colorSecondaryContainer
+            )
+            val colorOnTertiaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOnTertiaryContainer,
+                colorOnSecondaryContainer
             )
             val colorSurfaceContainerHigh = MaterialColors.getColor(
                 button,
@@ -722,24 +759,72 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 Color.LTGRAY
             )
 
-            if (isSpecialMode) {
-                button.backgroundTintList = ColorStateList.valueOf(colorSecondaryContainer)
-                button.iconTint = ColorStateList.valueOf(colorOnSecondaryContainer)
-                button.strokeColor = ColorStateList.valueOf(colorPrimary)
-                button.strokeWidth = stroke1_5dp
-                button.cornerRadius = radius12dp
-            } else {
-                button.backgroundTintList = ColorStateList.valueOf(colorSurfaceContainerHigh)
-                button.iconTint = ColorStateList.valueOf(colorOnSurfaceVariant)
-                button.strokeColor = ColorStateList.valueOf(Color.TRANSPARENT)
-                button.strokeWidth = 0
-                button.cornerRadius = radius18dp
+            when {
+                mode.isHalfFrame -> {
+                    button.backgroundTintList = ColorStateList.valueOf(colorTertiaryContainer)
+                    button.iconTint = ColorStateList.valueOf(colorOnTertiaryContainer)
+                    button.strokeColor = ColorStateList.valueOf(colorTertiary)
+                    button.strokeWidth = stroke1_5dp
+                    button.cornerRadius = radius12dp
+                }
+                mode == CaptureMode.MULTI_CAMERA -> {
+                    button.backgroundTintList = ColorStateList.valueOf(colorSecondaryContainer)
+                    button.iconTint = ColorStateList.valueOf(colorOnSecondaryContainer)
+                    button.strokeColor = ColorStateList.valueOf(colorSecondary)
+                    button.strokeWidth = stroke1_5dp
+                    button.cornerRadius = radius12dp
+                }
+                else -> {
+                    button.backgroundTintList = ColorStateList.valueOf(colorSurfaceContainerHigh)
+                    button.iconTint = ColorStateList.valueOf(colorOnSurfaceVariant)
+                    button.strokeColor = ColorStateList.valueOf(Color.TRANSPARENT)
+                    button.strokeWidth = 0
+                    button.cornerRadius = radius18dp
+                }
             }
         }
 
         @JvmStatic
-        fun styleModeSwitchButton(button: MaterialButton, mode: CaptureMode) {
-            styleModeSwitchButton(button, mode != CaptureMode.NORMAL)
+        fun styleModeSwitchButton(button: MaterialButton, isSpecialMode: Boolean) {
+            styleModeSwitchButton(button, if (isSpecialMode) CaptureMode.HALF_FRAME_SBS else CaptureMode.NORMAL)
+        }
+
+        /**
+         * Applies dynamic expressive border and container styling to the bottom island card.
+         */
+        @JvmStatic
+        fun styleDeckCard(card: MaterialCardView, mode: CaptureMode) {
+            val density = card.resources.displayMetrics.density
+            val colorTertiary = MaterialColors.getColor(
+                card,
+                com.google.android.material.R.attr.colorTertiary,
+                Color.MAGENTA
+            )
+            val colorSecondary = MaterialColors.getColor(
+                card,
+                com.google.android.material.R.attr.colorSecondary,
+                Color.CYAN
+            )
+            val colorOutlineVariant = MaterialColors.getColor(
+                card,
+                com.google.android.material.R.attr.colorOutlineVariant,
+                Color.GRAY
+            )
+
+            when {
+                mode.isHalfFrame -> {
+                    card.strokeColor = colorTertiary
+                    card.strokeWidth = (1.5f * density).roundToInt()
+                }
+                mode == CaptureMode.MULTI_CAMERA -> {
+                    card.strokeColor = colorSecondary
+                    card.strokeWidth = (1.5f * density).roundToInt()
+                }
+                else -> {
+                    card.strokeColor = colorOutlineVariant
+                    card.strokeWidth = (1f * density).roundToInt()
+                }
+            }
         }
 
         /**

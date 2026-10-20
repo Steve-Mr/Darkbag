@@ -766,6 +766,36 @@ class SettingsFragment : Fragment() {
             binding.cbSaveJpg.isEnabled = !(isJpg && count == 1)
             binding.cbSaveRaw.isEnabled = !(isRaw && count == 1)
         }
+
+        val colorPrimary = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
+        val colorPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
+        val colorSecondary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondary, colorPrimary)
+        val colorSecondaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondaryContainer, colorPrimaryContainer)
+        val colorSurfaceContainerHigh = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.DKGRAY)
+        val colorOutlineVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
+        val density = resources.displayMetrics.density
+        val stroke1_5dp = (1.5f * density).toInt()
+        val stroke1dp = (1f * density).toInt()
+
+        // JPG Card dynamic expressive morphing (SecondaryContainer when selected)
+        binding.tileFormatJpg.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (isJpg) colorSecondaryContainer else colorSurfaceContainerHigh))
+        binding.tileFormatJpg.strokeColor = if (isJpg) colorSecondary else colorOutlineVariant
+        binding.tileFormatJpg.strokeWidth = if (isJpg) stroke1_5dp else stroke1dp
+        binding.tileFormatJpg.radius = (if (isJpg) 10f else 14f) * density
+
+        // DNG Card dynamic expressive morphing (PrimaryContainer when selected)
+        binding.tileFormatRaw.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (isRaw) colorPrimaryContainer else colorSurfaceContainerHigh))
+        binding.tileFormatRaw.strokeColor = if (isRaw) colorPrimary else colorOutlineVariant
+        binding.tileFormatRaw.strokeWidth = if (isRaw) stroke1_5dp else stroke1dp
+        binding.tileFormatRaw.radius = (if (isRaw) 10f else 14f) * density
+    }
+
+    private fun updateHalfFrameCardStyling(enabled: Boolean) {
+        val colorTertiary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiary, android.graphics.Color.WHITE)
+        val colorOutlineVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
+        val density = resources.displayMetrics.density
+        binding.cardTrayHalfFrame.strokeColor = if (enabled) colorTertiary else colorOutlineVariant
+        binding.cardTrayHalfFrame.strokeWidth = if (enabled) (1.5f * density).toInt() else (1f * density).toInt()
     }
 
     private fun syncLocationSettingState() {
@@ -787,10 +817,13 @@ class SettingsFragment : Fragment() {
         fun updateStartupCards() {
             val colorPrimary = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
             val colorPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
+            val colorTertiary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiary, colorPrimary)
+            val colorTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiaryContainer, colorPrimaryContainer)
             val colorSurfaceContainerHigh = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.DKGRAY)
             val colorOutlineVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
             val colorOnSurface = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface, android.graphics.Color.WHITE)
             val colorOnPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimaryContainer, colorPrimary)
+            val colorOnTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnTertiaryContainer, colorTertiary)
             val density = resources.displayMetrics.density
             val stroke1dp = (1f * density).toInt()
             val stroke2dp = (2f * density).toInt()
@@ -806,10 +839,10 @@ class SettingsFragment : Fragment() {
             binding.txtStartupCameraTitle.setTextColor(if (isCameraActive) colorOnPrimaryContainer else colorOnSurface)
 
             binding.cardStartupPlayground.radius = (if (!isCameraActive) radius10dp else radius14dp).toFloat()
-            binding.cardStartupPlayground.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (!isCameraActive) colorPrimaryContainer else colorSurfaceContainerHigh))
-            binding.cardStartupPlayground.strokeColor = if (!isCameraActive) colorPrimary else colorOutlineVariant
+            binding.cardStartupPlayground.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (!isCameraActive) colorTertiaryContainer else colorSurfaceContainerHigh))
+            binding.cardStartupPlayground.strokeColor = if (!isCameraActive) colorTertiary else colorOutlineVariant
             binding.cardStartupPlayground.strokeWidth = if (!isCameraActive) stroke2dp else stroke1dp
-            binding.txtStartupPlaygroundTitle.setTextColor(if (!isCameraActive) colorOnPrimaryContainer else colorOnSurface)
+            binding.txtStartupPlaygroundTitle.setTextColor(if (!isCameraActive) colorOnTertiaryContainer else colorOnSurface)
         }
 
         fun updateSwitchStates() {
@@ -925,11 +958,14 @@ class SettingsFragment : Fragment() {
             }
         }
 
+        val isHf = prefs.getBoolean(KEY_HALF_FRAME_MODE, false)
         setupSwitch(binding.switchHalfFrameMode, KEY_HALF_FRAME_MODE, false)
-        binding.layoutHalfFrameOptions.visibility = if (prefs.getBoolean(KEY_HALF_FRAME_MODE, false)) View.VISIBLE else View.GONE
+        binding.layoutHalfFrameOptions.visibility = if (isHf) View.VISIBLE else View.GONE
+        updateHalfFrameCardStyling(isHf)
         binding.switchHalfFrameMode.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_HALF_FRAME_MODE, isChecked).apply()
             binding.layoutHalfFrameOptions.visibility = if (isChecked) View.VISIBLE else View.GONE
+            updateHalfFrameCardStyling(isChecked)
         }
         setupSwitch(binding.switchHalfFrameDownsample, KEY_HALF_FRAME_DOWNSAMPLE)
         setupSwitch(binding.switchHalfFrameDateStamp, KEY_HALF_FRAME_DATE_STAMP, false)

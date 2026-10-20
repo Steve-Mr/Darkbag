@@ -415,4 +415,48 @@ class CameraBentoDeckViewTest {
         assertEquals(200, circularCaptureBtn.layoutParams.width)
         assertEquals(200, circularCaptureBtn.layoutParams.height)
     }
+
+    @Test
+    fun testStyleModeSwitchButtonWithCaptureModes() {
+        val button = MaterialButton(themedContext)
+        val density = themedContext.resources.displayMetrics.density
+
+        // Normal mode
+        CameraBentoDeckView.styleModeSwitchButton(button, top.maary.darkbag.modes.CaptureMode.NORMAL)
+        assertEquals((18f * density).roundToInt(), button.cornerRadius)
+        assertEquals(0, button.strokeWidth)
+
+        // Half-Frame SBS
+        CameraBentoDeckView.styleModeSwitchButton(button, top.maary.darkbag.modes.CaptureMode.HALF_FRAME_SBS)
+        assertEquals((12f * density).roundToInt(), button.cornerRadius)
+        assertEquals((1.5f * density).roundToInt(), button.strokeWidth)
+
+        // Half-Frame TB
+        CameraBentoDeckView.styleModeSwitchButton(button, top.maary.darkbag.modes.CaptureMode.HALF_FRAME_TB)
+        assertEquals((12f * density).roundToInt(), button.cornerRadius)
+        assertEquals((1.5f * density).roundToInt(), button.strokeWidth)
+
+        // Multi-Camera
+        CameraBentoDeckView.styleModeSwitchButton(button, top.maary.darkbag.modes.CaptureMode.MULTI_CAMERA)
+        assertEquals((12f * density).roundToInt(), button.cornerRadius)
+        assertEquals((1.5f * density).roundToInt(), button.strokeWidth)
+    }
+
+    @Test
+    fun testStyleDeckCardModes() {
+        val card = com.google.android.material.card.MaterialCardView(themedContext)
+        val density = themedContext.resources.displayMetrics.density
+
+        // Normal mode: 1dp stroke
+        CameraBentoDeckView.styleDeckCard(card, top.maary.darkbag.modes.CaptureMode.NORMAL)
+        assertEquals((1f * density).roundToInt(), card.strokeWidth)
+
+        // Half-Frame mode: 1.5dp stroke
+        CameraBentoDeckView.styleDeckCard(card, top.maary.darkbag.modes.CaptureMode.HALF_FRAME_SBS)
+        assertEquals((1.5f * density).roundToInt(), card.strokeWidth)
+
+        // Multi-Camera mode: 1.5dp stroke
+        CameraBentoDeckView.styleDeckCard(card, top.maary.darkbag.modes.CaptureMode.MULTI_CAMERA)
+        assertEquals((1.5f * density).roundToInt(), card.strokeWidth)
+    }
 }

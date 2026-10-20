@@ -6242,6 +6242,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             readScopedHalfFrameState(prefs)
             cameraViewModel.setHalfFrameStep(halfFrameStep)
             uiBinding.cameraCaptureButton?.setHalfFrameState(isEnabled, halfFrameStep)
+            uiBinding.bottomIslandCard?.let { card ->
+                CameraBentoDeckView.styleDeckCard(card, if (isEnabled) CaptureMode.HALF_FRAME_SBS else CaptureMode.NORMAL)
+            }
 
             val gapView = vfBinding.halfFrameGapIndicator ?: return@post
             val snapshotView = vfBinding.halfFrameSnapshot ?: return@post
@@ -6512,7 +6515,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             CaptureMode.NORMAL -> R.drawable.ic_mode_normal
         }
         btn.setIconResource(iconRes)
-        CameraBentoDeckView.styleModeSwitchButton(btn, activeMode != CaptureMode.NORMAL)
+        CameraBentoDeckView.styleModeSwitchButton(btn, activeMode)
+        cameraUiContainerBinding?.bottomIslandCard?.let { card ->
+            CameraBentoDeckView.styleDeckCard(card, activeMode)
+        }
     }
 
     private fun rotateShutter(targetRotation: Float) {
