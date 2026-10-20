@@ -36,15 +36,25 @@ class BentoTrayCard @JvmOverloads constructor(
         val defaultPadding = (10f * density).toInt()
 
         strokeWidth = 0
-        radius = defaultRadius
-        setContentPadding(defaultPadding, defaultPadding, defaultPadding, defaultPadding)
 
+        val hasCustomRadius = attrs?.getAttributeValue("http://schemas.android.com/apk/res-auto", "cardCornerRadius") != null
+        if (!hasCustomRadius) {
+            radius = defaultRadius
+        }
+
+        val hasCustomPadding = attrs?.getAttributeValue("http://schemas.android.com/apk/res-auto", "contentPadding") != null
+        if (!hasCustomPadding) {
+            setContentPadding(defaultPadding, defaultPadding, defaultPadding, defaultPadding)
+        }
+
+        var roleSpecified = false
         if (attrs != null) {
             val a = context.obtainStyledAttributes(attrs, R.styleable.BentoTrayCard, defStyleAttr, 0)
             try {
                 if (a.hasValue(R.styleable.BentoTrayCard_bentoContainerRole)) {
                     val roleIdx = a.getInt(R.styleable.BentoTrayCard_bentoContainerRole, 2)
                     currentRole = BentoContainerRole.fromAttributeIndex(roleIdx)
+                    roleSpecified = true
                 }
                 if (a.hasValue(R.styleable.BentoTrayCard_bentoRadius)) {
                     radius = a.getDimension(R.styleable.BentoTrayCard_bentoRadius, defaultRadius)
@@ -54,7 +64,11 @@ class BentoTrayCard @JvmOverloads constructor(
             }
         }
 
-        applyContainerRole(currentRole, animated = false)
+        val hasCustomBg = attrs?.getAttributeValue("http://schemas.android.com/apk/res-auto", "cardBackgroundColor") != null
+                || attrs?.getAttributeValue("http://schemas.android.com/apk/res/android", "background") != null
+        if (roleSpecified || !hasCustomBg) {
+            applyContainerRole(currentRole, animated = false)
+        }
     }
 
     /**

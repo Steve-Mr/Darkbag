@@ -790,19 +790,17 @@ class SettingsFragment : Fragment() {
         binding.tileFormatRaw.radius = (if (isRaw) 10f else 14f) * density
     }
 
-    private fun updateHalfFrameCardStyling(enabled: Boolean) {
-        val colorTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiaryContainer, android.graphics.Color.DKGRAY)
-        val colorSurfaceContainerLow = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerLow, android.graphics.Color.WHITE)
+    private fun updateHalfFrameCardStyling(enabled: Boolean, animated: Boolean = true) {
         val colorOnTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnTertiaryContainer, android.graphics.Color.WHITE)
         val colorTertiary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiary, android.graphics.Color.WHITE)
         val colorOnSurfaceVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, android.graphics.Color.GRAY)
 
         if (enabled) {
-            binding.cardTrayHalfFrame.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(colorTertiaryContainer))
+            binding.cardTrayHalfFrame.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.TERTIARY_CONTAINER, animated)
             binding.txtTitleHalfFrame.setTextColor(colorOnTertiaryContainer)
             binding.txtSubHalfFrame.setTextColor(colorOnTertiaryContainer)
         } else {
-            binding.cardTrayHalfFrame.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(colorSurfaceContainerLow))
+            binding.cardTrayHalfFrame.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.SURFACE_CONTAINER_LOW, animated)
             binding.txtTitleHalfFrame.setTextColor(colorTertiary)
             binding.txtSubHalfFrame.setTextColor(colorOnSurfaceVariant)
         }
@@ -972,7 +970,7 @@ class SettingsFragment : Fragment() {
         val isHf = prefs.getBoolean(KEY_HALF_FRAME_MODE, false)
         setupSwitch(binding.switchHalfFrameMode, KEY_HALF_FRAME_MODE, false)
         binding.layoutHalfFrameOptions.visibility = if (isHf) View.VISIBLE else View.GONE
-        updateHalfFrameCardStyling(isHf)
+        updateHalfFrameCardStyling(isHf, animated = false)
         binding.switchHalfFrameMode.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_HALF_FRAME_MODE, isChecked).apply()
             binding.layoutHalfFrameOptions.visibility = if (isChecked) View.VISIBLE else View.GONE
@@ -1229,6 +1227,13 @@ class SettingsFragment : Fragment() {
     }
 
     private fun setupSwitch(switch: com.google.android.material.materialswitch.MaterialSwitch, key: String, defaultValue: Boolean = true) {
+        switch.isChecked = prefs.getBoolean(key, defaultValue)
+        switch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(key, isChecked).apply()
+        }
+    }
+
+    private fun setupSwitch(switch: top.maary.darkbag.ui.bento.BentoSwitchTile, key: String, defaultValue: Boolean = true) {
         switch.isChecked = prefs.getBoolean(key, defaultValue)
         switch.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(key, isChecked).apply()

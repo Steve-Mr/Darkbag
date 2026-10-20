@@ -54,7 +54,21 @@ class BentoSwitchTile @JvmOverloads constructor(
         }
     }
 
+    override fun setEnabled(enabled: Boolean) {
+        super.setEnabled(enabled)
+        @Suppress("SENSELESS_COMPARISON")
+        if (switchView != null) {
+            switchView.isEnabled = enabled
+        }
+        alpha = if (enabled) 1.0f else 0.5f
+    }
+
     init {
+        isClickable = true
+        isFocusable = true
+        setOnClickListener {
+            toggle()
+        }
         val density = context.resources.displayMetrics.density
 
         radius = 14f * density
