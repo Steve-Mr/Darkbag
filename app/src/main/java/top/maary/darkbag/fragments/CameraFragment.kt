@@ -336,6 +336,9 @@ class CameraFragment : Fragment() {
             activeCoordinator = ModeCoordinatorFactory.create(mode, modeExecutionContext)
             activeCoordinator?.onActivated()
             cameraViewModel.setMode(mode)
+            cameraUiContainerBinding?.bottomIslandCard?.let { card ->
+                CameraBentoDeckView.styleDeckCard(card, mode)
+            }
         }
     }
 

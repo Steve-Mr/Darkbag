@@ -102,11 +102,19 @@ class PlaygroundGalleryFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         val dockClearancePx = (88 * resources.displayMetrics.density).toInt()
-        binding.recyclerView.updatePadding(bottom = dockClearancePx)
+        val headerClearancePx = (68 * resources.displayMetrics.density).toInt()
+        binding.appBarLayout.translationZ = 16f * resources.displayMetrics.density
+        binding.recyclerView.updatePadding(
+            top = headerClearancePx,
+            bottom = dockClearancePx
+        )
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             binding.appBarLayout.updatePadding(top = systemBars.top)
-            binding.recyclerView.updatePadding(bottom = systemBars.bottom + dockClearancePx)
+            binding.recyclerView.updatePadding(
+                top = systemBars.top + headerClearancePx,
+                bottom = systemBars.bottom + dockClearancePx
+            )
 
             binding.playgroundBentoDock.updateLayoutParams<MarginLayoutParams> {
                 bottomMargin = systemBars.bottom + (12 * resources.displayMetrics.density).toInt()

@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.google.android.material.button.MaterialButton
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Before
 import org.junit.Test
 import top.maary.darkbag.R
@@ -445,18 +446,20 @@ class CameraBentoDeckViewTest {
     @Test
     fun testStyleDeckCardModes() {
         val card = com.google.android.material.card.MaterialCardView(themedContext)
-        val density = themedContext.resources.displayMetrics.density
 
-        // Normal mode: 1dp stroke
+        // Normal mode: surfaceContainer fill, strokeWidth 0dp
         CameraBentoDeckView.styleDeckCard(card, top.maary.darkbag.modes.CaptureMode.NORMAL)
-        assertEquals((1f * density).roundToInt(), card.strokeWidth)
+        assertEquals(0, card.strokeWidth)
+        assertNotNull(card.cardBackgroundColor)
 
-        // Half-Frame mode: 1.5dp stroke
+        // Half-Frame mode: tertiaryContainer fill, strokeWidth 0dp
         CameraBentoDeckView.styleDeckCard(card, top.maary.darkbag.modes.CaptureMode.HALF_FRAME_SBS)
-        assertEquals((1.5f * density).roundToInt(), card.strokeWidth)
+        assertEquals(0, card.strokeWidth)
+        assertNotNull(card.cardBackgroundColor)
 
-        // Multi-Camera mode: 1.5dp stroke
+        // Multi-Camera mode: secondaryContainer fill, strokeWidth 0dp
         CameraBentoDeckView.styleDeckCard(card, top.maary.darkbag.modes.CaptureMode.MULTI_CAMERA)
-        assertEquals((1.5f * density).roundToInt(), card.strokeWidth)
+        assertEquals(0, card.strokeWidth)
+        assertNotNull(card.cardBackgroundColor)
     }
 }

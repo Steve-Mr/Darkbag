@@ -794,37 +794,30 @@ class CameraBentoDeckView @JvmOverloads constructor(
          */
         @JvmStatic
         fun styleDeckCard(card: MaterialCardView, mode: CaptureMode) {
-            val density = card.resources.displayMetrics.density
-            val colorTertiary = MaterialColors.getColor(
+            val colorTertiaryContainer = MaterialColors.getColor(
                 card,
-                com.google.android.material.R.attr.colorTertiary,
-                Color.MAGENTA
+                com.google.android.material.R.attr.colorTertiaryContainer,
+                Color.DKGRAY
             )
-            val colorSecondary = MaterialColors.getColor(
+            val colorSecondaryContainer = MaterialColors.getColor(
                 card,
-                com.google.android.material.R.attr.colorSecondary,
-                Color.CYAN
+                com.google.android.material.R.attr.colorSecondaryContainer,
+                Color.DKGRAY
             )
-            val colorOutlineVariant = MaterialColors.getColor(
+            val colorSurfaceContainer = MaterialColors.getColor(
                 card,
-                com.google.android.material.R.attr.colorOutlineVariant,
-                Color.GRAY
+                com.google.android.material.R.attr.colorSurfaceContainer,
+                Color.DKGRAY
             )
 
-            when {
-                mode.isHalfFrame -> {
-                    card.strokeColor = colorTertiary
-                    card.strokeWidth = (1.5f * density).roundToInt()
-                }
-                mode == CaptureMode.MULTI_CAMERA -> {
-                    card.strokeColor = colorSecondary
-                    card.strokeWidth = (1.5f * density).roundToInt()
-                }
-                else -> {
-                    card.strokeColor = colorOutlineVariant
-                    card.strokeWidth = (1f * density).roundToInt()
-                }
+            val targetColor = when {
+                mode.isHalfFrame -> colorTertiaryContainer
+                mode == CaptureMode.MULTI_CAMERA -> colorSecondaryContainer
+                else -> colorSurfaceContainer
             }
+
+            card.setCardBackgroundColor(ColorStateList.valueOf(targetColor))
+            card.strokeWidth = 0
         }
 
         /**

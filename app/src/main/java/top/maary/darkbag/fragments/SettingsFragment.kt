@@ -791,11 +791,22 @@ class SettingsFragment : Fragment() {
     }
 
     private fun updateHalfFrameCardStyling(enabled: Boolean) {
+        val colorTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiaryContainer, android.graphics.Color.DKGRAY)
+        val colorSurfaceContainerLow = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerLow, android.graphics.Color.WHITE)
+        val colorOnTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnTertiaryContainer, android.graphics.Color.WHITE)
         val colorTertiary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiary, android.graphics.Color.WHITE)
-        val colorOutlineVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
-        val density = resources.displayMetrics.density
-        binding.cardTrayHalfFrame.strokeColor = if (enabled) colorTertiary else colorOutlineVariant
-        binding.cardTrayHalfFrame.strokeWidth = if (enabled) (1.5f * density).toInt() else (1f * density).toInt()
+        val colorOnSurfaceVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, android.graphics.Color.GRAY)
+
+        if (enabled) {
+            binding.cardTrayHalfFrame.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(colorTertiaryContainer))
+            binding.txtTitleHalfFrame.setTextColor(colorOnTertiaryContainer)
+            binding.txtSubHalfFrame.setTextColor(colorOnTertiaryContainer)
+        } else {
+            binding.cardTrayHalfFrame.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(colorSurfaceContainerLow))
+            binding.txtTitleHalfFrame.setTextColor(colorTertiary)
+            binding.txtSubHalfFrame.setTextColor(colorOnSurfaceVariant)
+        }
+        binding.cardTrayHalfFrame.strokeWidth = 0
     }
 
     private fun syncLocationSettingState() {
@@ -819,7 +830,7 @@ class SettingsFragment : Fragment() {
             val colorPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
             val colorTertiary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiary, colorPrimary)
             val colorTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiaryContainer, colorPrimaryContainer)
-            val colorSurfaceContainerHigh = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.DKGRAY)
+            val colorSurface = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurface, android.graphics.Color.WHITE)
             val colorOutlineVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
             val colorOnSurface = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface, android.graphics.Color.WHITE)
             val colorOnPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimaryContainer, colorPrimary)
@@ -833,13 +844,13 @@ class SettingsFragment : Fragment() {
             val isCameraActive = defaultStartup == STARTUP_CAMERA
 
             binding.cardStartupCamera.radius = (if (isCameraActive) radius10dp else radius14dp).toFloat()
-            binding.cardStartupCamera.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (isCameraActive) colorPrimaryContainer else colorSurfaceContainerHigh))
+            binding.cardStartupCamera.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (isCameraActive) colorPrimaryContainer else colorSurface))
             binding.cardStartupCamera.strokeColor = if (isCameraActive) colorPrimary else colorOutlineVariant
             binding.cardStartupCamera.strokeWidth = if (isCameraActive) stroke2dp else stroke1dp
             binding.txtStartupCameraTitle.setTextColor(if (isCameraActive) colorOnPrimaryContainer else colorOnSurface)
 
             binding.cardStartupPlayground.radius = (if (!isCameraActive) radius10dp else radius14dp).toFloat()
-            binding.cardStartupPlayground.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (!isCameraActive) colorTertiaryContainer else colorSurfaceContainerHigh))
+            binding.cardStartupPlayground.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (!isCameraActive) colorTertiaryContainer else colorSurface))
             binding.cardStartupPlayground.strokeColor = if (!isCameraActive) colorTertiary else colorOutlineVariant
             binding.cardStartupPlayground.strokeWidth = if (!isCameraActive) stroke2dp else stroke1dp
             binding.txtStartupPlaygroundTitle.setTextColor(if (!isCameraActive) colorOnTertiaryContainer else colorOnSurface)

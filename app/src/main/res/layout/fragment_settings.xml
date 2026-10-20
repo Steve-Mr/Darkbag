@@ -92,7 +92,8 @@
                 style="@style/Widget.Darkbag.BentoTray"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="?attr/colorSurfaceContainer"
+                app:strokeWidth="0dp"
+                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                 android:layout_marginBottom="12dp">
 
                 <LinearLayout
@@ -242,7 +243,7 @@
                             android:layout_weight="1"
                             android:layout_marginEnd="4dp"
                             app:cardCornerRadius="12dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                            app:cardBackgroundColor="?attr/colorSurface"
                             app:strokeWidth="1dp"
                             app:strokeColor="?attr/colorOutlineVariant">
 
@@ -273,7 +274,7 @@
                             android:layout_weight="1"
                             android:layout_marginStart="4dp"
                             app:cardCornerRadius="12dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                            app:cardBackgroundColor="?attr/colorSurface"
                             app:strokeWidth="1dp"
                             app:strokeColor="?attr/colorOutlineVariant">
 
@@ -309,6 +310,8 @@
                 style="@style/Widget.Darkbag.BentoTray"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                app:strokeWidth="0dp"
+                app:cardBackgroundColor="?attr/colorSecondaryContainer"
                 android:layout_marginBottom="12dp">
 
                 <LinearLayout
@@ -333,18 +336,18 @@
                             android:text="CAPTURE &amp; OUTPUT"
                             android:textSize="11sp"
                             android:textStyle="bold"
-                            android:textColor="?attr/colorPrimary" />
+                            android:textColor="?attr/colorOnSecondaryContainer" />
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:background="@drawable/bg_bento_badge_primary"
+                            android:background="@drawable/bg_bento_badge_secondary"
                             android:paddingHorizontal="8dp"
                             android:paddingVertical="2dp"
                             android:text="STANDARD"
                             android:textSize="10.5sp"
                             android:textStyle="bold"
-                            android:textColor="?attr/colorPrimary" />
+                            android:textColor="?attr/colorOnSecondaryContainer" />
                     </LinearLayout>
 
                     <!-- Format tile: tile_save_format (cb_save_jpg & cb_save_raw Bento row) -->
@@ -362,7 +365,7 @@
                             android:layout_weight="1"
                             android:layout_marginEnd="4dp"
                             app:cardCornerRadius="14dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                            app:cardBackgroundColor="?attr/colorSurface"
                             app:strokeWidth="1dp"
                             app:strokeColor="?attr/colorOutlineVariant">
 
@@ -406,7 +409,7 @@
                             android:layout_weight="1"
                             android:layout_marginStart="4dp"
                             app:cardCornerRadius="14dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                            app:cardBackgroundColor="?attr/colorSurface"
                             app:strokeWidth="1dp"
                             app:strokeColor="?attr/colorOutlineVariant">
 
@@ -450,7 +453,7 @@
                         android:layout_height="48dp"
                         android:layout_marginBottom="8dp"
                         app:cardCornerRadius="14dp"
-                        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                        app:cardBackgroundColor="?attr/colorSurface"
                         app:strokeWidth="1dp"
                         app:strokeColor="?attr/colorOutlineVariant">
 
@@ -494,7 +497,7 @@
                         android:layout_height="48dp"
                         android:layout_marginBottom="8dp"
                         app:cardCornerRadius="14dp"
-                        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                        app:cardBackgroundColor="?attr/colorSurface"
                         app:strokeWidth="1dp"
                         app:strokeColor="?attr/colorOutlineVariant">
 
@@ -546,6 +549,8 @@
                             android:layout_height="match_parent"
                             android:layout_weight="1"
                             android:layout_marginEnd="4dp"
+                            app:backgroundTint="?attr/colorSurface"
+                            android:textColor="?attr/colorOnSurface"
                             android:text="DEFAULT LENS\nWide (1.0x)" />
 
                         <com.google.android.material.button.MaterialButton
@@ -555,6 +560,8 @@
                             android:layout_height="match_parent"
                             android:layout_weight="1"
                             android:layout_marginStart="4dp"
+                            app:backgroundTint="?attr/colorSurface"
+                            android:textColor="?attr/colorOnSurface"
                             android:text="1.0X FOCAL BASE\n24mm" />
                     </LinearLayout>
 
@@ -563,7 +570,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="48dp"
                         app:cardCornerRadius="14dp"
-                        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                        app:cardBackgroundColor="?attr/colorSurface"
                         app:strokeWidth="1dp"
                         app:strokeColor="?attr/colorOutlineVariant">
 
@@ -611,7 +618,7 @@
                 style="@style/Widget.Darkbag.BentoTray"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:strokeColor="?attr/colorTertiary"
+                app:strokeWidth="0dp"
                 android:layout_marginBottom="12dp">
 
                 <LinearLayout
@@ -630,6 +637,7 @@
                         android:layout_marginBottom="4dp">
 
                         <TextView
+                            android:id="@+id/txt_title_half_frame"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
@@ -652,6 +660,7 @@
 
                     <!-- Sub-label: 半格胶片相机 -->
                     <TextView
+                        android:id="@+id/txt_sub_half_frame"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:paddingHorizontal="4dp"
@@ -666,7 +675,7 @@
                         android:layout_height="48dp"
                         android:layout_marginBottom="8dp"
                         app:cardCornerRadius="14dp"
-                        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                        app:cardBackgroundColor="?attr/colorSurface"
                         app:strokeWidth="1dp"
                         app:strokeColor="?attr/colorOutlineVariant">
 
@@ -724,7 +733,7 @@
                                 android:layout_weight="1"
                                 android:layout_marginEnd="4dp"
                                 app:cardCornerRadius="12dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:cardBackgroundColor="?attr/colorSurface"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
 
@@ -755,7 +764,7 @@
                                 android:layout_weight="1"
                                 android:layout_marginStart="4dp"
                                 app:cardCornerRadius="12dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:cardBackgroundColor="?attr/colorSurface"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
 
@@ -793,7 +802,7 @@
                                 android:layout_weight="1"
                                 android:layout_marginEnd="4dp"
                                 app:cardCornerRadius="12dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:cardBackgroundColor="?attr/colorSurface"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
 
@@ -824,7 +833,7 @@
                                 android:layout_weight="1"
                                 android:layout_marginStart="4dp"
                                 app:cardCornerRadius="12dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:cardBackgroundColor="?attr/colorSurface"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
 
@@ -861,7 +870,8 @@
                 style="@style/Widget.Darkbag.BentoTray"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:strokeColor="?attr/colorTertiary"
+                app:strokeWidth="0dp"
+                app:cardBackgroundColor="?attr/colorTertiaryContainer"
                 android:layout_marginBottom="12dp">
 
                 <LinearLayout
@@ -886,7 +896,7 @@
                             android:text="COLOR SCIENCE &amp; RECIPES"
                             android:textSize="11sp"
                             android:textStyle="bold"
-                            android:textColor="?attr/colorTertiary" />
+                            android:textColor="?attr/colorOnTertiaryContainer" />
                     </LinearLayout>
 
                     <!-- 2-Column Bento Row: btn_menu_target_log & btn_manage_luts -->
@@ -903,6 +913,8 @@
                             android:layout_height="match_parent"
                             android:layout_weight="1.2"
                             android:layout_marginEnd="4dp"
+                            app:backgroundTint="?attr/colorSurface"
+                            android:textColor="?attr/colorOnSurface"
                             android:maxLines="2"
                             android:ellipsize="end"
                             android:text="TARGET LOG\nApple Log" />
@@ -914,8 +926,9 @@
                             android:layout_height="match_parent"
                             android:layout_weight="1.4"
                             android:layout_marginStart="4dp"
-                            app:backgroundTint="?attr/colorTertiaryContainer"
-                            app:strokeColor="?attr/colorTertiary"
+                            app:backgroundTint="?attr/colorSurface"
+                            android:textColor="?attr/colorOnSurface"
+                            app:strokeWidth="0dp"
                             android:maxLines="2"
                             android:ellipsize="end"
                             android:text="3D LUT RECIPES\nClassic Neg" />
@@ -926,7 +939,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="48dp"
                         app:cardCornerRadius="14dp"
-                        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                        app:cardBackgroundColor="?attr/colorSurface"
                         app:strokeWidth="1dp"
                         app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1057,9 +1070,8 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             app:cardCornerRadius="18dp"
-                            app:strokeColor="?attr/colorPrimary"
-                            app:strokeWidth="1dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
+                            app:strokeWidth="0dp"
+                            app:cardBackgroundColor="?attr/colorPrimaryContainer"
                             android:layout_marginBottom="10dp">
 
                             <LinearLayout
@@ -1077,7 +1089,7 @@
                             android:text="A. HDR+ 计算摄影 (COMPUTE PIPELINE)"
                             android:textSize="10sp"
                             android:textStyle="bold"
-                            android:textColor="?attr/colorSecondary" />
+                            android:textColor="?attr/colorOnPrimaryContainer" />
 
                         <!-- Row 1: HDR+ Merge & Burst Frames -->
                         <LinearLayout
@@ -1093,8 +1105,9 @@
                                 android:layout_height="match_parent"
                                 android:layout_weight="1.1"
                                 android:layout_marginEnd="4dp"
-                                app:backgroundTint="?attr/colorSecondaryContainer"
-                                app:strokeColor="?attr/colorSecondary"
+                                app:backgroundTint="?attr/colorSurface"
+                                android:textColor="?attr/colorOnSurface"
+                                app:strokeWidth="0dp"
                                 android:text="HDR+ MERGE\nSabre (Default)" />
 
                             <com.google.android.material.button.MaterialButton
@@ -1104,6 +1117,8 @@
                                 android:layout_height="match_parent"
                                 android:layout_weight="1.0"
                                 android:layout_marginStart="4dp"
+                                app:backgroundTint="?attr/colorSurface"
+                                android:textColor="?attr/colorOnSurface"
                                 android:text="BURST FRAMES\n5 Frames" />
                         </LinearLayout>
 
@@ -1121,6 +1136,8 @@
                                 android:layout_height="match_parent"
                                 android:layout_weight="1.0"
                                 android:layout_marginEnd="4dp"
+                                app:backgroundTint="?attr/colorSurface"
+                                android:textColor="?attr/colorOnSurface"
                                 android:text="UNDEREXPOSURE\nDynamic EV" />
 
                             <com.google.android.material.button.MaterialButton
@@ -1130,6 +1147,8 @@
                                 android:layout_height="match_parent"
                                 android:layout_weight="1.0"
                                 android:layout_marginStart="4dp"
+                                app:backgroundTint="?attr/colorSurface"
+                                android:textColor="?attr/colorOnSurface"
                                 android:text="COLOR ENGINE\nSony Uchimura" />
                         </LinearLayout>
 
@@ -1146,7 +1165,7 @@
                                 android:layout_weight="1.1"
                                 android:layout_marginEnd="4dp"
                                 app:cardCornerRadius="14dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:cardBackgroundColor="?attr/colorSurface"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1191,6 +1210,8 @@
                                 android:layout_height="match_parent"
                                 android:layout_weight="1.0"
                                 android:layout_marginStart="4dp"
+                                app:backgroundTint="?attr/colorSurface"
+                                android:textColor="?attr/colorOnSurface"
                                 android:text="ANTIBANDING\nAuto" />
                         </LinearLayout>
 
@@ -1201,6 +1222,8 @@
                             android:layout_width="match_parent"
                             android:layout_height="50dp"
                             android:layout_marginBottom="10dp"
+                            app:backgroundTint="?attr/colorSurface"
+                            android:textColor="?attr/colorOnSurface"
                             android:text="BURST STRATEGY\nBalanced" />
                             </LinearLayout>
                         </com.google.android.material.card.MaterialCardView>
@@ -1210,9 +1233,8 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             app:cardCornerRadius="18dp"
-                            app:strokeColor="?attr/colorSecondary"
-                            app:strokeWidth="1dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
+                            app:strokeWidth="0dp"
+                            app:cardBackgroundColor="?attr/colorSecondaryContainer"
                             android:layout_marginBottom="10dp">
 
                             <LinearLayout
@@ -1230,7 +1252,7 @@
                             android:text="B. 视频录制 (VIDEO CAPTURE)"
                             android:textSize="10sp"
                             android:textStyle="bold"
-                            android:textColor="?attr/colorSecondary" />
+                            android:textColor="?attr/colorOnSecondaryContainer" />
 
                         <!-- Row 1: Shutter Long Press & RAW Video -->
                         <LinearLayout
@@ -1246,6 +1268,8 @@
                                 android:layout_height="match_parent"
                                 android:layout_weight="1.1"
                                 android:layout_marginEnd="4dp"
+                                app:backgroundTint="?attr/colorSurface"
+                                android:textColor="?attr/colorOnSurface"
                                 android:text="SHUTTER HOLD ACTION\nStandard MP4" />
 
                             <com.google.android.material.button.MaterialButton
@@ -1255,6 +1279,8 @@
                                 android:layout_height="match_parent"
                                 android:layout_weight="1.0"
                                 android:layout_marginStart="4dp"
+                                app:backgroundTint="?attr/colorSurface"
+                                android:textColor="?attr/colorOnSurface"
                                 android:text="RAW VIDEO\n24 FPS · 4K UHD" />
                         </LinearLayout>
                             </LinearLayout>
@@ -1265,9 +1291,8 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             app:cardCornerRadius="18dp"
-                            app:strokeColor="?attr/colorTertiary"
-                            app:strokeWidth="1dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
+                            app:strokeWidth="0dp"
+                            app:cardBackgroundColor="?attr/colorTertiaryContainer"
                             android:layout_marginBottom="10dp">
 
                             <LinearLayout
@@ -1285,7 +1310,7 @@
                             android:text="C. 多摄同拍 (MULTI-CAMERA)"
                             android:textSize="10sp"
                             android:textStyle="bold"
-                            android:textColor="?attr/colorSecondary" />
+                            android:textColor="?attr/colorOnTertiaryContainer" />
 
                         <!-- Multi-camera status text -->
                         <TextView
@@ -1296,7 +1321,7 @@
                             android:paddingHorizontal="4dp"
                             android:fontFamily="monospace"
                             android:textSize="10sp"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
+                            android:textColor="?attr/colorOnTertiaryContainer" />
 
                         <!-- Row 1: switch_multi_camera_mode -->
                         <com.google.android.material.card.MaterialCardView
@@ -1304,7 +1329,7 @@
                             android:layout_height="48dp"
                             android:layout_marginBottom="6dp"
                             app:cardCornerRadius="14dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                            app:cardBackgroundColor="?attr/colorSurface"
                             app:strokeWidth="1dp"
                             app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1356,6 +1381,8 @@
                                 android:layout_height="match_parent"
                                 android:layout_weight="1.0"
                                 android:layout_marginEnd="4dp"
+                                app:backgroundTint="?attr/colorSurface"
+                                android:textColor="?attr/colorOnSurface"
                                 android:text="CAMERA COUNT\nAuto (Max 3)" />
 
                             <com.google.android.material.button.MaterialButton
@@ -1365,6 +1392,8 @@
                                 android:layout_height="match_parent"
                                 android:layout_weight="1.1"
                                 android:layout_marginStart="4dp"
+                                app:backgroundTint="?attr/colorSurface"
+                                android:textColor="?attr/colorOnSurface"
                                 android:text="MULTI-CAMERA\nUW + Wide Dual Pair" />
                         </LinearLayout>
 
@@ -1381,7 +1410,7 @@
                                 android:layout_weight="1.1"
                                 android:layout_marginEnd="4dp"
                                 app:cardCornerRadius="14dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:cardBackgroundColor="?attr/colorSurface"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1425,7 +1454,7 @@
                                 android:layout_weight="1.0"
                                 android:layout_marginStart="4dp"
                                 app:cardCornerRadius="14dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:cardBackgroundColor="?attr/colorSurface"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1470,9 +1499,8 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             app:cardCornerRadius="18dp"
-                            app:strokeColor="?attr/colorSecondary"
-                            app:strokeWidth="1dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
+                            app:strokeWidth="0dp"
+                            app:cardBackgroundColor="?attr/colorSecondaryContainer"
                             android:layout_marginBottom="10dp">
 
                             <LinearLayout
@@ -1490,7 +1518,7 @@
                             android:text="D. 底片编码与存储 (DNG &amp; STORAGE)"
                             android:textSize="10sp"
                             android:textStyle="bold"
-                            android:textColor="?attr/colorSecondary" />
+                            android:textColor="?attr/colorOnSecondaryContainer" />
 
                         <!-- Row 1: DNG Compress & CFA Format -->
                         <LinearLayout
@@ -1506,8 +1534,9 @@
                                 android:layout_height="match_parent"
                                 android:layout_weight="1.1"
                                 android:layout_marginEnd="4dp"
-                                app:backgroundTint="?attr/colorPrimaryContainer"
-                                app:strokeColor="?attr/colorPrimary"
+                                app:backgroundTint="?attr/colorSurface"
+                                android:textColor="?attr/colorOnSurface"
+                                app:strokeWidth="0dp"
                                 android:text="DNG COMPRESS\n16-bit Lossless JPEG" />
 
                             <com.google.android.material.button.MaterialButton
@@ -1517,6 +1546,9 @@
                                 android:layout_height="match_parent"
                                 android:layout_weight="1.0"
                                 android:layout_marginStart="4dp"
+                                app:backgroundTint="?attr/colorSurface"
+                                android:textColor="?attr/colorOnSurface"
+                                app:strokeWidth="0dp"
                                 android:text="CFA FORMAT\nBayer CFA" />
                         </LinearLayout>
 
@@ -1536,7 +1568,7 @@
                                 android:clickable="true"
                                 android:focusable="true"
                                 app:cardCornerRadius="14dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:cardBackgroundColor="?attr/colorSurface"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1578,7 +1610,7 @@
                                 android:clickable="true"
                                 android:focusable="true"
                                 app:cardCornerRadius="14dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:cardBackgroundColor="?attr/colorSurface"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1619,9 +1651,8 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             app:cardCornerRadius="18dp"
-                            app:strokeColor="?attr/colorPrimary"
-                            app:strokeWidth="1dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
+                            app:strokeWidth="0dp"
+                            app:cardBackgroundColor="?attr/colorPrimaryContainer"
                             android:layout_marginBottom="4dp">
 
                             <LinearLayout
@@ -1639,7 +1670,7 @@
                             android:text="E. 取景器界面定制 (VIEWFINDER UI)"
                             android:textSize="10sp"
                             android:textStyle="bold"
-                            android:textColor="?attr/colorSecondary" />
+                            android:textColor="?attr/colorOnPrimaryContainer" />
 
                         <!-- 3-Tier Selector Tray -->
                         <com.google.android.material.card.MaterialCardView
@@ -1647,9 +1678,8 @@
                             android:layout_height="wrap_content"
                             android:layout_marginBottom="8dp"
                             app:cardCornerRadius="20dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
-                            app:strokeWidth="1dp"
-                            app:strokeColor="?attr/colorOutlineVariant"
+                            app:cardBackgroundColor="?attr/colorSurface"
+                            app:strokeWidth="0dp"
                             app:contentPadding="5dp">
 
                             <top.maary.darkbag.ui.BentoSegmentedButtonGroup
@@ -1723,7 +1753,7 @@
                                     android:layout_weight="1"
                                     android:layout_marginEnd="4dp"
                                     app:cardCornerRadius="14dp"
-                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:cardBackgroundColor="?attr/colorSurface"
                                     app:strokeWidth="1dp"
                                     app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1754,7 +1784,7 @@
                                     android:layout_weight="1"
                                     android:layout_marginStart="4dp"
                                     app:cardCornerRadius="14dp"
-                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:cardBackgroundColor="?attr/colorSurface"
                                     app:strokeWidth="1dp"
                                     app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1786,7 +1816,7 @@
                                 android:layout_height="46dp"
                                 android:layout_marginBottom="8dp"
                                 app:cardCornerRadius="14dp"
-                                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                app:cardBackgroundColor="?attr/colorSurface"
                                 app:strokeWidth="1dp"
                                 app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1808,7 +1838,7 @@
                                         android:id="@+id/switch_show_settings_button"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content" />
-                                </LinearLayout>
+                                 </LinearLayout>
                             </com.google.android.material.card.MaterialCardView>
                         </LinearLayout>
 
@@ -1833,7 +1863,7 @@
                                     android:layout_weight="1"
                                     android:layout_marginEnd="4dp"
                                     app:cardCornerRadius="14dp"
-                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:cardBackgroundColor="?attr/colorSurface"
                                     app:strokeWidth="1dp"
                                     app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1864,7 +1894,7 @@
                                     android:layout_weight="1"
                                     android:layout_marginStart="4dp"
                                     app:cardCornerRadius="14dp"
-                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:cardBackgroundColor="?attr/colorSurface"
                                     app:strokeWidth="1dp"
                                     app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1903,7 +1933,7 @@
                                     android:layout_weight="1"
                                     android:layout_marginEnd="4dp"
                                     app:cardCornerRadius="14dp"
-                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:cardBackgroundColor="?attr/colorSurface"
                                     app:strokeWidth="1dp"
                                     app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1934,7 +1964,7 @@
                                     android:layout_weight="1"
                                     android:layout_marginStart="4dp"
                                     app:cardCornerRadius="14dp"
-                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:cardBackgroundColor="?attr/colorSurface"
                                     app:strokeWidth="1dp"
                                     app:strokeColor="?attr/colorOutlineVariant">
 
@@ -1982,7 +2012,7 @@
                                     android:layout_weight="1"
                                     android:layout_marginEnd="4dp"
                                     app:cardCornerRadius="14dp"
-                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:cardBackgroundColor="?attr/colorSurface"
                                     app:strokeWidth="1dp"
                                     app:strokeColor="?attr/colorOutlineVariant">
 
@@ -2013,7 +2043,7 @@
                                     android:layout_weight="1"
                                     android:layout_marginStart="4dp"
                                     app:cardCornerRadius="14dp"
-                                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                                    app:cardBackgroundColor="?attr/colorSurface"
                                     app:strokeWidth="1dp"
                                     app:strokeColor="?attr/colorOutlineVariant">
 
@@ -2046,7 +2076,7 @@
                             android:layout_height="48dp"
                             android:layout_marginBottom="8dp"
                             app:cardCornerRadius="14dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                            app:cardBackgroundColor="?attr/colorSurface"
                             app:strokeWidth="1dp"
                             app:strokeColor="?attr/colorOutlineVariant">
 
@@ -2079,6 +2109,9 @@
                             android:layout_height="50dp"
                             android:layout_marginBottom="4dp"
                             android:visibility="gone"
+                            app:backgroundTint="?attr/colorSurface"
+                            android:textColor="?attr/colorOnSurface"
+                            app:strokeWidth="0dp"
                             android:text="EXTERNAL VIEWER\nSystem Default" />
                             </LinearLayout>
                         </com.google.android.material.card.MaterialCardView>
@@ -2093,6 +2126,8 @@
                 style="@style/Widget.Darkbag.BentoTray"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                app:strokeWidth="0dp"
+                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                 android:layout_marginBottom="12dp">
 
                 <LinearLayout
@@ -2140,6 +2175,9 @@
                             android:layout_height="match_parent"
                             android:layout_weight="1"
                             android:layout_marginEnd="4dp"
+                            app:backgroundTint="?attr/colorSurface"
+                            android:textColor="?attr/colorOnSurface"
+                            app:strokeWidth="0dp"
                             android:text="CLEAR CACHE\nCalculating..." />
 
                         <com.google.android.material.card.MaterialCardView
@@ -2151,7 +2189,7 @@
                             android:clickable="true"
                             android:focusable="true"
                             app:cardCornerRadius="14dp"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                            app:cardBackgroundColor="?attr/colorSurface"
                             app:strokeWidth="1dp"
                             app:strokeColor="?attr/colorOutlineVariant">
 
@@ -2196,8 +2234,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="12dp"
                 android:visibility="gone"
-                app:strokeWidth="1.5dp"
-                app:strokeColor="?attr/colorTertiary">
+                app:strokeWidth="0dp"
+                app:cardBackgroundColor="?attr/colorErrorContainer">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -2221,7 +2259,7 @@
                             android:text="EXPERIMENTAL LAB 🧪"
                             android:textSize="11sp"
                             android:textStyle="bold"
-                            android:textColor="?attr/colorTertiary" />
+                            android:textColor="?attr/colorOnErrorContainer" />
 
                         <TextView
                             android:layout_width="wrap_content"
@@ -2243,7 +2281,7 @@
                         android:paddingBottom="6dp"
                         android:text="硬件实验性特性"
                         android:textSize="10sp"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:textColor="?attr/colorOnErrorContainer" />
 
                     <!-- Row 1: Force 60fps toggle Bento tile -->
                     <com.google.android.material.card.MaterialCardView
@@ -2251,7 +2289,7 @@
                         android:layout_height="48dp"
                         android:layout_marginBottom="8dp"
                         app:cardCornerRadius="14dp"
-                        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                        app:cardBackgroundColor="?attr/colorSurface"
                         app:strokeWidth="1dp"
                         app:strokeColor="?attr/colorOutlineVariant">
 
@@ -2295,7 +2333,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginBottom="8dp"
                         app:cardCornerRadius="12dp"
-                        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                        app:cardBackgroundColor="?attr/colorSurface"
                         app:strokeWidth="0dp">
 
                         <TextView
@@ -2326,6 +2364,9 @@
                             android:insetTop="0dp"
                             android:insetBottom="0dp"
                             app:cornerRadius="12dp"
+                            app:backgroundTint="?attr/colorSurface"
+                            android:textColor="?attr/colorOnSurface"
+                            app:strokeWidth="0dp"
                             android:text="复制日志"
                             android:textSize="11sp" />
 
@@ -2339,6 +2380,9 @@
                             android:insetTop="0dp"
                             android:insetBottom="0dp"
                             app:cornerRadius="12dp"
+                            app:backgroundTint="?attr/colorSurface"
+                            android:textColor="?attr/colorOnSurface"
+                            app:strokeWidth="0dp"
                             android:text="清除日志"
                             android:textSize="11sp" />
                     </LinearLayout>
@@ -2354,9 +2398,10 @@
                         app:cornerRadius="14dp"
                         app:icon="@drawable/ic_lock"
                         app:iconGravity="textStart"
-                        app:iconTint="?attr/colorOnErrorContainer"
-                        app:backgroundTint="?attr/colorErrorContainer"
-                        android:textColor="?attr/colorOnErrorContainer"
+                        app:iconTint="?attr/colorOnError"
+                        app:backgroundTint="?attr/colorError"
+                        android:textColor="?attr/colorOnError"
+                        app:strokeWidth="0dp"
                         android:text="@string/btn_close_experimental"
                         android:textSize="11.5sp"
                         android:textStyle="bold" />
