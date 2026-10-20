@@ -200,19 +200,18 @@
     </com.google.android.material.card.MaterialCardView>
 
     <!-- Bottom Modular Bento Deck -->
-    <com.google.android.material.card.MaterialCardView
+    <top.maary.darkbag.ui.bento.BentoTrayCard
         android:id="@+id/viewer_bento_deck"
-        style="@style/Widget.Material3.CardView.Filled"
+        style="@style/Widget.Darkbag.BentoTray"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginStart="10dp"
         android:layout_marginEnd="10dp"
         android:layout_marginBottom="8dp"
         app:cardCornerRadius="24dp"
-        app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
-        app:strokeWidth="1dp"
-        app:strokeColor="?attr/colorOutlineVariant"
+        app:bentoContainerRole="surfaceContainerLow"
         app:contentPadding="6dp"
+        app:cardElevation="0dp"
         app:layout_constrainedWidth="true"
         app:layout_constraintWidth_max="540dp"
         app:layout_constraintBottom_toBottomOf="parent"
@@ -562,7 +561,7 @@
             </LinearLayout>
 
         </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
+    </top.maary.darkbag.ui.bento.BentoTrayCard>
 
     <!-- Integrated Adjustment Panel -->
     <androidx.constraintlayout.widget.ConstraintLayout
@@ -575,16 +574,14 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <com.google.android.material.card.MaterialCardView
+        <top.maary.darkbag.ui.bento.BentoTrayCard
             android:id="@+id/adjustment_island"
-            style="@style/Widget.Material3.CardView.Filled"
+            style="@style/Widget.Darkbag.BentoTray"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_margin="12dp"
             app:cardCornerRadius="26dp"
-            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
-            app:strokeWidth="1dp"
-            app:strokeColor="?attr/colorOutlineVariant"
+            app:bentoContainerRole="surfaceContainerLow"
             app:contentPadding="8dp"
             app:cardElevation="0dp"
             app:layout_constrainedWidth="true"
@@ -718,8 +715,7 @@
                     android:layout_marginBottom="6dp"
                     app:cardCornerRadius="14dp"
                     app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                    app:strokeWidth="1dp"
-                    app:strokeColor="?attr/colorOutlineVariant"
+                    app:strokeWidth="0dp"
                     app:contentPadding="10dp"
                     app:cardElevation="0dp">
 
@@ -847,7 +843,7 @@
                 </LinearLayout>
 
             </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
     </androidx.constraintlayout.widget.ConstraintLayout>
 
     <!-- Full-screen touch interceptor during saving -->
@@ -932,17 +928,15 @@
             app:layout_constraintEnd_toEndOf="parent" />
 
         <!-- Bottom Action Bar (Floating Concentric Bento Tray in selection mode) -->
-        <com.google.android.material.card.MaterialCardView
+        <top.maary.darkbag.ui.bento.BentoTrayCard
             android:id="@+id/gallery_bottom_bar"
-            style="@style/Widget.Material3.CardView.Filled"
+            style="@style/Widget.Darkbag.BentoTray"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_margin="12dp"
             android:visibility="gone"
             app:cardCornerRadius="26dp"
-            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
-            app:strokeWidth="1dp"
-            app:strokeColor="?attr/colorOutlineVariant"
+            app:bentoContainerRole="surfaceContainerLow"
             app:contentPadding="8dp"
             app:cardElevation="6dp"
             app:layout_constrainedWidth="true"
@@ -966,7 +960,7 @@
                 app:iconTint="?attr/colorOnErrorContainer"
                 app:backgroundTint="?attr/colorErrorContainer"
                 android:textColor="?attr/colorOnErrorContainer" />
-        </com.google.android.material.card.MaterialCardView>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

@@ -29,6 +29,8 @@ import android.widget.LinearLayout
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.ui.CameraBentoDeckView
+import top.maary.darkbag.ui.bento.BentoContainerRole
+import top.maary.darkbag.ui.bento.BentoTrayCard
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -599,6 +601,15 @@ open class ImageViewerFragment : Fragment() {
         val currentGroup = adapter.getGroup(currentIndex)
         val ctx = context ?: return
         val density = ctx.resources.displayMetrics.density
+
+        (currentBinding.viewerBentoDeck as? BentoTrayCard)?.let { deckCard ->
+            val role = when {
+                currentGroup.isHalfFrame() -> BentoContainerRole.TERTIARY_CONTAINER
+                currentGroup.isMultiCamera -> BentoContainerRole.SECONDARY_CONTAINER
+                else -> BentoContainerRole.SURFACE_CONTAINER_LOW
+            }
+            deckCard.setContainerRole(role, animated = true)
+        }
 
         val currentFormat = adapter.getSelectedFormat(currentIndex)
         val isRawSelected = currentFormat == ImageViewerAdapter.FORMAT_DNG

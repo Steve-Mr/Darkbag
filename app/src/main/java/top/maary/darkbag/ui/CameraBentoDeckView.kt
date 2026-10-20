@@ -793,19 +793,24 @@ class CameraBentoDeckView @JvmOverloads constructor(
          * Applies dynamic expressive border and container styling to the bottom island card.
          */
         @JvmStatic
-        fun styleDeckCard(card: MaterialCardView, mode: CaptureMode) {
+        fun styleDeckCard(card: View, mode: CaptureMode) {
+            if (card is top.maary.darkbag.ui.bento.BentoTrayCard) {
+                card.setCaptureMode(mode, animated = false)
+                return
+            }
+            val cardView = card as? MaterialCardView ?: return
             val colorTertiaryContainer = MaterialColors.getColor(
-                card,
+                cardView,
                 com.google.android.material.R.attr.colorTertiaryContainer,
                 Color.DKGRAY
             )
             val colorSecondaryContainer = MaterialColors.getColor(
-                card,
+                cardView,
                 com.google.android.material.R.attr.colorSecondaryContainer,
                 Color.DKGRAY
             )
             val colorSurfaceContainer = MaterialColors.getColor(
-                card,
+                cardView,
                 com.google.android.material.R.attr.colorSurfaceContainer,
                 Color.DKGRAY
             )
@@ -816,8 +821,8 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 else -> colorSurfaceContainer
             }
 
-            card.setCardBackgroundColor(ColorStateList.valueOf(targetColor))
-            card.strokeWidth = 0
+            cardView.setCardBackgroundColor(ColorStateList.valueOf(targetColor))
+            cardView.strokeWidth = 0
         }
 
         /**

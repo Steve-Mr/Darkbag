@@ -38,17 +38,16 @@
     <!-- ========================================================================= -->
     <!-- MODULAR DARKROOM BENTO MATRIX DECK (All controls in the lower thumb zone) -->
     <!-- ========================================================================= -->
-    <com.google.android.material.card.MaterialCardView
+    <top.maary.darkbag.ui.bento.BentoTrayCard
         android:id="@+id/bottom_island_card"
+        style="@style/Widget.Darkbag.BentoTray"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="10dp"
         android:layout_marginBottom="6dp"
-        app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
         app:cardCornerRadius="26dp"
+        app:bentoContainerRole="surfaceContainer"
         app:contentPadding="8dp"
-        app:strokeWidth="1dp"
-        app:strokeColor="?attr/colorOutlineVariant"
         app:cardElevation="0dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -691,7 +690,7 @@
             </LinearLayout>
 
         </top.maary.darkbag.ui.CameraBentoDeckView>
-    </com.google.android.material.card.MaterialCardView>
+    </top.maary.darkbag.ui.bento.BentoTrayCard>
 
     <!-- Legacy LUT List Container kept gone (superseded by ColorRecipeBottomSheet) -->
     <com.google.android.material.card.MaterialCardView

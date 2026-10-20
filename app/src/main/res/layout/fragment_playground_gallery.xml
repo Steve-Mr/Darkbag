@@ -26,19 +26,17 @@
             app:navigationIconTint="?attr/colorOnSurface"
             app:menu="@menu/menu_playground_gallery" />
 
-        <com.google.android.material.card.MaterialCardView
+        <top.maary.darkbag.ui.bento.BentoTrayCard
             android:id="@+id/playground_top_bento_card"
-            style="@style/Widget.Material3.CardView.Filled"
+            style="@style/Widget.Darkbag.BentoTray"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginStart="12dp"
             android:layout_marginEnd="12dp"
             android:layout_marginTop="8dp"
             android:layout_marginBottom="4dp"
-            app:cardCornerRadius="26dp"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
+            app:bentoContainerRole="surfaceContainer"
             app:cardElevation="6dp"
-            app:strokeWidth="0dp"
             app:contentPadding="6dp">
 
             <LinearLayout
@@ -101,7 +99,7 @@
                             android:id="@+id/tv_playground_subtitle"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="外部导入暗房 (0 SANDBOX)"
+                            android:text="外部暗房 · 0 组"
                             android:textSize="9.5sp"
                             android:textColor="?attr/colorTertiary"
                             android:singleLine="true"
@@ -151,7 +149,7 @@
 
             </LinearLayout>
 
-        </com.google.android.material.card.MaterialCardView>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
 
     </com.google.android.material.appbar.AppBarLayout>
 
@@ -182,18 +180,16 @@
         app:backgroundTint="@android:color/transparent" />
 
     <!-- Always-Docked Bottom Concentric Bento Action Deck -->
-    <com.google.android.material.card.MaterialCardView
+    <top.maary.darkbag.ui.bento.BentoTrayCard
         android:id="@+id/playground_bento_dock"
-        style="@style/Widget.Material3.CardView.Filled"
+        style="@style/Widget.Darkbag.BentoTray"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:layout_margin="12dp"
         app:cardCornerRadius="26dp"
-        app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
+        app:bentoContainerRole="surfaceContainerLow"
         app:cardElevation="0dp"
-        app:strokeWidth="1dp"
-        app:strokeColor="?attr/colorOutlineVariant"
         app:contentPadding="8dp">
 
         <LinearLayout
@@ -301,6 +297,6 @@
 
         </LinearLayout>
 
-    </com.google.android.material.card.MaterialCardView>
+    </top.maary.darkbag.ui.bento.BentoTrayCard>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

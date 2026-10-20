@@ -461,5 +461,17 @@ class CameraBentoDeckViewTest {
         CameraBentoDeckView.styleDeckCard(card, top.maary.darkbag.modes.CaptureMode.MULTI_CAMERA)
         assertEquals(0, card.strokeWidth)
         assertNotNull(card.cardBackgroundColor)
+
+        // Verify with BentoTrayCard directly
+        val bentoCard = top.maary.darkbag.ui.bento.BentoTrayCard(themedContext)
+        CameraBentoDeckView.styleDeckCard(bentoCard, top.maary.darkbag.modes.CaptureMode.NORMAL)
+        assertEquals(top.maary.darkbag.ui.bento.BentoContainerRole.SURFACE_CONTAINER, bentoCard.containerRole)
+        assertEquals(0, bentoCard.strokeWidth)
+
+        CameraBentoDeckView.styleDeckCard(bentoCard, top.maary.darkbag.modes.CaptureMode.HALF_FRAME_SBS)
+        assertEquals(top.maary.darkbag.ui.bento.BentoContainerRole.TERTIARY_CONTAINER, bentoCard.containerRole)
+
+        CameraBentoDeckView.styleDeckCard(bentoCard, top.maary.darkbag.modes.CaptureMode.MULTI_CAMERA)
+        assertEquals(top.maary.darkbag.ui.bento.BentoContainerRole.SECONDARY_CONTAINER, bentoCard.containerRole)
     }
 }

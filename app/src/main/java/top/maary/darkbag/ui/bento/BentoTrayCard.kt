@@ -28,6 +28,7 @@ class BentoTrayCard @JvmOverloads constructor(
 ) : MaterialCardView(context, attrs, defStyleAttr) {
 
     private var currentRole: BentoContainerRole = BentoContainerRole.SURFACE_CONTAINER_LOW
+    val containerRole: BentoContainerRole get() = currentRole
     private var colorAnimator: ValueAnimator? = null
 
     init {

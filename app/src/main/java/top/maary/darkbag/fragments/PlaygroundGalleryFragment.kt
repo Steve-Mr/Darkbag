@@ -5,6 +5,8 @@ import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.pipeline.composer.HalfFrameComposer
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.ui.bento.BentoContainerRole
+import top.maary.darkbag.ui.bento.BentoTrayCard
 
 import android.os.Bundle
 import androidx.lifecycle.lifecycleScope
@@ -532,9 +534,18 @@ class PlaygroundGalleryFragment : Fragment() {
     private fun updateBottomBar() {
         val ctx = context ?: return
         val sandboxCount = adapter.currentList.size
-        val subtitleText = "外部导入暗房 ($sandboxCount SANDBOX)"
+        val subtitleText = "外部暗房 · $sandboxCount 组"
         binding.toolbar.subtitle = subtitleText
         binding.tvPlaygroundSubtitle.text = subtitleText
+
+        (binding.playgroundBentoDock as? BentoTrayCard)?.let { dockCard ->
+            val role = if (isSelectionMode && selectedFiles.isNotEmpty()) {
+                BentoContainerRole.SECONDARY_CONTAINER
+            } else {
+                BentoContainerRole.SURFACE_CONTAINER_LOW
+            }
+            dockCard.setContainerRole(role, animated = true)
+        }
 
         val prefs = ctx.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)

@@ -16,7 +16,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
+import top.maary.darkbag.databinding.FragmentPlaygroundGalleryBinding
 import top.maary.darkbag.databinding.ItemPlaygroundImageBinding
+import top.maary.darkbag.ui.bento.BentoContainerRole
+import top.maary.darkbag.ui.bento.BentoTrayCard
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
@@ -127,5 +130,84 @@ class PlaygroundLayoutAndTopBarTest {
         }
         assertEquals(2, layoutManager.spanCount)
         assertEquals(StaggeredGridLayoutManager.GAP_HANDLING_NONE, layoutManager.gapStrategy)
+    }
+
+    @Test
+    fun testPlaygroundGalleryBentoParity() {
+        val binding = FragmentPlaygroundGalleryBinding.inflate(LayoutInflater.from(context))
+
+        // Top bento card
+        assertNotNull(binding.playgroundTopBentoCard)
+        assertTrue(
+            "playgroundTopBentoCard must be BentoTrayCard",
+            binding.playgroundTopBentoCard is BentoTrayCard
+        )
+        val topTray = binding.playgroundTopBentoCard as BentoTrayCard
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER, topTray.containerRole)
+
+        // Bottom bento dock
+        assertNotNull(binding.playgroundBentoDock)
+        assertTrue(
+            "playgroundBentoDock must be BentoTrayCard",
+            binding.playgroundBentoDock is BentoTrayCard
+        )
+        val dockTray = binding.playgroundBentoDock as BentoTrayCard
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER_LOW, dockTray.containerRole)
+
+        // Test dynamic mode reactivity
+        dockTray.setContainerRole(BentoContainerRole.SECONDARY_CONTAINER, animated = false)
+        assertEquals(BentoContainerRole.SECONDARY_CONTAINER, dockTray.containerRole)
+
+        // Verify all required buttons and text views
+        assertNotNull(binding.btnPlaygroundBack)
+        assertNotNull(binding.tvPlaygroundTitle)
+        assertNotNull(binding.tvPlaygroundSubtitle)
+        assertNotNull(binding.btnPlaygroundSelectAll)
+        assertNotNull(binding.btnPlaygroundSettings)
+        assertNotNull(binding.recyclerView)
+        assertNotNull(binding.emptyStateText)
+        assertNotNull(binding.fabAdd)
+        assertNotNull(binding.btnMerge)
+        assertNotNull(binding.btnDisband)
+        assertNotNull(binding.btnExport)
+        assertNotNull(binding.btnDelete)
+    }
+
+    @Test
+    fun testImageViewerBentoDeckAndAdjustmentIslandParity() {
+        val binding = FragmentImageViewerBinding.inflate(LayoutInflater.from(context))
+
+        // Bottom modular bento deck
+        assertNotNull(binding.viewerBentoDeck)
+        assertTrue(
+            "viewerBentoDeck must be BentoTrayCard",
+            binding.viewerBentoDeck is BentoTrayCard
+        )
+        val viewerDeck = binding.viewerBentoDeck as BentoTrayCard
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER_LOW, viewerDeck.containerRole)
+
+        // Test dynamic mode reactivity (Half-frame -> Tertiary, Multi-camera -> Secondary, Normal -> SurfaceContainerLow)
+        viewerDeck.setContainerRole(BentoContainerRole.TERTIARY_CONTAINER, animated = false)
+        assertEquals(BentoContainerRole.TERTIARY_CONTAINER, viewerDeck.containerRole)
+
+        viewerDeck.setContainerRole(BentoContainerRole.SECONDARY_CONTAINER, animated = false)
+        assertEquals(BentoContainerRole.SECONDARY_CONTAINER, viewerDeck.containerRole)
+
+        viewerDeck.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_LOW, animated = false)
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER_LOW, viewerDeck.containerRole)
+
+        // Adjustment island
+        assertNotNull(binding.adjustmentIsland)
+        assertTrue(
+            "adjustmentIsland must be BentoTrayCard",
+            binding.adjustmentIsland is BentoTrayCard
+        )
+
+        // Gallery bottom bar
+        assertNotNull(binding.galleryBottomBar)
+        assertTrue(
+            "galleryBottomBar must be BentoTrayCard",
+            binding.galleryBottomBar is BentoTrayCard
+        )
     }
 }

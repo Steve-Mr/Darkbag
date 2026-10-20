@@ -372,15 +372,15 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <com.google.android.material.card.MaterialCardView
+    <top.maary.darkbag.ui.bento.BentoTrayCard
         android:id="@+id/bottom_island_card"
+        style="@style/Widget.Darkbag.BentoTray"
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:cardBackgroundColor="@android:color/transparent"
-        app:strokeWidth="0dp">
+        app:bentoContainerRole="surfaceContainer">
         <androidx.constraintlayout.widget.ConstraintLayout
             android:layout_width="wrap_content"
             android:layout_height="match_parent">
@@ -390,7 +390,7 @@
             <com.google.android.material.loadingindicator.LoadingIndicator android:id="@+id/processing_progress" android:layout_width="48dp" android:layout_height="48dp" android:visibility="gone" app:layout_constraintTop_toTopOf="@id/photo_view_button" app:layout_constraintBottom_toBottomOf="@id/photo_view_button" app:layout_constraintStart_toStartOf="@id/photo_view_button" app:layout_constraintEnd_toEndOf="@id/photo_view_button" />
             <com.google.android.material.button.MaterialButton android:id="@+id/camera_switch_button" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" />
         </androidx.constraintlayout.widget.ConstraintLayout>
-    </com.google.android.material.card.MaterialCardView>
+    </top.maary.darkbag.ui.bento.BentoTrayCard>
 
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/lut_list_container"
