@@ -96,15 +96,26 @@ class BentoUiKitTest {
         assertFalse(switchTile.switchView.isFocusable)
         assertFalse(switchTile.isChecked)
         assertFalse(switchTile.switchView.isChecked)
+        assertNull(switchTile.checkedIcon)
 
         // Setting isChecked = true/false updates visual and switchView state
         switchTile.isChecked = true
         assertTrue(switchTile.isChecked)
         assertTrue(switchTile.switchView.isChecked)
+        assertNull(switchTile.checkedIcon)
+
+        // Ensure attempting to set checked icon is a no-op and remains null
+        val testDrawable = context.getDrawable(android.R.drawable.ic_menu_camera)
+        assertNotNull(testDrawable)
+        switchTile.checkedIcon = testDrawable
+        assertNull(switchTile.checkedIcon)
+        switchTile.setCheckedIconResource(android.R.drawable.ic_menu_camera)
+        assertNull(switchTile.checkedIcon)
 
         switchTile.isChecked = false
         assertFalse(switchTile.isChecked)
         assertFalse(switchTile.switchView.isChecked)
+        assertNull(switchTile.checkedIcon)
 
         // Title and badge styling
         switchTile.setTitle("Optical Stabilization")

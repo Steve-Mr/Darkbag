@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.util.AttributeSet
 import android.view.Gravity
 import android.view.View
@@ -88,6 +89,7 @@ class BentoSwitchTile @JvmOverloads constructor(
         isCheckable = true
         isClickable = true
         isFocusable = true
+        checkedIcon = null
         setOnClickListener {
             toggle()
         }
@@ -193,6 +195,14 @@ class BentoSwitchTile @JvmOverloads constructor(
                 badgeView.setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorTertiary, Color.MAGENTA))
             }
         }
+    }
+
+    override fun setCheckedIcon(checkedIcon: Drawable?) {
+        super.setCheckedIcon(null)
+    }
+
+    override fun setCheckedIconResource(id: Int) {
+        super.setCheckedIcon(null)
     }
 
     override fun setOnCheckedChangeListener(listener: OnCheckedChangeListener?) {
