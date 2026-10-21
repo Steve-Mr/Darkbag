@@ -10,6 +10,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import android.widget.CompoundButton
+import com.google.android.material.card.MaterialCardView
 import top.maary.darkbag.R
 import top.maary.darkbag.modes.CaptureMode
 import kotlin.math.roundToInt
@@ -89,14 +91,75 @@ class BentoUiKitTest {
         val density = context.resources.displayMetrics.density
 
         assertEquals((14f * density).roundToInt(), switchTile.radius.roundToInt())
+        assertTrue(switchTile.isCheckable)
+        assertFalse(switchTile.switchView.isClickable)
+        assertFalse(switchTile.switchView.isFocusable)
         assertFalse(switchTile.isChecked)
+        assertFalse(switchTile.switchView.isChecked)
 
+        // Setting isChecked = true/false updates visual and switchView state
         switchTile.isChecked = true
         assertTrue(switchTile.isChecked)
         assertTrue(switchTile.switchView.isChecked)
 
+        switchTile.isChecked = false
+        assertFalse(switchTile.isChecked)
+        assertFalse(switchTile.switchView.isChecked)
+
+        // Title and badge styling
         switchTile.setTitle("Optical Stabilization")
         switchTile.setBadge("OIS", BentoSwitchTile.BentoBadgeStyle.PRIMARY)
+
+        // Tapping / clicking the switch tile toggles both tile and switchView and dispatches lambda listener
+        var lambdaCallbackCount = 0
+        var lastLambdaChecked = false
+        switchTile.setOnCheckedChangeListener { view, isChecked ->
+            assertSame(switchTile, view)
+            lambdaCallbackCount++
+            lastLambdaChecked = isChecked
+        }
+
+        switchTile.performClick()
+        assertTrue(switchTile.isChecked)
+        assertTrue(switchTile.switchView.isChecked)
+        assertEquals(1, lambdaCallbackCount)
+        assertTrue(lastLambdaChecked)
+
+        switchTile.performClick()
+        assertFalse(switchTile.isChecked)
+        assertFalse(switchTile.switchView.isChecked)
+        assertEquals(2, lambdaCallbackCount)
+        assertFalse(lastLambdaChecked)
+
+        // MaterialCardView.OnCheckedChangeListener convention
+        var cardCallbackCount = 0
+        var lastCardChecked = false
+        switchTile.setOnCheckedChangeListener(MaterialCardView.OnCheckedChangeListener { card, isChecked ->
+            assertSame(switchTile, card)
+            cardCallbackCount++
+            lastCardChecked = isChecked
+        })
+
+        switchTile.performClick()
+        assertTrue(switchTile.isChecked)
+        assertTrue(switchTile.switchView.isChecked)
+        assertEquals(1, cardCallbackCount)
+        assertTrue(lastCardChecked)
+
+        // CompoundButton.OnCheckedChangeListener convention
+        var compoundCallbackCount = 0
+        var lastCompoundChecked = false
+        switchTile.setOnCheckedChangeListener(CompoundButton.OnCheckedChangeListener { buttonView, isChecked ->
+            assertSame(switchTile.switchView, buttonView)
+            compoundCallbackCount++
+            lastCompoundChecked = isChecked
+        })
+
+        switchTile.performClick()
+        assertFalse(switchTile.isChecked)
+        assertFalse(switchTile.switchView.isChecked)
+        assertEquals(1, compoundCallbackCount)
+        assertFalse(lastCompoundChecked)
     }
 
     @Test

@@ -338,4 +338,10 @@
     <string name="pref_custom_raw_folder">Custom RAW Storage Directory</string>
     <string name="pref_cache_category">Cache &amp; Storage Management</string>
     <string name="pref_force_60fps">Force 60fps Viewfinder Preview</string>
+    <string name="dialog_reset_storage_title">Reset Storage Directory</string>
+    <string name="dialog_reset_storage_jpg_message">Reset custom JPEG storage back to default (Pictures/Darkbag)?</string>
+    <string name="dialog_reset_storage_raw_message">Reset custom RAW storage back to default (Pictures/Darkbag)?</string>
+    <string name="btn_reset">Reset</string>
+    <string name="toast_storage_reset_default">Storage location reset to default (Pictures/Darkbag)</string>
+    <string name="toast_storage_already_default">Already using default storage (Pictures/Darkbag)</string>
 </resources>

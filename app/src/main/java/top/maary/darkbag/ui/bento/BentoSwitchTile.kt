@@ -33,6 +33,11 @@ class BentoSwitchTile @JvmOverloads constructor(
     private val badgeView = TextView(context)
     val switchView = MaterialSwitch(context)
 
+    private var cardCheckedChangeListener: OnCheckedChangeListener? = null
+    private var compoundCheckedChangeListener: CompoundButton.OnCheckedChangeListener? = null
+    private var tileCheckedChangeListener: ((view: BentoSwitchTile, isChecked: Boolean) -> Unit)? = null
+    private var isDispatching = false
+
     override fun isChecked(): Boolean {
         @Suppress("SENSELESS_COMPARISON")
         return if (switchView != null) switchView.isChecked else super.isChecked()
@@ -47,10 +52,26 @@ class BentoSwitchTile @JvmOverloads constructor(
     }
 
     override fun toggle() {
+        val wasChecked = isChecked
         super.toggle()
+        val newChecked = super.isChecked()
         @Suppress("SENSELESS_COMPARISON")
-        if (switchView != null) {
-            switchView.toggle()
+        if (switchView != null && switchView.isChecked != newChecked) {
+            switchView.isChecked = newChecked
+        }
+        if (wasChecked != newChecked) {
+            notifySecondaryListeners(newChecked)
+        }
+    }
+
+    private fun notifySecondaryListeners(checked: Boolean) {
+        if (isDispatching) return
+        isDispatching = true
+        try {
+            compoundCheckedChangeListener?.onCheckedChanged(switchView, checked)
+            tileCheckedChangeListener?.invoke(this, checked)
+        } finally {
+            isDispatching = false
         }
     }
 
@@ -64,6 +85,7 @@ class BentoSwitchTile @JvmOverloads constructor(
     }
 
     init {
+        isCheckable = true
         isClickable = true
         isFocusable = true
         setOnClickListener {
@@ -115,6 +137,8 @@ class BentoSwitchTile @JvmOverloads constructor(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
+            isClickable = false
+            isFocusable = false
         }
         rootLayout.addView(switchView)
 
@@ -171,7 +195,16 @@ class BentoSwitchTile @JvmOverloads constructor(
         }
     }
 
+    override fun setOnCheckedChangeListener(listener: OnCheckedChangeListener?) {
+        super.setOnCheckedChangeListener(listener)
+        this.cardCheckedChangeListener = listener
+    }
+
     fun setOnCheckedChangeListener(listener: CompoundButton.OnCheckedChangeListener?) {
-        switchView.setOnCheckedChangeListener(listener)
+        this.compoundCheckedChangeListener = listener
+    }
+
+    fun setOnCheckedChangeListener(listener: ((view: BentoSwitchTile, isChecked: Boolean) -> Unit)?) {
+        this.tileCheckedChangeListener = listener
     }
 }

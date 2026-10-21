@@ -133,7 +133,6 @@ class SettingsFragment : Fragment() {
         super.onResume()
         updateDebugStats()
         updateAllBentoTiles()
-        setupStorageSettings()
         updateCheckboxStates()
         syncLocationSettingState()
         updateStorageVisibility()
@@ -301,9 +300,15 @@ class SettingsFragment : Fragment() {
     private fun updateUnderexposureTile() {
         val ctx = context ?: return
         val saved = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic") ?: "Dynamic"
+        val displayValue = when {
+            saved.endsWith("EV") -> saved
+            saved == "Off" || saved.startsWith("Off") -> saved
+            saved.startsWith("Dynamic") -> "Dynamic"
+            else -> "$saved EV"
+        }
         binding.btnMenuUnderexposureMode.text = CameraBentoDeckView.formatProTelemetry(
             label = "UNDEREXPOSURE",
-            value = "$saved EV",
+            value = displayValue,
             isTabActive = false,
             isValueManual = saved != "Off",
             context = ctx
@@ -520,7 +525,10 @@ class SettingsFragment : Fragment() {
                 selectedIndex = selectedIndex,
                 badge = "LENS"
             ) { which ->
-                prefs.edit().putString(KEY_DEFAULT_LENS_ID, lenses[which].sensorId).apply()
+                prefs.edit()
+                    .putString(KEY_DEFAULT_LENS_ID, lenses[which].sensorId)
+                    .remove(CameraFragment.KEY_SELECTED_LENS_ID)
+                    .apply()
                 updateDefaultLensTile()
             }
         }
@@ -984,6 +992,11 @@ class SettingsFragment : Fragment() {
         binding.cbHfSaveRaw.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_HALF_FRAME_SAVE_RAW, isChecked).apply()
         }
+        binding.tileHfSaveRaw.setOnClickListener {
+            if (binding.cbHfSaveRaw.isEnabled) {
+                binding.cbHfSaveRaw.toggle()
+            }
+        }
 
         setupMultiCameraSettings()
 
@@ -1144,12 +1157,15 @@ class SettingsFragment : Fragment() {
             binding.btnMenuMultiCameraCount.isEnabled = false
             binding.btnMenuMultiCameraDualPair.isEnabled = false
             binding.cbMultiCameraSaveRaw.isEnabled = false
+            binding.tileMultiCameraSaveRaw.isEnabled = false
             return
         }
 
         val physLenses = multiCamInfo?.physicalLenses?.joinToString { "${it.name} (${it.type})" } ?: "None"
         binding.tvMultiCameraStatus.text = "$hwDesc\n" + getString(R.string.multi_camera_detected_lenses, physLenses)
         binding.switchMultiCameraMode.isEnabled = true
+        binding.cbMultiCameraSaveRaw.isEnabled = true
+        binding.tileMultiCameraSaveRaw.isEnabled = true
 
         setupSwitch(binding.switchMultiCameraMode, KEY_MULTI_CAMERA_MODE, false)
         binding.switchMultiCameraMode.setOnCheckedChangeListener { _, isChecked ->
@@ -1214,6 +1230,11 @@ class SettingsFragment : Fragment() {
         binding.cbMultiCameraSaveRaw.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_MULTI_CAMERA_SAVE_RAW, isChecked).apply()
         }
+        binding.tileMultiCameraSaveRaw.setOnClickListener {
+            if (binding.cbMultiCameraSaveRaw.isEnabled) {
+                binding.cbMultiCameraSaveRaw.toggle()
+            }
+        }
 
         updateMultiCameraVisibility()
     }
@@ -1223,7 +1244,7 @@ class SettingsFragment : Fragment() {
         val countKey = prefs.getString(KEY_MULTI_CAMERA_COUNT_PREF, MultiCameraCountPreference.AUTO_MAX.key)
         binding.btnMenuMultiCameraCount.visibility = if (isEnabled) View.VISIBLE else View.GONE
         binding.btnMenuMultiCameraDualPair.visibility = if (isEnabled && countKey == MultiCameraCountPreference.DUAL.key) View.VISIBLE else View.GONE
-        binding.cbMultiCameraSaveRaw.visibility = if (isEnabled) View.VISIBLE else View.GONE
+        binding.tileMultiCameraSaveRaw.visibility = if (isEnabled) View.VISIBLE else View.GONE
     }
 
     private fun setupSwitch(switch: com.google.android.material.materialswitch.MaterialSwitch, key: String, defaultValue: Boolean = true) {
@@ -1244,8 +1265,51 @@ class SettingsFragment : Fragment() {
         binding.layoutJpgStorage.setOnClickListener {
             jpgPicker.launch(null)
         }
+        binding.layoutJpgStorage.setOnLongClickListener {
+            val currentUri = prefs.getString(KEY_JPG_STORAGE_URI, null)
+            if (currentUri != null) {
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(R.string.dialog_reset_storage_title)
+                    .setMessage(R.string.dialog_reset_storage_jpg_message)
+                    .setNegativeButton(R.string.cancel, null)
+                    .setPositiveButton(R.string.btn_reset) { _, _ ->
+                        prefs.edit()
+                            .remove(KEY_JPG_STORAGE_URI)
+                            .remove(KEY_JPG_STORAGE_URI_NAME)
+                            .apply()
+                        updateStorageVisibility()
+                        Toast.makeText(requireContext(), R.string.toast_storage_reset_default, Toast.LENGTH_SHORT).show()
+                    }
+                    .show()
+            } else {
+                Toast.makeText(requireContext(), R.string.toast_storage_already_default, Toast.LENGTH_SHORT).show()
+            }
+            true
+        }
+
         binding.layoutRawStorage.setOnClickListener {
             rawPicker.launch(null)
+        }
+        binding.layoutRawStorage.setOnLongClickListener {
+            val currentUri = prefs.getString(KEY_RAW_STORAGE_URI, null)
+            if (currentUri != null) {
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(R.string.dialog_reset_storage_title)
+                    .setMessage(R.string.dialog_reset_storage_raw_message)
+                    .setNegativeButton(R.string.cancel, null)
+                    .setPositiveButton(R.string.btn_reset) { _, _ ->
+                        prefs.edit()
+                            .remove(KEY_RAW_STORAGE_URI)
+                            .remove(KEY_RAW_STORAGE_URI_NAME)
+                            .apply()
+                        updateStorageVisibility()
+                        Toast.makeText(requireContext(), R.string.toast_storage_reset_default, Toast.LENGTH_SHORT).show()
+                    }
+                    .show()
+            } else {
+                Toast.makeText(requireContext(), R.string.toast_storage_already_default, Toast.LENGTH_SHORT).show()
+            }
+            true
         }
     }
 
@@ -1281,9 +1345,6 @@ class SettingsFragment : Fragment() {
                 updateDngFormatTile()
             }
         }
-
-        binding.btnMenuDngCompression.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
-        binding.btnMenuDngFormat.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
     }
 
     private fun setupCacheManagement() {

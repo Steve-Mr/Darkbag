@@ -313,4 +313,10 @@
     <string name="pref_force_60fps">强制 60fps 取景</string>
     <string name="pref_hdr_fusion_mode_title">HDR+ 融合算法引擎</string>
     <string name="pref_hdr_fusion_mode_helper">自动模式：1.0x 使用 Spatial+RCD，变焦（≥1.25x）启用 Sabre 超分</string>
+    <string name="dialog_reset_storage_title">重置存储目录</string>
+    <string name="dialog_reset_storage_jpg_message">是否将自定义 JPEG 存储目录重置为默认位置 (Pictures/Darkbag)？</string>
+    <string name="dialog_reset_storage_raw_message">是否将自定义 RAW 存储目录重置为默认位置 (Pictures/Darkbag)？</string>
+    <string name="btn_reset">重置</string>
+    <string name="toast_storage_reset_default">存储目录已恢复为默认 (Pictures/Darkbag)</string>
+    <string name="toast_storage_already_default">当前已是默认存储目录 (Pictures/Darkbag)</string>
 </resources>

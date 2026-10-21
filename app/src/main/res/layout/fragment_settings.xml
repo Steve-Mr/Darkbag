@@ -554,6 +554,7 @@
                                 app:bentoSwitchTitle="@string/pref_half_frame_downsample" />
 
                             <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/tile_hf_save_raw"
                                 android:layout_width="0dp"
                                 android:layout_height="match_parent"
                                 android:layout_weight="1"
@@ -1020,6 +1021,7 @@
                                         app:bentoSwitchBadgeStyle="primary" />
 
                                     <com.google.android.material.card.MaterialCardView
+                                        android:id="@+id/tile_multi_camera_save_raw"
                                         android:layout_width="0dp"
                                         android:layout_height="match_parent"
                                         android:layout_weight="1.0"

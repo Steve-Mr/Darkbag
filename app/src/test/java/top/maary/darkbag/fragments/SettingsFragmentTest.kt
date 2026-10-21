@@ -245,6 +245,8 @@ class SettingsFragmentTest {
         org.junit.Assert.assertNotNull(binding.btnSettingsBack)
 
         // Section 1: Shooting & Capture Modes
+        org.junit.Assert.assertNotNull(binding.tileHfSaveRaw)
+        org.junit.Assert.assertNotNull(binding.tileMultiCameraSaveRaw)
         org.junit.Assert.assertNotNull(binding.cardStartupCamera)
         org.junit.Assert.assertNotNull(binding.cardStartupPlayground)
         org.junit.Assert.assertNotNull(binding.tileSaveFormat)
@@ -320,5 +322,22 @@ class SettingsFragmentTest {
         org.junit.Assert.assertNotNull(binding.btnCopyDebugLogs)
         org.junit.Assert.assertNotNull(binding.btnClearDebugLogs)
         org.junit.Assert.assertNotNull(binding.btnCloseExperimental)
+    }
+
+    @Test
+    fun testUnderexposureFormatting() {
+        fun formatUnderexposure(saved: String): String = when {
+            saved.endsWith("EV") -> saved
+            saved == "Off" || saved.startsWith("Off") -> saved
+            saved.startsWith("Dynamic") -> "Dynamic"
+            else -> "$saved EV"
+        }
+
+        assertEquals("-1 EV", formatUnderexposure("-1 EV"))
+        assertEquals("-2 EV", formatUnderexposure("-2 EV"))
+        assertEquals("Off", formatUnderexposure("Off"))
+        assertEquals("Dynamic", formatUnderexposure("Dynamic"))
+        assertEquals("Dynamic", formatUnderexposure("Dynamic (Experimental)"))
+        assertEquals("-0.5 EV", formatUnderexposure("-0.5"))
     }
 }
