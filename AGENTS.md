@@ -120,3 +120,19 @@ In any medium-to-large scale refactoring, cross-module UI overhaul, or architect
    - If the reviewer subagent issues `REVISE_REQUIRED`, the implementer agent MUST address each finding with actionable code fixes.
    - The implementer then requests a re-audit from the reviewer subagent.
    - Changes may ONLY be committed and considered complete once the reviewer subagent issues an explicit **`APPROVED`** sign-off verdict.
+
+---
+
+## 5. Stage-Gated Atomic Commits & Remote Push Policy (分阶段原子性提交与即时推送规范)
+
+To guarantee incremental traceability, branch safety, and guard against accidental progress loss, AI agents and contributors **MUST MANDATORILY ADOPT** the stage-gated atomic commit and push policy:
+
+1. **Commit Upon Stage Completion (每完成一个阶段就立即提交)**:
+   - Whenever a self-contained feature, refactoring phase, bug fix, or subagent iteration milestone is completed and verified by quality gates (tests pass, reviewer signs off), the agent **MUST promptly create a clean Git commit**.
+   - **NEVER** accumulate multiple disparate development phases into a massive uncommitted working tree.
+2. **Immediate Remote Synchronization (及时推送至远端)**:
+   - Following each atomic stage commit, changes **MUST be pushed to the active remote branch** (`git push origin <branch>`) to maintain remote synchronization.
+3. **Semantic & Clear Commit Copywriting (规范化语义提交信息)**:
+   - All commits must follow semantic commit standards (`fix: ...`, `feat: ...`, `refactor: ...`, `test: ...`).
+   - The commit message body must succinctly describe the root cause, architectural solution, and quality gate verification results.
+
