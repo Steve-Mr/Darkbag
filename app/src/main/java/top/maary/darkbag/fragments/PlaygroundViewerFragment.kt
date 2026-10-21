@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 import top.maary.darkbag.models.ImageGroup
+import top.maary.darkbag.pipeline.composer.HalfFrameComposer
 import top.maary.darkbag.utils.ImageSaver
 import java.io.File
 import androidx.appcompat.widget.PopupMenu
@@ -86,6 +87,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                         onLongPressStarted = { handleLongPressStarted(it) }
                         onLongPressEnded = { handleLongPressEnded(it) }
                         onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
+                        onFormatChanged = { _, _ -> updateControlsVisibility() }
+                        onDerivativeVersionChanged = { _, _ -> updateControlsVisibility() }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
                             val currentIndex = binding.imagePager.currentItem
@@ -563,67 +566,22 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                         val f1 = dngUri1?.let { processFullSafe(sourceDngBytes, it, 0) }
                         val f2 = dngUri2?.let { processFullSafe(sourceDngBytes2, it, 1) }
 
-                        val b1 = if (config.isSwapped) f2 else f1
-                        val b2 = if (config.isSwapped) f1 else f2
+                        val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+                        val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
 
-                        val finalCompositeBitmap: android.graphics.Bitmap? = if (b1 != null || b2 != null) {
-                            val isSBS = currentGroup.hfLayout != "TB"
-
-                            val refW = b1?.width ?: b2?.width ?: 0
-                            val refH = b1?.height ?: b2?.height ?: 0
-
-                            val oriented1 = b1?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-                            val oriented2 = b2?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-
-                            val w1 = oriented1?.width ?: refW
-                            val h1 = oriented1?.height ?: refH
-                            val w2 = oriented2?.width ?: refW
-                            val h2 = oriented2?.height ?: refH
-
-                            val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-                            val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-
-                            var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
-
-                            val economical = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample
-                            if (economical) {
-                                val scale = 0.707f
-                                val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
-                                val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
-                                val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
-                                if (scaled != composite) {
-                                    composite.recycle()
-                                    composite = scaled
-                                }
-                            }
-
-                            if (oriented1 != b1) oriented1?.recycle()
-                            if (oriented2 != b2) oriented2?.recycle()
-                            if (tempB1 != oriented1) tempB1.recycle()
-                            if (tempB2 != oriented2) tempB2.recycle()
-
-                            val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-                            val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-
-                            val t1 = if (config.isSwapped) time2 else time1
-                            val t2 = if (config.isSwapped) time1 else time2
-
-                            val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
-                                composite,
-                                config.showTimestamp,
-                                config.flareType >= 0,
-                                currentGroup.hfLayout ?: "SBS",
-                                time1 = t1,
-                                time2 = t2,
-                                flareType = config.flareType
-                            )
-                            if (finalComposite != composite) {
-                                composite.recycle()
-                            }
-                            f1?.recycle()
-                            f2?.recycle()
-                            finalComposite
-                        } else null
+                        val finalCompositeBitmap = HalfFrameComposer.compose(
+                            frame1 = f1,
+                            frame2 = f2,
+                            layout = currentGroup.hfLayout,
+                            isSwapped = config.isSwapped,
+                            showTimestamp = config.showTimestamp,
+                            flareType = config.flareType,
+                            time1 = time1,
+                            time2 = time2,
+                            downsample = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample
+                        )
+                        f1?.recycle()
+                        f2?.recycle()
 
                         finalCompositeBitmap?.let { bitmap ->
                             val captureMetadata = (currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1)?.let { repository.getCaptureMetadata(it) }

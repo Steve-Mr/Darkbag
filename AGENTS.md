@@ -55,6 +55,27 @@ Darkbag has undergone a comprehensive architectural decoupling to eliminate God-
   - `CameraViewModel` exposes immutable `StateFlow<CameraUiState>` for persistent UI state and `SharedFlow<CameraEffect>` for transient one-shot events.
   - `CameraFragment` observes state using `viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED)` and sends user actions via `CameraUserIntent`.
 
+### Invariant 5: Mandatory Bento Matrix & Material 3 Expressive Design System (Bento 矩阵设计与 M3 Expressive 规范)
+* **Rule**: All user interfaces across Darkbag (Camera Deck, Settings, Playground, ImageViewer, BottomSheets, and Dialogs) **MUST MANDATORILY ADOPT** the Bento Matrix design language and Material 3 Expressive container role specifications.
+* **Prohibitions**:
+  - **NEVER** use flat, monotonous 1dp borders as the primary distinction for major Bento tray containers.
+  - **NEVER** introduce outer wrapping boxes or divider lines around floating Bento island headers (e.g., Playground top header).
+  - **NEVER** write verbose, flamboyant, or marketing-heavy copywriting.
+  - **NEVER** include redundant parenthetical explanations (e.g., `Sabre (Default 默认)`, `动态照片 (Motion Photo)`, `保存高质量 JPG (快速分享)`).
+  - **NEVER** allow telemetry text to wrap to 3 lines or clip outside container boundaries.
+* **Standard Pattern**:
+  - **Container Roles**: Outer Bento trays MUST use semantic M3 Expressive container fills (`colorPrimaryContainer`, `colorSecondaryContainer`, `colorTertiaryContainer`, `colorErrorContainer`, `colorSurfaceContainerHigh`, `colorSurfaceContainer`) with `strokeWidth = 0` (or transparent stroke).
+  - **Porcelain Inner Tiles**: Inner clickable blocks, switches, and tiles MUST use `?attr/colorSurface` (pure white porcelain in light theme) with `?attr/colorOnSurface` typography for crisp, high-contrast visual hierarchy.
+  - **Dynamic Mode Reactivity**: Mode switches (Camera Bento Deck, Settings Half-Frame tray, Startup cards) MUST dynamically and immediately update their container background color to reflect active shooting modes (`colorTertiaryContainer` for Half-Frame, `colorSecondaryContainer` for Multi-Camera, `colorSurfaceContainer` for Normal).
+  - **Concentric Geometry**:
+    - Outer trays: 26dp (top-level cards) or 18dp (nested groups), standard 10dp contentPadding.
+    - Inner blocks: 14dp standard radius, dynamic squircle morphing to 10dp with 1.5dp primary stroke when active/selected.
+    - Uniform gutters: 8dp vertical row gap (`layout_marginBottom = "8dp"`), 8dp column gutter (`4dp + 4dp`).
+  - **Plain & Professional Copywriting**:
+    - Plain, concise, professional camera terminology (e.g., `保存 JPG`, `保存 DNG 底片`, `动态照片`, `记录地理位置`, `光学防抖`, `抗频闪`).
+    - Two-line micro-telemetry: Line 1 short uppercase label (e.g., `BURST FRAMES`), Line 2 status/value (e.g., `5 Frames`), protected defensively by `android:maxLines="2"` and `android:ellipsize="end"`.
+  - **Frameless Floating Islands**: Floating header cards MUST be standalone floating islands with elevation (e.g. 6dp) and `appBarLayout` set to transparent with 0 elevation and `translationZ`. Scrolling content (e.g. `RecyclerView`) MUST smoothly pass underneath the floating island without clipping.
+
 ---
 
 ## 2. Cross-Repository Boundaries (Darkbag vs. hdr-plus)
@@ -78,6 +99,40 @@ Every code modification must satisfy the following gates before submission:
 2. **Native Compilation**:
    - Run: `./gradlew :app:buildCMakeRelease[arm64-v8a]`
    - Zero compilation warnings or link errors.
-3. **Architecture Audit**:
-   - Verify that changes do not introduce regressions against the 4 Architectural Invariants.
+3. **Architecture & Design Audit**:
+   - Verify that changes do not introduce regressions against the 5 Architectural & Design Invariants.
    - For detailed design specifications, consult `docs/ARCHITECTURE_DECOUPLING_DESIGN.md`.
+
+---
+
+## 4. Multi-Agent Dual-Loop Workflow & Continuous Reviewer Sign-Off Policy
+
+In any medium-to-large scale refactoring, cross-module UI overhaul, or architectural change, AI coding agents MUST strictly follow the dual-loop multi-agent review and continuous iteration process:
+
+1. **Role Separation (实施与审查分离)**:
+   - The primary implementer agent (or subagent) MUST NOT self-certify task completion.
+   - A dedicated `design_and_code_reviewer` subagent MUST be defined and launched to evaluate the modifications before task conclusion.
+2. **Dual-Perspective Audit Criteria (双重视角严格审查)**:
+   - **Perspective 1: Design Fidelity & UX Quality**: Validates Material 3 Expressive container roles, porcelain contrast, concentric radii, spacing, frameless floating islands, and plain copywriting compliance (Invariant 5).
+   - **Perspective 2: Code Quality & Architecture Invariants**: Validates compliance with Invariants 1-4 (CaptureSink, CaptureTaskSpec, CaptureModeCoordinator, Headless session zero UI blocking) and cross-repository boundaries.
+   - **Perspective 3: Automated Quality Gates**: Executes `./gradlew testDebugUnitTest --rerun-tasks` (100% pass rate) and `./gradlew :app:buildCMakeRelease[arm64-v8a]` (0 errors).
+3. **Continuous Revision Loop (闭环持续迭代直到 APPROVED)**:
+   - If the reviewer subagent issues `REVISE_REQUIRED`, the implementer agent MUST address each finding with actionable code fixes.
+   - The implementer then requests a re-audit from the reviewer subagent.
+   - Changes may ONLY be committed and considered complete once the reviewer subagent issues an explicit **`APPROVED`** sign-off verdict.
+
+---
+
+## 5. Stage-Gated Atomic Commits & Remote Push Policy (分阶段原子性提交与即时推送规范)
+
+To guarantee incremental traceability, branch safety, and guard against accidental progress loss, AI agents and contributors **MUST MANDATORILY ADOPT** the stage-gated atomic commit and push policy:
+
+1. **Commit Upon Stage Completion (每完成一个阶段就立即提交)**:
+   - Whenever a self-contained feature, refactoring phase, bug fix, or subagent iteration milestone is completed and verified by quality gates (tests pass, reviewer signs off), the agent **MUST promptly create a clean Git commit**.
+   - **NEVER** accumulate multiple disparate development phases into a massive uncommitted working tree.
+2. **Immediate Remote Synchronization (及时推送至远端)**:
+   - Following each atomic stage commit, changes **MUST be pushed to the active remote branch** (`git push origin <branch>`) to maintain remote synchronization.
+3. **Semantic & Clear Commit Copywriting (规范化语义提交信息)**:
+   - All commits must follow semantic commit standards (`fix: ...`, `feat: ...`, `refactor: ...`, `test: ...`).
+   - The commit message body must succinctly describe the root cause, architectural solution, and quality gate verification results.
+

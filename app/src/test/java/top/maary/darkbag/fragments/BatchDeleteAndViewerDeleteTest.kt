@@ -137,4 +137,76 @@ class BatchDeleteAndViewerDeleteTest {
         assertFalse("RAWVID master must not be deleted in Mode 3", distinctUris.contains(rawVideo))
         assertFalse("Exported MP4 must not be deleted in Mode 3", distinctUris.contains(mp4))
     }
+
+    @Test
+    fun testSingleItemDeleteMultiComponentConditions() {
+        val dngUri = Uri.parse("content://media/external/images/media/200")
+        val jpgUri = Uri.parse("content://media/external/images/media/201")
+        val photoGroup = ImageGroup(
+            baseName = "PHOTO_20260901_220000",
+            dngUri = dngUri,
+            jpgUri = jpgUri
+        )
+
+        val hasPhotoDng = photoGroup.dngUri != null || photoGroup.dngUri1 != null || photoGroup.dngUri2 != null || photoGroup.multiDngUris.isNotEmpty()
+        val hasRawVid = photoGroup.isRawVideo || photoGroup.rawVideoUri != null
+        val hasRaw = hasPhotoDng || hasRawVid
+        val hasDerivatives = photoGroup.allDerivativeUris.isNotEmpty()
+        val hasCdng = photoGroup.isCinemaDng || photoGroup.cinemaDngFolderUri != null || photoGroup.cinemaDngFirstFrameUri != null || photoGroup.cinemaDngFrameUris.isNotEmpty()
+
+        val componentCount = (if (hasRaw) 1 else 0) + (if (hasDerivatives) 1 else 0) + (if (hasCdng) 1 else 0)
+        assertTrue("Photo with RAW + JPG must be multi-component", componentCount > 1)
+
+        val singleJpgGroup = ImageGroup(
+            baseName = "PHOTO_JPG_ONLY",
+            jpgUri = jpgUri
+        )
+        val singleComponentCount = (if (singleJpgGroup.dngUri != null) 1 else 0) + (if (singleJpgGroup.allDerivativeUris.isNotEmpty()) 1 else 0)
+        assertEquals("Single format JPG should have component count 1", 1, singleComponentCount)
+    }
+
+    @Test
+    fun testSingleItemDeleteExecutionModes() {
+        val folderUri = Uri.parse("content://documents/tree/DBAG_CDNG_20260901_220000")
+        val frame0 = Uri.parse("content://documents/tree/DBAG_CDNG_20260901_220000/000000.dng")
+        val rawVideo = Uri.parse("content://media/external/video/media/300")
+        val mp4 = Uri.parse("content://media/external/video/media/301")
+
+        val group = ImageGroup(
+            baseName = "CDNG_20260901_220000",
+            isCinemaDng = true,
+            cinemaDngFolderUri = folderUri,
+            cinemaDngFirstFrameUri = frame0,
+            cinemaDngFrameUris = listOf(frame0),
+            isRawVideo = true,
+            rawVideoUri = rawVideo,
+            mp4VideoUri = mp4
+        )
+
+        // Mode 0: Entire Group
+        val urisMode0 = mutableListOf<Uri>()
+        urisMode0.addAll(group.allUris)
+        group.cinemaDngFolderUri?.let { urisMode0.add(it) }
+        assertTrue(urisMode0.contains(rawVideo))
+        assertTrue(urisMode0.contains(mp4))
+        assertTrue(urisMode0.contains(frame0))
+        assertTrue(urisMode0.contains(folderUri))
+
+        // Mode 1: RAW only (CinemaDNG + RAWVID)
+        val urisMode1 = mutableListOf<Uri>()
+        if (group.isCinemaDng || group.cinemaDngFolderUri != null) {
+            group.cinemaDngFolderUri?.let { urisMode1.add(it) }
+        }
+        urisMode1.addAll(group.allMasterRawUris)
+        assertTrue(urisMode1.contains(rawVideo))
+        assertTrue(urisMode1.contains(frame0))
+        assertFalse("Mode 1 must preserve exported derivatives", urisMode1.contains(mp4))
+
+        // Mode 2: Derivatives only
+        val urisMode2 = mutableListOf<Uri>()
+        urisMode2.addAll(group.allDerivativeUris)
+        assertTrue(urisMode2.contains(mp4))
+        assertFalse(urisMode2.contains(rawVideo))
+        assertFalse(urisMode2.contains(frame0))
+    }
 }

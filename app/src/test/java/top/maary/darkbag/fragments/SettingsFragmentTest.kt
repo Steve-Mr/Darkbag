@@ -215,4 +215,129 @@ class SettingsFragmentTest {
         assertEquals(0, mapPreferenceToFusionMode("Unknown"))
         assertEquals(0, mapPreferenceToFusionMode(null))
     }
+
+    @Test
+    fun testFragmentSettingsBindingParity() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val themedContext = android.view.ContextThemeWrapper(context, top.maary.darkbag.R.style.AppTheme)
+        val inflater = android.view.LayoutInflater.from(themedContext)
+        val binding = top.maary.darkbag.databinding.FragmentSettingsBinding.inflate(inflater)
+
+        org.junit.Assert.assertNotNull(binding.cardAdvancedContainer)
+        org.junit.Assert.assertNotNull(binding.headerAdvancedToggle)
+        org.junit.Assert.assertNotNull(binding.ivAdvancedArrow)
+        org.junit.Assert.assertNotNull(binding.containerAdvancedContent)
+        org.junit.Assert.assertNotNull(binding.btnCloseExperimental)
+        org.junit.Assert.assertNotNull(binding.cardStartupCamera)
+        org.junit.Assert.assertNotNull(binding.cardStartupPlayground)
+        org.junit.Assert.assertNotNull(binding.sectionDebug)
+    }
+
+    @Test
+    fun testBentoSettingsMatrixParity() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val themedContext = android.view.ContextThemeWrapper(context, top.maary.darkbag.R.style.AppTheme)
+        val inflater = android.view.LayoutInflater.from(themedContext)
+        val binding = top.maary.darkbag.databinding.FragmentSettingsBinding.inflate(inflater)
+
+        // Top Bento Header
+        org.junit.Assert.assertNotNull(binding.cardSettingsHeader)
+        org.junit.Assert.assertNotNull(binding.btnSettingsBack)
+
+        // Section 1: Shooting & Capture Modes
+        org.junit.Assert.assertNotNull(binding.tileHfSaveRaw)
+        org.junit.Assert.assertNotNull(binding.tileMultiCameraSaveRaw)
+        org.junit.Assert.assertNotNull(binding.cardStartupCamera)
+        org.junit.Assert.assertNotNull(binding.cardStartupPlayground)
+        org.junit.Assert.assertNotNull(binding.tileSaveFormat)
+        org.junit.Assert.assertNotNull(binding.cbSaveJpg)
+        org.junit.Assert.assertNotNull(binding.cbSaveRaw)
+        org.junit.Assert.assertNotNull(binding.switchMotionPhoto)
+        org.junit.Assert.assertNotNull(binding.switchSaveLocation)
+        org.junit.Assert.assertNotNull(binding.btnMenuDefaultLens)
+        org.junit.Assert.assertNotNull(binding.btnMenuDefaultFocal1x)
+        org.junit.Assert.assertNotNull(binding.switchHalfFrameMode)
+        org.junit.Assert.assertNotNull(binding.layoutHalfFrameOptions)
+        org.junit.Assert.assertNotNull(binding.switchHalfFrameDateStamp)
+        org.junit.Assert.assertNotNull(binding.switchHalfFrameLightLeak)
+        org.junit.Assert.assertNotNull(binding.switchHalfFrameDownsample)
+        org.junit.Assert.assertNotNull(binding.cbHfSaveRaw)
+        org.junit.Assert.assertNotNull(binding.switchMirrorFront)
+
+        // Section 2: Color Science & Recipes
+        org.junit.Assert.assertNotNull(binding.btnMenuTargetLog)
+        org.junit.Assert.assertNotNull(binding.btnManageLuts)
+        org.junit.Assert.assertNotNull(binding.switchLivePreview)
+
+        // Section 3: Advanced Settings (Collapsible Bento)
+        org.junit.Assert.assertNotNull(binding.cardAdvancedContainer)
+        org.junit.Assert.assertNotNull(binding.headerAdvancedToggle)
+        org.junit.Assert.assertNotNull(binding.ivAdvancedArrow)
+        org.junit.Assert.assertNotNull(binding.containerAdvancedContent)
+
+        // Sub-Matrix A: HDR+ & Compute Pipeline
+        org.junit.Assert.assertNotNull(binding.btnMenuHdrFusionMode)
+        org.junit.Assert.assertNotNull(binding.btnMenuHdrBurstMode)
+        org.junit.Assert.assertNotNull(binding.btnMenuUnderexposureMode)
+        org.junit.Assert.assertNotNull(binding.btnMenuColorEngine)
+        org.junit.Assert.assertNotNull(binding.switchHdrPlusOis)
+        org.junit.Assert.assertNotNull(binding.btnMenuAntibanding)
+        org.junit.Assert.assertNotNull(binding.btnMenuBurstProcessingStrategy)
+        org.junit.Assert.assertNotNull(binding.btnMenuShutterLongPress)
+
+        // Sub-Matrix B: RAW Video & Multi-Camera
+        org.junit.Assert.assertNotNull(binding.btnMenuRawVideo)
+        org.junit.Assert.assertNotNull(binding.btnMenuMultiCameraDualPair)
+        org.junit.Assert.assertNotNull(binding.tvMultiCameraStatus)
+        org.junit.Assert.assertNotNull(binding.switchMultiCameraMode)
+        org.junit.Assert.assertNotNull(binding.btnMenuMultiCameraCount)
+        org.junit.Assert.assertNotNull(binding.switchMultiCameraForceEnable)
+        org.junit.Assert.assertNotNull(binding.cbMultiCameraSaveRaw)
+
+        // Sub-Matrix C: DNG Format & Storage
+        org.junit.Assert.assertNotNull(binding.btnMenuDngCompression)
+        org.junit.Assert.assertNotNull(binding.btnMenuDngFormat)
+        org.junit.Assert.assertNotNull(binding.layoutJpgStorage)
+        org.junit.Assert.assertNotNull(binding.layoutRawStorage)
+
+        // Sub-Matrix D: Advanced UI Customization
+        org.junit.Assert.assertNotNull(binding.toggleUiTiers)
+        org.junit.Assert.assertNotNull(binding.btnTierPs)
+        org.junit.Assert.assertNotNull(binding.btnTierFilm)
+        org.junit.Assert.assertNotNull(binding.btnTierPro)
+        org.junit.Assert.assertNotNull(binding.containerTierPs)
+        org.junit.Assert.assertNotNull(binding.containerTierFilm)
+        org.junit.Assert.assertNotNull(binding.containerTierPro)
+        org.junit.Assert.assertNotNull(binding.switchUseInternalViewer)
+        org.junit.Assert.assertNotNull(binding.btnMenuExternalViewer)
+
+        // Section 4: System & About
+        org.junit.Assert.assertNotNull(binding.btnClearCache)
+        org.junit.Assert.assertNotNull(binding.cardAbout)
+
+        // Section 5: Experimental Lab
+        org.junit.Assert.assertNotNull(binding.sectionDebug)
+        org.junit.Assert.assertNotNull(binding.switchForce60fps)
+        org.junit.Assert.assertNotNull(binding.tvDebugStats)
+        org.junit.Assert.assertNotNull(binding.btnCopyDebugLogs)
+        org.junit.Assert.assertNotNull(binding.btnClearDebugLogs)
+        org.junit.Assert.assertNotNull(binding.btnCloseExperimental)
+    }
+
+    @Test
+    fun testUnderexposureFormatting() {
+        fun formatUnderexposure(saved: String): String = when {
+            saved.endsWith("EV") -> saved
+            saved == "Off" || saved.startsWith("Off") -> saved
+            saved.startsWith("Dynamic") -> "Dynamic"
+            else -> "$saved EV"
+        }
+
+        assertEquals("-1 EV", formatUnderexposure("-1 EV"))
+        assertEquals("-2 EV", formatUnderexposure("-2 EV"))
+        assertEquals("Off", formatUnderexposure("Off"))
+        assertEquals("Dynamic", formatUnderexposure("Dynamic"))
+        assertEquals("Dynamic", formatUnderexposure("Dynamic (Experimental)"))
+        assertEquals("-0.5 EV", formatUnderexposure("-0.5"))
+    }
 }

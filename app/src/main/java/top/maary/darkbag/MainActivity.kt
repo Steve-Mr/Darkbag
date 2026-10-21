@@ -142,7 +142,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateFloatingToolbarVisibility() {
         val prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val showToolbar = prefs.getBoolean(SettingsFragment.KEY_SHOW_FLOATING_TOOLBAR, true)
         val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
         val enablePlayground = prefs.getBoolean(SettingsFragment.KEY_ENABLE_PLAYGROUND, true)
 
@@ -153,25 +152,10 @@ class MainActivity : AppCompatActivity() {
         btnCamera.visibility = if (enableCamera) View.VISIBLE else View.GONE
         btnPlayground.visibility = if (enablePlayground) View.VISIBLE else View.GONE
 
-        if (!showToolbar || !enableCamera || !enablePlayground || !isAllowedDestination || isFloatingToolbarForcedHidden) {
-            toolbarLayout.visibility = View.GONE
-            // Keep toolbar height for layout stability when navigating away to settings or viewer
-            if (isAllowedDestination || isFloatingToolbarForcedHidden) {
-                toolbarHeightWithInsets = 0
-            }
-        } else {
-            toolbarLayout.visibility = View.VISIBLE
-            // Recalculate if it just became visible
-            toolbarLayout.post {
-                if (toolbarLayout.visibility == View.VISIBLE) {
-                     val lp = toolbarLayout.layoutParams as MarginLayoutParams
-                     toolbarHeightWithInsets = toolbarLayout.height + lp.topMargin + lp.bottomMargin
-                }
-                _toolbarHeightFlow.value = toolbarHeightWithInsets
-            }
-        }
-
-        _toolbarHeightFlow.value = toolbarHeightWithInsets
+        // Retired: CameraFragment has btn_bento_playground and PlaygroundGalleryFragment has its own top Bento navigation
+        toolbarLayout.visibility = View.GONE
+        toolbarHeightWithInsets = 0
+        _toolbarHeightFlow.value = 0
 
         btnCamera.isChecked = currentDestId == R.id.camera_fragment
         btnPlayground.isChecked = currentDestId == R.id.playground_gallery_fragment
