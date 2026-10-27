@@ -1541,6 +1541,18 @@
                             </LinearLayout>
                         </com.google.android.material.card.MaterialCardView>
                     </top.maary.darkbag.ui.bento.BentoRowLayout>
+
+                    <!-- Row 2: Replay Onboarding Button -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_replay_onboarding"
+                        style="@style/Widget.Darkbag.BentoTile.Button"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="8dp"
+                        app:backgroundTint="?attr/colorSurface"
+                        android:textColor="?attr/colorOnSurface"
+                        app:strokeWidth="0dp"
+                        android:text="SETUP WIZARD\nReconfigure Startup &amp; Formats" />
                 </LinearLayout>
             </top.maary.darkbag.ui.bento.BentoTrayCard>
 

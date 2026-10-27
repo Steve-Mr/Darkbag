@@ -344,4 +344,34 @@
     <string name="btn_reset">Reset</string>
     <string name="toast_storage_reset_default">Storage location reset to default (Pictures/Darkbag)</string>
     <string name="toast_storage_already_default">Already using default storage (Pictures/Darkbag)</string>
+
+    <!-- Onboarding Flow -->
+    <string name="onboarding_header_title">DARKBAG SETUP</string>
+    <string name="onboarding_subtitle">Computational Photography · Lossless Negatives · Darkroom</string>
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_step_format">STEP %1$02d / %2$02d</string>
+    <string name="onboarding_btn_next">Next →</string>
+    <string name="onboarding_btn_start">Complete Setup · Enter Darkbag</string>
+    <string name="onboarding_btn_grant_perms">Grant Core Permissions &amp; Continue →</string>
+    <string name="onboarding_perm_camera_title">Camera Hardware Access</string>
+    <string name="onboarding_perm_camera_desc">Access RAW sensor stream and computational photography</string>
+    <string name="onboarding_perm_notif_title">Background Processing Notifications</string>
+    <string name="onboarding_perm_notif_desc">Show background photo synthesis and DNG export progress</string>
+    <string name="onboarding_perm_audio_title">Microphone Audio Recording</string>
+    <string name="onboarding_perm_audio_desc">Record audio for MP4 &amp; RAW video (not needed for photos)</string>
+    <string name="onboarding_perm_granted">✓ GRANTED</string>
+    <string name="onboarding_perm_grant">Grant</string>
+    <string name="onboarding_format_dual_desc">✨ JPG + DNG (Recommended): Instant shareable graded JPGs while preserving lossless compressed DNG negatives for darkroom grading.</string>
+    <string name="onboarding_format_jpg_desc">⚡ JPG Only: Saves maximum storage, ideal for everyday snapshots (no DNG negatives for darkroom lossless re-grading).</string>
+    <string name="onboarding_format_raw_desc">🎞️ DNG Only: Pure digital negatives, ready to be graded in Darkbag Playground or desktop software.</string>
+    <string name="onboarding_recipe_log_hint">Film simulation LUTs must be mapped from a specific Log transfer curve to accurately render colors. Pairing them on import allows Darkbag to auto-switch the matching Log curve in the viewfinder.</string>
+    <string name="onboarding_recipe_import_action">Import .cube matching %1$s</string>
+    <string name="onboarding_recipe_imported_count">Associated Recipe: %1$s ➔ %2$s</string>
+    <string name="onboarding_recipe_skip_hint">Tip: If you do not have LUT files now, tap Next to skip. Darkbag will use the built-in cinematic film tone curve.</string>
+    <string name="onboarding_tier_ps_desc">📷 P&amp;S Minimal Layer: Clean viewfinder with focal length and shutter only, focused on street framing.</string>
+    <string name="onboarding_tier_film_desc">🎞️ FILM Simulation Layer (Recommended): Viewfinder includes Film Recipe capsule, Half-frame &amp; Multi-cam modes, and dynamic HDR+ underexposure.</string>
+    <string name="onboarding_tier_pro_desc">🎛️ PRO Manual Layer: Unlocks manual dials (ISO, Shutter speed, Manual focus) and focus peaking highlight.</string>
+    <string name="onboarding_ready_desc">Setup complete! You can adjust any of these options at any time in Darkbag Settings.</string>
+    <string name="pref_replay_onboarding">Setup Wizard</string>
+    <string name="pref_replay_onboarding_desc">Re-run startup module, formats, and UI tier setup</string>
 </resources>

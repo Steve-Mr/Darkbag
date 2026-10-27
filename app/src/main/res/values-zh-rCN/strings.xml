@@ -166,7 +166,7 @@
     <string name="cinemadng_export_success">CinemaDNG 单帧已导出并保存</string>
     <string name="cinemadng_export_failed">单帧导出失败</string>
 
-    <string name="export_hub_title">暗袋出片中心</string>
+    <string name="export_hub_title">Darkbag 出片中心</string>
     <string name="export_hub_subtitle_default">选择色彩方案与母带衍生体导出规格</string>
     <string name="export_hub_subtitle_rawvid">%1$s (%2$d 帧 / %3$s)</string>
     <string name="export_hub_subtitle_cdng">%1$s (%2$d 帧 CinemaDNG)</string>
@@ -319,4 +319,34 @@
     <string name="btn_reset">重置</string>
     <string name="toast_storage_reset_default">存储目录已恢复为默认 (Pictures/Darkbag)</string>
     <string name="toast_storage_already_default">当前已是默认存储目录 (Pictures/Darkbag)</string>
+
+    <!-- 首次安装引导流程 -->
+    <string name="onboarding_header_title">DARKBAG 配置向导</string>
+    <string name="onboarding_subtitle">计算摄影 · 无损底片 · 胶片暗房工作台</string>
+    <string name="onboarding_skip">跳过</string>
+    <string name="onboarding_step_format">步骤 %1$02d / %2$02d</string>
+    <string name="onboarding_btn_next">下一步 →</string>
+    <string name="onboarding_btn_start">完成配置 · 进入 Darkbag</string>
+    <string name="onboarding_btn_grant_perms">一键授予核心权限并继续 →</string>
+    <string name="onboarding_perm_camera_title">相机硬件访问</string>
+    <string name="onboarding_perm_camera_desc">开启 RAW 传感器数据流与多帧计算摄影</string>
+    <string name="onboarding_perm_notif_title">后台冲印进度通知</string>
+    <string name="onboarding_perm_notif_desc">显示后台照片合成与 DNG 冲印队列</string>
+    <string name="onboarding_perm_audio_title">麦克风音频录制</string>
+    <string name="onboarding_perm_audio_desc">长按快门录制 MP4 / RAW 视频音轨（拍照免授）</string>
+    <string name="onboarding_perm_granted">✓ 已授权</string>
+    <string name="onboarding_perm_grant">授权</string>
+    <string name="onboarding_format_dual_desc">✨ JPG + DNG 双修 (推荐)：直出调色 JPG 方便即时分享，同时保存无损压缩 DNG (~12MB)，供「暗房工作台」无损重调色彩与半格拼图。</string>
+    <string name="onboarding_format_jpg_desc">⚡ 仅保存 JPG 照片：最节省存储空间，适合轻快记录（注：无 DNG 底片无法在暗房中二次无损调色）。</string>
+    <string name="onboarding_format_raw_desc">🎞️ 纯 DNG 数字底片模式：仅保存无损压缩 DNG 母带，完全交由「暗房工作台」或外部专业后期软件冲印。</string>
+    <string name="onboarding_recipe_log_hint">胶片模拟 LUT 必须基于特定的 Log 曲线才能精准还原色彩。导入时建立关联，取景器便能根据选定的胶片配方自动切换匹配的 Log 曲线。</string>
+    <string name="onboarding_recipe_import_action">导入匹配 %1$s 的 .cube 文件</string>
+    <string name="onboarding_recipe_imported_count">已关联配方: %1$s ➔ %2$s</string>
+    <string name="onboarding_recipe_skip_hint">提示：若当前暂无 LUT 文件，可直接点击「下一步」跳过；Darkbag 将默认使用电影感色调算法直出。</string>
+    <string name="onboarding_tier_ps_desc">📷 P&amp;S 极简快拍层：隐藏高阶参数与模式磁贴，仅保留焦段切换与快门，专注街头抓拍构图。</string>
+    <string name="onboarding_tier_film_desc">🎞️ FILM 胶片创作层（推荐）：取景器常驻 Log/LUT 配方切换胶囊、半格胶片 / 多摄同开模式切换 与 HDR+ 动态欠曝 磁贴。</string>
+    <string name="onboarding_tier_pro_desc">🎛️ PRO 专业手动层：全功能开启 手动 ISO / 快门速度 / 对焦拨盘 与 峰值对焦辅助高亮 (Focus Peaking)。</string>
+    <string name="onboarding_ready_desc">已为您配置完成！随时可在设置菜单中调整。</string>
+    <string name="pref_replay_onboarding">配置向导</string>
+    <string name="pref_replay_onboarding_desc">重新配置初始模块、格式与操控层级</string>
 </resources>

@@ -162,6 +162,14 @@ class SettingsFragment : Fragment() {
                 aboutClickCount = 0
             }
         }
+
+        binding.btnReplayOnboarding.setOnClickListener {
+            val bundle = Bundle().apply {
+                putBoolean("force_onboarding", true)
+            }
+            Navigation.findNavController(requireActivity(), R.id.fragment_container)
+                .navigate(R.id.action_settings_to_permissions, bundle)
+        }
     }
 
     private fun updateDebugVisibility() {
@@ -1508,6 +1516,8 @@ class SettingsFragment : Fragment() {
         const val KEY_DEFAULT_STARTUP = "default_startup_page"
         const val STARTUP_CAMERA = "camera"
         const val STARTUP_PLAYGROUND = "playground"
+
+        const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
 
         const val KEY_ENABLE_CAMERA = "enable_camera"
         const val KEY_ENABLE_PLAYGROUND = "enable_playground"

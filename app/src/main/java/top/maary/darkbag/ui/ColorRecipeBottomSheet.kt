@@ -401,14 +401,21 @@ object ColorRecipeBottomSheet {
                         currentLut = null
                         prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
                     } else {
-                        // If current Log is "None" when picking a LUT, auto-select standard Log curve
-                        if (currentLog == "None") {
+                        val fileName = entry.fileName
+                        val lutManager = LutManager(context)
+                        val assocLog = fileName?.let { lutManager.getAssociatedLog(it) }
+                        if (!assocLog.isNullOrEmpty()) {
+                            currentLog = assocLog
+                            prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, currentLog).apply()
+                            updateLogButtonsUi()
+                        } else if (currentLog == "None") {
+                            // If current Log is "None" when picking a LUT, auto-select standard Log curve
                             val defaultLog = SettingsFragment.LOG_CURVES.getOrNull(1) ?: "Arri LogC3"
                             currentLog = defaultLog
                             prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, currentLog).apply()
                             updateLogButtonsUi()
                         }
-                        currentLut = entry.fileName
+                        currentLut = fileName
                         prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, currentLut).apply()
                     }
                     onRecipeSelected(currentLog, currentLut)

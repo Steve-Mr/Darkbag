@@ -162,9 +162,14 @@ class LutManagementFragment : Fragment() {
 
             holder.itemView.setOnClickListener {
                 if (isActive) {
-                     prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                    prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
                 } else {
-                     prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, file.name).apply()
+                    val editor = prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, file.name)
+                    val assocLog = lutManager.getAssociatedLog(file.name)
+                    if (!assocLog.isNullOrEmpty()) {
+                        editor.putString(SettingsFragment.KEY_TARGET_LOG, assocLog)
+                    }
+                    editor.apply()
                 }
                 updateList()
             }
