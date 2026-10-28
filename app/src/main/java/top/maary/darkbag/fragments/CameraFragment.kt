@@ -1914,16 +1914,14 @@ class CameraFragment : Fragment() {
     private fun updateTierUi(tier: CameraUiTier = cameraViewModel.uiState.value.uiTier) {
         val binding = cameraUiContainerBinding ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val showLutSwitcher = prefs.getBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, true)
-        val showManualControls = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, tier)
         val isAnyManual = isManualFocus || isManualIso || isManualShutter || currentEvIndex != 0
         CameraBentoDeckView.bindTierState(
             binding = binding,
             tier = tier,
             isAnyManual = isAnyManual,
             hasActiveManualTab = activeManualTab != null,
-            showLutSwitcherPref = showLutSwitcher,
-            showManualControlsPref = showManualControls
+            visibilitySpec = spec
         )
         CameraBentoDeckView.applyDynamicRowHeights(binding)
     }
@@ -1931,11 +1929,12 @@ class CameraFragment : Fragment() {
     /** Enabled or disabled a button to switch cameras depending on the available cameras */
     private fun updateCameraSwitchButton() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val showSwitch = prefs.getBoolean(SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, true)
+        val currentTier = cameraViewModel.uiState.value.uiTier
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, currentTier)
         try {
             cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled =
                 hasBackCamera() && hasFrontCamera()
-            cameraUiContainerBinding?.cameraSwitchButtonAlt?.visibility = if (showSwitch) View.VISIBLE else View.GONE
+            cameraUiContainerBinding?.cameraSwitchButtonAlt?.visibility = if (spec.showCameraSwitch) View.VISIBLE else View.GONE
         } catch (exception: Exception) {
             cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled = false
         }
@@ -2642,8 +2641,9 @@ class CameraFragment : Fragment() {
     private fun updateFocusPeakingState() {
         val context = context ?: return
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val peakingPref = prefs.getBoolean(SettingsFragment.KEY_EXP_FOCUS_PEAKING, false)
-        val enabled = peakingPref && (activeManualTab == "Focus" || isManualFocus)
+        val currentTier = cameraViewModel.uiState.value.uiTier
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, currentTier)
+        val enabled = spec.enableFocusPeaking && (activeManualTab == "Focus" || isManualFocus)
         lutProcessor?.setFocusPeakingEnabled(enabled)
     }
 
@@ -4421,7 +4421,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     private fun updateHdrPlusConstraints() {
         val binding = cameraUiContainerBinding ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val showFlashButton = prefs.getBoolean(SettingsFragment.KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, true)
+        val currentTier = cameraViewModel.uiState.value.uiTier
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, currentTier)
+        val showFlashButton = spec.showUnderexposure
 
         if (isHdrPlusEnabled) {
             // Hide and disable flash
@@ -6555,32 +6557,27 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     private fun applyUIVisibility() {
         val uiBinding = cameraUiContainerBinding ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val currentTier = cameraViewModel.uiState.value.uiTier
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, currentTier)
 
-        val showHdrPill = prefs.getBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, true)
-        val showSettings = prefs.getBoolean(SettingsFragment.KEY_SHOW_SETTINGS_BUTTON, true)
-        val showSwitch = prefs.getBoolean(SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, true)
-        val showModeSwitch = prefs.getBoolean(SettingsFragment.KEY_SHOW_MODE_SWITCH_BUTTON, true)
-        val showLensControls = prefs.getBoolean(SettingsFragment.KEY_SHOW_LENS_CONTROLS, true)
-        val showLutSwitcher = prefs.getBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, true)
-
-        uiBinding.hdrPlusPill?.visibility = if (showHdrPill) View.VISIBLE else View.GONE
-        uiBinding.settingsButton?.visibility = if (showSettings) View.VISIBLE else View.GONE
-        uiBinding.cameraSwitchButtonAlt?.visibility = if (showSwitch) View.VISIBLE else View.GONE
-        uiBinding.modeSwitchButton?.visibility = if (showModeSwitch) View.VISIBLE else View.GONE
+        uiBinding.hdrPlusPill?.visibility = if (spec.showHdrPlusPill) View.VISIBLE else View.GONE
+        uiBinding.settingsButton?.visibility = if (spec.showSettingsButton) View.VISIBLE else View.GONE
+        uiBinding.cameraSwitchButtonAlt?.visibility = if (spec.showCameraSwitch) View.VISIBLE else View.GONE
+        uiBinding.modeSwitchButton?.visibility = if (spec.showModeSwitch) View.VISIBLE else View.GONE
 
         val hasMultipleLenses = (uiBinding.lensControlsContainer?.childCount ?: 0) > 1
-        uiBinding.lensControlsCard?.visibility = if (showLensControls && hasMultipleLenses) View.VISIBLE else View.GONE
+        uiBinding.lensControlsCard?.visibility = if (spec.showLensControls && hasMultipleLenses) View.VISIBLE else View.GONE
 
         // Hide the whole row if all its components are hidden
-        uiBinding.lensControlRow?.visibility = if (showSwitch || showModeSwitch || (showLensControls && hasMultipleLenses)) View.VISIBLE else View.GONE
+        uiBinding.lensControlRow?.visibility = if (spec.showLensRow && (spec.showCameraSwitch || spec.showModeSwitch || (spec.showLensControls && hasMultipleLenses))) View.VISIBLE else View.GONE
 
-        uiBinding.lutSwitcherButton?.visibility = if (showLutSwitcher) View.VISIBLE else View.GONE
-        uiBinding.bentoLogButton?.visibility = if (showLutSwitcher) View.VISIBLE else View.GONE
+        uiBinding.lutSwitcherButton?.visibility = if (spec.showLogAndLut) View.VISIBLE else View.GONE
+        uiBinding.bentoLogButton?.visibility = if (spec.showLogAndLut) View.VISIBLE else View.GONE
 
         // Update Motion Photo Button & Flash/Underexposure button & Tier rows as well
         updateMotionPhotoButton()
         updateHdrPlusConstraints()
-        updateTierUi()
+        updateTierUi(currentTier)
     }
 
     private fun getDotTargetRotation(): Float {

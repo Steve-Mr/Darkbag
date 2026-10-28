@@ -37,14 +37,41 @@ object ViewfinderDeckCustomizerSheet {
                 TransitionManager.beginDelayedTransition(binding.containerPreviewContent, transition)
             }
 
-            binding.previewLensControls.visibility = if (binding.switchLensControls.isChecked) View.VISIBLE else View.GONE
-            binding.previewCameraSwitch.visibility = if (binding.switchCameraSwitch.isChecked) View.VISIBLE else View.GONE
-            binding.previewSettingsButton.visibility = if (binding.switchSettingsButton.isChecked) View.VISIBLE else View.GONE
-            binding.previewFilmRow.visibility = if (binding.switchLutSwitcher.isChecked) View.VISIBLE else View.GONE
-            binding.previewProModule.visibility = if (binding.switchManualControls.isChecked) View.VISIBLE else View.GONE
-            binding.previewFocusPeakingBadge.visibility = if (binding.switchFocusPeaking.isChecked) View.VISIBLE else View.GONE
-            binding.previewUnderexposure.visibility = if (binding.switchUnderexposure.isChecked) View.VISIBLE else View.GONE
-            binding.previewModeSwitch.visibility = if (binding.switchModeSwitch.isChecked) View.VISIBLE else View.GONE
+            val spec = CameraBentoDeckView.DeckVisibilitySpec(
+                tier = CameraUiTier.CUSTOM,
+                showProModule = binding.switchManualControls.isChecked,
+                showLogAndLut = binding.switchLutSwitcher.isChecked,
+                showHdrPlusPill = binding.switchHdrPlus.isChecked,
+                showUnderexposure = binding.switchUnderexposure.isChecked,
+                showMotionPhoto = true,
+                showModeSwitch = binding.switchModeSwitch.isChecked,
+                showLensControls = binding.switchLensControls.isChecked,
+                showCameraSwitch = binding.switchCameraSwitch.isChecked,
+                showSettingsButton = binding.switchSettingsButton.isChecked,
+                enableFocusPeaking = binding.switchFocusPeaking.isChecked
+            )
+
+            // Row A: Pro Module
+            binding.previewProModule.visibility = if (spec.showProModule) View.VISIBLE else View.GONE
+
+            // Row B: Film Recipe & Switches
+            binding.previewFilmRow.visibility = if (spec.showFilmRow) View.VISIBLE else View.GONE
+            binding.previewLogButton.visibility = if (spec.showLogAndLut) View.VISIBLE else View.GONE
+            binding.previewLutButton.visibility = if (spec.showLogAndLut) View.VISIBLE else View.GONE
+            binding.previewHdrPlusPill.visibility = if (spec.showHdrPlusPill) View.VISIBLE else View.GONE
+            binding.previewUnderexposure.visibility = if (spec.showUnderexposure) View.VISIBLE else View.GONE
+
+            // Row C: Lens Controls
+            binding.previewLensRow.visibility = if (spec.showLensRow) View.VISIBLE else View.GONE
+            binding.previewModeSwitch.visibility = if (spec.showModeSwitch) View.VISIBLE else View.GONE
+            binding.previewLensControls.visibility = if (spec.showLensControls) View.VISIBLE else View.GONE
+            binding.previewCameraSwitch.visibility = if (spec.showCameraSwitch) View.VISIBLE else View.GONE
+
+            // Row D: Shutter & Right Stack
+            binding.previewSettingsButton.visibility = if (spec.showSettingsButton) View.VISIBLE else View.GONE
+
+            // Viewfinder Stage: Focus Peaking
+            binding.previewFocusPeakingBadge.visibility = if (spec.enableFocusPeaking) View.VISIBLE else View.GONE
         }
 
         // Initialize switch states from SharedPreferences

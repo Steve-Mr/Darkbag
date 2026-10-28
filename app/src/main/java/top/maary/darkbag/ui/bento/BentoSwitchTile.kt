@@ -103,6 +103,9 @@ class BentoSwitchTile @JvmOverloads constructor(
         val colorOnSurface = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurface, Color.BLACK)
 
         setCardBackgroundColor(ColorStateList.valueOf(colorSurface))
+        setCardForegroundColor(ColorStateList.valueOf(Color.TRANSPARENT))
+        val rippleColorInt = MaterialColors.getColor(this, android.R.attr.colorControlHighlight, Color.LTGRAY)
+        rippleColor = ColorStateList.valueOf(rippleColorInt)
         strokeColor = colorOutlineVariant
 
         val rootLayout = LinearLayout(context).apply {

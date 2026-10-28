@@ -279,6 +279,7 @@
     <string name="settings_ui_tier_viewer">Navigation &amp; Viewer</string>
     <string name="settings_ui_open_customizer">Viewfinder Layout &amp; Live Preview</string>
     <string name="viewfinder_customizer_title">Viewfinder Customizer</string>
+    <string name="viewfinder_customizer_btn_subtitle">Controls Layout &amp; Live Preview</string>
     <string name="viewfinder_customizer_preview_label">LIVE DECK PREVIEW</string>
     <string name="viewfinder_customizer_template_title">BASE TEMPLATE RESET</string>
     <string name="viewfinder_customizer_template_ps">Base on P&amp;S</string>

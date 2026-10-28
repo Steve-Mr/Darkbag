@@ -143,15 +143,16 @@ class SettingsFragment : Fragment() {
 
     private var aboutClickCount = 0
     private fun setupAboutSection() {
-        try {
+        val versionName = try {
             val packageInfo = requireContext().packageManager.getPackageInfo(requireContext().packageName, 0)
-            binding.tvAppVersion.text = "VERSION ${packageInfo.versionName}"
+            packageInfo.versionName
         } catch (_: Exception) {
-            binding.tvAppVersion.text = "VERSION 1.0.0"
+            "1.0.0"
         }
 
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
-        binding.txtArchInfo.text = abi
+        binding.tvAppVersion.text = "v$versionName ($abi)"
+        binding.txtArchInfo.visibility = View.GONE
 
         binding.cardAbout.setOnClickListener {
             aboutClickCount++
@@ -1025,11 +1026,19 @@ class SettingsFragment : Fragment() {
 
         fun styleTierButton(btn: com.google.android.material.button.MaterialButton, title: String, subtitle: String, isActive: Boolean) {
             val ctx = requireContext()
-            btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                label = title,
-                value = subtitle,
-                isTabActive = isActive,
-                context = ctx
+            btn.setPadding(0, 0, 0, 0)
+            btn.insetTop = 0
+            btn.insetBottom = 0
+            btn.iconPadding = 0
+            btn.minWidth = 0
+            btn.minimumWidth = 0
+            btn.isSingleLine = false
+            btn.maxLines = 2
+            btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatCompactTierLabel(
+                context = ctx,
+                enLabel = title,
+                zhSub = subtitle,
+                isActive = isActive
             )
             val density = resources.displayMetrics.density
             val stroke1dp = (1f * density).toInt()
@@ -1097,6 +1106,11 @@ class SettingsFragment : Fragment() {
             }
         }
 
+        binding.btnOpenDeckCustomizer.text = CameraBentoDeckView.formatProTelemetry(
+            label = "VIEWFINDER CUSTOMIZER",
+            value = getString(R.string.viewfinder_customizer_btn_subtitle),
+            context = requireContext()
+        )
         binding.btnOpenDeckCustomizer.setOnClickListener {
             ViewfinderDeckCustomizerSheet.show(requireContext()) {
                 syncTierSelectionFromPrefs()

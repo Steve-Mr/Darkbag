@@ -104,6 +104,30 @@ class CameraBentoDeckView @JvmOverloads constructor(
         val rowMarginDp: Int
     )
 
+    /**
+     * Immutable snapshot of viewfinder deck component visibility.
+     * Decouples P&S, FILM, and PRO presets from user custom switches.
+     */
+    data class DeckVisibilitySpec(
+        val tier: CameraUiTier,
+        val showProModule: Boolean,
+        val showLogAndLut: Boolean,
+        val showHdrPlusPill: Boolean,
+        val showUnderexposure: Boolean,
+        val showMotionPhoto: Boolean,
+        val showModeSwitch: Boolean,
+        val showLensControls: Boolean,
+        val showCameraSwitch: Boolean,
+        val showSettingsButton: Boolean,
+        val enableFocusPeaking: Boolean
+    ) {
+        val showFilmRow: Boolean
+            get() = showLogAndLut || showHdrPlusPill || showUnderexposure || showMotionPhoto
+
+        val showLensRow: Boolean
+            get() = showModeSwitch || showLensControls || showCameraSwitch
+    }
+
     companion object {
 
         const val PREF_KEY_UI_TIER = "pref_camera_bento_ui_tier"
@@ -348,6 +372,72 @@ class CameraBentoDeckView @JvmOverloads constructor(
         }
 
         /**
+         * Resolves the canonical visibility specification for the given UI tier.
+         * For presets (P&S, FILM, PRO), returns invariant tier definitions.
+         * For CUSTOM, reads granular user preferences from SharedPreferences.
+         */
+        @JvmStatic
+        fun resolveVisibilitySpec(
+            prefs: android.content.SharedPreferences,
+            tier: CameraUiTier
+        ): DeckVisibilitySpec {
+            return when (tier) {
+                CameraUiTier.POINT_AND_SHOOT -> DeckVisibilitySpec(
+                    tier = tier,
+                    showProModule = false,
+                    showLogAndLut = false,
+                    showHdrPlusPill = false,
+                    showUnderexposure = false,
+                    showMotionPhoto = false,
+                    showModeSwitch = true,
+                    showLensControls = true,
+                    showCameraSwitch = true,
+                    showSettingsButton = true,
+                    enableFocusPeaking = false
+                )
+                CameraUiTier.FILM -> DeckVisibilitySpec(
+                    tier = tier,
+                    showProModule = false,
+                    showLogAndLut = true,
+                    showHdrPlusPill = true,
+                    showUnderexposure = true,
+                    showMotionPhoto = true,
+                    showModeSwitch = true,
+                    showLensControls = true,
+                    showCameraSwitch = true,
+                    showSettingsButton = true,
+                    enableFocusPeaking = false
+                )
+                CameraUiTier.PRO -> DeckVisibilitySpec(
+                    tier = tier,
+                    showProModule = true,
+                    showLogAndLut = true,
+                    showHdrPlusPill = true,
+                    showUnderexposure = true,
+                    showMotionPhoto = true,
+                    showModeSwitch = true,
+                    showLensControls = true,
+                    showCameraSwitch = true,
+                    showSettingsButton = true,
+                    enableFocusPeaking = true
+                )
+                CameraUiTier.CUSTOM -> DeckVisibilitySpec(
+                    tier = tier,
+                    showProModule = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_MANUAL_CONTROLS, false),
+                    showLogAndLut = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_LUT_SWITCHER, true),
+                    showHdrPlusPill = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, true),
+                    showUnderexposure = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, true),
+                    showMotionPhoto = true,
+                    showModeSwitch = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_MODE_SWITCH_BUTTON, true),
+                    showLensControls = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_LENS_CONTROLS, true),
+                    showCameraSwitch = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, true),
+                    showSettingsButton = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_SETTINGS_BUTTON, true),
+                    enableFocusPeaking = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_EXP_FOCUS_PEAKING, false)
+                )
+            }
+        }
+
+        /**
          * Updates the Bento Matrix deck visibility and tier switcher button styling for
          * `P&S` (Point & Shoot), `FILM`, and `PRO` modes.
          *
@@ -362,10 +452,66 @@ class CameraBentoDeckView @JvmOverloads constructor(
             isAnyManual: Boolean = false,
             hasActiveManualTab: Boolean = false,
             showLutSwitcherPref: Boolean = true,
-            showManualControlsPref: Boolean = false
+            showManualControlsPref: Boolean = false,
+            visibilitySpec: DeckVisibilitySpec? = null
         ) {
             val root = binding.bentoDeckView ?: binding.bottomIslandCard ?: return
             val density = root.resources.displayMetrics.density
+
+            val spec = visibilitySpec ?: when (tier) {
+                CameraUiTier.POINT_AND_SHOOT -> DeckVisibilitySpec(
+                    tier = tier,
+                    showProModule = false,
+                    showLogAndLut = false,
+                    showHdrPlusPill = false,
+                    showUnderexposure = false,
+                    showMotionPhoto = false,
+                    showModeSwitch = true,
+                    showLensControls = true,
+                    showCameraSwitch = true,
+                    showSettingsButton = true,
+                    enableFocusPeaking = false
+                )
+                CameraUiTier.FILM -> DeckVisibilitySpec(
+                    tier = tier,
+                    showProModule = false,
+                    showLogAndLut = true,
+                    showHdrPlusPill = true,
+                    showUnderexposure = true,
+                    showMotionPhoto = true,
+                    showModeSwitch = true,
+                    showLensControls = true,
+                    showCameraSwitch = true,
+                    showSettingsButton = true,
+                    enableFocusPeaking = false
+                )
+                CameraUiTier.PRO -> DeckVisibilitySpec(
+                    tier = tier,
+                    showProModule = true,
+                    showLogAndLut = true,
+                    showHdrPlusPill = true,
+                    showUnderexposure = true,
+                    showMotionPhoto = true,
+                    showModeSwitch = true,
+                    showLensControls = true,
+                    showCameraSwitch = true,
+                    showSettingsButton = true,
+                    enableFocusPeaking = true
+                )
+                CameraUiTier.CUSTOM -> DeckVisibilitySpec(
+                    tier = tier,
+                    showProModule = showManualControlsPref,
+                    showLogAndLut = showLutSwitcherPref,
+                    showHdrPlusPill = true,
+                    showUnderexposure = true,
+                    showMotionPhoto = true,
+                    showModeSwitch = true,
+                    showLensControls = true,
+                    showCameraSwitch = true,
+                    showSettingsButton = true,
+                    enableFocusPeaking = false
+                )
+            }
 
             val colorPrimary = MaterialColors.getColor(
                 root,
@@ -445,25 +591,65 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 }
             }
 
-            // Row B: Film Recipe + Quick Switches (visible in FILM and PRO; in CUSTOM respects showLutSwitcherPref; hidden in P&S)
-            val showFilmRow = when (tier) {
-                CameraUiTier.POINT_AND_SHOOT -> false
-                CameraUiTier.FILM, CameraUiTier.PRO -> !hasActiveManualTab
-                CameraUiTier.CUSTOM -> showLutSwitcherPref && !hasActiveManualTab
-            }
+            // Row B: Film Recipe + Quick Switches (visible in FILM and PRO; in CUSTOM respects spec.showFilmRow; hidden in P&S)
+            val showFilmRow = spec.showFilmRow && !hasActiveManualTab
             binding.bentoFilmRow?.visibility = if (showFilmRow) View.VISIBLE else View.GONE
-            binding.bentoLogButton?.visibility = if (showFilmRow && showLutSwitcherPref) View.VISIBLE else View.GONE
-            binding.lutSwitcherButton?.visibility = if (showFilmRow && showLutSwitcherPref) View.VISIBLE else View.GONE
+            binding.bentoLogButton?.visibility = if (showFilmRow && spec.showLogAndLut) View.VISIBLE else View.GONE
+            binding.lutSwitcherButton?.visibility = if (showFilmRow && spec.showLogAndLut) View.VISIBLE else View.GONE
+            binding.hdrPlusPill?.visibility = if (showFilmRow && spec.showHdrPlusPill) View.VISIBLE else View.GONE
 
-            // Row A: Pro Telemetry & Manual Dial Module (ONLY visible in PRO mode or CUSTOM with manual controls enabled)
-            val showPro = when (tier) {
-                CameraUiTier.POINT_AND_SHOOT, CameraUiTier.FILM -> false
-                CameraUiTier.PRO -> true
-                CameraUiTier.CUSTOM -> showManualControlsPref
-            }
+            // Row A: Pro Telemetry & Manual Dial Module (ONLY visible in PRO mode or CUSTOM with manual controls enabled, or manual override)
+            val showPro = spec.showProModule || isAnyManual
             binding.bentoProModule?.visibility = if (showPro) View.VISIBLE else View.GONE
             binding.proInfoBarCard?.visibility = if (showPro) View.VISIBLE else View.GONE
             binding.manualControlsRoot?.visibility = if (showPro && hasActiveManualTab) View.VISIBLE else View.GONE
+        }
+
+        /**
+         * Creates an ultra-compact two-line formatted label for 4-tier segmented buttons,
+         * with zero vertical overflow, custom letter-spacing, and dynamic contrast colors.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun formatCompactTierLabel(
+            context: Context,
+            enLabel: String,
+            zhSub: String,
+            isActive: Boolean = false
+        ): CharSequence {
+            val text = "$enLabel\n$zhSub"
+            val builder = SpannableStringBuilder(text)
+            val displayMetrics = context.resources.displayMetrics
+            val enPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 10f, displayMetrics).roundToInt()
+            val zhPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 9f, displayMetrics).roundToInt()
+
+            val colorOnSurface = MaterialColors.getColor(context, com.google.android.material.R.attr.colorOnSurface, Color.BLACK)
+            val colorOnSurfaceVariant = MaterialColors.getColor(context, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.DKGRAY)
+            val colorOnPrimaryContainer = MaterialColors.getColor(context, com.google.android.material.R.attr.colorOnPrimaryContainer, Color.WHITE)
+
+            val (enColor, zhColor) = if (isActive) {
+                Pair(colorOnPrimaryContainer, ColorUtils.setAlphaComponent(colorOnPrimaryContainer, 220))
+            } else {
+                Pair(colorOnSurface, colorOnSurfaceVariant)
+            }
+
+            val enEnd = enLabel.length
+            if (enEnd > 0) {
+                builder.setSpan(AbsoluteSizeSpan(enPx, false), 0, enEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(StyleSpan(Typeface.BOLD), 0, enEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(ProLetterSpacingSpan(0.04f), 0, enEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(ForegroundColorSpan(enColor), 0, enEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+
+            val zhStart = enEnd + 1
+            val zhEnd = text.length
+            if (zhStart < zhEnd) {
+                builder.setSpan(AbsoluteSizeSpan(zhPx, false), zhStart, zhEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(StyleSpan(Typeface.BOLD), zhStart, zhEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(ForegroundColorSpan(zhColor), zhStart, zhEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+
+            return builder
         }
 
         /**

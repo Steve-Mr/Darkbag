@@ -766,16 +766,33 @@
                                 android:orientation="vertical">
 
                                 <!-- Group A: HDR+ 计算摄影 (COMPUTE PIPELINE) -->
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:paddingHorizontal="4dp"
-                            android:paddingVertical="2dp"
-                            android:layout_marginBottom="4dp"
-                            android:text="@string/settings_adv_hdr_title"
-                            android:textSize="10sp"
-                            android:textStyle="bold"
-                            android:textColor="?attr/colorOnPrimaryContainer" />
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
+                                    android:paddingHorizontal="4dp"
+                                    android:paddingVertical="2dp"
+                                    android:layout_marginBottom="4dp">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="COMPUTE &amp; MERGE"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:letterSpacing="0.06"
+                                        android:textColor="?attr/colorPrimary" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="6dp"
+                                        android:text="@string/settings_adv_hdr_title"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:textColor="?attr/colorOnPrimaryContainer" />
+                                </LinearLayout>
 
                         <!-- Row 1: HDR+ Merge & Burst Frames -->
                         <top.maary.darkbag.ui.bento.BentoRowLayout
@@ -887,16 +904,33 @@
                                 android:orientation="vertical">
 
                                 <!-- Group B: 视频录制 (VIDEO CAPTURE) -->
-                                <TextView
+                                <LinearLayout
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
                                     android:paddingHorizontal="4dp"
                                     android:paddingVertical="2dp"
-                                    android:layout_marginBottom="4dp"
-                                    android:text="@string/settings_adv_video_title"
-                                    android:textSize="10sp"
-                                    android:textStyle="bold"
-                                    android:textColor="?attr/colorOnSecondaryContainer" />
+                                    android:layout_marginBottom="4dp">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="VIDEO &amp; ENCODING"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:letterSpacing="0.06"
+                                        android:textColor="?attr/colorPrimary" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="6dp"
+                                        android:text="@string/settings_adv_video_title"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:textColor="?attr/colorOnSecondaryContainer" />
+                                </LinearLayout>
 
                                 <!-- Row 1: Shutter Long Press & RAW Video -->
                                 <top.maary.darkbag.ui.bento.BentoRowLayout
@@ -944,16 +978,33 @@
                                 android:orientation="vertical">
 
                                 <!-- Group C: 多摄同拍 (MULTI-CAMERA) -->
-                                <TextView
+                                <LinearLayout
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
                                     android:paddingHorizontal="4dp"
                                     android:paddingVertical="2dp"
-                                    android:layout_marginBottom="4dp"
-                                    android:text="@string/settings_adv_multicam_title"
-                                    android:textSize="10sp"
-                                    android:textStyle="bold"
-                                    android:textColor="?attr/colorOnTertiaryContainer" />
+                                    android:layout_marginBottom="4dp">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="MULTI-CAMERA"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:letterSpacing="0.06"
+                                        android:textColor="?attr/colorPrimary" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="6dp"
+                                        android:text="@string/settings_adv_multicam_title"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:textColor="?attr/colorOnTertiaryContainer" />
+                                </LinearLayout>
 
                                 <!-- Multi-camera status text -->
                                 <TextView
@@ -1081,16 +1132,33 @@
                                 android:orientation="vertical">
 
                                 <!-- Group D: 底片编码与存储 (DNG & STORAGE) -->
-                                <TextView
+                                <LinearLayout
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
                                     android:paddingHorizontal="4dp"
                                     android:paddingVertical="2dp"
-                                    android:layout_marginBottom="4dp"
-                                    android:text="@string/settings_adv_storage_title"
-                                    android:textSize="10sp"
-                                    android:textStyle="bold"
-                                    android:textColor="?attr/colorOnSecondaryContainer" />
+                                    android:layout_marginBottom="4dp">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="RAW &amp; STORAGE"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:letterSpacing="0.06"
+                                        android:textColor="?attr/colorPrimary" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="6dp"
+                                        android:text="@string/settings_adv_storage_title"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:textColor="?attr/colorOnSecondaryContainer" />
+                                </LinearLayout>
 
                                 <!-- Row 1: DNG Compress & CFA Format -->
                                 <top.maary.darkbag.ui.bento.BentoRowLayout
@@ -1144,24 +1212,26 @@
                                             android:layout_height="match_parent"
                                             android:orientation="vertical"
                                             android:gravity="center"
-                                            android:paddingHorizontal="8dp">
+                                            android:paddingHorizontal="6dp">
 
                                             <TextView
                                                 android:layout_width="wrap_content"
                                                 android:layout_height="wrap_content"
-                                                android:text="JPG 目录"
-                                                android:textSize="11sp"
+                                                android:text="STORAGE JPG"
+                                                android:textSize="9.5sp"
                                                 android:textStyle="bold"
-                                                android:textColor="?attr/colorOnSurface" />
+                                                android:letterSpacing="0.06"
+                                                android:textColor="?attr/colorOnSurfaceVariant" />
 
                                             <TextView
                                                 android:id="@+id/tv_jpg_path"
                                                 android:layout_width="match_parent"
                                                 android:layout_height="wrap_content"
                                                 android:gravity="center"
-                                                android:text="Default (Pictures/Darkbag)"
-                                                android:textSize="9.5sp"
-                                                android:textColor="?attr/colorOnSurfaceVariant"
+                                                android:text="Pictures/Darkbag"
+                                                android:textSize="11.5sp"
+                                                android:textStyle="bold"
+                                                android:textColor="?attr/colorOnSurface"
                                                 android:singleLine="true"
                                                 android:ellipsize="middle"
                                                 android:layout_marginTop="2dp" />
@@ -1185,24 +1255,26 @@
                                             android:layout_height="match_parent"
                                             android:orientation="vertical"
                                             android:gravity="center"
-                                            android:paddingHorizontal="8dp">
+                                            android:paddingHorizontal="6dp">
 
                                             <TextView
                                                 android:layout_width="wrap_content"
                                                 android:layout_height="wrap_content"
-                                                android:text="RAW 目录"
-                                                android:textSize="11sp"
+                                                android:text="STORAGE RAW"
+                                                android:textSize="9.5sp"
                                                 android:textStyle="bold"
-                                                android:textColor="?attr/colorOnSurface" />
+                                                android:letterSpacing="0.06"
+                                                android:textColor="?attr/colorOnSurfaceVariant" />
 
                                             <TextView
                                                 android:id="@+id/tv_raw_path"
                                                 android:layout_width="match_parent"
                                                 android:layout_height="wrap_content"
                                                 android:gravity="center"
-                                                android:text="Default (Pictures/Darkbag)"
-                                                android:textSize="9.5sp"
-                                                android:textColor="?attr/colorOnSurfaceVariant"
+                                                android:text="Pictures/Darkbag"
+                                                android:textSize="11.5sp"
+                                                android:textStyle="bold"
+                                                android:textColor="?attr/colorOnSurface"
                                                 android:singleLine="true"
                                                 android:ellipsize="middle"
                                                 android:layout_marginTop="2dp" />
@@ -1227,16 +1299,33 @@
                                 android:orientation="vertical">
 
                                 <!-- Group E: 取景器界面定制 (VIEWFINDER UI) -->
-                                <TextView
+                                <LinearLayout
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
                                     android:paddingHorizontal="4dp"
                                     android:paddingVertical="2dp"
-                                    android:layout_marginBottom="4dp"
-                                    android:text="@string/settings_adv_viewfinder_title"
-                                    android:textSize="10sp"
-                                    android:textStyle="bold"
-                                    android:textColor="?attr/colorOnPrimaryContainer" />
+                                    android:layout_marginBottom="4dp">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="VIEWFINDER DECK"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:letterSpacing="0.06"
+                                        android:textColor="?attr/colorPrimary" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="6dp"
+                                        android:text="@string/settings_adv_viewfinder_title"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:textColor="?attr/colorOnPrimaryContainer" />
+                                </LinearLayout>
 
                                 <!-- 4-Tier Selector Tray -->
                                 <com.google.android.material.card.MaterialCardView
@@ -1386,16 +1475,33 @@
                                 android:layout_height="wrap_content"
                                 android:orientation="vertical">
 
-                                <TextView
+                                <LinearLayout
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
                                     android:paddingHorizontal="4dp"
                                     android:paddingVertical="2dp"
-                                    android:layout_marginBottom="4dp"
-                                    android:text="@string/settings_section_setup_wizard"
-                                    android:textSize="10sp"
-                                    android:textStyle="bold"
-                                    android:textColor="?attr/colorOnSurfaceVariant" />
+                                    android:layout_marginBottom="4dp">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="SETUP WIZARD"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:letterSpacing="0.06"
+                                        android:textColor="?attr/colorPrimary" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="6dp"
+                                        android:text="@string/settings_section_setup_wizard"
+                                        android:textSize="10.5sp"
+                                        android:textStyle="bold"
+                                        android:textColor="?attr/colorOnSurfaceVariant" />
+                                </LinearLayout>
 
                                 <com.google.android.material.button.MaterialButton
                                     android:id="@+id/btn_replay_onboarding"
@@ -1498,23 +1604,29 @@
                                 android:padding="2dp">
 
                                 <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="APP VERSION"
+                                    android:textSize="9.5sp"
+                                    android:textStyle="bold"
+                                    android:letterSpacing="0.06"
+                                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                                <TextView
                                     android:id="@+id/tvAppVersion"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="VERSION 1.0.0"
-                                    android:textSize="11sp"
+                                    android:text="1.0.0 (arm64-v8a)"
+                                    android:textSize="11.5sp"
                                     android:textStyle="bold"
-                                    android:textColor="?attr/colorOnSurface" />
+                                    android:textColor="?attr/colorOnSurface"
+                                    android:layout_marginTop="2dp" />
 
                                 <TextView
                                     android:id="@+id/txt_arch_info"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="arm64-v8a"
-                                    android:textSize="9sp"
-                                    android:fontFamily="monospace"
-                                    android:textColor="?attr/colorOnSurfaceVariant"
-                                    android:layout_marginTop="1dp" />
+                                    android:visibility="gone" />
                             </LinearLayout>
                         </com.google.android.material.card.MaterialCardView>
                     </top.maary.darkbag.ui.bento.BentoRowLayout>

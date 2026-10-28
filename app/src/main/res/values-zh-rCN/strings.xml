@@ -252,6 +252,7 @@
     <string name="settings_ui_tier_viewer">导航与相册查看器</string>
     <string name="settings_ui_open_customizer">取景器按键排布与实时预览</string>
     <string name="viewfinder_customizer_title">取景器界面定制</string>
+    <string name="viewfinder_customizer_btn_subtitle">按键排布与实时预览</string>
     <string name="viewfinder_customizer_preview_label">实时取景器预览</string>
     <string name="viewfinder_customizer_template_title">基于模板初始化</string>
     <string name="viewfinder_customizer_template_ps">基于 P&amp;S</string>

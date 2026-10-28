@@ -8,6 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -374,6 +375,13 @@ class SettingsFragmentTest {
         assertNotNull(binding.previewFocusPeakingBadge)
         assertNotNull(binding.previewUnderexposure)
         assertNotNull(binding.previewModeSwitch)
+        assertNotNull(binding.previewLogButton)
+        assertNotNull(binding.previewLutButton)
+        assertNotNull(binding.previewHdrPlusPill)
+        assertNotNull(binding.previewCaptureButton)
+        assertNotNull(binding.previewTierPill)
+        assertNotNull(binding.previewPlaygroundButton)
+        assertNotNull(binding.previewGalleryCard)
 
         // Template buttons
         assertNotNull(binding.btnTemplatePs)
@@ -390,5 +398,49 @@ class SettingsFragmentTest {
         assertNotNull(binding.switchModeSwitch)
         assertNotNull(binding.switchManualControls)
         assertNotNull(binding.switchFocusPeaking)
+    }
+
+    @Test
+    fun testDeckVisibilitySpecTierParity() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+
+        // 1. POINT_AND_SHOOT preset
+        val psSpec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(prefs, top.maary.darkbag.viewmodel.CameraUiTier.POINT_AND_SHOOT)
+        assertFalse(psSpec.showProModule)
+        assertFalse(psSpec.showFilmRow)
+        assertFalse(psSpec.showLogAndLut)
+        assertFalse(psSpec.showHdrPlusPill)
+        assertTrue(psSpec.showLensRow)
+        assertTrue(psSpec.showSettingsButton)
+
+        // 2. FILM preset
+        val filmSpec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(prefs, top.maary.darkbag.viewmodel.CameraUiTier.FILM)
+        assertFalse(filmSpec.showProModule)
+        assertTrue(filmSpec.showFilmRow)
+        assertTrue(filmSpec.showLogAndLut)
+        assertTrue(filmSpec.showHdrPlusPill)
+        assertTrue(filmSpec.showLensRow)
+
+        // 3. PRO preset
+        val proSpec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(prefs, top.maary.darkbag.viewmodel.CameraUiTier.PRO)
+        assertTrue(proSpec.showProModule)
+        assertTrue(proSpec.showFilmRow)
+        assertTrue(proSpec.enableFocusPeaking)
+
+        // 4. CUSTOM respects granular prefs
+        prefs.edit()
+            .putBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, true)
+            .putBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, false)
+            .putBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, true)
+            .putBoolean(SettingsFragment.KEY_SHOW_SETTINGS_BUTTON, false)
+            .apply()
+
+        val customSpec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(prefs, top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM)
+        assertTrue(customSpec.showProModule)
+        assertFalse(customSpec.showLogAndLut)
+        assertTrue(customSpec.showHdrPlusPill)
+        assertTrue(customSpec.showFilmRow) // Row B remains visible because HDR+ is on!
+        assertFalse(customSpec.showSettingsButton)
     }
 }
