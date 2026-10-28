@@ -355,12 +355,14 @@ class CameraBentoDeckView @JvmOverloads constructor(
          * in `P&S` and `FILM` modes and only revealed in `PRO` mode.
          */
         @JvmStatic
+        @JvmOverloads
         fun bindTierState(
             binding: CameraUiContainerBinding,
             tier: CameraUiTier,
             isAnyManual: Boolean = false,
             hasActiveManualTab: Boolean = false,
-            showLutSwitcherPref: Boolean = true
+            showLutSwitcherPref: Boolean = true,
+            showManualControlsPref: Boolean = false
         ) {
             val root = binding.bentoDeckView ?: binding.bottomIslandCard ?: return
             val density = root.resources.displayMetrics.density
@@ -429,6 +431,11 @@ class CameraBentoDeckView @JvmOverloads constructor(
                         btn.setTextColor(colorInverseOnSurface)
                         btn.cornerRadius = (10f * density).roundToInt()
                     }
+                    CameraUiTier.CUSTOM -> {
+                        btn.backgroundTintList = ColorStateList.valueOf(colorPrimaryContainer)
+                        btn.setTextColor(colorOnPrimaryContainer)
+                        btn.cornerRadius = (10f * density).roundToInt()
+                    }
                 }
                 if (isAnyManual) {
                     btn.strokeWidth = (1.5f * density).roundToInt()
@@ -438,14 +445,22 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 }
             }
 
-            // Row B: Film Recipe + Quick Switches (visible in FILM and PRO; hidden in P&S)
-            val showFilmRow = (tier == CameraUiTier.FILM || tier == CameraUiTier.PRO) && !hasActiveManualTab
+            // Row B: Film Recipe + Quick Switches (visible in FILM and PRO; in CUSTOM respects showLutSwitcherPref; hidden in P&S)
+            val showFilmRow = when (tier) {
+                CameraUiTier.POINT_AND_SHOOT -> false
+                CameraUiTier.FILM, CameraUiTier.PRO -> !hasActiveManualTab
+                CameraUiTier.CUSTOM -> showLutSwitcherPref && !hasActiveManualTab
+            }
             binding.bentoFilmRow?.visibility = if (showFilmRow) View.VISIBLE else View.GONE
             binding.bentoLogButton?.visibility = if (showFilmRow && showLutSwitcherPref) View.VISIBLE else View.GONE
             binding.lutSwitcherButton?.visibility = if (showFilmRow && showLutSwitcherPref) View.VISIBLE else View.GONE
 
-            // Row A: Pro Telemetry & Manual Dial Module (ONLY visible in PRO mode!)
-            val showPro = (tier == CameraUiTier.PRO)
+            // Row A: Pro Telemetry & Manual Dial Module (ONLY visible in PRO mode or CUSTOM with manual controls enabled)
+            val showPro = when (tier) {
+                CameraUiTier.POINT_AND_SHOOT, CameraUiTier.FILM -> false
+                CameraUiTier.PRO -> true
+                CameraUiTier.CUSTOM -> showManualControlsPref
+            }
             binding.bentoProModule?.visibility = if (showPro) View.VISIBLE else View.GONE
             binding.proInfoBarCard?.visibility = if (showPro) View.VISIBLE else View.GONE
             binding.manualControlsRoot?.visibility = if (showPro && hasActiveManualTab) View.VISIBLE else View.GONE

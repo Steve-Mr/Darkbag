@@ -1,13 +1,18 @@
 package top.maary.darkbag.fragments
 
+import android.content.Context
 import android.util.Size
+import android.view.LayoutInflater
+import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import top.maary.darkbag.R
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
@@ -305,9 +310,9 @@ class SettingsFragmentTest {
         org.junit.Assert.assertNotNull(binding.btnTierPs)
         org.junit.Assert.assertNotNull(binding.btnTierFilm)
         org.junit.Assert.assertNotNull(binding.btnTierPro)
-        org.junit.Assert.assertNotNull(binding.containerTierPs)
-        org.junit.Assert.assertNotNull(binding.containerTierFilm)
-        org.junit.Assert.assertNotNull(binding.containerTierPro)
+        org.junit.Assert.assertNotNull(binding.btnTierCustom)
+        org.junit.Assert.assertNotNull(binding.btnOpenDeckCustomizer)
+        org.junit.Assert.assertNotNull(binding.btnReplayOnboarding)
         org.junit.Assert.assertNotNull(binding.switchUseInternalViewer)
         org.junit.Assert.assertNotNull(binding.btnMenuExternalViewer)
 
@@ -339,5 +344,51 @@ class SettingsFragmentTest {
         assertEquals("Dynamic", formatUnderexposure("Dynamic"))
         assertEquals("Dynamic", formatUnderexposure("Dynamic (Experimental)"))
         assertEquals("-0.5 EV", formatUnderexposure("-0.5"))
+    }
+
+    @Test
+    fun testCameraUiTierCustomCycleAndParsing() {
+        assertEquals(top.maary.darkbag.viewmodel.CameraUiTier.FILM, top.maary.darkbag.viewmodel.CameraUiTier.POINT_AND_SHOOT.next())
+        assertEquals(top.maary.darkbag.viewmodel.CameraUiTier.PRO, top.maary.darkbag.viewmodel.CameraUiTier.FILM.next())
+        assertEquals(top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM, top.maary.darkbag.viewmodel.CameraUiTier.PRO.next())
+        assertEquals(top.maary.darkbag.viewmodel.CameraUiTier.POINT_AND_SHOOT, top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM.next())
+
+        assertEquals(top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM, top.maary.darkbag.viewmodel.CameraUiTier.fromKey("CUSTOM"))
+        assertEquals(top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM, top.maary.darkbag.viewmodel.CameraUiTier.fromKey("custom"))
+    }
+
+    @Test
+    fun testSheetViewfinderCustomizerBindingParity() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
+        val inflater = LayoutInflater.from(themedContext)
+        val binding = top.maary.darkbag.databinding.SheetViewfinderCustomizerBinding.inflate(inflater)
+
+        // Preview components
+        assertNotNull(binding.cardViewfinderPreview)
+        assertNotNull(binding.previewLensControls)
+        assertNotNull(binding.previewSettingsButton)
+        assertNotNull(binding.previewCameraSwitch)
+        assertNotNull(binding.previewFilmRow)
+        assertNotNull(binding.previewProModule)
+        assertNotNull(binding.previewFocusPeakingBadge)
+        assertNotNull(binding.previewUnderexposure)
+        assertNotNull(binding.previewModeSwitch)
+
+        // Template buttons
+        assertNotNull(binding.btnTemplatePs)
+        assertNotNull(binding.btnTemplateFilm)
+        assertNotNull(binding.btnTemplatePro)
+
+        // Switch controls
+        assertNotNull(binding.switchLensControls)
+        assertNotNull(binding.switchCameraSwitch)
+        assertNotNull(binding.switchSettingsButton)
+        assertNotNull(binding.switchLutSwitcher)
+        assertNotNull(binding.switchHdrPlus)
+        assertNotNull(binding.switchUnderexposure)
+        assertNotNull(binding.switchModeSwitch)
+        assertNotNull(binding.switchManualControls)
+        assertNotNull(binding.switchFocusPeaking)
     }
 }

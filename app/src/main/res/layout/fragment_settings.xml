@@ -772,7 +772,7 @@
                             android:paddingHorizontal="4dp"
                             android:paddingVertical="2dp"
                             android:layout_marginBottom="4dp"
-                            android:text="A. HDR+ 计算摄影 (COMPUTE PIPELINE)"
+                            android:text="@string/settings_adv_hdr_title"
                             android:textSize="10sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorOnPrimaryContainer" />
@@ -893,7 +893,7 @@
                                     android:paddingHorizontal="4dp"
                                     android:paddingVertical="2dp"
                                     android:layout_marginBottom="4dp"
-                                    android:text="B. 视频录制 (VIDEO CAPTURE)"
+                                    android:text="@string/settings_adv_video_title"
                                     android:textSize="10sp"
                                     android:textStyle="bold"
                                     android:textColor="?attr/colorOnSecondaryContainer" />
@@ -950,7 +950,7 @@
                                     android:paddingHorizontal="4dp"
                                     android:paddingVertical="2dp"
                                     android:layout_marginBottom="4dp"
-                                    android:text="C. 多摄同拍 (MULTI-CAMERA)"
+                                    android:text="@string/settings_adv_multicam_title"
                                     android:textSize="10sp"
                                     android:textStyle="bold"
                                     android:textColor="?attr/colorOnTertiaryContainer" />
@@ -1087,7 +1087,7 @@
                                     android:paddingHorizontal="4dp"
                                     android:paddingVertical="2dp"
                                     android:layout_marginBottom="4dp"
-                                    android:text="D. 底片编码与存储 (DNG &amp; STORAGE)"
+                                    android:text="@string/settings_adv_storage_title"
                                     android:textSize="10sp"
                                     android:textStyle="bold"
                                     android:textColor="?attr/colorOnSecondaryContainer" />
@@ -1233,12 +1233,12 @@
                                     android:paddingHorizontal="4dp"
                                     android:paddingVertical="2dp"
                                     android:layout_marginBottom="4dp"
-                                    android:text="E. 取景器界面定制 (VIEWFINDER UI)"
+                                    android:text="@string/settings_adv_viewfinder_title"
                                     android:textSize="10sp"
                                     android:textStyle="bold"
                                     android:textColor="?attr/colorOnPrimaryContainer" />
 
-                                <!-- 3-Tier Selector Tray -->
+                                <!-- 4-Tier Selector Tray -->
                                 <com.google.android.material.card.MaterialCardView
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
@@ -1246,7 +1246,7 @@
                                     app:cardCornerRadius="20dp"
                                     app:cardBackgroundColor="?attr/colorSurface"
                                     app:strokeWidth="0dp"
-                                    app:contentPadding="5dp">
+                                    app:contentPadding="4dp">
 
                                     <top.maary.darkbag.ui.BentoSegmentedButtonGroup
                                         android:id="@+id/toggle_ui_tiers"
@@ -1261,13 +1261,18 @@
                                             android:layout_width="0dp"
                                             android:layout_height="match_parent"
                                             android:layout_weight="1"
-                                            android:layout_marginEnd="4dp"
+                                            android:layout_marginEnd="2dp"
                                             android:insetTop="0dp"
                                             android:insetBottom="0dp"
                                             android:padding="0dp"
+                                            android:paddingStart="2dp"
+                                            android:paddingEnd="2dp"
+                                            android:singleLine="false"
+                                            android:maxLines="2"
+                                            android:ellipsize="end"
                                             app:cornerRadius="12dp"
-                                            android:text="P&amp;S\n极简层"
-                                            android:textSize="10.5sp" />
+                                            android:text="P&amp;S\n极简"
+                                            android:textSize="9.5sp" />
 
                                         <com.google.android.material.button.MaterialButton
                                             android:id="@+id/btn_tier_film"
@@ -1275,13 +1280,18 @@
                                             android:layout_width="0dp"
                                             android:layout_height="match_parent"
                                             android:layout_weight="1"
-                                            android:layout_marginEnd="4dp"
+                                            android:layout_marginEnd="2dp"
                                             android:insetTop="0dp"
                                             android:insetBottom="0dp"
                                             android:padding="0dp"
+                                            android:paddingStart="2dp"
+                                            android:paddingEnd="2dp"
+                                            android:singleLine="false"
+                                            android:maxLines="2"
+                                            android:ellipsize="end"
                                             app:cornerRadius="12dp"
-                                            android:text="FILM\n胶片层"
-                                            android:textSize="10.5sp" />
+                                            android:text="FILM\n胶片"
+                                            android:textSize="9.5sp" />
 
                                         <com.google.android.material.button.MaterialButton
                                             android:id="@+id/btn_tier_pro"
@@ -1289,133 +1299,55 @@
                                             android:layout_width="0dp"
                                             android:layout_height="match_parent"
                                             android:layout_weight="1"
+                                            android:layout_marginEnd="2dp"
                                             android:insetTop="0dp"
                                             android:insetBottom="0dp"
                                             android:padding="0dp"
+                                            android:paddingStart="2dp"
+                                            android:paddingEnd="2dp"
+                                            android:singleLine="false"
+                                            android:maxLines="2"
+                                            android:ellipsize="end"
                                             app:cornerRadius="12dp"
-                                            android:text="PRO\n专业层"
-                                            android:textSize="10.5sp" />
+                                            android:text="PRO\n专业"
+                                            android:textSize="9.5sp" />
+
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btn_tier_custom"
+                                            style="@style/Widget.Material3.Button.TonalButton"
+                                            android:layout_width="0dp"
+                                            android:layout_height="match_parent"
+                                            android:layout_weight="1"
+                                            android:insetTop="0dp"
+                                            android:insetBottom="0dp"
+                                            android:padding="0dp"
+                                            android:paddingStart="2dp"
+                                            android:paddingEnd="2dp"
+                                            android:singleLine="false"
+                                            android:maxLines="2"
+                                            android:ellipsize="end"
+                                            app:cornerRadius="12dp"
+                                            android:text="CUSTOM\n自定义"
+                                            android:textSize="9.5sp" />
                                     </top.maary.darkbag.ui.BentoSegmentedButtonGroup>
                                 </com.google.android.material.card.MaterialCardView>
 
-                                <!-- P&S Tier Container -->
-                                <LinearLayout
-                                    android:id="@+id/container_tier_ps"
+                                <!-- Dedicated Deck Customizer Entry Button -->
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btn_open_deck_customizer"
+                                    style="@style/Widget.Darkbag.BentoTile.Button"
                                     android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:orientation="vertical"
-                                    android:visibility="gone">
-
-                                    <!-- Row 1: Lens controls + Camera switch -->
-                                    <top.maary.darkbag.ui.bento.BentoRowLayout
-                                        android:layout_width="match_parent"
-                                        android:layout_height="48dp"
-                                        android:layout_marginBottom="8dp">
-
-                                        <top.maary.darkbag.ui.bento.BentoSwitchTile
-                                            android:id="@+id/switch_show_lens_controls"
-                                            android:layout_width="0dp"
-                                            android:layout_height="match_parent"
-                                            android:layout_weight="1"
-                                            app:bentoSwitchTitle="@string/settings_ui_lens_controls" />
-
-                                        <top.maary.darkbag.ui.bento.BentoSwitchTile
-                                            android:id="@+id/switch_show_camera_switch_button"
-                                            android:layout_width="0dp"
-                                            android:layout_height="match_parent"
-                                            android:layout_weight="1"
-                                            app:bentoSwitchTitle="@string/settings_ui_camera_switch" />
-                                    </top.maary.darkbag.ui.bento.BentoRowLayout>
-
-                                    <!-- Row 2: Settings button -->
-                                    <top.maary.darkbag.ui.bento.BentoSwitchTile
-                                        android:id="@+id/switch_show_settings_button"
-                                        android:layout_width="match_parent"
-                                        android:layout_height="48dp"
-                                        android:layout_marginBottom="8dp"
-                                        app:bentoSwitchTitle="@string/settings_ui_settings_tile" />
-                                </LinearLayout>
-
-                                <!-- FILM Tier Container -->
-                                <LinearLayout
-                                    android:id="@+id/container_tier_film"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:orientation="vertical"
-                                    android:visibility="visible">
-
-                                    <!-- Row 1: LUT switcher + HDR+ switch -->
-                                    <top.maary.darkbag.ui.bento.BentoRowLayout
-                                        android:layout_width="match_parent"
-                                        android:layout_height="48dp"
-                                        android:layout_marginBottom="8dp">
-
-                                        <top.maary.darkbag.ui.bento.BentoSwitchTile
-                                            android:id="@+id/switch_show_lut_switcher"
-                                            android:layout_width="0dp"
-                                            android:layout_height="match_parent"
-                                            android:layout_weight="1"
-                                            app:bentoSwitchTitle="@string/settings_ui_lut_switcher" />
-
-                                        <top.maary.darkbag.ui.bento.BentoSwitchTile
-                                            android:id="@+id/switch_show_hdr_plus_switch"
-                                            android:layout_width="0dp"
-                                            android:layout_height="match_parent"
-                                            android:layout_weight="1"
-                                            app:bentoSwitchTitle="@string/settings_ui_hdr_tile" />
-                                    </top.maary.darkbag.ui.bento.BentoRowLayout>
-
-                                    <!-- Row 2: Underexposure button + Mode switch button -->
-                                    <top.maary.darkbag.ui.bento.BentoRowLayout
-                                        android:layout_width="match_parent"
-                                        android:layout_height="48dp"
-                                        android:layout_marginBottom="8dp">
-
-                                        <top.maary.darkbag.ui.bento.BentoSwitchTile
-                                            android:id="@+id/switch_show_underexposure_button"
-                                            android:layout_width="0dp"
-                                            android:layout_height="match_parent"
-                                            android:layout_weight="1"
-                                            app:bentoSwitchTitle="@string/settings_ui_underexposure_tile" />
-
-                                        <top.maary.darkbag.ui.bento.BentoSwitchTile
-                                            android:id="@+id/switch_show_mode_switch_button"
-                                            android:layout_width="0dp"
-                                            android:layout_height="match_parent"
-                                            android:layout_weight="1"
-                                            app:bentoSwitchTitle="@string/settings_ui_mode_switch_tile" />
-                                    </top.maary.darkbag.ui.bento.BentoRowLayout>
-                                </LinearLayout>
-
-                                <!-- PRO Tier Container -->
-                                <LinearLayout
-                                    android:id="@+id/container_tier_pro"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:orientation="vertical"
-                                    android:visibility="gone">
-
-                                    <!-- Row 1: Manual controls + Focus peaking -->
-                                    <top.maary.darkbag.ui.bento.BentoRowLayout
-                                        android:layout_width="match_parent"
-                                        android:layout_height="48dp"
-                                        android:layout_marginBottom="8dp">
-
-                                        <top.maary.darkbag.ui.bento.BentoSwitchTile
-                                            android:id="@+id/switch_manual_controls"
-                                            android:layout_width="0dp"
-                                            android:layout_height="match_parent"
-                                            android:layout_weight="1"
-                                            app:bentoSwitchTitle="@string/settings_ui_manual_controls" />
-
-                                        <top.maary.darkbag.ui.bento.BentoSwitchTile
-                                            android:id="@+id/switch_exp_focus_peaking"
-                                            android:layout_width="0dp"
-                                            android:layout_height="match_parent"
-                                            android:layout_weight="1"
-                                            app:bentoSwitchTitle="@string/settings_ui_focus_peaking" />
-                                    </top.maary.darkbag.ui.bento.BentoRowLayout>
-                                </LinearLayout>
+                                    android:layout_height="52dp"
+                                    android:layout_marginBottom="8dp"
+                                    app:backgroundTint="?attr/colorSurface"
+                                    android:textColor="?attr/colorOnSurface"
+                                    app:strokeWidth="1dp"
+                                    app:strokeColor="?attr/colorOutlineVariant"
+                                    app:cornerRadius="14dp"
+                                    app:icon="@drawable/ic_arrow_forward"
+                                    app:iconGravity="end"
+                                    app:iconTint="?attr/colorOnSurfaceVariant"
+                                    android:text="VIEWFINDER CUSTOMIZER\n取景器按键排布与实时预览" />
 
                                 <!-- Internal / External Viewer -->
                                 <top.maary.darkbag.ui.bento.BentoSwitchTile
@@ -1436,6 +1368,49 @@
                                     android:textColor="?attr/colorOnSurface"
                                     app:strokeWidth="0dp"
                                     android:text="EXTERNAL VIEWER\nSystem Default" />
+                            </LinearLayout>
+                        </top.maary.darkbag.ui.bento.BentoTrayCard>
+
+                        <!-- Setup Wizard Card -->
+                        <top.maary.darkbag.ui.bento.BentoTrayCard
+                            style="@style/Widget.Darkbag.BentoTray"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            app:cardCornerRadius="18dp"
+                            app:strokeWidth="0dp"
+                            app:bentoContainerRole="surfaceContainer"
+                            android:layout_marginBottom="4dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:paddingHorizontal="4dp"
+                                    android:paddingVertical="2dp"
+                                    android:layout_marginBottom="4dp"
+                                    android:text="@string/settings_section_setup_wizard"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold"
+                                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btn_replay_onboarding"
+                                    style="@style/Widget.Darkbag.BentoTile.Button"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="52dp"
+                                    app:backgroundTint="?attr/colorSurface"
+                                    android:textColor="?attr/colorOnSurface"
+                                    app:strokeWidth="1dp"
+                                    app:strokeColor="?attr/colorOutlineVariant"
+                                    app:cornerRadius="14dp"
+                                    app:icon="@drawable/ic_arrow_forward"
+                                    app:iconGravity="end"
+                                    app:iconTint="?attr/colorOnSurfaceVariant"
+                                    android:text="SETUP WIZARD\nReconfigure Startup &amp; Formats" />
                             </LinearLayout>
                         </top.maary.darkbag.ui.bento.BentoTrayCard>
                     </LinearLayout>
@@ -1498,7 +1473,9 @@
                             android:layout_weight="1"
                             app:backgroundTint="?attr/colorSurface"
                             android:textColor="?attr/colorOnSurface"
-                            app:strokeWidth="0dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="?attr/colorOutlineVariant"
+                            app:cornerRadius="14dp"
                             android:text="CLEAR CACHE\nCalculating..." />
 
                         <com.google.android.material.card.MaterialCardView
@@ -1541,18 +1518,6 @@
                             </LinearLayout>
                         </com.google.android.material.card.MaterialCardView>
                     </top.maary.darkbag.ui.bento.BentoRowLayout>
-
-                    <!-- Row 2: Replay Onboarding Button -->
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_replay_onboarding"
-                        style="@style/Widget.Darkbag.BentoTile.Button"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:layout_marginTop="8dp"
-                        app:backgroundTint="?attr/colorSurface"
-                        android:textColor="?attr/colorOnSurface"
-                        app:strokeWidth="0dp"
-                        android:text="SETUP WIZARD\nReconfigure Startup &amp; Formats" />
                 </LinearLayout>
             </top.maary.darkbag.ui.bento.BentoTrayCard>
 

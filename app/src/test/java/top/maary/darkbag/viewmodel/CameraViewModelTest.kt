@@ -144,7 +144,8 @@ class CameraViewModelTest {
     fun testCameraUiTier_NextAndFromKey() {
         assertEquals(CameraUiTier.FILM, CameraUiTier.POINT_AND_SHOOT.next())
         assertEquals(CameraUiTier.PRO, CameraUiTier.FILM.next())
-        assertEquals(CameraUiTier.POINT_AND_SHOOT, CameraUiTier.PRO.next())
+        assertEquals(CameraUiTier.CUSTOM, CameraUiTier.PRO.next())
+        assertEquals(CameraUiTier.POINT_AND_SHOOT, CameraUiTier.CUSTOM.next())
 
         assertEquals(CameraUiTier.POINT_AND_SHOOT, CameraUiTier.fromKey("PS"))
         assertEquals(CameraUiTier.POINT_AND_SHOOT, CameraUiTier.fromKey("ps"))
@@ -152,6 +153,8 @@ class CameraViewModelTest {
         assertEquals(CameraUiTier.FILM, CameraUiTier.fromKey("film"))
         assertEquals(CameraUiTier.PRO, CameraUiTier.fromKey("PRO"))
         assertEquals(CameraUiTier.PRO, CameraUiTier.fromKey("pro"))
+        assertEquals(CameraUiTier.CUSTOM, CameraUiTier.fromKey("CUSTOM"))
+        assertEquals(CameraUiTier.CUSTOM, CameraUiTier.fromKey("custom"))
         assertEquals(CameraUiTier.FILM, CameraUiTier.fromKey(null))
         assertEquals(CameraUiTier.FILM, CameraUiTier.fromKey("unknown"))
     }
@@ -162,6 +165,9 @@ class CameraViewModelTest {
 
         viewModel.cycleUiTier()
         assertEquals(CameraUiTier.PRO, viewModel.uiState.value.uiTier)
+
+        viewModel.cycleUiTier()
+        assertEquals(CameraUiTier.CUSTOM, viewModel.uiState.value.uiTier)
 
         viewModel.cycleUiTier()
         assertEquals(CameraUiTier.POINT_AND_SHOOT, viewModel.uiState.value.uiTier)
@@ -186,6 +192,11 @@ class CameraViewModelTest {
         viewModel.setUiTier(CameraUiTier.PRO)
         assertTrue(viewModel.uiState.value.showDetailedTelemetry)
         assertTrue(viewModel.uiState.value.showFilmRecipeRow)
+
+        // CUSTOM
+        viewModel.setUiTier(CameraUiTier.CUSTOM)
+        assertTrue(viewModel.uiState.value.showDetailedTelemetry)
+        assertTrue(viewModel.uiState.value.showFilmRecipeRow)
     }
 
     @Test
@@ -194,9 +205,9 @@ class CameraViewModelTest {
         viewModel.setActiveManualTab("focus")
         assertEquals("focus", viewModel.uiState.value.activeManualTab)
 
-        // Cycle away to POINT_AND_SHOOT
+        // Cycle away to CUSTOM
         viewModel.cycleUiTier()
-        assertEquals(CameraUiTier.POINT_AND_SHOOT, viewModel.uiState.value.uiTier)
+        assertEquals(CameraUiTier.CUSTOM, viewModel.uiState.value.uiTier)
         assertNull(viewModel.uiState.value.activeManualTab)
 
         // Reset to PRO and set active manual tab

@@ -1915,13 +1915,15 @@ class CameraFragment : Fragment() {
         val binding = cameraUiContainerBinding ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val showLutSwitcher = prefs.getBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, true)
+        val showManualControls = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
         val isAnyManual = isManualFocus || isManualIso || isManualShutter || currentEvIndex != 0
         CameraBentoDeckView.bindTierState(
             binding = binding,
             tier = tier,
             isAnyManual = isAnyManual,
             hasActiveManualTab = activeManualTab != null,
-            showLutSwitcherPref = showLutSwitcher
+            showLutSwitcherPref = showLutSwitcher,
+            showManualControlsPref = showManualControls
         )
         CameraBentoDeckView.applyDynamicRowHeights(binding)
     }

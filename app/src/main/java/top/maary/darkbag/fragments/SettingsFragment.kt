@@ -16,6 +16,8 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.shape.ShapeAppearanceModel
 import top.maary.darkbag.ui.BentoSelectionBottomSheet
 import top.maary.darkbag.ui.RawVideoSettingsBottomSheet
+import top.maary.darkbag.ui.ViewfinderDeckCustomizerSheet
+import top.maary.darkbag.viewmodel.CameraUiTier
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -163,6 +165,12 @@ class SettingsFragment : Fragment() {
             }
         }
 
+        binding.btnReplayOnboarding.text = CameraBentoDeckView.formatProTelemetry(
+            label = "SETUP WIZARD",
+            value = getString(R.string.settings_btn_replay_onboarding),
+            isTabActive = false,
+            context = requireContext()
+        )
         binding.btnReplayOnboarding.setOnClickListener {
             val bundle = Bundle().apply {
                 putBoolean("force_onboarding", true)
@@ -959,8 +967,6 @@ class SettingsFragment : Fragment() {
         updateCheckboxStates()
         updateStorageVisibility()
 
-        setupSwitch(binding.switchManualControls, KEY_MANUAL_CONTROLS, false)
-        setupSwitch(binding.switchExpFocusPeaking, KEY_EXP_FOCUS_PEAKING, false)
         setupSwitch(binding.switchMotionPhoto, KEY_MOTION_PHOTO, false)
 
         syncLocationSettingState()
@@ -1028,8 +1034,6 @@ class SettingsFragment : Fragment() {
             val density = resources.displayMetrics.density
             val stroke1dp = (1f * density).toInt()
             val stroke1_5dp = (1.5f * density).toInt()
-            val radius10dp = (10f * density).toInt()
-            val radius14dp = (14f * density).toInt()
 
             val colorPrimary = MaterialColors.getColor(btn, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
             val colorPrimaryContainer = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
@@ -1054,31 +1058,52 @@ class SettingsFragment : Fragment() {
         }
 
         fun updateUiTierButtons(checkedId: Int) {
-            styleTierButton(binding.btnTierPs, "P&S", "极简层", checkedId == R.id.btn_tier_ps)
-            styleTierButton(binding.btnTierFilm, "FILM", "胶片层", checkedId == R.id.btn_tier_film)
-            styleTierButton(binding.btnTierPro, "PRO", "专业层", checkedId == R.id.btn_tier_pro)
+            styleTierButton(binding.btnTierPs, "P&S", "极简", checkedId == R.id.btn_tier_ps)
+            styleTierButton(binding.btnTierFilm, "FILM", "胶片", checkedId == R.id.btn_tier_film)
+            styleTierButton(binding.btnTierPro, "PRO", "专业", checkedId == R.id.btn_tier_pro)
+            styleTierButton(binding.btnTierCustom, "CUSTOM", "自定义", checkedId == R.id.btn_tier_custom)
+        }
+
+        fun syncTierSelectionFromPrefs() {
+            val currentTierKey = prefs.getString(CameraBentoDeckView.PREF_KEY_UI_TIER, CameraUiTier.FILM.key)
+            val tier = CameraUiTier.fromKey(currentTierKey)
+            val checkId = when (tier) {
+                CameraUiTier.POINT_AND_SHOOT -> R.id.btn_tier_ps
+                CameraUiTier.FILM -> R.id.btn_tier_film
+                CameraUiTier.PRO -> R.id.btn_tier_pro
+                CameraUiTier.CUSTOM -> R.id.btn_tier_custom
+            }
+            binding.toggleUiTiers.check(checkId)
+            updateUiTierButtons(checkId)
+            binding.toggleUiTiers.enforceConcentricShapes()
         }
 
         binding.toggleUiTiers.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isChecked) {
-                binding.containerTierPs.visibility = if (checkedId == R.id.btn_tier_ps) View.VISIBLE else View.GONE
-                binding.containerTierFilm.visibility = if (checkedId == R.id.btn_tier_film) View.VISIBLE else View.GONE
-                binding.containerTierPro.visibility = if (checkedId == R.id.btn_tier_pro) View.VISIBLE else View.GONE
+                val tier = when (checkedId) {
+                    R.id.btn_tier_ps -> CameraUiTier.POINT_AND_SHOOT
+                    R.id.btn_tier_film -> CameraUiTier.FILM
+                    R.id.btn_tier_pro -> CameraUiTier.PRO
+                    else -> CameraUiTier.CUSTOM
+                }
+                prefs.edit().putString(CameraBentoDeckView.PREF_KEY_UI_TIER, tier.key).apply()
                 updateUiTierButtons(checkedId)
                 binding.toggleUiTiers.enforceConcentricShapes()
+                if (tier == CameraUiTier.CUSTOM) {
+                    ViewfinderDeckCustomizerSheet.show(requireContext()) {
+                        syncTierSelectionFromPrefs()
+                    }
+                }
             }
         }
-        binding.toggleUiTiers.check(R.id.btn_tier_film)
-        updateUiTierButtons(R.id.btn_tier_film)
-        binding.toggleUiTiers.enforceConcentricShapes()
 
-        setupSwitch(binding.switchShowHdrPlusSwitch, KEY_SHOW_HDR_PLUS_SWITCH)
-        setupSwitch(binding.switchShowUnderexposureButton, KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON)
-        setupSwitch(binding.switchShowSettingsButton, KEY_SHOW_SETTINGS_BUTTON)
-        setupSwitch(binding.switchShowCameraSwitchButton, KEY_SHOW_CAMERA_SWITCH_BUTTON)
-        setupSwitch(binding.switchShowModeSwitchButton, KEY_SHOW_MODE_SWITCH_BUTTON)
-        setupSwitch(binding.switchShowLensControls, KEY_SHOW_LENS_CONTROLS)
-        setupSwitch(binding.switchShowLutSwitcher, KEY_SHOW_LUT_SWITCHER)
+        binding.btnOpenDeckCustomizer.setOnClickListener {
+            ViewfinderDeckCustomizerSheet.show(requireContext()) {
+                syncTierSelectionFromPrefs()
+            }
+        }
+
+        syncTierSelectionFromPrefs()
 
         setupSwitch(binding.switchForce60fps, KEY_FORCE_60FPS, false)
 
@@ -1363,13 +1388,14 @@ class SettingsFragment : Fragment() {
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(R.string.btn_clear_cache) { _, _ ->
                     val appContext = requireContext().applicationContext
+                    val ctx = requireContext()
                     binding.btnClearCache.isEnabled = false
                     binding.btnClearCache.text = CameraBentoDeckView.formatProTelemetry(
                         label = "CLEAR CACHE",
                         value = getString(R.string.pref_cache_calculating),
                         isTabActive = false,
                         isValueManual = false,
-                        context = appContext
+                        context = ctx
                     )
                     lifecycleScope.launch(Dispatchers.IO) {
                         val freedBytes = CacheManager.clearCache(appContext)
@@ -1381,7 +1407,7 @@ class SettingsFragment : Fragment() {
                                 value = CacheManager.formatSize(0L),
                                 isTabActive = false,
                                 isValueManual = false,
-                                context = appContext
+                                context = _binding?.btnClearCache?.context ?: ctx
                             )
                             if (freedBytes > 0) {
                                 Toast.makeText(
@@ -1404,14 +1430,15 @@ class SettingsFragment : Fragment() {
     }
 
     private fun updateCacheSize() {
-        val appContext = context?.applicationContext ?: return
+        val ctx = context ?: return
+        val appContext = ctx.applicationContext
         binding.btnClearCache.isEnabled = false
         binding.btnClearCache.text = CameraBentoDeckView.formatProTelemetry(
             label = "CLEAR CACHE",
             value = getString(R.string.pref_cache_calculating),
             isTabActive = false,
             isValueManual = false,
-            context = appContext
+            context = ctx
         )
         lifecycleScope.launch(Dispatchers.IO) {
             val size = CacheManager.calculateCacheSize(appContext)
@@ -1423,7 +1450,7 @@ class SettingsFragment : Fragment() {
                     value = formatted,
                     isTabActive = false,
                     isValueManual = false,
-                    context = appContext
+                    context = _binding?.btnClearCache?.context ?: ctx
                 )
             }
         }

@@ -6,12 +6,14 @@ import top.maary.darkbag.modes.CaptureMode
 enum class CameraUiTier(val key: String, val displayLabel: String) {
     POINT_AND_SHOOT("PS", "P&S"),
     FILM("FILM", "FILM"),
-    PRO("PRO", "PRO");
+    PRO("PRO", "PRO"),
+    CUSTOM("CUSTOM", "CUSTOM");
 
     fun next(): CameraUiTier = when (this) {
         POINT_AND_SHOOT -> FILM
         FILM -> PRO
-        PRO -> POINT_AND_SHOOT
+        PRO -> CUSTOM
+        CUSTOM -> POINT_AND_SHOOT
     }
 
     companion object {
@@ -58,8 +60,8 @@ data class CameraUiState(
         get() = currentMode.isMultiCamera
 
     val showDetailedTelemetry: Boolean
-        get() = uiTier == CameraUiTier.PRO
+        get() = uiTier == CameraUiTier.PRO || uiTier == CameraUiTier.CUSTOM
 
     val showFilmRecipeRow: Boolean
-        get() = uiTier == CameraUiTier.FILM || uiTier == CameraUiTier.PRO
+        get() = uiTier == CameraUiTier.FILM || uiTier == CameraUiTier.PRO || uiTier == CameraUiTier.CUSTOM
 }
