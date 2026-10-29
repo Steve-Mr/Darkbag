@@ -746,6 +746,9 @@ class CameraBentoDeckView @JvmOverloads constructor(
                     binding.btnBentoPlayground.layoutParams = lp
                 }
             }
+
+            // 5. Focus Peaking Quick-Toggle Badge (Anchored to top-right corner of viewfinder)
+            binding.btnFocusPeakingBadge?.visibility = if (spec.enableFocusPeaking) View.VISIBLE else View.GONE
         }
 
         /**
@@ -967,6 +970,9 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 supportsMotionPhoto = activeMode.supportsMotionPhoto,
                 isFlashOrUnderexposureAvailable = true
             )
+
+            // In customizer preview, the mockup stage displays previewFocusPeakingBadge
+            binding.btnFocusPeakingBadge?.visibility = View.GONE
 
             // Keep all preview controls enabled for 100% authentic M3 contrast, but non-clickable so scrolling is smooth
             disableInteractivityForPreview(binding.root)
@@ -1288,6 +1294,62 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 button.strokeColor = ColorStateList.valueOf(Color.TRANSPARENT)
                 button.strokeWidth = 0
                 button.cornerRadius = radius14dp
+            }
+        }
+
+        /**
+         * Applies Material 3 Expressive styling to the Focus Peaking quick-toggle capsule badge.
+         *
+         * - Active (ON): colorTertiaryContainer fill, colorOnTertiaryContainer text, 1.5dp colorTertiary stroke.
+         * - Inactive (OFF): Translucent dark overlay with subtle outline, colorOnSurfaceVariant text.
+         */
+        @JvmStatic
+        fun styleFocusPeakingBadge(button: MaterialButton, isActive: Boolean) {
+            val density = button.resources.displayMetrics.density
+            val radius13dp = (13f * density).roundToInt()
+            val stroke1_5dp = (1.5f * density).roundToInt()
+
+            val colorTertiaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorTertiaryContainer,
+                Color.parseColor("#2E7D32")
+            )
+            val colorOnTertiaryContainer = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOnTertiaryContainer,
+                Color.WHITE
+            )
+            val colorTertiary = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorTertiary,
+                Color.parseColor("#00E676")
+            )
+            val colorOnSurfaceVariant = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOnSurfaceVariant,
+                Color.LTGRAY
+            )
+
+            button.cornerRadius = radius13dp
+            button.includeFontPadding = false
+            button.insetTop = 0
+            button.insetBottom = 0
+            button.minWidth = 0
+            button.minimumWidth = 0
+            button.minHeight = 0
+            button.minimumHeight = 0
+            button.iconPadding = 0
+
+            if (isActive) {
+                button.backgroundTintList = ColorStateList.valueOf(colorTertiaryContainer)
+                button.setTextColor(colorOnTertiaryContainer)
+                button.strokeColor = ColorStateList.valueOf(colorTertiary)
+                button.strokeWidth = stroke1_5dp
+            } else {
+                button.backgroundTintList = ColorStateList.valueOf(Color.argb(160, 20, 24, 28))
+                button.setTextColor(colorOnSurfaceVariant)
+                button.strokeColor = ColorStateList.valueOf(Color.argb(90, 255, 255, 255))
+                button.strokeWidth = (1f * density).roundToInt()
             }
         }
 

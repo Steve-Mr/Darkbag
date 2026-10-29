@@ -541,4 +541,47 @@ class CameraBentoDeckViewTest {
         assertEquals(0, lpNone.marginStart)
         assertEquals(0, lpNone.marginEnd)
     }
+
+    @Test
+    fun testStyleFocusPeakingBadge() {
+        val button = MaterialButton(themedContext)
+        val density = themedContext.resources.displayMetrics.density
+
+        // Inactive (OFF)
+        CameraBentoDeckView.styleFocusPeakingBadge(button, isActive = false)
+        assertEquals((13f * density).roundToInt(), button.cornerRadius)
+        assertEquals((1f * density).roundToInt(), button.strokeWidth)
+        assertEquals(0, button.insetTop)
+        assertEquals(0, button.insetBottom)
+
+        // Active (ON)
+        CameraBentoDeckView.styleFocusPeakingBadge(button, isActive = true)
+        assertEquals((13f * density).roundToInt(), button.cornerRadius)
+        assertEquals((1.5f * density).roundToInt(), button.strokeWidth)
+    }
+
+    @Test
+    fun testFocusPeakingBadgeVisibilityInDeckSpec() {
+        val root = android.widget.FrameLayout(themedContext)
+        val binding = top.maary.darkbag.databinding.CameraUiContainerBinding.inflate(
+            android.view.LayoutInflater.from(themedContext),
+            root
+        )
+
+        // PRO tier: enableFocusPeaking = true -> btnFocusPeakingBadge VISIBLE
+        val proSpec = CameraBentoDeckView.DeckVisibilitySpec(
+            tier = top.maary.darkbag.viewmodel.CameraUiTier.PRO,
+            enableFocusPeaking = true
+        )
+        CameraBentoDeckView.applyVisibilitySpec(binding, proSpec)
+        assertEquals(android.view.View.VISIBLE, binding.btnFocusPeakingBadge?.visibility)
+
+        // FILM tier: enableFocusPeaking = false -> btnFocusPeakingBadge GONE
+        val filmSpec = CameraBentoDeckView.DeckVisibilitySpec(
+            tier = top.maary.darkbag.viewmodel.CameraUiTier.FILM,
+            enableFocusPeaking = false
+        )
+        CameraBentoDeckView.applyVisibilitySpec(binding, filmSpec)
+        assertEquals(android.view.View.GONE, binding.btnFocusPeakingBadge?.visibility)
+    }
 }

@@ -1567,6 +1567,7 @@ class SettingsFragment : Fragment() {
         const val KEY_ENABLE_PLAYGROUND = "enable_playground"
         const val KEY_SHOW_FLOATING_TOOLBAR = "show_floating_toolbar"
         const val KEY_EXP_FOCUS_PEAKING = "exp_focus_peaking"
+        const val KEY_FOCUS_PEAKING_ACTIVE = "pref_focus_peaking_active"
         const val KEY_COLOR_ENGINE_MODE = "color_engine_mode"
 
         const val KEY_SHUTTER_LONG_PRESS_ACTION = "shutter_long_press_action"

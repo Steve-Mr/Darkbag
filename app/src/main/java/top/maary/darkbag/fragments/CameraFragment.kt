@@ -1607,6 +1607,16 @@ class CameraFragment : Fragment() {
             }
         }
 
+        // Focus Peaking Badge Quick-Toggle (Anchored to top-right corner of viewfinder)
+        cameraUiContainerBinding?.btnFocusPeakingBadge?.setOnClickListener { btn ->
+            btn.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val currentState = prefs.getBoolean(SettingsFragment.KEY_FOCUS_PEAKING_ACTIVE, true)
+            val newState = !currentState
+            prefs.edit().putBoolean(SettingsFragment.KEY_FOCUS_PEAKING_ACTIVE, newState).apply()
+            updateFocusPeakingState()
+        }
+
         // Bento Tier Switcher (P&S / FILM / PRO)
         val initialPrefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val savedTier = CameraUiTier.fromKey(initialPrefs.getString(CameraBentoDeckView.PREF_KEY_UI_TIER, CameraUiTier.FILM.key))
@@ -1863,6 +1873,7 @@ class CameraFragment : Fragment() {
         updateCameraSwitchButton()
         initLensControls()
         updateLiveLut()
+        updateFocusPeakingState()
     }
 
     private fun updateViewFinderConstraints() {
@@ -2653,8 +2664,19 @@ class CameraFragment : Fragment() {
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val currentTier = cameraViewModel.uiState.value.uiTier
         val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, currentTier)
-        val enabled = spec.enableFocusPeaking && (activeManualTab == "Focus" || isManualFocus)
-        lutProcessor?.setFocusPeakingEnabled(enabled)
+        val isBadgeVisible = spec.enableFocusPeaking
+        val badge = cameraUiContainerBinding?.btnFocusPeakingBadge
+
+        badge?.visibility = if (isBadgeVisible) View.VISIBLE else View.GONE
+        if (isBadgeVisible) {
+            val isActive = prefs.getBoolean(SettingsFragment.KEY_FOCUS_PEAKING_ACTIVE, true)
+            if (badge != null) {
+                CameraBentoDeckView.styleFocusPeakingBadge(badge, isActive)
+            }
+            lutProcessor?.setFocusPeakingEnabled(isActive)
+        } else {
+            lutProcessor?.setFocusPeakingEnabled(false)
+        }
     }
 
     private fun handleDialSelection(item: top.maary.darkbag.ui.ProDialWheelView.DialItem) {
@@ -6599,6 +6621,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 container.getChildAt(i)?.requestLayout()
             }
         }
+        updateFocusPeakingState()
     }
 
     private fun getDotTargetRotation(): Float {

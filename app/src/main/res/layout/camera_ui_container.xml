@@ -17,6 +17,30 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <!-- Focus Peaking Interactive Quick-Toggle Badge (Anchored to top-right corner of viewFinderContainer) -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_focus_peaking_badge"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_width="wrap_content"
+        android:layout_height="26dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginEnd="10dp"
+        android:text="PEAK"
+        android:textSize="9sp"
+        android:textStyle="bold"
+        android:includeFontPadding="false"
+        android:minWidth="0dp"
+        android:minHeight="0dp"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="0dp"
+        android:elevation="6dp"
+        android:visibility="gone"
+        app:cornerRadius="13dp"
+        app:layout_constraintTop_toTopOf="@id/viewFinderContainer"
+        app:layout_constraintEnd_toEndOf="@id/viewFinderContainer" />
+
     <!-- Top Safe-Area Anchor (Zero visual clutter at top of screen) -->
     <Space
         android:id="@+id/top_right_controls"
