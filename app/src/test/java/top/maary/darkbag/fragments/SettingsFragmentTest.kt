@@ -364,24 +364,43 @@ class SettingsFragmentTest {
         val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
         val inflater = LayoutInflater.from(themedContext)
         val binding = top.maary.darkbag.databinding.SheetViewfinderCustomizerBinding.inflate(inflater)
+        val deckBinding = top.maary.darkbag.databinding.CameraUiContainerBinding.inflate(inflater, binding.previewDeckHost)
 
-        // Preview components
+        // Preview stage & authentic CameraUiContainerBinding host
         assertNotNull(binding.cardViewfinderPreview)
-        assertNotNull(binding.previewLensControls)
-        assertNotNull(binding.previewSettingsButton)
-        assertNotNull(binding.previewCameraSwitch)
-        assertNotNull(binding.previewFilmRow)
-        assertNotNull(binding.previewProModule)
+        assertNotNull(binding.previewViewfinderStage)
         assertNotNull(binding.previewFocusPeakingBadge)
-        assertNotNull(binding.previewUnderexposure)
-        assertNotNull(binding.previewModeSwitch)
-        assertNotNull(binding.previewLogButton)
-        assertNotNull(binding.previewLutButton)
-        assertNotNull(binding.previewHdrPlusPill)
-        assertNotNull(binding.previewCaptureButton)
-        assertNotNull(binding.previewTierPill)
-        assertNotNull(binding.previewPlaygroundButton)
-        assertNotNull(binding.previewGalleryCard)
+        assertNotNull(binding.previewDeckHost)
+
+        // Authentic CameraUiContainerBinding components inside previewDeckHost
+        assertNotNull(deckBinding.bottomIslandCard)
+        assertNotNull(deckBinding.bentoDeckView)
+        assertNotNull(deckBinding.bentoProModule)
+        assertNotNull(deckBinding.bentoFilmRow)
+        assertNotNull(deckBinding.bentoLogButton)
+        assertNotNull(deckBinding.lutSwitcherButton)
+        assertNotNull(deckBinding.hdrPlusPill)
+        assertNotNull(deckBinding.flashButton)
+        assertNotNull(deckBinding.motionPhotoButton)
+        assertNotNull(deckBinding.lensControlRow)
+        assertNotNull(deckBinding.modeSwitchButton)
+        assertNotNull(deckBinding.lensControlsCard)
+        assertNotNull(deckBinding.cameraSwitchButtonAlt)
+        assertNotNull(deckBinding.bentoShutterRow)
+        assertNotNull(deckBinding.photoViewCard)
+        assertNotNull(deckBinding.cameraCaptureButton)
+        assertNotNull(deckBinding.btnBentoTier)
+        assertNotNull(deckBinding.btnBentoPlayground)
+        assertNotNull(deckBinding.settingsButton)
+
+        // Verify bindAuthenticPreview populates lens buttons and binds state cleanly
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val spec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(prefs, top.maary.darkbag.viewmodel.CameraUiTier.PRO)
+        top.maary.darkbag.ui.CameraBentoDeckView.bindAuthenticPreview(deckBinding, themedContext, prefs, spec)
+        assertEquals(5, deckBinding.lensControlsContainer?.childCount)
+        assertEquals(android.view.View.VISIBLE, deckBinding.bentoProModule?.visibility)
+        assertEquals(android.view.View.VISIBLE, deckBinding.bentoFilmRow?.visibility)
+        assertEquals(android.view.View.VISIBLE, deckBinding.lensControlRow?.visibility)
 
         // Template buttons
         assertNotNull(binding.btnTemplatePs)
@@ -403,6 +422,7 @@ class SettingsFragmentTest {
     @Test
     fun testDeckVisibilitySpecTierParity() {
         val context = ApplicationProvider.getApplicationContext<Context>()
+        val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
         // 1. POINT_AND_SHOOT preset
@@ -412,6 +432,7 @@ class SettingsFragmentTest {
         assertFalse(psSpec.showLogAndLut)
         assertFalse(psSpec.showHdrPlusPill)
         assertTrue(psSpec.showLensRow)
+        assertTrue(psSpec.showModeSwitch)
         assertTrue(psSpec.showSettingsButton)
 
         // 2. FILM preset
@@ -428,19 +449,45 @@ class SettingsFragmentTest {
         assertTrue(proSpec.showFilmRow)
         assertTrue(proSpec.enableFocusPeaking)
 
-        // 4. CUSTOM respects granular prefs
+        // 4. CUSTOM respects granular prefs and collapses Row B when all 3 Row B switches are off
+        prefs.edit()
+            .putBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
+            .putBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, false)
+            .putBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, false)
+            .putBoolean(SettingsFragment.KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, false)
+            .putBoolean(SettingsFragment.KEY_SHOW_SETTINGS_BUTTON, false)
+            .apply()
+
+        val customCollapsedSpec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(prefs, top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM)
+        assertFalse(customCollapsedSpec.showFilmRow)
+
+        // 5. CUSTOM keeps Row B visible when HDR+ is on, and dynamically expands fixed pills when Log/LUT is off
         prefs.edit()
             .putBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, true)
             .putBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, false)
             .putBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, true)
-            .putBoolean(SettingsFragment.KEY_SHOW_SETTINGS_BUTTON, false)
+            .putBoolean(SettingsFragment.KEY_SHOW_LENS_CONTROLS, false)
+            .putBoolean(SettingsFragment.KEY_SHOW_MODE_SWITCH_BUTTON, true)
+            .putBoolean(SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, true)
             .apply()
 
         val customSpec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(prefs, top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM)
         assertTrue(customSpec.showProModule)
         assertFalse(customSpec.showLogAndLut)
         assertTrue(customSpec.showHdrPlusPill)
-        assertTrue(customSpec.showFilmRow) // Row B remains visible because HDR+ is on!
-        assertFalse(customSpec.showSettingsButton)
+        assertTrue(customSpec.showFilmRow)
+
+        val inflater = LayoutInflater.from(themedContext)
+        val host = androidx.constraintlayout.widget.ConstraintLayout(themedContext)
+        val deckBinding = top.maary.darkbag.databinding.CameraUiContainerBinding.inflate(inflater, host)
+        top.maary.darkbag.ui.CameraBentoDeckView.bindAuthenticPreview(deckBinding, themedContext, prefs, customSpec)
+
+        val hdrLp = deckBinding.hdrPlusPill?.layoutParams as android.widget.LinearLayout.LayoutParams
+        assertEquals(0, hdrLp.width)
+        assertEquals(1f, hdrLp.weight, 0.001f)
+
+        val modeLp = deckBinding.modeSwitchButton?.layoutParams as android.widget.LinearLayout.LayoutParams
+        assertEquals(0, modeLp.width)
+        assertEquals(1f, modeLp.weight, 0.001f)
     }
 }

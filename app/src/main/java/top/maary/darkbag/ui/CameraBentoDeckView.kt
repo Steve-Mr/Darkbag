@@ -122,7 +122,7 @@ class CameraBentoDeckView @JvmOverloads constructor(
         val enableFocusPeaking: Boolean
     ) {
         val showFilmRow: Boolean
-            get() = showLogAndLut || showHdrPlusPill || showUnderexposure || showMotionPhoto
+            get() = showLogAndLut || showHdrPlusPill || showUnderexposure
 
         val showLensRow: Boolean
             get() = showModeSwitch || showLensControls || showCameraSwitch
@@ -603,6 +603,362 @@ class CameraBentoDeckView @JvmOverloads constructor(
             binding.bentoProModule?.visibility = if (showPro) View.VISIBLE else View.GONE
             binding.proInfoBarCard?.visibility = if (showPro) View.VISIBLE else View.GONE
             binding.manualControlsRoot?.visibility = if (showPro && hasActiveManualTab) View.VISIBLE else View.GONE
+        }
+
+        /**
+         * Applies the full 4-row DeckVisibilitySpec to a CameraUiContainerBinding, including
+         * dynamic layout weight and margin balancing so hidden weighted strips (e.g. Log/LUT
+         * or Lens Controls) never leave empty horizontal holes in Row B, Row C, or Row D.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun applyVisibilitySpec(
+            binding: CameraUiContainerBinding,
+            spec: DeckVisibilitySpec,
+            hasMultipleLenses: Boolean = true,
+            isAnyManual: Boolean = false,
+            hasActiveManualTab: Boolean = false,
+            supportsMotionPhoto: Boolean = true,
+            isFlashOrUnderexposureAvailable: Boolean = true
+        ) {
+            val root = binding.bentoDeckView ?: binding.bottomIslandCard ?: binding.root
+            val density = root.resources.displayMetrics.density
+
+            // 1. Style tier pill and apply Row A + base Row B state
+            bindTierState(
+                binding = binding,
+                tier = spec.tier,
+                isAnyManual = isAnyManual,
+                hasActiveManualTab = hasActiveManualTab,
+                showLutSwitcherPref = spec.showLogAndLut,
+                showManualControlsPref = spec.showProModule,
+                visibilitySpec = spec
+            )
+
+            // 2. Row B: Film Recipe & Quick Switches + Dynamic Weight Balancing
+            val showUnderexposureTile = spec.showUnderexposure && isFlashOrUnderexposureAvailable
+            val showFilmRow = (spec.showLogAndLut || spec.showHdrPlusPill || showUnderexposureTile) && !hasActiveManualTab
+            binding.bentoFilmRow?.visibility = if (showFilmRow) View.VISIBLE else View.GONE
+            binding.bentoLogButton?.visibility = if (showFilmRow && spec.showLogAndLut) View.VISIBLE else View.GONE
+            binding.lutSwitcherButton?.visibility = if (showFilmRow && spec.showLogAndLut) View.VISIBLE else View.GONE
+            binding.hdrPlusPill?.visibility = if (showFilmRow && spec.showHdrPlusPill) View.VISIBLE else View.GONE
+            binding.flashButton?.visibility = if (showFilmRow && showUnderexposureTile) View.VISIBLE else View.GONE
+            val showMotionTile = showFilmRow && spec.showMotionPhoto && supportsMotionPhoto
+            binding.motionPhotoButton?.visibility = if (showMotionTile) View.VISIBLE else View.GONE
+
+            val expandFilmPills = !spec.showLogAndLut
+            val hdrWidthPx = (50f * density).roundToInt()
+            val iconWidthPx = (44f * density).roundToInt()
+            val gap5dp = (5f * density).roundToInt()
+
+            fun updateRowBWeight(view: View?, fixedWidthPx: Int) {
+                val lp = view?.layoutParams as? LayoutParams ?: return
+                val targetWidth = if (expandFilmPills) 0 else fixedWidthPx
+                val targetWeight = if (expandFilmPills) 1f else 0f
+                if (lp.width != targetWidth || lp.weight != targetWeight) {
+                    lp.width = targetWidth
+                    lp.weight = targetWeight
+                    view.layoutParams = lp
+                }
+            }
+            updateRowBWeight(binding.hdrPlusPill, hdrWidthPx)
+            updateRowBWeight(binding.flashButton, iconWidthPx)
+            updateRowBWeight(binding.motionPhotoButton, iconWidthPx)
+
+            val rowBVisible = listOfNotNull(
+                binding.bentoLogButton,
+                binding.lutSwitcherButton,
+                binding.hdrPlusPill,
+                binding.flashButton,
+                binding.motionPhotoButton
+            ).filter { it.visibility == View.VISIBLE }
+            rowBVisible.forEachIndexed { idx, v ->
+                val lp = v.layoutParams as? MarginLayoutParams ?: return@forEachIndexed
+                val targetMarginEnd = if (idx < rowBVisible.lastIndex) gap5dp else 0
+                if (lp.marginEnd != targetMarginEnd) {
+                    lp.marginEnd = targetMarginEnd
+                    v.layoutParams = lp
+                }
+            }
+
+            // 3. Row C: Lens Controls & Mode/Camera Switches + Dynamic Weight Balancing
+            val showLensStrip = spec.showLensControls && hasMultipleLenses
+            val showLensRow = spec.showModeSwitch || showLensStrip || spec.showCameraSwitch
+            binding.lensControlRow?.visibility = if (showLensRow) View.VISIBLE else View.GONE
+            binding.modeSwitchButton?.visibility = if (showLensRow && spec.showModeSwitch) View.VISIBLE else View.GONE
+            binding.lensControlsCard?.visibility = if (showLensRow && showLensStrip) View.VISIBLE else View.GONE
+            binding.cameraSwitchButtonAlt?.visibility = if (showLensRow && spec.showCameraSwitch) View.VISIBLE else View.GONE
+
+            val expandLensSideButtons = !showLensStrip
+            val sideBtnWidthPx = (52f * density).roundToInt()
+            val gap6dp = (6f * density).roundToInt()
+
+            fun updateRowCWeight(view: View?) {
+                val lp = view?.layoutParams as? LayoutParams ?: return
+                val targetWidth = if (expandLensSideButtons) 0 else sideBtnWidthPx
+                val targetWeight = if (expandLensSideButtons) 1f else 0f
+                if (lp.width != targetWidth || lp.weight != targetWeight) {
+                    lp.width = targetWidth
+                    lp.weight = targetWeight
+                    view.layoutParams = lp
+                }
+            }
+            updateRowCWeight(binding.modeSwitchButton)
+            updateRowCWeight(binding.cameraSwitchButtonAlt)
+
+            val rowCVisible = listOfNotNull(
+                binding.modeSwitchButton,
+                binding.lensControlsCard,
+                binding.cameraSwitchButtonAlt
+            ).filter { it.visibility == View.VISIBLE }
+            rowCVisible.forEachIndexed { idx, v ->
+                val lp = v.layoutParams as? MarginLayoutParams ?: return@forEachIndexed
+                val targetMarginEnd = if (idx < rowCVisible.lastIndex) gap6dp else 0
+                if (lp.marginEnd != targetMarginEnd) {
+                    lp.marginEnd = targetMarginEnd
+                    v.layoutParams = lp
+                }
+            }
+
+            // 4. Row D: Shutter & Right Dual-Layer Stack
+            binding.settingsButton?.visibility = if (spec.showSettingsButton) View.VISIBLE else View.GONE
+            (binding.btnBentoPlayground?.layoutParams as? MarginLayoutParams)?.let { lp ->
+                val targetEnd = if (spec.showSettingsButton) (4f * density).roundToInt() else 0
+                if (lp.marginEnd != targetEnd) {
+                    lp.marginEnd = targetEnd
+                    binding.btnBentoPlayground.layoutParams = lp
+                }
+            }
+        }
+
+        /**
+         * Populates and styles an inflated [CameraUiContainerBinding] so it renders an authentic,
+         * 1:1 WYSIWYG viewfinder Bento deck preview inside [ViewfinderDeckCustomizerSheet].
+         */
+        @JvmStatic
+        fun bindAuthenticPreview(
+            binding: CameraUiContainerBinding,
+            context: Context,
+            prefs: android.content.SharedPreferences,
+            spec: DeckVisibilitySpec
+        ) {
+            val density = context.resources.displayMetrics.density
+
+            // Hide non-deck overlays from camera_ui_container.xml
+            binding.touchOverlay?.visibility = View.GONE
+            binding.topRightControls?.visibility = View.GONE
+            binding.btnProMode?.visibility = View.GONE
+            binding.lutListContainer?.visibility = View.GONE
+            binding.manualControlsRoot?.visibility = View.GONE
+
+            // Fit bottom_island_card snugly inside the preview host container
+            (binding.bottomIslandCard?.layoutParams as? MarginLayoutParams)?.let { lp ->
+                lp.marginStart = 0
+                lp.marginEnd = 0
+                lp.topMargin = 0
+                lp.bottomMargin = 0
+                binding.bottomIslandCard.layoutParams = lp
+            }
+
+            // Apply compact preview row heights so all 4 rows fit comfortably in the BottomSheet
+            val proBarPx = (40f * density).roundToInt()
+            val recipeRowPx = (40f * density).roundToInt()
+            val lensRowPx = (42f * density).roundToInt()
+            val shutterRowPx = (68f * density).roundToInt()
+            val cardPaddingPx = (7f * density).roundToInt()
+            val rowMarginPx = (4f * density).roundToInt()
+
+            binding.proInfoBarCard?.let { v ->
+                (v.layoutParams as? MarginLayoutParams)?.let { lp ->
+                    lp.height = proBarPx
+                    lp.bottomMargin = rowMarginPx
+                    v.layoutParams = lp
+                }
+            }
+            binding.bentoFilmRow?.let { v ->
+                (v.layoutParams as? MarginLayoutParams)?.let { lp ->
+                    lp.height = recipeRowPx
+                    lp.bottomMargin = rowMarginPx
+                    v.layoutParams = lp
+                }
+            }
+            binding.lensControlRow?.let { v ->
+                (v.layoutParams as? MarginLayoutParams)?.let { lp ->
+                    lp.height = lensRowPx
+                    lp.bottomMargin = rowMarginPx
+                    v.layoutParams = lp
+                }
+            }
+            binding.bentoShutterRow?.let { v ->
+                v.layoutParams?.let { lp ->
+                    lp.height = shutterRowPx
+                    v.layoutParams = lp
+                }
+            }
+            binding.photoViewCard?.let { v ->
+                v.layoutParams?.let { lp ->
+                    lp.width = (64f * density).roundToInt()
+                    v.layoutParams = lp
+                }
+            }
+            binding.bentoRightStack?.let { v ->
+                v.layoutParams?.let { lp ->
+                    lp.width = (92f * density).roundToInt()
+                    v.layoutParams = lp
+                }
+            }
+            (binding.bottomIslandCard as? MaterialCardView)?.setContentPadding(
+                cardPaddingPx, cardPaddingPx, cardPaddingPx, cardPaddingPx
+            )
+
+            // Resolve active capture mode for authentic mode color reactivity
+            val savedModeKey = prefs.getString(
+                top.maary.darkbag.fragments.SettingsFragment.KEY_ACTIVE_CAPTURE_MODE,
+                CaptureMode.NORMAL.key
+            )
+            val activeMode = CaptureMode.fromKey(savedModeKey) ?: CaptureMode.NORMAL
+            binding.bottomIslandCard?.let { styleDeckCard(it, activeMode) }
+
+            // Row A: Pro Telemetry Bar (AF, ISO, SEC, EV)
+            binding.pillFocus?.let { pill ->
+                styleBentoProPill(pill, isTabActive = false, isValueManual = false)
+                pill.text = formatProTelemetry("AF", "AUTO", false, false, context)
+            }
+            binding.pillIso?.let { pill ->
+                styleBentoProPill(pill, isTabActive = false, isValueManual = false)
+                pill.text = formatProTelemetry("ISO", "100", false, false, context)
+            }
+            binding.pillShutter?.let { pill ->
+                styleBentoProPill(pill, isTabActive = false, isValueManual = false)
+                pill.text = formatProTelemetry("SEC", "1/125s", false, false, context)
+            }
+            binding.pillEv?.let { pill ->
+                styleBentoProPill(pill, isTabActive = false, isValueManual = false)
+                pill.text = formatProTelemetry("EV", "0.0", false, false, context)
+            }
+            binding.btnProLink?.visibility = if (activeMode == CaptureMode.MULTI_CAMERA) View.VISIBLE else View.GONE
+            binding.btnProLink?.let { styleBentoProLink(it, isLinked = true) }
+
+            // Row B: Film Recipe & Quick Switches
+            val targetLogName = prefs.getString(top.maary.darkbag.fragments.SettingsFragment.KEY_TARGET_LOG, "F-Log2")
+                ?.takeIf { !it.equals("None", ignoreCase = true) } ?: "F-Log2"
+            val activeLutName = prefs.getString(top.maary.darkbag.fragments.SettingsFragment.KEY_ACTIVE_LUT, null)
+                ?.takeIf { !it.equals("None", ignoreCase = true) } ?: "Classic Neg"
+            bindRecipeRow(binding, targetLogName, activeLutName)
+
+            val isHdrPlus = prefs.getBoolean(top.maary.darkbag.fragments.CameraFragment.KEY_HDR_PLUS_ENABLED, true)
+            styleHdrPlusTile(binding, isHdrPlus)
+
+            val underexposureMode = prefs.getString(
+                top.maary.darkbag.fragments.SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE,
+                "Dynamic (Experimental)"
+            ) ?: "Dynamic (Experimental)"
+            binding.flashButton?.let { btn ->
+                btn.text = null
+                val iconRes = when {
+                    underexposureMode.contains("Dynamic") -> top.maary.darkbag.R.drawable.ic_hdr_dynamic
+                    underexposureMode == "Off" -> top.maary.darkbag.R.drawable.ic_exposure_off
+                    underexposureMode == "-1 EV" -> top.maary.darkbag.R.drawable.ic_exposure_neg_1
+                    underexposureMode == "-2 EV" -> top.maary.darkbag.R.drawable.ic_exposure_neg_2
+                    else -> top.maary.darkbag.R.drawable.ic_hdr_dynamic
+                }
+                btn.setIconResource(iconRes)
+                styleBentoToggleTile(btn, isActive = underexposureMode != "Off", isTertiaryAccent = false)
+            }
+
+            val isMotionPhoto = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_MOTION_PHOTO, false)
+            binding.motionPhotoButton?.let { btn ->
+                btn.setIconResource(
+                    if (isMotionPhoto) top.maary.darkbag.R.drawable.ic_motion_photo_on
+                    else top.maary.darkbag.R.drawable.ic_motion_photo_off
+                )
+                styleBentoToggleTile(btn, isActive = isMotionPhoto, isTertiaryAccent = false)
+            }
+
+            // Row C: Mode Switch, Lens Focal Strip, Camera Switch
+            binding.modeSwitchButton?.let { btn ->
+                val iconRes = when (activeMode) {
+                    CaptureMode.MULTI_CAMERA -> top.maary.darkbag.R.drawable.ic_mode_multi_camera
+                    CaptureMode.HALF_FRAME_SBS -> top.maary.darkbag.R.drawable.ic_mode_half_side
+                    CaptureMode.HALF_FRAME_TB -> top.maary.darkbag.R.drawable.ic_mode_half_top
+                    CaptureMode.NORMAL -> top.maary.darkbag.R.drawable.ic_mode_normal
+                }
+                btn.setIconResource(iconRes)
+                styleModeSwitchButton(btn, activeMode)
+            }
+
+            binding.lensControlsContainer?.let { container ->
+                if (container.childCount == 0) {
+                    val previewLenses = listOf(
+                        Triple("0.6x", false, false),
+                        Triple("1.0x", true, false),
+                        Triple("28mm", false, true),
+                        Triple("35mm", false, true),
+                        Triple("3.0x", false, false)
+                    )
+                    val marginPx = (2.5f * density).roundToInt()
+                    for ((label, isActive, isDigitalCrop) in previewLenses) {
+                        val btn = MaterialButton(context).apply {
+                            layoutParams = LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f).apply {
+                                marginStart = marginPx
+                                marginEnd = marginPx
+                            }
+                            text = label
+                            textSize = 10.5f
+                            isSingleLine = true
+                            maxLines = 1
+                            setPadding(0, 0, 0, 0)
+                            insetTop = 0
+                            insetBottom = 0
+                            minWidth = 0
+                            minimumWidth = 0
+                        }
+                        styleBentoLensButton(btn, isActive = isActive, isDigitalCrop = isDigitalCrop)
+                        container.addView(btn)
+                    }
+                }
+            }
+
+            // Row D: Gallery Thumbnail Placeholder & ExpressiveShutterButton
+            binding.photoViewButton?.let { iv ->
+                iv.visibility = View.VISIBLE
+                iv.setImageResource(top.maary.darkbag.R.drawable.ic_photo)
+                val pad = (16f * density).roundToInt()
+                iv.setPadding(pad, pad, pad, pad)
+                val tintColor = MaterialColors.getColor(
+                    iv,
+                    com.google.android.material.R.attr.colorOnSurfaceVariant,
+                    Color.GRAY
+                )
+                iv.imageTintList = ColorStateList.valueOf(tintColor)
+            }
+            binding.cameraCaptureButton?.setHalfFrameState(activeMode.isHalfFrame, 0)
+
+            // Apply visibility spec & dynamic weight balancing
+            applyVisibilitySpec(
+                binding = binding,
+                spec = spec,
+                hasMultipleLenses = true,
+                isAnyManual = false,
+                hasActiveManualTab = false,
+                supportsMotionPhoto = activeMode.supportsMotionPhoto,
+                isFlashOrUnderexposureAvailable = true
+            )
+
+            // Keep all preview controls enabled for 100% authentic M3 contrast, but non-clickable so scrolling is smooth
+            disableInteractivityForPreview(binding.root)
+        }
+
+        private fun disableInteractivityForPreview(view: View?) {
+            if (view == null) return
+            view.isClickable = false
+            view.isLongClickable = false
+            view.isFocusable = false
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) {
+                    disableInteractivityForPreview(view.getChildAt(i))
+                }
+            }
         }
 
         /**

@@ -707,7 +707,8 @@ class CameraFragment : Fragment() {
         val btn = cameraUiContainerBinding?.motionPhotoButton ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val supportsMotion = (activeCoordinator?.mode ?: resolveActiveCaptureMode(prefs)).supportsMotionPhoto
-        if (!supportsMotion) {
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, cameraViewModel.uiState.value.uiTier)
+        if (!supportsMotion || !spec.showFilmRow) {
             btn.visibility = View.GONE
             return
         }
@@ -1618,17 +1619,19 @@ class CameraFragment : Fragment() {
                 android.transition.TransitionManager.beginDelayedTransition(root, transition)
             }
             val nextTier = cameraViewModel.uiState.value.uiTier.next()
-            requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putString(CameraBentoDeckView.PREF_KEY_UI_TIER, nextTier.key).apply()
+            val tierPrefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            tierPrefs.edit().putString(CameraBentoDeckView.PREF_KEY_UI_TIER, nextTier.key).apply()
             cameraViewModel.setUiTier(nextTier)
-            if (nextTier != CameraUiTier.PRO && activeManualTab != null) {
+            val nextSpec = CameraBentoDeckView.resolveVisibilitySpec(tierPrefs, nextTier)
+            if (!nextSpec.showProModule && activeManualTab != null) {
                 activeManualTab = null
                 cameraViewModel.setActiveManualTab(null)
                 updateBentoFolding(isDialOpen = false)
                 updateFocusPeakingState()
                 updateProInfoBar()
             }
-            updateTierUi(nextTier)
+            applyUIVisibility()
+            updateFocusPeakingState()
         }
 
         // Flash / Underexposure Toggle Button
@@ -2521,11 +2524,11 @@ class CameraFragment : Fragment() {
                 }
             }
         } else {
-            // Restore bento_film_row to View.VISIBLE
+            // Restore bento_film_row to View.VISIBLE if enabled in current tier spec
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val uiTier = cameraViewModel.uiState.value.uiTier
-            if (uiTier == CameraUiTier.FILM || uiTier == CameraUiTier.PRO) {
-                binding.bentoFilmRow?.visibility = View.VISIBLE
-            }
+            val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, uiTier)
+            binding.bentoFilmRow?.visibility = if (spec.showFilmRow) View.VISIBLE else View.GONE
             // Restore lens_control_row and bento_shutter_row to dynamic heights via applyDynamicRowHeights()
             CameraBentoDeckView.applyDynamicRowHeights(binding)
         }
@@ -3133,16 +3136,13 @@ class CameraFragment : Fragment() {
 
     private fun updateLensUI() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val showLensControls = prefs.getBoolean(SettingsFragment.KEY_SHOW_LENS_CONTROLS, true)
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, cameraViewModel.uiState.value.uiTier)
+        val showLensControls = spec.showLensControls
         currentLens?.let {
             prefs.edit().putString(KEY_SELECTED_LENS_ID, it.sensorId).apply()
         }
 
         val binding = cameraUiContainerBinding ?: return
-
-        // Ensure the row containing the switch button is always visible
-        binding.lensControlRow?.visibility = View.VISIBLE
-
         val container = binding.lensControlsContainer ?: return
 
         val isBackCamera = lensFacing == CameraCharacteristics.LENS_FACING_BACK
@@ -3184,7 +3184,10 @@ class CameraFragment : Fragment() {
             }
         }
 
-        binding.lensControlsCard?.visibility = if (container.childCount > 1 && showLensControls) View.VISIBLE else View.GONE
+        val hasMultipleLenses = container.childCount > 1
+        val showLensStrip = hasMultipleLenses && showLensControls
+        binding.lensControlsCard?.visibility = if (showLensStrip) View.VISIBLE else View.GONE
+        binding.lensControlRow?.visibility = if (spec.showModeSwitch || spec.showCameraSwitch || showLensStrip) View.VISIBLE else View.GONE
     }
 
     private fun updateZoom(animate: Boolean) {
@@ -3205,7 +3208,8 @@ class CameraFragment : Fragment() {
         if (resFocus != null) liveFocusDistance = resFocus
         captureResultFlow.tryEmit(result)
 
-        if (cameraViewModel.uiState.value.uiTier == CameraUiTier.PRO) {
+        val activeTier = cameraViewModel.uiState.value.uiTier
+        if (activeTier == CameraUiTier.PRO || activeTier == CameraUiTier.CUSTOM) {
             val now = android.os.SystemClock.uptimeMillis()
             if (now - lastTelemetryUpdateMs >= 250L) {
                 lastTelemetryUpdateMs = now
@@ -3220,7 +3224,7 @@ class CameraFragment : Fragment() {
 
                 lifecycleScope.launch(Dispatchers.Main.immediate) {
                     val binding = cameraUiContainerBinding ?: return@launch
-                    if (cameraViewModel.uiState.value.uiTier != CameraUiTier.PRO) return@launch
+                    if (binding.proInfoBarCard?.visibility != View.VISIBLE) return@launch
                     val ctx = context ?: binding.root.context
                     binding.pillFocus?.let { pill ->
                         val isTabActive = activeManualTab == "Focus"
@@ -6560,24 +6564,26 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val currentTier = cameraViewModel.uiState.value.uiTier
         val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, currentTier)
 
-        uiBinding.hdrPlusPill?.visibility = if (spec.showHdrPlusPill) View.VISIBLE else View.GONE
-        uiBinding.settingsButton?.visibility = if (spec.showSettingsButton) View.VISIBLE else View.GONE
-        uiBinding.cameraSwitchButtonAlt?.visibility = if (spec.showCameraSwitch) View.VISIBLE else View.GONE
-        uiBinding.modeSwitchButton?.visibility = if (spec.showModeSwitch) View.VISIBLE else View.GONE
-
         val hasMultipleLenses = (uiBinding.lensControlsContainer?.childCount ?: 0) > 1
-        uiBinding.lensControlsCard?.visibility = if (spec.showLensControls && hasMultipleLenses) View.VISIBLE else View.GONE
+        val supportsMotion = (activeCoordinator?.mode ?: resolveActiveCaptureMode(prefs)).supportsMotionPhoto
+        val isAnyManual = isManualFocus || isManualIso || isManualShutter || currentEvIndex != 0
 
-        // Hide the whole row if all its components are hidden
-        uiBinding.lensControlRow?.visibility = if (spec.showLensRow && (spec.showCameraSwitch || spec.showModeSwitch || (spec.showLensControls && hasMultipleLenses))) View.VISIBLE else View.GONE
-
-        uiBinding.lutSwitcherButton?.visibility = if (spec.showLogAndLut) View.VISIBLE else View.GONE
-        uiBinding.bentoLogButton?.visibility = if (spec.showLogAndLut) View.VISIBLE else View.GONE
-
-        // Update Motion Photo Button & Flash/Underexposure button & Tier rows as well
+        // Update Motion Photo & Flash/Underexposure states first
         updateMotionPhotoButton()
         updateHdrPlusConstraints()
-        updateTierUi(currentTier)
+
+        // Apply full 4-row visibility spec & dynamic weight balancing
+        val isFlashOrUnderexposureAvailable = isHdrPlusEnabled || (uiBinding.flashButton?.visibility == View.VISIBLE)
+        CameraBentoDeckView.applyVisibilitySpec(
+            binding = uiBinding,
+            spec = spec,
+            hasMultipleLenses = hasMultipleLenses,
+            isAnyManual = isAnyManual,
+            hasActiveManualTab = activeManualTab != null,
+            supportsMotionPhoto = supportsMotion,
+            isFlashOrUnderexposureAvailable = isFlashOrUnderexposureAvailable
+        )
+        CameraBentoDeckView.applyDynamicRowHeights(uiBinding)
     }
 
     private fun getDotTargetRotation(): Float {

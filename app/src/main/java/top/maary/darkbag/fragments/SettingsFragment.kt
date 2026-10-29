@@ -1073,21 +1073,31 @@ class SettingsFragment : Fragment() {
             styleTierButton(binding.btnTierCustom, "CUSTOM", "自定义", checkedId == R.id.btn_tier_custom)
         }
 
+        var isSyncingTierSelection = false
+
         fun syncTierSelectionFromPrefs() {
-            val currentTierKey = prefs.getString(CameraBentoDeckView.PREF_KEY_UI_TIER, CameraUiTier.FILM.key)
-            val tier = CameraUiTier.fromKey(currentTierKey)
-            val checkId = when (tier) {
-                CameraUiTier.POINT_AND_SHOOT -> R.id.btn_tier_ps
-                CameraUiTier.FILM -> R.id.btn_tier_film
-                CameraUiTier.PRO -> R.id.btn_tier_pro
-                CameraUiTier.CUSTOM -> R.id.btn_tier_custom
+            isSyncingTierSelection = true
+            try {
+                val currentTierKey = prefs.getString(CameraBentoDeckView.PREF_KEY_UI_TIER, CameraUiTier.FILM.key)
+                val tier = CameraUiTier.fromKey(currentTierKey)
+                val checkId = when (tier) {
+                    CameraUiTier.POINT_AND_SHOOT -> R.id.btn_tier_ps
+                    CameraUiTier.FILM -> R.id.btn_tier_film
+                    CameraUiTier.PRO -> R.id.btn_tier_pro
+                    CameraUiTier.CUSTOM -> R.id.btn_tier_custom
+                }
+                binding.toggleUiTiers.check(checkId)
+                updateUiTierButtons(checkId)
+                binding.toggleUiTiers.enforceConcentricShapes()
+            } finally {
+                isSyncingTierSelection = false
             }
-            binding.toggleUiTiers.check(checkId)
-            updateUiTierButtons(checkId)
-            binding.toggleUiTiers.enforceConcentricShapes()
         }
 
+        syncTierSelectionFromPrefs()
+
         binding.toggleUiTiers.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isSyncingTierSelection) return@addOnButtonCheckedListener
             if (isChecked) {
                 val tier = when (checkedId) {
                     R.id.btn_tier_ps -> CameraUiTier.POINT_AND_SHOOT
@@ -1098,11 +1108,6 @@ class SettingsFragment : Fragment() {
                 prefs.edit().putString(CameraBentoDeckView.PREF_KEY_UI_TIER, tier.key).apply()
                 updateUiTierButtons(checkedId)
                 binding.toggleUiTiers.enforceConcentricShapes()
-                if (tier == CameraUiTier.CUSTOM) {
-                    ViewfinderDeckCustomizerSheet.show(requireContext()) {
-                        syncTierSelectionFromPrefs()
-                    }
-                }
             }
         }
 
@@ -1116,8 +1121,6 @@ class SettingsFragment : Fragment() {
                 syncTierSelectionFromPrefs()
             }
         }
-
-        syncTierSelectionFromPrefs()
 
         setupSwitch(binding.switchForce60fps, KEY_FORCE_60FPS, false)
 
