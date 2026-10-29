@@ -62,6 +62,13 @@ class CameraBentoDeckViewTest {
         CameraBentoDeckView.styleBentoLensButton(button, isActive = true, isDigitalCrop = true)
         assertEquals((12f * density).roundToInt(), button.cornerRadius)
         assertEquals((1.5f * density).roundToInt(), button.strokeWidth)
+
+        // Alignment & Inset invariants
+        assertEquals(android.view.Gravity.CENTER, button.gravity)
+        assertEquals(0, button.insetTop)
+        assertEquals(0, button.insetBottom)
+        assertEquals(0, button.minHeight)
+        assertEquals(0, button.minimumHeight)
     }
 
     @Test
@@ -473,5 +480,65 @@ class CameraBentoDeckViewTest {
 
         CameraBentoDeckView.styleDeckCard(bentoCard, top.maary.darkbag.modes.CaptureMode.MULTI_CAMERA)
         assertEquals(top.maary.darkbag.ui.bento.BentoContainerRole.SECONDARY_CONTAINER, bentoCard.containerRole)
+    }
+
+    @Test
+    fun testRowCSymmetricalMarginBalancing() {
+        val root = android.widget.FrameLayout(themedContext)
+        val binding = top.maary.darkbag.databinding.CameraUiContainerBinding.inflate(
+            android.view.LayoutInflater.from(themedContext),
+            root
+        )
+        val density = themedContext.resources.displayMetrics.density
+        val sideSlotPx = (52f * density).roundToInt() + (6f * density).roundToInt()
+        val gap6dp = (6f * density).roundToInt()
+
+        // Case 1: Both side buttons visible -> lensControlsCard has marginStart 0, marginEnd gap6dp
+        val bothSpec = CameraBentoDeckView.DeckVisibilitySpec(
+            tier = top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM,
+            showModeSwitch = true,
+            showLensControls = true,
+            showCameraSwitch = true
+        )
+        CameraBentoDeckView.applyVisibilitySpec(binding, bothSpec, hasMultipleLenses = true)
+        val lpBoth = binding.lensControlsCard.layoutParams as android.view.ViewGroup.MarginLayoutParams
+        assertEquals(0, lpBoth.marginStart)
+        assertEquals(gap6dp, lpBoth.marginEnd)
+
+        // Case 2: Only mode switch visible -> lensControlsCard has marginStart 0, marginEnd sideSlotPx (centered)
+        val modeOnlySpec = CameraBentoDeckView.DeckVisibilitySpec(
+            tier = top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM,
+            showModeSwitch = true,
+            showLensControls = true,
+            showCameraSwitch = false
+        )
+        CameraBentoDeckView.applyVisibilitySpec(binding, modeOnlySpec, hasMultipleLenses = true)
+        val lpModeOnly = binding.lensControlsCard.layoutParams as android.view.ViewGroup.MarginLayoutParams
+        assertEquals(0, lpModeOnly.marginStart)
+        assertEquals(sideSlotPx, lpModeOnly.marginEnd)
+
+        // Case 3: Only camera switch visible -> lensControlsCard has marginStart sideSlotPx, marginEnd gap6dp (centered)
+        val camOnlySpec = CameraBentoDeckView.DeckVisibilitySpec(
+            tier = top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM,
+            showModeSwitch = false,
+            showLensControls = true,
+            showCameraSwitch = true
+        )
+        CameraBentoDeckView.applyVisibilitySpec(binding, camOnlySpec, hasMultipleLenses = true)
+        val lpCamOnly = binding.lensControlsCard.layoutParams as android.view.ViewGroup.MarginLayoutParams
+        assertEquals(sideSlotPx, lpCamOnly.marginStart)
+        assertEquals(gap6dp, lpCamOnly.marginEnd)
+
+        // Case 4: Neither side button visible -> lensControlsCard has marginStart 0, marginEnd 0 (centered)
+        val noneSpec = CameraBentoDeckView.DeckVisibilitySpec(
+            tier = top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM,
+            showModeSwitch = false,
+            showLensControls = true,
+            showCameraSwitch = false
+        )
+        CameraBentoDeckView.applyVisibilitySpec(binding, noneSpec, hasMultipleLenses = true)
+        val lpNone = binding.lensControlsCard.layoutParams as android.view.ViewGroup.MarginLayoutParams
+        assertEquals(0, lpNone.marginStart)
+        assertEquals(0, lpNone.marginEnd)
     }
 }

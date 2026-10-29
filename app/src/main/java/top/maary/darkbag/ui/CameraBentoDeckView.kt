@@ -110,16 +110,16 @@ class CameraBentoDeckView @JvmOverloads constructor(
      */
     data class DeckVisibilitySpec(
         val tier: CameraUiTier,
-        val showProModule: Boolean,
-        val showLogAndLut: Boolean,
-        val showHdrPlusPill: Boolean,
-        val showUnderexposure: Boolean,
-        val showMotionPhoto: Boolean,
-        val showModeSwitch: Boolean,
-        val showLensControls: Boolean,
-        val showCameraSwitch: Boolean,
-        val showSettingsButton: Boolean,
-        val enableFocusPeaking: Boolean
+        val showProModule: Boolean = false,
+        val showLogAndLut: Boolean = false,
+        val showHdrPlusPill: Boolean = false,
+        val showUnderexposure: Boolean = false,
+        val showMotionPhoto: Boolean = false,
+        val showModeSwitch: Boolean = true,
+        val showLensControls: Boolean = true,
+        val showCameraSwitch: Boolean = true,
+        val showSettingsButton: Boolean = true,
+        val enableFocusPeaking: Boolean = false
     ) {
         val showFilmRow: Boolean
             get() = showLogAndLut || showHdrPlusPill || showUnderexposure
@@ -685,13 +685,18 @@ class CameraBentoDeckView @JvmOverloads constructor(
             val showLensStrip = spec.showLensControls && hasMultipleLenses
             val showLensRow = spec.showModeSwitch || showLensStrip || spec.showCameraSwitch
             binding.lensControlRow?.visibility = if (showLensRow) View.VISIBLE else View.GONE
-            binding.modeSwitchButton?.visibility = if (showLensRow && spec.showModeSwitch) View.VISIBLE else View.GONE
-            binding.lensControlsCard?.visibility = if (showLensRow && showLensStrip) View.VISIBLE else View.GONE
-            binding.cameraSwitchButtonAlt?.visibility = if (showLensRow && spec.showCameraSwitch) View.VISIBLE else View.GONE
+            val isModeSwitchVisible = showLensRow && spec.showModeSwitch
+            val isLensControlsVisible = showLensRow && showLensStrip
+            val isCameraSwitchVisible = showLensRow && spec.showCameraSwitch
+
+            binding.modeSwitchButton?.visibility = if (isModeSwitchVisible) View.VISIBLE else View.GONE
+            binding.lensControlsCard?.visibility = if (isLensControlsVisible) View.VISIBLE else View.GONE
+            binding.cameraSwitchButtonAlt?.visibility = if (isCameraSwitchVisible) View.VISIBLE else View.GONE
 
             val expandLensSideButtons = !showLensStrip
             val sideBtnWidthPx = (52f * density).roundToInt()
             val gap6dp = (6f * density).roundToInt()
+            val sideSlotPx = sideBtnWidthPx + gap6dp
 
             fun updateRowCWeight(view: View?) {
                 val lp = view?.layoutParams as? LayoutParams ?: return
@@ -706,17 +711,29 @@ class CameraBentoDeckView @JvmOverloads constructor(
             updateRowCWeight(binding.modeSwitchButton)
             updateRowCWeight(binding.cameraSwitchButtonAlt)
 
-            val rowCVisible = listOfNotNull(
-                binding.modeSwitchButton,
-                binding.lensControlsCard,
-                binding.cameraSwitchButtonAlt
-            ).filter { it.visibility == View.VISIBLE }
-            rowCVisible.forEachIndexed { idx, v ->
-                val lp = v.layoutParams as? MarginLayoutParams ?: return@forEachIndexed
-                val targetMarginEnd = if (idx < rowCVisible.lastIndex) gap6dp else 0
-                if (lp.marginEnd != targetMarginEnd) {
-                    lp.marginEnd = targetMarginEnd
-                    v.layoutParams = lp
+            // Dynamic symmetrical balance for lensControlsCard:
+            // When only one side button is enabled in CUSTOM tier, compensate the opposite margin
+            // so lensControlsCard is always centered with the shutter button in Row D.
+            binding.lensControlsCard?.let { card ->
+                val lp = card.layoutParams as? MarginLayoutParams
+                if (lp != null) {
+                    val targetStart = if (!isModeSwitchVisible && isCameraSwitchVisible) sideSlotPx else 0
+                    val targetEnd = if (isModeSwitchVisible && !isCameraSwitchVisible) sideSlotPx else (if (isCameraSwitchVisible) gap6dp else 0)
+                    if (lp.marginStart != targetStart || lp.marginEnd != targetEnd) {
+                        lp.marginStart = targetStart
+                        lp.marginEnd = targetEnd
+                        card.layoutParams = lp
+                    }
+                }
+            }
+            binding.modeSwitchButton?.let { btn ->
+                val lp = btn.layoutParams as? MarginLayoutParams
+                if (lp != null) {
+                    val targetEnd = if (isLensControlsVisible || isCameraSwitchVisible) gap6dp else 0
+                    if (lp.marginEnd != targetEnd) {
+                        lp.marginEnd = targetEnd
+                        btn.layoutParams = lp
+                    }
                 }
             }
 
@@ -907,11 +924,17 @@ class CameraBentoDeckView @JvmOverloads constructor(
                             textSize = 10.5f
                             isSingleLine = true
                             maxLines = 1
+                            gravity = Gravity.CENTER
+                            textAlignment = View.TEXT_ALIGNMENT_CENTER
+                            includeFontPadding = false
                             setPadding(0, 0, 0, 0)
                             insetTop = 0
                             insetBottom = 0
                             minWidth = 0
                             minimumWidth = 0
+                            minHeight = 0
+                            minimumHeight = 0
+                            iconPadding = 0
                         }
                         styleBentoLensButton(btn, isActive = isActive, isDigitalCrop = isDigitalCrop)
                         container.addView(btn)
@@ -1096,6 +1119,18 @@ class CameraBentoDeckView @JvmOverloads constructor(
             val stroke1_5dp = (1.5f * density).roundToInt()
             val radius12dp = (12f * density).roundToInt()
             val radius14dp = (14f * density).roundToInt()
+
+            button.gravity = Gravity.CENTER
+            button.textAlignment = View.TEXT_ALIGNMENT_CENTER
+            button.includeFontPadding = false
+            button.insetTop = 0
+            button.insetBottom = 0
+            button.minHeight = 0
+            button.minimumHeight = 0
+            button.minWidth = 0
+            button.minimumWidth = 0
+            button.iconPadding = 0
+            button.setPadding(0, 0, 0, 0)
 
             val colorPrimary = MaterialColors.getColor(
                 button,

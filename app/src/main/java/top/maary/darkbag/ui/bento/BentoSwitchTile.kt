@@ -40,28 +40,33 @@ class BentoSwitchTile @JvmOverloads constructor(
     private var isDispatching = false
 
     override fun isChecked(): Boolean {
-        @Suppress("SENSELESS_COMPARISON")
-        return if (switchView != null) switchView.isChecked else super.isChecked()
+        return super.isChecked()
     }
 
     override fun setChecked(checked: Boolean) {
-        super.setChecked(checked)
+        val wasChecked = super.isChecked()
+        if (wasChecked == checked) return
         @Suppress("SENSELESS_COMPARISON")
         if (switchView != null && switchView.isChecked != checked) {
             switchView.isChecked = checked
         }
+        super.setChecked(checked)
+        if (wasChecked != super.isChecked()) {
+            notifySecondaryListeners(super.isChecked())
+        }
     }
 
     override fun toggle() {
-        val wasChecked = isChecked
-        super.toggle()
-        val newChecked = super.isChecked()
+        if (!isCheckable || !isEnabled) return
+        val wasChecked = super.isChecked()
+        val target = !wasChecked
         @Suppress("SENSELESS_COMPARISON")
-        if (switchView != null && switchView.isChecked != newChecked) {
-            switchView.isChecked = newChecked
+        if (switchView != null && switchView.isChecked != target) {
+            switchView.isChecked = target
         }
-        if (wasChecked != newChecked) {
-            notifySecondaryListeners(newChecked)
+        super.toggle()
+        if (wasChecked != super.isChecked()) {
+            notifySecondaryListeners(super.isChecked())
         }
     }
 

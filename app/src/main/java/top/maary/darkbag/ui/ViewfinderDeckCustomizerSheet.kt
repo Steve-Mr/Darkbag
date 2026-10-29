@@ -101,9 +101,12 @@ object ViewfinderDeckCustomizerSheet {
 
         updatePreview(animate = false)
 
+        var isBulkUpdating = false
         fun wireSwitch(switchTile: top.maary.darkbag.ui.bento.BentoSwitchTile) {
             switchTile.setOnCheckedChangeListener { _, _ ->
-                persistCurrentSwitchesAsCustom()
+                if (!isBulkUpdating) {
+                    persistCurrentSwitchesAsCustom()
+                }
             }
         }
 
@@ -119,16 +122,21 @@ object ViewfinderDeckCustomizerSheet {
 
         // Template Resets (canonical preset definitions)
         fun applyTemplateFromTier(templateTier: CameraUiTier) {
-            val templateSpec = CameraBentoDeckView.resolveVisibilitySpec(prefs, templateTier)
-            binding.switchLensControls.isChecked = templateSpec.showLensControls
-            binding.switchCameraSwitch.isChecked = templateSpec.showCameraSwitch
-            binding.switchSettingsButton.isChecked = templateSpec.showSettingsButton
-            binding.switchLutSwitcher.isChecked = templateSpec.showLogAndLut
-            binding.switchHdrPlus.isChecked = templateSpec.showHdrPlusPill
-            binding.switchUnderexposure.isChecked = templateSpec.showUnderexposure
-            binding.switchModeSwitch.isChecked = templateSpec.showModeSwitch
-            binding.switchManualControls.isChecked = templateSpec.showProModule
-            binding.switchFocusPeaking.isChecked = templateSpec.enableFocusPeaking
+            isBulkUpdating = true
+            try {
+                val templateSpec = CameraBentoDeckView.resolveVisibilitySpec(prefs, templateTier)
+                binding.switchLensControls.isChecked = templateSpec.showLensControls
+                binding.switchCameraSwitch.isChecked = templateSpec.showCameraSwitch
+                binding.switchSettingsButton.isChecked = templateSpec.showSettingsButton
+                binding.switchLutSwitcher.isChecked = templateSpec.showLogAndLut
+                binding.switchHdrPlus.isChecked = templateSpec.showHdrPlusPill
+                binding.switchUnderexposure.isChecked = templateSpec.showUnderexposure
+                binding.switchModeSwitch.isChecked = templateSpec.showModeSwitch
+                binding.switchManualControls.isChecked = templateSpec.showProModule
+                binding.switchFocusPeaking.isChecked = templateSpec.enableFocusPeaking
+            } finally {
+                isBulkUpdating = false
+            }
 
             persistCurrentSwitchesAsCustom()
         }

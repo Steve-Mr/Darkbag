@@ -798,6 +798,11 @@ class CameraFragment : Fragment() {
         } else {
             locationHelper.stopListening()
         }
+        val savedTier = CameraUiTier.fromKey(prefs.getString(CameraBentoDeckView.PREF_KEY_UI_TIER, CameraUiTier.FILM.key))
+        if (cameraViewModel.uiState.value.uiTier != savedTier) {
+            cameraViewModel.setUiTier(savedTier)
+            updateTierUi(savedTier)
+        }
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateCameraUi()
         updateHalfFrameUI()
@@ -1622,6 +1627,7 @@ class CameraFragment : Fragment() {
             val tierPrefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             tierPrefs.edit().putString(CameraBentoDeckView.PREF_KEY_UI_TIER, nextTier.key).apply()
             cameraViewModel.setUiTier(nextTier)
+            updateTierUi(nextTier)
             val nextSpec = CameraBentoDeckView.resolveVisibilitySpec(tierPrefs, nextTier)
             if (!nextSpec.showProModule && activeManualTab != null) {
                 activeManualTab = null
@@ -1631,6 +1637,7 @@ class CameraFragment : Fragment() {
                 updateProInfoBar()
             }
             applyUIVisibility()
+            updateLensUI()
             updateFocusPeakingState()
         }
 
@@ -3006,9 +3013,6 @@ class CameraFragment : Fragment() {
         val container = binding.lensControlsContainer ?: return
         val row = binding.lensControlRow ?: return
 
-        // Row visibility is managed by applyUIVisibility()
-        applyUIVisibility()
-
         // Always clear container to avoid stale buttons from previous facings
         container.removeAllViews()
 
@@ -3060,11 +3064,17 @@ class CameraFragment : Fragment() {
                     isSingleLine = true
                     maxLines = 1
                     ellipsize = android.text.TextUtils.TruncateAt.END
+                    gravity = android.view.Gravity.CENTER
+                    textAlignment = View.TEXT_ALIGNMENT_CENTER
+                    includeFontPadding = false
                     setPadding(0, 0, 0, 0)
                     insetTop = 0
                     insetBottom = 0
                     minWidth = 0
                     minimumWidth = 0
+                    minHeight = 0
+                    minimumHeight = 0
+                    iconPadding = 0
 
                     setOnClickListener {
                         if (isBurstActive || isSwitchingLens) return@setOnClickListener
@@ -6584,6 +6594,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             isFlashOrUnderexposureAvailable = isFlashOrUnderexposureAvailable
         )
         CameraBentoDeckView.applyDynamicRowHeights(uiBinding)
+        uiBinding.lensControlsContainer?.let { container ->
+            for (i in 0 until container.childCount) {
+                container.getChildAt(i)?.requestLayout()
+            }
+        }
     }
 
     private fun getDotTargetRotation(): Float {

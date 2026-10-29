@@ -171,6 +171,17 @@ class BentoUiKitTest {
         assertFalse(switchTile.switchView.isChecked)
         assertEquals(1, compoundCallbackCount)
         assertFalse(lastCompoundChecked)
+
+        // Verify synchronous state availability inside OnCheckedChangeListener callback (no one-step lag)
+        var capturedTileCheckedInCallback = false
+        var capturedSwitchViewCheckedInCallback = false
+        switchTile.setOnCheckedChangeListener(MaterialCardView.OnCheckedChangeListener { card, isChecked ->
+            capturedTileCheckedInCallback = (card as BentoSwitchTile).isChecked
+            capturedSwitchViewCheckedInCallback = card.switchView.isChecked
+        })
+        switchTile.performClick()
+        assertTrue(capturedTileCheckedInCallback)
+        assertTrue(capturedSwitchViewCheckedInCallback)
     }
 
     @Test
