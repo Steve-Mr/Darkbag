@@ -1298,15 +1298,19 @@ class CameraBentoDeckView @JvmOverloads constructor(
         }
 
         /**
-         * Applies Material 3 Expressive styling to the Focus Peaking quick-toggle capsule badge.
+         * Applies Material 3 Expressive Bento Matrix styling to the Focus Peaking quick-toggle badge.
          *
-         * - Active (ON): colorTertiaryContainer fill, colorOnTertiaryContainer text, 1.5dp colorTertiary stroke.
-         * - Inactive (OFF): Translucent dark overlay with subtle outline, colorOnSurfaceVariant text.
+         * - Inactive (OFF): Authentic Bento porcelain resting tile (colorSurface fill, colorOutlineVariant
+         *   hairline stroke, high-contrast colorOnSurface text, 13dp pill radius, 4dp elevation).
+         * - Active (ON): Dynamic squircle morphing (colorTertiaryContainer fill, 1.5dp colorTertiary accent
+         *   stroke, colorOnTertiaryContainer text, 9dp squircle radius, 6dp elevation).
          */
         @JvmStatic
         fun styleFocusPeakingBadge(button: MaterialButton, isActive: Boolean) {
             val density = button.resources.displayMetrics.density
             val radius13dp = (13f * density).roundToInt()
+            val radius9dp = (9f * density).roundToInt()
+            val stroke1dp = (1f * density).roundToInt()
             val stroke1_5dp = (1.5f * density).roundToInt()
 
             val colorTertiaryContainer = MaterialColors.getColor(
@@ -1324,13 +1328,22 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 com.google.android.material.R.attr.colorTertiary,
                 Color.parseColor("#00E676")
             )
-            val colorOnSurfaceVariant = MaterialColors.getColor(
+            val colorSurface = MaterialColors.getColor(
                 button,
-                com.google.android.material.R.attr.colorOnSurfaceVariant,
+                com.google.android.material.R.attr.colorSurface,
+                Color.WHITE
+            )
+            val colorOnSurface = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOnSurface,
+                Color.BLACK
+            )
+            val colorOutlineVariant = MaterialColors.getColor(
+                button,
+                com.google.android.material.R.attr.colorOutlineVariant,
                 Color.LTGRAY
             )
 
-            button.cornerRadius = radius13dp
             button.includeFontPadding = false
             button.insetTop = 0
             button.insetBottom = 0
@@ -1341,15 +1354,19 @@ class CameraBentoDeckView @JvmOverloads constructor(
             button.iconPadding = 0
 
             if (isActive) {
+                button.cornerRadius = radius9dp
                 button.backgroundTintList = ColorStateList.valueOf(colorTertiaryContainer)
                 button.setTextColor(colorOnTertiaryContainer)
                 button.strokeColor = ColorStateList.valueOf(colorTertiary)
                 button.strokeWidth = stroke1_5dp
+                button.elevation = 6f * density
             } else {
-                button.backgroundTintList = ColorStateList.valueOf(Color.argb(160, 20, 24, 28))
-                button.setTextColor(colorOnSurfaceVariant)
-                button.strokeColor = ColorStateList.valueOf(Color.argb(90, 255, 255, 255))
-                button.strokeWidth = (1f * density).roundToInt()
+                button.cornerRadius = radius13dp
+                button.backgroundTintList = ColorStateList.valueOf(colorSurface)
+                button.setTextColor(colorOnSurface)
+                button.strokeColor = ColorStateList.valueOf(colorOutlineVariant)
+                button.strokeWidth = stroke1dp
+                button.elevation = 4f * density
             }
         }
 

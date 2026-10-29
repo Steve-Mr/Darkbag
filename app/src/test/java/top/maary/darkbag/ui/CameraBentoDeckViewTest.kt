@@ -547,17 +547,45 @@ class CameraBentoDeckViewTest {
         val button = MaterialButton(themedContext)
         val density = themedContext.resources.displayMetrics.density
 
-        // Inactive (OFF)
+        // Inactive (OFF) - Authentic Bento Porcelain Resting Pill
         CameraBentoDeckView.styleFocusPeakingBadge(button, isActive = false)
         assertEquals((13f * density).roundToInt(), button.cornerRadius)
         assertEquals((1f * density).roundToInt(), button.strokeWidth)
         assertEquals(0, button.insetTop)
         assertEquals(0, button.insetBottom)
+        assertEquals(4f * density, button.elevation, 0.01f)
 
-        // Active (ON)
+        val colorSurface = com.google.android.material.color.MaterialColors.getColor(
+            button,
+            com.google.android.material.R.attr.colorSurface,
+            android.graphics.Color.WHITE
+        )
+        val colorOnSurface = com.google.android.material.color.MaterialColors.getColor(
+            button,
+            com.google.android.material.R.attr.colorOnSurface,
+            android.graphics.Color.BLACK
+        )
+        assertEquals(colorSurface, button.backgroundTintList?.defaultColor)
+        assertEquals(colorOnSurface, button.textColors.defaultColor)
+
+        // Active (ON) - Dynamic Squircle Morphing with Tertiary Accent
         CameraBentoDeckView.styleFocusPeakingBadge(button, isActive = true)
-        assertEquals((13f * density).roundToInt(), button.cornerRadius)
+        assertEquals((9f * density).roundToInt(), button.cornerRadius)
         assertEquals((1.5f * density).roundToInt(), button.strokeWidth)
+        assertEquals(6f * density, button.elevation, 0.01f)
+
+        val colorTertiaryContainer = com.google.android.material.color.MaterialColors.getColor(
+            button,
+            com.google.android.material.R.attr.colorTertiaryContainer,
+            android.graphics.Color.GREEN
+        )
+        val colorOnTertiaryContainer = com.google.android.material.color.MaterialColors.getColor(
+            button,
+            com.google.android.material.R.attr.colorOnTertiaryContainer,
+            android.graphics.Color.WHITE
+        )
+        assertEquals(colorTertiaryContainer, button.backgroundTintList?.defaultColor)
+        assertEquals(colorOnTertiaryContainer, button.textColors.defaultColor)
     }
 
     @Test

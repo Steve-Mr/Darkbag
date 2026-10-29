@@ -107,12 +107,11 @@
                         android:layout_height="wrap_content"
                         android:layout_gravity="top|end"
                         android:layout_margin="6dp"
-                        android:background="@drawable/bg_badge_capsule"
-                        android:backgroundTint="#2E7D32"
+                        android:background="@drawable/bg_bento_badge_tertiary"
                         android:paddingHorizontal="7dp"
                         android:paddingVertical="2dp"
                         android:text="PEAK"
-                        android:textColor="#FFFFFF"
+                        android:textColor="?attr/colorOnTertiaryContainer"
                         android:textSize="8.5sp"
                         android:textStyle="bold" />
                 </FrameLayout>
