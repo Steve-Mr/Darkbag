@@ -398,6 +398,16 @@
                         app:bentoSwitchBadge="LIVE"
                         app:bentoSwitchBadgeStyle="secondary" />
 
+                    <!-- Motion Photo Audio tile (switch_motion_photo_audio) -->
+                    <top.maary.darkbag.ui.bento.BentoSwitchTile
+                        android:id="@+id/switch_motion_photo_audio"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginBottom="8dp"
+                        app:bentoSwitchTitle="@string/pref_motion_photo_audio"
+                        app:bentoSwitchBadge="AUDIO"
+                        app:bentoSwitchBadgeStyle="tertiary" />
+
                     <!-- Location tile (switch_save_location) -->
                     <top.maary.darkbag.ui.bento.BentoSwitchTile
                         android:id="@+id/switch_save_location"

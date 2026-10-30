@@ -74,6 +74,10 @@ class SettingsFragment : Fragment() {
             Toast.makeText(context, R.string.toast_audio_permission_granted, Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(context, R.string.error_mic_permission_silent_video, Toast.LENGTH_SHORT).show()
+            if (_binding != null && binding.switchMotionPhotoAudio.isChecked) {
+                binding.switchMotionPhotoAudio.isChecked = false
+                prefs.edit().putBoolean(KEY_MOTION_PHOTO_AUDIO, false).apply()
+            }
         }
     }
 
@@ -138,6 +142,7 @@ class SettingsFragment : Fragment() {
         updateCheckboxStates()
         syncLocationSettingState()
         updateStorageVisibility()
+        updateMotionPhotoVisibility()
         updateCacheSize()
     }
 
@@ -969,6 +974,25 @@ class SettingsFragment : Fragment() {
         updateStorageVisibility()
 
         setupSwitch(binding.switchMotionPhoto, KEY_MOTION_PHOTO, false)
+        binding.switchMotionPhoto.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_MOTION_PHOTO, isChecked).apply()
+            updateMotionPhotoVisibility()
+        }
+
+        setupSwitch(binding.switchMotionPhotoAudio, KEY_MOTION_PHOTO_AUDIO, true)
+        binding.switchMotionPhotoAudio.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                if (androidx.core.content.ContextCompat.checkSelfPermission(
+                        requireContext(),
+                        android.Manifest.permission.RECORD_AUDIO
+                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) {
+                    audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                }
+            }
+            prefs.edit().putBoolean(KEY_MOTION_PHOTO_AUDIO, isChecked).apply()
+        }
+        updateMotionPhotoVisibility()
 
         syncLocationSettingState()
         binding.switchSaveLocation.setOnCheckedChangeListener { _, isChecked ->
@@ -1158,6 +1182,12 @@ class SettingsFragment : Fragment() {
 
         binding.tvJpgPath.text = prefs.getString(KEY_JPG_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
         binding.tvRawPath.text = prefs.getString(KEY_RAW_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
+    }
+
+    private fun updateMotionPhotoVisibility() {
+        if (_binding == null) return
+        val motionEnabled = binding.switchMotionPhoto.isChecked
+        binding.switchMotionPhotoAudio.visibility = if (motionEnabled) View.VISIBLE else View.GONE
     }
 
     private val jpgPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -1523,6 +1553,7 @@ class SettingsFragment : Fragment() {
         const val KEY_FORCE_60FPS = "force_60fps"
         const val KEY_DEBUG_ENABLED = "debug_enabled"
         const val KEY_MOTION_PHOTO = "motion_photo_enabled"
+        const val KEY_MOTION_PHOTO_AUDIO = "motion_photo_audio_enabled"
         const val KEY_SAVE_LOCATION = "save_location_enabled"
         const val KEY_SAVE_RAW = "save_raw"
         const val KEY_RAW_OUTPUT_TYPE = "raw_output_type"
