@@ -113,14 +113,38 @@
                 app:layout_constraintStart_toStartOf="@id/view_finder"
                 app:layout_constraintEnd_toEndOf="@id/view_finder" />
 
-            <View
+            <FrameLayout
                 android:id="@+id/focus_ring"
                 android:layout_width="@dimen/focus_ring_size"
                 android:layout_height="@dimen/focus_ring_size"
-                android:background="@drawable/ic_focus_ring"
                 android:visibility="gone"
+                android:clipChildren="false"
                 app:layout_constraintTop_toTopOf="@id/view_finder"
-                app:layout_constraintStart_toStartOf="@id/view_finder" />
+                app:layout_constraintStart_toStartOf="@id/view_finder">
+
+                <View
+                    android:id="@+id/focus_ring_circle"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_margin="4dp"
+                    android:background="@drawable/ic_focus_ring" />
+
+                <TextView
+                    android:id="@+id/focus_lock_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="18dp"
+                    android:layout_gravity="top|end"
+                    android:background="@drawable/bg_bento_badge_tertiary"
+                    android:text="AF-L"
+                    android:textColor="?attr/colorOnTertiaryContainer"
+                    android:textSize="8sp"
+                    android:textStyle="bold"
+                    android:paddingHorizontal="5dp"
+                    android:paddingVertical="0dp"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:visibility="gone" />
+            </FrameLayout>
 
             <!-- Front Camera Picture-in-Picture (PiP) Floating Preview -->
             <com.google.android.material.card.MaterialCardView

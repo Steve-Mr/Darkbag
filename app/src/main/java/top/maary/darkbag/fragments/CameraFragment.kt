@@ -40,6 +40,13 @@ import top.maary.darkbag.rawvideo.RawVideoNative
 import top.maary.darkbag.motionphoto.MotionPhotoEncoder
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.resume
+import kotlinx.coroutines.CancellationException
+import android.graphics.drawable.GradientDrawable
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.content.res.ColorStateList
 
 import android.animation.ValueAnimator
@@ -80,6 +87,7 @@ import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.RggbChannelVector
 import android.view.HapticFeedbackConstants
 import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CaptureFailure
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
 import com.google.android.material.slider.Slider
@@ -2286,7 +2294,7 @@ class CameraFragment : Fragment() {
         val gestureDetector = GestureDetector(requireContext(), object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
 
-            override fun onSingleTapUp(e: MotionEvent): Boolean {
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 val uiBinding = cameraUiContainerBinding
                 if (uiBinding?.lutListContainer?.visibility == View.VISIBLE ||
                     uiBinding?.manualControlsRoot?.visibility == View.VISIBLE ||
@@ -2297,7 +2305,6 @@ class CameraFragment : Fragment() {
                 }
 
                 triggerTapToFocusCamera2(e.x, e.y)
-                showFocusRing(e.x, e.y)
                 return true
             }
 
@@ -2336,8 +2343,8 @@ class CameraFragment : Fragment() {
         exposureMeteringRegion = null
 
         val action = {
-            _fragmentCameraBinding?.focusRing?.animate()?.cancel()
-            _fragmentCameraBinding?.focusRing?.visibility = View.GONE
+            hideFocusRingUnlock()
+            updateProInfoBar()
 
             val device = camera2Device
             val session = camera2Session
@@ -2375,7 +2382,6 @@ class CameraFragment : Fragment() {
 
         tapToFocusJob?.cancel()
         tapToFocusJob = lifecycleScope.launch(Dispatchers.Default) {
-            val job = coroutineContext[Job]
             try {
                 val characteristics = CameraRepository.getCharacteristics(camera2Manager, device.id)
                 val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
@@ -2398,88 +2404,257 @@ class CameraFragment : Fragment() {
                     exposureMeteringRegion = region
                 }
 
-                // 1. Cancel ongoing AF scan cleanly
+                // 1. Show scanning visual feedback immediately on UI
+                withContext(Dispatchers.Main) {
+                    showFocusRingScanning(x, y)
+                    updateProInfoBar()
+                }
+
+                // 2. Submit cancel request cleanly and suspend until processed by HAL
                 val cancelRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                 cancelRequest.addTarget(surface)
                 applyManualSettingsToRequest(cancelRequest)
                 cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
-                // Note: Strictly avoid setting CONTROL_AE_PRECAPTURE_TRIGGER here!
 
-                // Chain triggerRequest strictly after cancelRequest completes in HAL
-                session.capture(cancelRequest.build(), object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(
-                        session: CameraCaptureSession,
-                        request: CaptureRequest,
-                        result: TotalCaptureResult
-                    ) {
-                        super.onCaptureCompleted(session, request, result)
-                        if (job?.isActive != true) return
-
-                        try {
-                            val triggerRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
-                            triggerRequest.addTarget(surface)
-                            applyManualSettingsToRequest(triggerRequest)
-
-                            triggerRequest.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(region))
-                            if (!isManualExposure) {
-                                triggerRequest.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(region))
+                suspendCancellableCoroutine<Unit> { cont ->
+                    try {
+                        session.capture(cancelRequest.build(), object : CameraCaptureSession.CaptureCallback() {
+                            override fun onCaptureCompleted(
+                                session: CameraCaptureSession,
+                                request: CaptureRequest,
+                                result: TotalCaptureResult
+                            ) {
+                                super.onCaptureCompleted(session, request, result)
+                                if (cont.isActive) cont.resume(Unit)
                             }
 
-                            if (isManualFocus) {
-                                triggerRequest.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                            override fun onCaptureFailed(
+                                session: CameraCaptureSession,
+                                request: CaptureRequest,
+                                failure: CaptureFailure
+                            ) {
+                                super.onCaptureFailed(session, request, failure)
+                                if (cont.isActive) cont.resume(Unit)
                             }
-
-                            triggerRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
-                            // Crucial: DO NOT set CONTROL_AE_PRECAPTURE_TRIGGER_START!
-                            // Setting CONTROL_AE_REGIONS above updates AE weighting dynamically without freezing AE state machine!
-
-                            session.capture(triggerRequest.build(), object : CameraCaptureSession.CaptureCallback() {
-                                override fun onCaptureCompleted(
-                                    session: CameraCaptureSession,
-                                    request: CaptureRequest,
-                                    result: TotalCaptureResult
-                                ) {
-                                    super.onCaptureCompleted(session, request, result)
-                                    if (isManualFocus) {
-                                        syncManualFocusAfterTap()
-                                    }
-                                }
-                            }, handler)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to submit AF trigger request", e)
-                        }
-                    }
-                }, handler)
-
-                // 3. Resume repeating preview with AF_MODE_AUTO and updated regions
-                withContext(Dispatchers.Main) {
-                    if (!isManualFocus && job?.isActive == true) {
-                        applyCameraControls()
+                        }, handler)
+                    } catch (e: Exception) {
+                        if (cont.isActive) cont.resume(Unit)
                     }
                 }
+
+                ensureActive()
+
+                // 3. Update repeating request with AF_MODE_AUTO and updated metering regions
+                withContext(Dispatchers.Main) {
+                    applyCameraControls()
+                }
+
+                ensureActive()
+
+                // 4. Submit trigger request (CONTROL_AF_TRIGGER_START)
+                val triggerRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                triggerRequest.addTarget(surface)
+                applyManualSettingsToRequest(triggerRequest)
+                triggerRequest.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(region))
+                if (!isManualExposure) {
+                    triggerRequest.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(region))
+                }
+                if (isManualFocus) {
+                    triggerRequest.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                }
+                triggerRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+
+                suspendCancellableCoroutine<Unit> { cont ->
+                    try {
+                        session.capture(triggerRequest.build(), object : CameraCaptureSession.CaptureCallback() {
+                            override fun onCaptureCompleted(
+                                session: CameraCaptureSession,
+                                request: CaptureRequest,
+                                result: TotalCaptureResult
+                            ) {
+                                super.onCaptureCompleted(session, request, result)
+                                if (isManualFocus) {
+                                    syncManualFocusAfterTap()
+                                }
+                                if (cont.isActive) cont.resume(Unit)
+                            }
+
+                            override fun onCaptureFailed(
+                                session: CameraCaptureSession,
+                                request: CaptureRequest,
+                                failure: CaptureFailure
+                            ) {
+                                super.onCaptureFailed(session, request, failure)
+                                if (cont.isActive) cont.resume(Unit)
+                            }
+                        }, handler)
+                    } catch (e: Exception) {
+                        if (cont.isActive) cont.resume(Unit)
+                    }
+                }
+
+                ensureActive()
+
+                // 5. Await AF convergence (FOCUSED_LOCKED or NOT_FOCUSED_LOCKED)
+                if (!isManualFocus) {
+                    val convergenceResult = withTimeoutOrNull(3500L) {
+                        captureResultFlow.first { res ->
+                            val afState = res.get(CaptureResult.CONTROL_AF_STATE)
+                            afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                            afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                        }
+                    }
+
+                    ensureActive()
+
+                    val afState = convergenceResult?.get(CaptureResult.CONTROL_AF_STATE)
+                    val isFocused = afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                        (convergenceResult != null && afState != CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED)
+
+                    withContext(Dispatchers.Main) {
+                        if (isFocused) {
+                            showFocusRingLocked()
+                            updateProInfoBar()
+                        } else {
+                            showFocusRingFailed()
+                        }
+                    }
+                }
+            } catch (e: CancellationException) {
+                // Ignore cancellation (e.g. newer tap or double tap unlock)
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Camera2 tap to focus trigger failed", e)
+                withContext(Dispatchers.Main) {
+                    showFocusRingFailed()
+                }
             }
         }
     }
 
-    private fun showFocusRing(x: Float, y: Float) {
-        val focusRing = _fragmentCameraBinding?.focusRing ?: return
+    private fun showFocusRingScanning(x: Float, y: Float) {
+        val binding = _fragmentCameraBinding ?: return
+        val focusRing = binding.focusRing
         val size = resources.getDimension(R.dimen.focus_ring_size)
 
         focusRing.animate().cancel()
+        binding.focusRingCircle.animate().cancel()
+        binding.focusLockBadge.animate().cancel()
 
         focusRing.translationX = x - size / 2
         focusRing.translationY = y - size / 2
-        focusRing.visibility = View.VISIBLE
+        focusRing.scaleX = 1.25f
+        focusRing.scaleY = 1.25f
         focusRing.alpha = 1.0f
+        focusRing.visibility = View.VISIBLE
+
+        binding.focusLockBadge.visibility = View.GONE
+        setFocusRingStroke(Color.WHITE)
 
         focusRing.animate()
-            .setStartDelay(FOCUS_RING_DISPLAY_TIME_MS)
-            .alpha(0.0f)
-            .setDuration(FOCUS_RING_FADE_OUT_DURATION_MS)
-            .withEndAction { focusRing.visibility = View.GONE }
+            .scaleX(1.0f)
+            .scaleY(1.0f)
+            .setDuration(200L)
+            .setInterpolator(DecelerateInterpolator())
             .start()
+
+        binding.viewFinderStage.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+    }
+
+    private fun showFocusRingLocked() {
+        val binding = _fragmentCameraBinding ?: return
+        if (focusMeteringRegion == null) return
+
+        val colorTertiary = com.google.android.material.color.MaterialColors.getColor(
+            binding.root,
+            com.google.android.material.R.attr.colorTertiary,
+            Color.parseColor("#00E676")
+        )
+
+        setFocusRingStroke(colorTertiary)
+
+        // Pop in the AF-L badge with overshoot spring
+        binding.focusLockBadge.visibility = View.VISIBLE
+        binding.focusLockBadge.scaleX = 0f
+        binding.focusLockBadge.scaleY = 0f
+        binding.focusLockBadge.animate()
+            .scaleX(1.0f)
+            .scaleY(1.0f)
+            .setDuration(200L)
+            .setInterpolator(OvershootInterpolator())
+            .start()
+
+        // Subtle confirmation pulse on the circular ring
+        binding.focusRingCircle.animate()
+            .scaleX(1.08f)
+            .scaleY(1.08f)
+            .setDuration(120L)
+            .withEndAction {
+                binding.focusRingCircle.animate()
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .setDuration(120L)
+                    .start()
+            }
+            .start()
+
+        // Settle into quiet resident resting state (alpha 0.85f)
+        binding.focusRing.animate()
+            .alpha(0.85f)
+            .setDuration(250L)
+            .start()
+
+        binding.viewFinderStage.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+    }
+
+    private fun showFocusRingFailed() {
+        val binding = _fragmentCameraBinding ?: return
+
+        val colorError = com.google.android.material.color.MaterialColors.getColor(
+            binding.root,
+            androidx.appcompat.R.attr.colorError,
+            Color.parseColor("#FF5252")
+        )
+
+        setFocusRingStroke(colorError)
+        binding.focusLockBadge.visibility = View.GONE
+
+        binding.focusRing.animate()
+            .alpha(0.0f)
+            .setDuration(400L)
+            .withEndAction {
+                binding.focusRing.visibility = View.GONE
+                binding.focusRing.alpha = 1.0f
+                setFocusRingStroke(Color.WHITE)
+            }
+            .start()
+    }
+
+    private fun hideFocusRingUnlock() {
+        val focusRing = _fragmentCameraBinding?.focusRing ?: return
+        focusRing.animate().cancel()
+        focusRing.animate()
+            .scaleX(1.35f)
+            .scaleY(1.35f)
+            .alpha(0.0f)
+            .setDuration(220L)
+            .withEndAction {
+                focusRing.visibility = View.GONE
+                focusRing.scaleX = 1.0f
+                focusRing.scaleY = 1.0f
+                focusRing.alpha = 1.0f
+                _fragmentCameraBinding?.focusLockBadge?.visibility = View.GONE
+                setFocusRingStroke(Color.WHITE)
+            }
+            .start()
+        _fragmentCameraBinding?.viewFinderStage?.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+    }
+
+    private fun setFocusRingStroke(color: Int) {
+        val binding = _fragmentCameraBinding ?: return
+        val drawable = binding.focusRingCircle.background?.mutate() as? GradientDrawable ?: return
+        val density = resources.displayMetrics.density
+        drawable.setStroke((1.5f * density).roundToInt(), color)
     }
 
     private fun dismissFloatingOverlays() {
@@ -2813,12 +2988,18 @@ class CameraFragment : Fragment() {
         val density = resources.displayMetrics.density
 
         // Focus
-        val focusLabel = if (isManualFocus) "MF" else "AF"
+        val isFocusLocked = !isManualFocus && focusMeteringRegion != null
+        val focusLabel = when {
+            isManualFocus -> "MF"
+            isFocusLocked -> "AF-L"
+            else -> "AF"
+        }
+        val isFocusManualOrLocked = isManualFocus || isFocusLocked
         val focusVal = if (isManualFocus) formatFocusDist(currentFocusDistance) else formatFocusDist(liveFocusDistance)
         binding.pillFocus?.let { pill ->
             val isTabActive = activeManualTab == "Focus"
-            CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isManualFocus)
-            pill.text = CameraBentoDeckView.formatProTelemetry(focusLabel, focusVal, isTabActive, isManualFocus, pill.context)
+            CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isFocusManualOrLocked)
+            pill.text = CameraBentoDeckView.formatProTelemetry(focusLabel, focusVal, isTabActive, isFocusManualOrLocked, pill.context)
         }
 
         // ISO
@@ -3245,7 +3426,13 @@ class CameraFragment : Fragment() {
             val now = android.os.SystemClock.uptimeMillis()
             if (now - lastTelemetryUpdateMs >= 250L) {
                 lastTelemetryUpdateMs = now
-                val focusLabel = if (isManualFocus) "MF" else "AF"
+                val isFocusLocked = !isManualFocus && focusMeteringRegion != null
+                val focusLabel = when {
+                    isManualFocus -> "MF"
+                    isFocusLocked -> "AF-L"
+                    else -> "AF"
+                }
+                val isFocusManualOrLocked = isManualFocus || isFocusLocked
                 val focusVal = if (isManualFocus) formatFocusDist(currentFocusDistance) else formatFocusDist(liveFocusDistance)
                 val isoLabel = "ISO"
                 val isoVal = if (isManualIso) "$currentIso" else "$liveIso"
@@ -3260,8 +3447,8 @@ class CameraFragment : Fragment() {
                     val ctx = context ?: binding.root.context
                     binding.pillFocus?.let { pill ->
                         val isTabActive = activeManualTab == "Focus"
-                        CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isManualFocus)
-                        pill.text = CameraBentoDeckView.formatProTelemetry(focusLabel, focusVal, isTabActive, isManualFocus, ctx)
+                        CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isFocusManualOrLocked)
+                        pill.text = CameraBentoDeckView.formatProTelemetry(focusLabel, focusVal, isTabActive, isFocusManualOrLocked, ctx)
                     }
                     binding.pillIso?.let { pill ->
                         val isTabActive = activeManualTab == "ISO"
