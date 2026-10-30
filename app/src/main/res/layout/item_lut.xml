@@ -20,21 +20,50 @@
         android:paddingVertical="@dimen/padding_small"
         android:gravity="center_vertical">
 
-        <TextView
-            android:id="@+id/tv_lut_name"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="My LUT"
-            android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
-            android:textColor="?attr/colorOnSurface" />
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tv_lut_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="My LUT"
+                android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+                android:textStyle="bold"
+                android:textColor="?attr/colorOnSurface" />
+
+            <TextView
+                android:id="@+id/tv_lut_log"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="2dp"
+                android:text="F-Log2"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="?attr/colorPrimary"
+                android:background="?attr/colorSurfaceContainerHigh" />
+
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_change_log"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:icon="@drawable/ic_link"
+            android:contentDescription="@string/lut_assoc_change_title" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_rename"
             style="@style/Widget.Material3.Button.IconButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            app:icon="@drawable/ic_settings"
+            app:icon="@drawable/ic_edit"
             android:contentDescription="Rename LUT" />
 
         <com.google.android.material.button.MaterialButton

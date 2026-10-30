@@ -7,6 +7,7 @@ import top.maary.darkbag.utils.CacheManager
 import top.maary.darkbag.utils.MultiCameraHelper
 import top.maary.darkbag.utils.MultiCameraCountPreference
 import top.maary.darkbag.utils.DualLensPairPreference
+import top.maary.darkbag.utils.LutManager
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -268,11 +269,19 @@ class SettingsFragment : Fragment() {
     private fun updateLutsTile() {
         val ctx = context ?: return
         val activeLut = prefs.getString(KEY_ACTIVE_LUT, null)
-        val rawName = activeLut?.removeSuffix(".cube")?.removeSuffix(".CUBE") ?: "Classic Neg"
-        val displayLut = if (rawName.length > 14) {
-            rawName.take(13) + "…"
+        val rawName = activeLut?.removeSuffix(".cube")?.removeSuffix(".CUBE") ?: "None"
+        val assocLog = activeLut?.let { LutManager(ctx).getAssociatedLog(it) }
+        val displayLut = if (activeLut != null) {
+            val label = if (!assocLog.isNullOrEmpty() && assocLog != LutManager.LOG_UNIVERSAL) {
+                "$rawName ($assocLog)"
+            } else if (assocLog == LutManager.LOG_UNIVERSAL) {
+                "$rawName (Universal)"
+            } else {
+                rawName
+            }
+            if (label.length > 18) label.take(17) + "…" else label
         } else {
-            rawName
+            "None"
         }
         binding.btnManageLuts.text = CameraBentoDeckView.formatProTelemetry(
             label = "3D LUT RECIPES",
@@ -584,8 +593,12 @@ class SettingsFragment : Fragment() {
             ) { which ->
                 val selected = LOG_CURVES[which]
                 val editor = prefs.edit().putString(KEY_TARGET_LOG, selected)
-                if (selected == "None") {
+                val activeLut = prefs.getString(KEY_ACTIVE_LUT, null)
+                val lutMgr = LutManager(requireContext())
+                if (!lutMgr.isLutCompatibleWithLog(activeLut, selected)) {
                     editor.remove(KEY_ACTIVE_LUT)
+                    val msg = getString(R.string.lut_reset_incompatible_toast, selected)
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                 }
                 editor.apply()
                 updateTargetLogTile()
