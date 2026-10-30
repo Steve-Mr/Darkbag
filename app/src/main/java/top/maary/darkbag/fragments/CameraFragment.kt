@@ -690,6 +690,11 @@ class CameraFragment : Fragment() {
         if (!isAdded) return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         isMotionPhotoEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false)
+        val isAudioEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true) &&
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    requireContext(),
+                    android.Manifest.permission.RECORD_AUDIO
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
         if (isMotionPhotoEnabled && (activeCoordinator?.mode ?: resolveActiveCaptureMode(prefs)).supportsMotionPhoto) {
             if (motionPhotoEncoder == null) {
@@ -697,10 +702,13 @@ class CameraFragment : Fragment() {
                     width = 1080,
                     height = 1440,
                     frameRate = 30,
-                    bitRate = 10_000_000
+                    bitRate = 10_000_000,
+                    isAudioEnabled = isAudioEnabled
                 ).apply {
                     start()
                 }
+            } else {
+                motionPhotoEncoder?.updateAudioEnabled(isAudioEnabled)
             }
             lutProcessor?.setEncoderSurface(motionPhotoEncoder?.surface, 1080, 1440)
         } else {

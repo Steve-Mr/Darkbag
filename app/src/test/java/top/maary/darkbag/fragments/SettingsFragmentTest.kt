@@ -490,4 +490,25 @@ class SettingsFragmentTest {
         assertEquals(0, modeLp.width)
         assertEquals(1f, modeLp.weight, 0.001f)
     }
+
+    @Test
+    fun testMotionPhotoAudioSwitchAndPreference() {
+        assertEquals("motion_photo_audio_enabled", SettingsFragment.KEY_MOTION_PHOTO_AUDIO)
+
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
+        val inflater = LayoutInflater.from(themedContext)
+        val binding = top.maary.darkbag.databinding.FragmentSettingsBinding.inflate(inflater)
+
+        assertNotNull(binding.switchMotionPhoto)
+        assertNotNull(binding.switchMotionPhotoAudio)
+        assertEquals("AUDIO", binding.switchMotionPhotoAudio.badgeText)
+
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true).apply()
+        assertTrue(prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, false))
+
+        prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, false).apply()
+        assertFalse(prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true))
+    }
 }

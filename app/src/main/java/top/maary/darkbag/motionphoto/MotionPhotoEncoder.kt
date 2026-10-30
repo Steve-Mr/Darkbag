@@ -13,14 +13,15 @@ import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Hardware accelerated video encoder managing the continuous encoding pipeline
- * and circular buffer for Motion Photo recording.
+ * Hardware accelerated video encoder and audio recorder managing the continuous
+ * encoding pipeline and circular buffers for Motion Photo recording.
  */
 class MotionPhotoEncoder(
     private val width: Int = 1080,
     private val height: Int = 1440,
     private val frameRate: Int = 30,
-    private val bitRate: Int = 10_000_000 // 10 Mbps
+    private val bitRate: Int = 10_000_000, // 10 Mbps
+    var isAudioEnabled: Boolean = false
 ) {
     companion object {
         private const val TAG = "MotionPhotoEncoder"
@@ -32,6 +33,8 @@ class MotionPhotoEncoder(
     private var mediaCodec: MediaCodec? = null
     private var inputSurface: Surface? = null
     private var mediaFormat: MediaFormat? = null
+
+    private var audioRecorder: MotionPhotoAudioRecorder? = null
 
     private var encoderThread: HandlerThread? = null
     private var encoderHandler: Handler? = null
@@ -46,7 +49,7 @@ class MotionPhotoEncoder(
         get() = isRunning.get()
 
     /**
-     * Initializes and starts the video encoder.
+     * Initializes and starts the video encoder and optional audio recorder.
      */
     @Synchronized
     fun start() {
@@ -80,11 +83,57 @@ class MotionPhotoEncoder(
             // Start draining output buffers asynchronously
             encoderHandler?.post { drainEncoderLoop() }
 
-            Log.i(TAG, "MotionPhotoEncoder started: ${width}x${height} @ ${frameRate}fps, ${bitRate / 1_000_000}Mbps")
+            // Start audio recorder if enabled
+            if (isAudioEnabled) {
+                startAudioRecorderInternal()
+            }
+
+            Log.i(TAG, "MotionPhotoEncoder started: ${width}x${height} @ ${frameRate}fps, ${bitRate / 1_000_000}Mbps, audio=$isAudioEnabled")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start MotionPhotoEncoder", e)
             stop()
         }
+    }
+
+    /**
+     * Starts or stops audio recording dynamically while video encoding is active.
+     */
+    @Synchronized
+    fun updateAudioEnabled(enabled: Boolean) {
+        isAudioEnabled = enabled
+        if (!isRunning.get()) return
+
+        if (enabled && audioRecorder == null) {
+            startAudioRecorderInternal()
+        } else if (!enabled && audioRecorder != null) {
+            stopAudioRecorderInternal()
+        }
+    }
+
+    private fun startAudioRecorderInternal() {
+        try {
+            val recorder = MotionPhotoAudioRecorder()
+            if (recorder.start()) {
+                audioRecorder = recorder
+                Log.i(TAG, "MotionPhoto audio recorder attached successfully")
+            } else {
+                Log.w(TAG, "MotionPhoto audio recorder failed to start, audio track disabled")
+                recorder.stop()
+                audioRecorder = null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error starting MotionPhoto audio recorder", e)
+            audioRecorder = null
+        }
+    }
+
+    private fun stopAudioRecorderInternal() {
+        try {
+            audioRecorder?.stop()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error stopping MotionPhoto audio recorder", e)
+        }
+        audioRecorder = null
     }
 
     /**
@@ -136,6 +185,7 @@ class MotionPhotoEncoder(
      * @param preDurationMs Milliseconds of video to keep before shutter.
      * @param postDurationMs Milliseconds of video to record after shutter.
      * @param outputFile Destination MP4 file.
+     * @param orientationDegrees Orientation hint in degrees (0, 90, 180, 270).
      * @param onComplete Callback with the generated MP4 file (or null on failure) and the still PTS in us.
      */
     fun captureSnapshot(
@@ -176,11 +226,24 @@ class MotionPhotoEncoder(
                 return@launch
             }
 
+            // Extract matching audio slice if audio is active
+            val activeAudioRecorder = audioRecorder
+            val audioSlice = if (activeAudioRecorder?.isRecording == true) {
+                val videoStartPtsUs = slice.samples.first().presentationTimeUs
+                val videoEndPtsUs = slice.samples.last().presentationTimeUs
+                activeAudioRecorder.ringBuffer.slice(videoStartPtsUs, videoEndPtsUs)
+            } else {
+                null
+            }
+            val audioFormat = activeAudioRecorder?.mediaFormat
+
             val stillPtsUs = MotionPhotoMuxer.muxSliceToMp4(
                 outputFile = outputFile,
                 mediaFormat = currentFormat,
                 slice = slice,
-                orientationDegrees = orientationDegrees
+                orientationDegrees = orientationDegrees,
+                audioFormat = audioFormat,
+                audioSlice = audioSlice
             )
 
             if (stillPtsUs != null && outputFile.exists() && outputFile.length() > 0) {
@@ -192,13 +255,15 @@ class MotionPhotoEncoder(
     }
 
     /**
-     * Stops and releases encoder resources.
+     * Stops and releases encoder and audio resources.
      */
     @Synchronized
     fun stop() {
         if (!isRunning.getAndSet(false)) return
 
         try {
+            stopAudioRecorderInternal()
+
             encoderHandler?.removeCallbacksAndMessages(null)
             encoderThread?.quitSafely()
             encoderThread?.join(500)
