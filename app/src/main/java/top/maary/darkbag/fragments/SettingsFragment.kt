@@ -1124,6 +1124,10 @@ class SettingsFragment : Fragment() {
 
         setupSwitch(binding.switchForce60fps, KEY_FORCE_60FPS, false)
 
+        binding.btnOpenLensCalibration.setOnClickListener {
+            top.maary.darkbag.ui.LensCalibrationBottomSheet.show(childFragmentManager)
+        }
+
         binding.btnCloseExperimental.setOnClickListener {
             prefs.edit().putBoolean(KEY_DEBUG_ENABLED, false).apply()
             updateDebugVisibility()

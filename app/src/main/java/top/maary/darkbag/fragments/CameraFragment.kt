@@ -2159,7 +2159,8 @@ class CameraFragment : Fragment() {
                     useSensorColorMatrix = useSensorColorMatrix,
                     lensDistortion = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) chars.get(android.hardware.camera2.CameraCharacteristics.LENS_DISTORTION) else null,
                     intrinsicCalibration = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INTRINSIC_CALIBRATION) else null,
-                    focalLength = captureResult?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f
+                    focalLength = captureResult?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f,
+                    customCalibration = top.maary.darkbag.calibration.LensCalibrationStore.getInstance(requireContext()).getCalibration(targetCharId)
                 )
                 val frameMeta = top.maary.darkbag.pipeline.model.CaptureFrameMetadata(
                     timestamp = image.timestamp,
@@ -4190,7 +4191,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         useSensorColorMatrix = useSensorColorMatrix,
                         lensDistortion = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) chars.get(android.hardware.camera2.CameraCharacteristics.LENS_DISTORTION) else null,
                         intrinsicCalibration = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INTRINSIC_CALIBRATION) else null,
-                        focalLength = result?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f
+                        focalLength = result?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f,
+                        customCalibration = top.maary.darkbag.calibration.LensCalibrationStore.getInstance(requireContext()).getCalibration(targetCharId)
                     )
                     val frameMeta = top.maary.darkbag.pipeline.model.CaptureFrameMetadata(
                         timestamp = captureMetadata.dateTimeOriginal ?: captureTime,
@@ -4500,7 +4502,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     useSensorColorMatrix = useSensorColorMatrix,
                     lensDistortion = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) chars.get(android.hardware.camera2.CameraCharacteristics.LENS_DISTORTION) else null,
                     intrinsicCalibration = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INTRINSIC_CALIBRATION) else null,
-                    focalLength = result?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f
+                    focalLength = result?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f,
+                    customCalibration = top.maary.darkbag.calibration.LensCalibrationStore.getInstance(requireContext()).getCalibration(targetCharId)
                 )
                 val frameMeta = top.maary.darkbag.pipeline.model.CaptureFrameMetadata(
                     timestamp = captureMetadata.dateTimeOriginal ?: System.currentTimeMillis(),

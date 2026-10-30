@@ -83,7 +83,7 @@ uniform float uShadows;
 uniform float uWhites;
 uniform float uBlacks;
 
-uniform int uDistortionMode; // 0=None, 1=Polynomial, 2=Optical Fallback
+uniform int uDistortionMode; // 0=None, 1=Polynomial
 uniform vec4 uDistortionK;    // k1, k2, k3, k4
 uniform vec2 uDistortionCenter; // normalized cx, cy in [0, 1]
 uniform float uDistortionFocalPx; // focal length in pixels
@@ -295,16 +295,7 @@ float applyHswb(float v) {
 void main() {
     // 0. Distortion Correction backward mapping
     vec2 sampleTc = vTexCoord;
-    if (uDistortionMode == 2) {
-        vec2 d = (vTexCoord - uDistortionCenter) * uImageSize;
-        float ru = length(d);
-        if (ru > 0.001 && uDistortionFocalPx > 1.0) {
-            float theta = atan(ru / uDistortionFocalPx);
-            float rd = uDistortionFocalPx * theta;
-            float s = (rd / ru) * uDistortionFitScale;
-            sampleTc = uDistortionCenter + (d * s) / uImageSize;
-        }
-    } else if (uDistortionMode == 1) {
+    if (uDistortionMode == 1) {
         vec2 d = (vTexCoord - uDistortionCenter) * uImageSize;
         if (uDistortionFocalPx > 1.0) {
             float ru = length(d) / uDistortionFocalPx;

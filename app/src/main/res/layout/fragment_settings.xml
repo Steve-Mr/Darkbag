@@ -1702,6 +1702,22 @@
                         app:bentoSwitchBadge="60 FPS"
                         app:bentoSwitchBadgeStyle="secondary" />
 
+                    <!-- Custom Lens Calibration Bento Button -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_open_lens_calibration"
+                        style="@style/Widget.Darkbag.BentoTile.Button"
+                        android:layout_width="match_parent"
+                        android:layout_height="52dp"
+                        android:layout_marginBottom="8dp"
+                        app:backgroundTint="?attr/colorSurface"
+                        android:textColor="?attr/colorOnSurface"
+                        app:strokeWidth="0dp"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_arrow_forward"
+                        app:iconGravity="end"
+                        app:iconTint="?attr/colorOnSurfaceVariant"
+                        android:text="自定义镜头畸变标定" />
+
                     <!-- Performance diagnosis card -->
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
