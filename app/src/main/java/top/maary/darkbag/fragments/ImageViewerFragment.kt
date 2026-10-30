@@ -18,6 +18,19 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.style.ForegroundColorSpan
+import android.view.Gravity
+import android.widget.LinearLayout
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.color.MaterialColors
+import top.maary.darkbag.ui.CameraBentoDeckView
+import top.maary.darkbag.ui.bento.BentoContainerRole
+import top.maary.darkbag.ui.bento.BentoTrayCard
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -42,6 +55,7 @@ import top.maary.darkbag.databinding.BottomSheetImageDetailsBinding
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
 import top.maary.darkbag.databinding.ItemDetailRowBinding
 import top.maary.darkbag.models.ImageGroup
+import top.maary.darkbag.pipeline.composer.HalfFrameComposer
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.repository.ImageRepository
 import java.text.SimpleDateFormat
@@ -50,6 +64,7 @@ import java.util.Locale
 import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.round
+import kotlin.math.roundToInt
 
 open class ImageViewerFragment : Fragment() {
 
@@ -108,6 +123,7 @@ open class ImageViewerFragment : Fragment() {
     private var systemTopInset = 0
     private var systemBottomInset = 0
     private var topBarHeight = 0
+    private var bentoDeckHeight = 0
     private var configBeforeEditing: top.maary.darkbag.models.EditConfig? = null
     protected var currentEditConfig: top.maary.darkbag.models.EditConfig? = null
     protected var selectedDngIndex = 0 // 0 or 1 for half-frame
@@ -120,6 +136,7 @@ open class ImageViewerFragment : Fragment() {
     private var isLongPressing = false
     private var savedMatrix = android.graphics.Matrix()
     private var savedScale = 1f
+    private var pendingSingleDeleteGroup: ImageGroup? = null
 
     protected lateinit var lutManager: top.maary.darkbag.utils.LutManager
     protected var previewJob: Job? = null
@@ -204,8 +221,8 @@ open class ImageViewerFragment : Fragment() {
                 } else {
                     exitGalleryMode()
                 }
-            } else if (binding.lutListContainer.visibility == View.VISIBLE) {
-                binding.lutListContainer.visibility = View.GONE
+            } else if (binding.lutListContainer?.visibility == View.VISIBLE) {
+                binding.lutListContainer?.visibility = View.GONE
                 binding.touchOverlay.visibility = View.GONE
                 updateBackPressedCallbackState()
             } else if (isEditingAdjustments) {
@@ -252,6 +269,11 @@ open class ImageViewerFragment : Fragment() {
             val selectedItems = if (::galleryAdapter.isInitialized) galleryAdapter.getSelectedItems() else emptyList()
             if (selectedItems.isNotEmpty()) {
                 deleteBatchImages(selectedItems, mode)
+            } else {
+                pendingSingleDeleteGroup?.let { group ->
+                    executeSingleGroupDelete(group, mode)
+                    pendingSingleDeleteGroup = null
+                }
             }
         }
 
@@ -392,11 +414,24 @@ open class ImageViewerFragment : Fragment() {
                         onMultiCameraLensChanged = { _, _ ->
                             updateSplitButtons()
                             updateToolbarIcon()
+                            updateControlsVisibility()
+                        }
+                        onFormatChanged = { _, _ ->
+                            updateControlsVisibility()
+                        }
+                        onDerivativeVersionChanged = { _, _ ->
+                            updateControlsVisibility()
                         }
                         onCinemaDngFrameSelected = { group, index, uri ->
                             val currentPosition = binding.imagePager.currentItem
                             if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
                                 currentCinemaDngFrame = Pair(index, uri)
+                                binding.filmstripBentoSeekbar?.setProgress(index, group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: 1)
+                            }
+                        }
+                        onVideoPlaybackStateChanged = { position, isPlaying, currentMs, totalMs ->
+                            if (_binding != null && ::adapter.isInitialized && position == binding.imagePager.currentItem) {
+                                updateVideoPlaybackButton(isPlaying, currentMs, totalMs)
                             }
                         }
                         setFormatSwitcherPersistentHidden(isAdjusted)
@@ -436,6 +471,9 @@ open class ImageViewerFragment : Fragment() {
                                     adapter.updateSingleGroup(updatedGroup) {
                                         if (continuation.isActive) continuation.resume(Unit)
                                     }
+                                }
+                                if (binding.imagePager.currentItem == initialIndex && !isAdjusted) {
+                                    updateControlsVisibility()
                                 }
                                 if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex && binding.imagePager.currentItem == initialIndex) {
                                     hasAutoPlayedPosition = initialIndex
@@ -487,6 +525,9 @@ open class ImageViewerFragment : Fragment() {
                                         }
                                     }
                                     val index = adapter.getGroups().indexOfFirst { it.baseName == updatedGroup.baseName }
+                                    if (index == binding.imagePager.currentItem && !isAdjusted) {
+                                        updateControlsVisibility()
+                                    }
                                     if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != index && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == index) {
                                         hasAutoPlayedPosition = index
                                         adapter.playMotionVideoForPosition(index)
@@ -520,15 +561,17 @@ open class ImageViewerFragment : Fragment() {
         val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
         val canEdit = ((currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial) || isRawVideo
 
-        val showBottomLeft = isUiVisible && !isEditingAdjustments && !isGalleryMode
-        binding.bottomLeftControls.visibility = if (showBottomLeft) View.VISIBLE else View.GONE
-        binding.btnLogLut.isEnabled = canEdit
-        binding.btnLogLut.isClickable = canEdit
-        binding.btnLogLut.alpha = if (canEdit) 1.0f else 0.65f
-
-        val editVisibility = if (canEdit && isUiVisible && !isEditingAdjustments && !isGalleryMode) View.VISIBLE else View.GONE
-        binding.bottomRightControls.visibility = editVisibility
-        binding.fabAdjust.visibility = editVisibility
+        val showDeck = isUiVisible && !isEditingAdjustments && !isGalleryMode
+        binding.viewerBentoDeck.visibility = if (showDeck) View.VISIBLE else View.GONE
+        binding.btnLogCurve.isEnabled = canEdit
+        binding.btnLogCurve.isClickable = canEdit
+        binding.btnLogCurve.alpha = if (canEdit) 1.0f else 0.65f
+        binding.btn3dLut.isEnabled = canEdit
+        binding.btn3dLut.isClickable = canEdit
+        binding.btn3dLut.alpha = if (canEdit) 1.0f else 0.65f
+        binding.btnAdjustTofu.isEnabled = canEdit
+        binding.btnAdjustTofu.isClickable = canEdit
+        binding.btnAdjustTofu.alpha = if (canEdit) 1.0f else 0.65f
 
         if (canEdit && currentEditConfig == null) {
             prepareEditConfig(currentGroup)
@@ -541,12 +584,507 @@ open class ImageViewerFragment : Fragment() {
             binding.hfExtraControls.visibility = View.GONE
         }
 
+        updateFormatBentoRow()
         updateSplitButtons()
         updateToolbarIcon()
         updateEditUi()
         updateEffectsButtons()
         updateSelectionFeedback()
         updateBackPressedCallbackState()
+    }
+
+    protected fun updateFormatBentoRow() {
+        val currentBinding = _binding ?: return
+        if (!::adapter.isInitialized || adapter.itemCount == 0) return
+        val currentIndex = currentBinding.imagePager.currentItem
+        if (currentIndex !in 0 until adapter.itemCount) return
+        val currentGroup = adapter.getGroup(currentIndex)
+        val ctx = context ?: return
+        val density = ctx.resources.displayMetrics.density
+
+        (currentBinding.viewerBentoDeck as? BentoTrayCard)?.let { deckCard ->
+            val role = when {
+                currentGroup.isHalfFrame() -> BentoContainerRole.TERTIARY_CONTAINER
+                currentGroup.isMultiCamera -> BentoContainerRole.SECONDARY_CONTAINER
+                else -> BentoContainerRole.SURFACE_CONTAINER_LOW
+            }
+            deckCard.setContainerRole(role, animated = true)
+        }
+
+        val currentFormat = adapter.getSelectedFormat(currentIndex)
+        val isRawSelected = currentFormat == ImageViewerAdapter.FORMAT_DNG
+
+        val lenses = if (currentGroup.isMultiCamera) adapter.getMultiCameraLenses(currentGroup) else emptyList()
+        val activeLensIndex = if (currentGroup.isMultiCamera && lenses.isNotEmpty()) {
+            adapter.getSelectedLensIndex(currentIndex).coerceIn(0, lenses.size - 1)
+        } else 0
+        val activeLens = if (currentGroup.isMultiCamera && lenses.isNotEmpty()) {
+            lenses[activeLensIndex]
+        } else null
+        val activeLensTag = activeLens?.lensTag?.ifEmpty {
+            String.format(java.util.Locale.US, "%.1fx", activeLens.multiplier)
+        } ?: "1.0x"
+
+        val hasDng = if (currentGroup.isMultiCamera) {
+            activeLens?.dngUri != null
+        } else {
+            currentGroup.hasMasterRaw
+        }
+
+        val derivatives = adapter.getDerivativeUris(currentGroup)
+        val hasDerivatives = if (currentGroup.isMultiCamera) {
+            activeLens?.jpgUri != null
+        } else {
+            derivatives.isNotEmpty()
+        }
+
+        val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
+        val isCinemaDng = currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()
+        val activeDerivIdx = adapter.getSelectedDerivativeIndex(currentGroup.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
+        val activeDerivativeUri = derivatives.getOrNull(activeDerivIdx) ?: currentGroup.jpgUri ?: currentGroup.mp4VideoUri
+        val isMp4Active = !isRawSelected && activeDerivativeUri != null && (activeDerivativeUri.toString().endsWith(".mp4", ignoreCase = true) || currentGroup.isMp4Video)
+
+        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(ctx, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
+        val colorPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
+        val colorOnPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnPrimaryContainer, android.graphics.Color.WHITE)
+        val colorSecondaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorSecondaryContainer, android.graphics.Color.DKGRAY)
+        val colorOnSecondaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnSecondaryContainer, android.graphics.Color.WHITE)
+        val colorSurfaceContainerHigh = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.GRAY)
+        val colorOnSurfaceVariant = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnSurfaceVariant, android.graphics.Color.LTGRAY)
+        val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
+
+        val showDerivCycle = !currentGroup.isMultiCamera && !isRawSelected && derivatives.size >= 2
+        val showMotionLive = !currentGroup.isMultiCamera && currentGroup.isMotionPhoto && !isRawSelected && !isAdjusted
+        val hasContextualAddons = showMotionLive
+
+        if (hasContextualAddons) {
+            currentBinding.viewerFormatRow?.visibility = View.VISIBLE
+            currentBinding.btnFormatSwitch?.visibility = View.VISIBLE
+            currentBinding.btnFormatSwitchCompact?.visibility = View.GONE
+            currentBinding.btnDerivativeCycleCompact?.visibility = View.GONE
+        } else {
+            currentBinding.viewerFormatRow?.visibility = View.GONE
+            currentBinding.btnFormatSwitchCompact?.visibility = View.VISIBLE
+            currentBinding.btnDerivativeCycleCompact?.visibility = if (showDerivCycle) View.VISIBLE else View.GONE
+        }
+
+        currentBinding.btnFormatSwitch?.let { btn ->
+            when {
+                hasDng && hasDerivatives -> {
+                    btn.isEnabled = !isAdjusted
+                    btn.isClickable = !isAdjusted
+                    if (currentGroup.isMultiCamera) {
+                        val line1 = "$activeLensTag · ${if (isRawSelected) "DNG" else "JPG"}"
+                        val line2 = "JPG ⇄ DNG"
+                        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                            label = line1,
+                            value = line2,
+                            isTabActive = isRawSelected,
+                            isValueManual = false,
+                            context = ctx
+                        )
+                    } else if (isRawSelected) {
+                        val line1 = when {
+                            isRawVideo -> "MASTER · RAWVID"
+                            isCinemaDng -> "MASTER · CDNG"
+                            else -> "MASTER · DNG"
+                        }
+                        val line2 = if (isRawVideo || currentGroup.mp4VideoUri != null) "⇄ SWITCH MP4" else "⇄ SWITCH JPG"
+                        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                            label = line1,
+                            value = line2,
+                            isTabActive = true,
+                            isValueManual = false,
+                            context = ctx
+                        )
+                    } else {
+                        val line1 = if (isMp4Active) "VIEW · MP4" else "VIEW · JPG"
+                        val line2 = when {
+                            isRawVideo -> "⇄ SWITCH RAWVID"
+                            isCinemaDng -> "⇄ SWITCH CDNG"
+                            else -> "⇄ SWITCH DNG"
+                        }
+                        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                            label = line1,
+                            value = line2,
+                            isTabActive = false,
+                            isValueManual = false,
+                            context = ctx
+                        )
+                    }
+
+                    if (isRawSelected) {
+                        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
+                        btn.setTextColor(colorOnPrimaryContainer)
+                        btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                        btn.strokeWidth = (1.5f * density).toInt()
+                        btn.cornerRadius = (10f * density).toInt()
+                    } else {
+                        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSecondaryContainer)
+                        btn.setTextColor(colorOnSecondaryContainer)
+                        btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+                        btn.strokeWidth = (1f * density).toInt()
+                        btn.cornerRadius = (14f * density).toInt()
+                    }
+                }
+                hasDng && !hasDerivatives -> {
+                    btn.isEnabled = false
+                    btn.isClickable = false
+                    val line1 = if (currentGroup.isMultiCamera) "$activeLensTag · DNG" else "FORMAT"
+                    val line2 = when {
+                        isRawVideo -> "RAWVID ONLY"
+                        isCinemaDng -> "CDNG ONLY"
+                        else -> "DNG ONLY"
+                    }
+                    btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                        label = line1,
+                        value = line2,
+                        isTabActive = false,
+                        isValueManual = false,
+                        context = ctx
+                    )
+                    btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+                    btn.strokeWidth = (1f * density).toInt()
+                    btn.cornerRadius = (14f * density).toInt()
+                }
+                else -> {
+                    btn.isEnabled = false
+                    btn.isClickable = false
+                    val line1 = if (currentGroup.isMultiCamera) "$activeLensTag · JPG" else "FORMAT"
+                    val line2 = if (isMp4Active) "MP4 ONLY" else "JPG ONLY"
+                    btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                        label = line1,
+                        value = line2,
+                        isTabActive = false,
+                        isValueManual = false,
+                        context = ctx
+                    )
+                    btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+                    btn.strokeWidth = (1f * density).toInt()
+                    btn.cornerRadius = (14f * density).toInt()
+                }
+            }
+        }
+
+        currentBinding.btnFormatSwitchCompact?.let { btn ->
+            val isRawAvailable = hasDng
+            val rawLabel = when {
+                isRawVideo -> "RAWVID"
+                isCinemaDng -> "CDNG"
+                else -> "RAW"
+            }
+            val nonRawLabel = if (isMp4Active) "MP4" else "JPG"
+
+            if (isRawSelected) {
+                btn.isEnabled = !isAdjusted
+                btn.isClickable = !isAdjusted
+                btn.text = rawLabel
+                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
+                btn.setTextColor(colorOnPrimaryContainer)
+                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                btn.strokeWidth = (1.5f * density).toInt()
+                btn.cornerRadius = (14f * density).toInt()
+            } else if (isRawAvailable) {
+                btn.isEnabled = !isAdjusted
+                btn.isClickable = !isAdjusted
+                btn.text = rawLabel
+                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                btn.setTextColor(colorOnSurfaceVariant)
+                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+                btn.strokeWidth = (1f * density).toInt()
+                btn.cornerRadius = (14f * density).toInt()
+            } else {
+                btn.isEnabled = false
+                btn.isClickable = false
+                btn.text = nonRawLabel
+                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                btn.setTextColor(androidx.core.graphics.ColorUtils.setAlphaComponent(colorOnSurfaceVariant, 120))
+                btn.strokeWidth = 0
+                btn.cornerRadius = (14f * density).toInt()
+            }
+        }
+
+        currentBinding.btnDerivativeCycleCompact?.let { btn ->
+            val showCompactLook = !hasContextualAddons && showDerivCycle
+            btn.visibility = if (showCompactLook) View.VISIBLE else View.GONE
+            if (showCompactLook) {
+                val dotColor = LOOK_DOT_COLORS[activeDerivIdx % LOOK_DOT_COLORS.size]
+                val dotColorAlpha = androidx.core.graphics.ColorUtils.setAlphaComponent(dotColor, 200)
+
+                val text = "V${activeDerivIdx + 1} ●"
+                val spannable = android.text.SpannableStringBuilder(text)
+                val dotIdx = text.indexOf("●")
+                if (dotIdx >= 0) {
+                    spannable.setSpan(
+                        android.text.style.ForegroundColorSpan(dotColor),
+                        dotIdx,
+                        dotIdx + 1,
+                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+                btn.text = spannable
+                btn.icon = null
+
+                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                btn.setTextColor(colorOnSurfaceVariant)
+                btn.strokeColor = android.content.res.ColorStateList.valueOf(dotColorAlpha)
+                btn.strokeWidth = (1.5f * density).toInt()
+                btn.cornerRadius = (14f * density).toInt()
+            }
+        }
+
+        currentBinding.btnDerivativeCycle?.let { btn ->
+            val showExpandedLook = hasContextualAddons && showDerivCycle
+            btn.visibility = if (showExpandedLook) View.VISIBLE else View.GONE
+            if (showExpandedLook) {
+                val dotColor = LOOK_DOT_COLORS[activeDerivIdx % LOOK_DOT_COLORS.size]
+                val dotColorAlpha = androidx.core.graphics.ColorUtils.setAlphaComponent(dotColor, 200)
+
+                val line1 = "LOOK"
+                val line2 = "V${activeDerivIdx + 1} / V${derivatives.size} ●"
+                val formatted = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                    label = line1,
+                    value = line2,
+                    isTabActive = false,
+                    isValueManual = true,
+                    context = ctx
+                )
+                val spannable = formatted as? android.text.SpannableStringBuilder ?: android.text.SpannableStringBuilder(formatted)
+                val dotIdx = spannable.indexOf("●")
+                if (dotIdx >= 0) {
+                    spannable.setSpan(
+                        android.text.style.ForegroundColorSpan(dotColor),
+                        dotIdx,
+                        dotIdx + 1,
+                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+                btn.text = spannable
+                btn.icon = null
+
+                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                btn.strokeColor = android.content.res.ColorStateList.valueOf(dotColorAlpha)
+                btn.strokeWidth = (1.5f * density).toInt()
+                btn.cornerRadius = (14f * density).toInt()
+            }
+        }
+
+        currentBinding.btnMotionLive?.let { btn ->
+            btn.visibility = if (showMotionLive) View.VISIBLE else View.GONE
+            if (showMotionLive) {
+                val line1 = "LIVE PHOTO"
+                val line2 = if (isMotionPhotoAutoPlay) "AUTO ON" else "PAUSED"
+                val liveText = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                    label = line1,
+                    value = line2,
+                    isTabActive = isMotionPhotoAutoPlay,
+                    isValueManual = isMotionPhotoAutoPlay,
+                    context = ctx
+                )
+                btn.text = liveText
+                if (isMotionPhotoAutoPlay) {
+                    btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
+                    btn.setTextColor(colorOnPrimaryContainer)
+                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                    btn.strokeWidth = (1.5f * density).toInt()
+                    btn.cornerRadius = (12f * density).toInt()
+                } else {
+                    btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                    btn.setTextColor(colorOnSurfaceVariant)
+                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+                    btn.strokeWidth = (1f * density).toInt()
+                    btn.cornerRadius = (12f * density).toInt()
+                }
+            }
+        }
+
+        if (currentGroup.isMultiCamera && lenses.isNotEmpty()) {
+            currentBinding.viewerMulticamRow?.visibility = View.VISIBLE
+            currentBinding.multicamLensContainer?.let { container ->
+                container.removeAllViews()
+                for ((idx, lens) in lenses.withIndex()) {
+                    val isSelected = (idx == activeLensIndex)
+                    val baseTag = if (lens.lensTag.isNotBlank()) lens.lensTag else String.format(java.util.Locale.US, "%.1fx", lens.multiplier)
+                    val lensLabel = when {
+                        baseTag.contains("(") -> baseTag
+                        lens.multiplier < 0.9f -> "$baseTag (UW)"
+                        lens.multiplier in 0.9f..1.5f -> "$baseTag (W)"
+                        lens.multiplier > 1.5f -> "$baseTag (T)"
+                        else -> baseTag
+                    }
+
+                    val lensBtn = com.google.android.material.button.MaterialButton(
+                        ctx,
+                        null,
+                        com.google.android.material.R.attr.materialButtonTonalStyle
+                    ).apply {
+                        layoutParams = android.widget.LinearLayout.LayoutParams(
+                            0,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            1.0f
+                        ).apply {
+                            if (idx > 0) marginStart = (2f * density).roundToInt()
+                            if (idx < lenses.size - 1) marginEnd = (2f * density).roundToInt()
+                        }
+                        text = lensLabel
+                        textSize = 10.5f
+                        isSingleLine = true
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                        gravity = android.view.Gravity.CENTER
+                        insetTop = 0
+                        insetBottom = 0
+                        setPadding(0, 0, 0, 0)
+                        minWidth = 0
+                        minimumWidth = 0
+
+                        if (isSelected) {
+                            cornerRadius = (10f * density).roundToInt()
+                            backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
+                            setTextColor(colorOnPrimaryContainer)
+                            strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                            strokeWidth = (1.5f * density).roundToInt()
+                        } else {
+                            cornerRadius = (14f * density).roundToInt()
+                            backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                            setTextColor(colorOnSurfaceVariant)
+                            strokeColor = android.content.res.ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
+                            strokeWidth = 0
+                        }
+
+                        setOnClickListener {
+                            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                            val curPos = currentBinding.imagePager.currentItem
+                            if (adapter.getSelectedLensIndex(curPos) != idx) {
+                                adapter.setSelectedLensIndex(curPos, idx)
+                                updateControlsVisibility()
+                            }
+                        }
+                    }
+                    container.addView(lensBtn)
+                }
+            }
+
+            currentBinding.btnMulticamCollage?.apply {
+                text = CameraBentoDeckView.formatProTelemetry(
+                    label = "⊞ COLLAGE",
+                    value = "多摄拼图",
+                    isTabActive = true,
+                    isValueManual = false,
+                    context = ctx
+                )
+                setOnClickListener {
+                    it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                    val curPos = currentBinding.imagePager.currentItem
+                    val grp = adapter.getGroup(curPos)
+                    if (grp.isMultiCamera) {
+                        showMultiCamCollageDialog(grp)
+                    }
+                }
+            }
+        } else {
+            currentBinding.viewerMulticamRow?.visibility = View.GONE
+            currentBinding.multicamLensContainer?.removeAllViews()
+        }
+
+        val isVideoActive = isRawVideo || isCinemaDng || currentGroup.isMp4Video || currentGroup.mp4VideoUri != null || isMp4Active
+
+        if (isVideoActive) {
+            currentBinding.viewerVideoDeck?.visibility = View.VISIBLE
+            if (isCinemaDng) {
+                currentBinding.filmstripBentoContainer?.visibility = View.VISIBLE
+                val frameUris = if (currentGroup.cinemaDngFrameUris.isNotEmpty()) {
+                    currentGroup.cinemaDngFrameUris
+                } else if (currentGroup.cinemaDngFirstFrameUri != null) {
+                    listOf(currentGroup.cinemaDngFirstFrameUri)
+                } else {
+                    emptyList()
+                }
+                val activeIndex = currentCinemaDngFrame?.first ?: adapter.getActiveCinemaDngFrame(currentIndex)?.first ?: 0
+                currentBinding.filmstripBentoSeekbar?.setFrames(frameUris, activeIndex)
+            } else {
+                currentBinding.filmstripBentoContainer?.visibility = View.GONE
+            }
+
+            val exportSub = if (isCinemaDng) "CDNG / MP4 / FRAME" else "MP4 / FRAME / DNG"
+            currentBinding.btnVideoExportHub?.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+                label = "↗ EXPORT HUB",
+                value = exportSub,
+                isTabActive = false,
+                isValueManual = false,
+                context = ctx
+            )
+
+            val isPlaying = adapter.isVideoPlaying(currentIndex)
+            val curMs = adapter.getVideoCurrentPosition(currentIndex)
+            val totalMs = adapter.getVideoDuration(currentIndex)
+            updateVideoPlaybackButton(isPlaying, curMs, totalMs)
+        } else {
+            currentBinding.viewerVideoDeck?.visibility = View.GONE
+        }
+    }
+
+    protected fun updateVideoPlaybackButton(isPlaying: Boolean, currentMs: Long, totalMs: Long) {
+        val currentBinding = _binding ?: return
+        val btn = currentBinding.btnVideoPlayback ?: return
+        val ctx = context ?: return
+        val density = ctx.resources.displayMetrics.density
+
+        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(ctx, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
+        val colorPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
+        val colorOnPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnPrimaryContainer, android.graphics.Color.WHITE)
+        val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
+
+        val line1 = if (isPlaying) "❚❚ PAUSE" else "▶ PLAY"
+        val line2 = if (totalMs > 0) {
+            "${formatVideoTime(currentMs)} / ${formatVideoTime(totalMs)}"
+        } else {
+            val currentIndex = currentBinding.imagePager.currentItem
+            if (::adapter.isInitialized && currentIndex in adapter.getGroups().indices) {
+                val group = adapter.getGroup(currentIndex)
+                if (group.isCinemaDng || group.cinemaDngFrameUris.isNotEmpty()) {
+                    val count = group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: group.cinemaDngFrameCount
+                    val sec = (count / 24.0f).roundToInt()
+                    "24 FPS · ${sec}s"
+                } else if (group.isRawVideo) {
+                    val fps = group.rawVideoFps.takeIf { it > 0 } ?: 24.0f
+                    val sec = (group.rawVideoFrameCount / fps).roundToInt()
+                    "${fps.toInt()} FPS · ${sec}s"
+                } else {
+                    "00:00 / 00:00"
+                }
+            } else {
+                "00:00 / 00:00"
+            }
+        }
+
+        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = line1,
+            value = line2,
+            isTabActive = isPlaying,
+            isValueManual = false,
+            context = ctx
+        )
+
+        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
+        btn.setTextColor(colorOnPrimaryContainer)
+        if (isPlaying) {
+            btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+            btn.strokeWidth = (1.5f * density).toInt()
+            btn.cornerRadius = (14f * density).toInt()
+        } else {
+            btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+            btn.strokeWidth = (1f * density).toInt()
+            btn.cornerRadius = (18f * density).toInt()
+        }
+    }
+
+    private fun formatVideoTime(millis: Long): String {
+        val totalSec = (millis / 1000).coerceAtLeast(0)
+        val minutes = totalSec / 60
+        val seconds = totalSec % 60
+        return String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
     }
 
     protected fun prepareEditConfig(group: ImageGroup) {
@@ -664,6 +1202,7 @@ open class ImageViewerFragment : Fragment() {
     private fun updateSplitButtons() {
         if (isEditingAdjustments || isAdjusted) {
             binding.btnActionMain?.setIconResource(R.drawable.ic_save)
+            binding.btnActionMain?.text = getString(R.string.save).uppercase()
             binding.btnActionMain?.contentDescription = getString(R.string.save)
         } else {
             if (::adapter.isInitialized && adapter.itemCount > 0) {
@@ -673,13 +1212,16 @@ open class ImageViewerFragment : Fragment() {
 
                 if (isUnrenderedRawVideoOrCinemaDng) {
                     binding.btnActionMain?.setIconResource(R.drawable.ic_save)
+                    binding.btnActionMain?.text = "EXPORT"
                     binding.btnActionMain?.contentDescription = getString(R.string.action_export_main)
                 } else {
                     binding.btnActionMain?.setIconResource(R.drawable.ic_share)
+                    binding.btnActionMain?.text = "SHARE"
                     binding.btnActionMain?.contentDescription = getString(R.string.share_button_alt)
                 }
             } else {
                 binding.btnActionMain?.setIconResource(R.drawable.ic_share)
+                binding.btnActionMain?.text = "SHARE"
                 binding.btnActionMain?.contentDescription = getString(R.string.share_button_alt)
             }
         }
@@ -687,9 +1229,9 @@ open class ImageViewerFragment : Fragment() {
 
     private fun updateToolbarIcon() {
         if (isAdjusted || isEditingAdjustments) {
-            binding.btnNavigation.setIconResource(R.drawable.ic_close)
+            binding.btnBack.setIconResource(R.drawable.ic_close)
         } else {
-            binding.btnNavigation.setIconResource(R.drawable.ic_back)
+            binding.btnBack.setIconResource(R.drawable.ic_back)
         }
     }
 
@@ -715,6 +1257,16 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
+        binding.btnActionMain?.setOnLongClickListener {
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            if (isEditingAdjustments || isAdjusted) {
+                showSaveMenu(it)
+            } else {
+                showViewMenu(it)
+            }
+            true
+        }
+
         binding.btnActionMenu?.setOnClickListener {
             binding.btnActionMenu?.isCheckable = true
             binding.btnActionMenu?.isChecked = true
@@ -725,12 +1277,149 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
-        binding.btnLogLut.setOnClickListener {
+        binding.btnLogCurve.setOnClickListener {
             showLutMenu()
         }
 
+        binding.btn3dLut.setOnClickListener {
+            showLutMenu()
+        }
+
+        binding.btnEditRecipe?.setOnClickListener {
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            showLutMenu()
+        }
+
+        binding.btnFormatSwitch?.setOnClickListener {
+            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            adapter.cycleOrToggleFormat(binding.imagePager.currentItem)
+        }
+
+        binding.btnFormatSwitchCompact?.setOnClickListener {
+            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            adapter.cycleOrToggleFormat(binding.imagePager.currentItem)
+        }
+
+        binding.btnDerivativeCycle?.setOnClickListener {
+            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            val curPos = binding.imagePager.currentItem
+            adapter.cycleDerivativeVersion(curPos)
+            updateFormatBentoRow()
+        }
+
+        binding.btnDerivativeCycleCompact?.setOnClickListener {
+            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            val curPos = binding.imagePager.currentItem
+            adapter.cycleDerivativeVersion(curPos)
+            updateFormatBentoRow()
+        }
+
+        binding.btnMulticamCollage?.setOnClickListener {
+            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+            if (currentGroup.isMultiCamera) {
+                showMultiCamCollageDialog(currentGroup)
+            }
+        }
+
+        binding.btnMotionLive?.setOnClickListener {
+            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
+            handleMotionPhotoIndicatorTapped(binding.imagePager.currentItem)
+        }
+
+        binding.btnVideoPlayback?.setOnClickListener {
+            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            val currentIndex = binding.imagePager.currentItem
+            if (currentIndex !in adapter.getGroups().indices) return@setOnClickListener
+            val currentGroup = adapter.getGroup(currentIndex)
+            val currentFormat = adapter.getSelectedFormat(currentIndex)
+            val isRawSelected = currentFormat == ImageViewerAdapter.FORMAT_DNG
+            val derivatives = adapter.getDerivativeUris(currentGroup)
+            val activeDerivIdx = adapter.getSelectedDerivativeIndex(currentGroup.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
+            val activeDerivativeUri = derivatives.getOrNull(activeDerivIdx) ?: currentGroup.jpgUri ?: currentGroup.mp4VideoUri
+            val isMp4Active = !isRawSelected && activeDerivativeUri != null && (activeDerivativeUri.toString().endsWith(".mp4", ignoreCase = true) || currentGroup.isMp4Video)
+            val isCinemaDng = currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()
+
+            when {
+                currentGroup.isRawVideo || currentGroup.rawVideoUri != null -> {
+                    adapter.toggleRawVideoForPosition(currentIndex)
+                }
+                isMp4Active || currentGroup.isMp4Video || currentGroup.mp4VideoUri != null -> {
+                    adapter.toggleMp4VideoForPosition(currentIndex)
+                }
+                isCinemaDng -> {
+                    if (currentGroup.mp4VideoUri != null && !isRawSelected) {
+                        adapter.toggleMp4VideoForPosition(currentIndex)
+                    } else {
+                        adapter.toggleCinemaDngForPosition(currentIndex)
+                    }
+                }
+            }
+        }
+
+        binding.btnVideoExportHub?.setOnClickListener {
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            openExportHub()
+        }
+
+        binding.filmstripBentoSeekbar?.onFrameSelected = { frameIndex, uri ->
+            if (::adapter.isInitialized && adapter.itemCount > 0) {
+                val currentIndex = binding.imagePager.currentItem
+                if (currentIndex in adapter.getGroups().indices) {
+                    val group = adapter.getGroup(currentIndex)
+                    val frameUris = if (group.cinemaDngFrameUris.isNotEmpty()) {
+                        group.cinemaDngFrameUris
+                    } else if (group.cinemaDngFirstFrameUri != null) {
+                        listOf(group.cinemaDngFirstFrameUri)
+                    } else {
+                        emptyList()
+                    }
+                    val targetUri = uri ?: frameUris.getOrNull(frameIndex)
+                    currentCinemaDngFrame = Pair(frameIndex, targetUri)
+                    adapter.selectCinemaDngFrame(currentIndex, frameIndex, targetUri)
+                }
+            }
+        }
+
+        binding.btnTabLight?.setOnClickListener {
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            selectAdjustmentTab(0)
+        }
+        binding.btnTabRange?.setOnClickListener {
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            selectAdjustmentTab(1)
+        }
+        binding.btnTabTone?.setOnClickListener {
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            selectAdjustmentTab(2)
+        }
+        binding.btnTabColor?.setOnClickListener {
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            selectAdjustmentTab(3)
+        }
+
+        binding.btnDelete.setOnClickListener {
+            if (::adapter.isInitialized && adapter.itemCount > 0) {
+                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                showDeleteDialog(currentGroup)
+            }
+        }
+
+        binding.btnSeparateDng.setOnClickListener {
+            if (::adapter.isInitialized && adapter.itemCount > 0) {
+                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                showHalfFrameShareSheet(currentGroup)
+            }
+        }
+
         binding.touchOverlay.setOnClickListener {
-            binding.lutListContainer.visibility = View.GONE
+            binding.lutListContainer?.visibility = View.GONE
             binding.touchOverlay.visibility = View.GONE
             updateBackPressedCallbackState()
         }
@@ -774,7 +1463,7 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
-        binding.fabAdjust.setOnClickListener {
+        binding.btnAdjustTofu.setOnClickListener {
             showAdjustmentsBottomSheet()
             lifecycleScope.launch {
                 ensureDngBytesLoaded()
@@ -809,6 +1498,7 @@ open class ImageViewerFragment : Fragment() {
 
         binding.editTabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab?) {
+                updateAdjustmentTabButtons(tab?.position ?: 0)
                 updateSlidersInPanel()
             }
             override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
@@ -991,7 +1681,7 @@ open class ImageViewerFragment : Fragment() {
         previewJob?.cancel()
         currentEditConfig = null
 
-        binding.lutListContainer.visibility = View.GONE
+        binding.lutListContainer?.visibility = View.GONE
 
         val currentIndex = binding.imagePager.currentItem
         adapter.notifyItemChanged(currentIndex)
@@ -1098,18 +1788,44 @@ open class ImageViewerFragment : Fragment() {
 
         if (!currentGroup.metadataLoaded) return
 
+        val ctx = context ?: return
         val config = currentEditConfig ?: currentGroup.editConfig
-        if (config != null) {
-            val lutName = if (config.lut == "None" || config.lut == null) null else config.lut.substringBeforeLast(".")
-            val logName = if (config.log == "None" || config.log == null) null else config.log
-            binding.btnLogLut.text = lutName ?: logName ?: "None"
-        } else {
-            binding.btnLogLut.text = "None"
-        }
+        val logName = if (config != null && config.log != null && config.log != "None") config.log else "None"
+        val lutName = if (config != null && config.lut != null && config.lut != "None") config.lut.substringBeforeLast(".") else "None"
+
+        binding.btn3dLut.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = "LUT",
+            value = lutName,
+            isTabActive = false,
+            isValueManual = lutName != "None",
+            context = ctx
+        )
+        binding.btnAdjustTofu.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = "ADJUST",
+            value = if (isAdjusted) "ACTIVE" else "LIGHT & COLOR",
+            isTabActive = false,
+            isValueManual = isAdjusted,
+            context = ctx
+        )
+        binding.btnEditRecipe?.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = "RECIPE",
+            value = if (lutName != "None") lutName else logName,
+            isTabActive = false,
+            isValueManual = (logName != "None" || lutName != "None"),
+            context = ctx
+        )
+        binding.btnSeparateDng.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = "SPLIT",
+            value = "HALF FRAME",
+            isTabActive = false,
+            isValueManual = false,
+            context = ctx
+        )
     }
 
     private fun updateEffectsButtons() {
         val config = currentEditConfig ?: return
+        val ctx = context ?: return
         val iconRes = when (config.flareType) {
             1 -> R.drawable.ic_flare_side
             2 -> R.drawable.ic_flare_corner
@@ -1119,16 +1835,95 @@ open class ImageViewerFragment : Fragment() {
         val activeLayout = config.hfLayout ?: currentGroup.hfLayout
         val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
 
+        binding.btnTimestamp.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = "DATE",
+            value = if (config.showTimestamp) "ON" else "OFF",
+            isTabActive = false,
+            isValueManual = config.showTimestamp,
+            context = ctx
+        )
         binding.btnTimestamp.setIconTintResource(if (config.showTimestamp) R.color.vibrant_orange else android.R.color.white)
         binding.btnTimestamp.alpha = if (config.showTimestamp) 1.0f else 0.6f
 
+        val flareSub = when (config.flareType) {
+            1 -> "LEAK #1"
+            2 -> "LEAK #2"
+            else -> "OFF"
+        }
+        binding.btnFlare.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = "FLARE",
+            value = flareSub,
+            isTabActive = false,
+            isValueManual = config.flareType != -1,
+            context = ctx
+        )
         binding.btnFlare.setIconTintResource(if (config.flareType != -1) R.color.vibrant_pink else android.R.color.white)
-        binding.btnFlare.setIconResource( iconRes )
+        binding.btnFlare.setIconResource(iconRes)
         binding.btnFlare.alpha = if (config.flareType != -1) 1.0f else 0.6f
 
+        binding.btnSwap.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = "⇄ SWAP",
+            value = if (isTB) "T / B" else "F1 / F2",
+            isTabActive = false,
+            isValueManual = config.isSwapped,
+            context = ctx
+        )
         binding.btnSwap.setIconResource(if (isTB) R.drawable.ic_swap_vert else R.drawable.ic_swap_horiz)
         binding.btnSwap.setIconTintResource(if (config.isSwapped) R.color.vibrant_cyan else android.R.color.white)
         binding.btnSwap.alpha = if (config.isSwapped) 1.0f else 0.6f
+    }
+
+    private fun selectAdjustmentTab(index: Int) {
+        binding.editTabs.getTabAt(index)?.select()
+        updateAdjustmentTabButtons(index)
+        updateSlidersInPanel()
+    }
+
+    private fun updateAdjustmentTabButtons(selectedTab: Int) {
+        val ctx = context ?: return
+        val density = ctx.resources.displayMetrics.density
+        val colorPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(
+            ctx, com.google.android.material.R.attr.colorPrimaryContainer, 0xFF334433.toInt()
+        )
+        val colorOnPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(
+            ctx, com.google.android.material.R.attr.colorOnPrimaryContainer, 0xFFFFFFFF.toInt()
+        )
+        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(
+            ctx, androidx.appcompat.R.attr.colorPrimary, 0xFF88CC88.toInt()
+        )
+        val colorSurfaceContainerHigh = com.google.android.material.color.MaterialColors.getColor(
+            ctx, com.google.android.material.R.attr.colorSurfaceContainerHigh, 0xFF2B2B2B.toInt()
+        )
+        val colorOnSurfaceVariant = com.google.android.material.color.MaterialColors.getColor(
+            ctx, com.google.android.material.R.attr.colorOnSurfaceVariant, 0xFFCCCCCC.toInt()
+        )
+        val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(
+            ctx, com.google.android.material.R.attr.colorOutlineVariant, 0xFF444444.toInt()
+        )
+
+        val tabs = listOf(
+            binding.btnTabLight,
+            binding.btnTabRange,
+            binding.btnTabTone,
+            binding.btnTabColor
+        )
+        tabs.forEachIndexed { idx, btn ->
+            btn ?: return@forEachIndexed
+            val isSelected = idx == selectedTab
+            if (isSelected) {
+                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
+                btn.setTextColor(colorOnPrimaryContainer)
+                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                btn.strokeWidth = (1.5f * density).toInt()
+                btn.cornerRadius = (10f * density).toInt()
+            } else {
+                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
+                btn.setTextColor(colorOnSurfaceVariant)
+                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
+                btn.strokeWidth = (1f * density).toInt()
+                btn.cornerRadius = (14f * density).toInt()
+            }
+        }
     }
 
     private fun updateSelectionFeedback() {
@@ -1173,99 +1968,39 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun showLutMenu() {
-        if (isEditingAdjustments) return
-
-        val currentLog = currentEditConfig?.log ?: "None"
-        val currentLut = currentEditConfig?.lut?.substringBeforeLast(".") ?: "None"
-
-        val items = mutableListOf<Pair<String, Boolean>>()
-        items.add("Log: $currentLog" to true)
-        if (currentLog == "None") {
-            items.add("Select Log First" to false)
-        } else {
-            items.add("LUT: $currentLut" to true)
-        }
-
-        showPillPopup(items, autoDismiss = false) { item, _ ->
-            if (item.startsWith("Log:")) {
-                showLogSelectionMenu()
+        val lutManager = top.maary.darkbag.utils.LutManager(requireContext())
+        top.maary.darkbag.ui.ColorRecipeBottomSheet.show(requireContext(), lutManager) { selectedLog, selectedLut ->
+            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+            val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
+            if (isRawVideo) {
+                currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(
+                    log = selectedLog,
+                    lut = selectedLut ?: "None"
+                )
+                markAdjusted()
+                updateEditUi()
+                applyEditPreview()
             } else {
-                showLutSelectionMenu()
+                lifecycleScope.launch {
+                    ensureDngBytesLoaded()
+                    currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(
+                        log = selectedLog,
+                        lut = selectedLut ?: "None"
+                    )
+                    markAdjusted()
+                    updateEditUi()
+                    applyEditPreview()
+                }
             }
         }
-        updateBackPressedCallbackState()
     }
 
     private fun showLogSelectionMenu() {
-        val items = mutableListOf("← Back" to true)
-        SettingsFragment.LOG_CURVES.forEach { log ->
-            items.add(log to true)
-        }
-
-        showPillPopup(items, autoDismiss = false) { selectedLog, position ->
-            if (position == 0) {
-                showLutMenu()
-            } else {
-                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
-                if (isRawVideo) {
-                    currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(log = selectedLog)
-                    if (selectedLog == "None") {
-                        currentEditConfig = currentEditConfig?.copy(lut = "None")
-                    }
-                    markAdjusted()
-                    updateEditUi()
-                    showLutMenu()
-                    applyEditPreview()
-                } else {
-                    lifecycleScope.launch {
-                        ensureDngBytesLoaded()
-                        currentEditConfig = currentEditConfig?.copy(log = selectedLog)
-                        if (selectedLog == "None") {
-                            currentEditConfig = currentEditConfig?.copy(lut = "None")
-                        }
-                        markAdjusted()
-                        updateEditUi()
-                        showLutMenu()
-                        applyEditPreview()
-                    }
-                }
-            }
-        }
+        showLutMenu()
     }
 
     private fun showLutSelectionMenu() {
-        val luts = lutManager.getLuts()
-        val items = mutableListOf("← Back" to true, "None" to true)
-        luts.forEach { file ->
-            items.add(file.nameWithoutExtension to true)
-        }
-
-        showPillPopup(items, autoDismiss = false) { selectedName, position ->
-            if (position == 0) {
-                showLutMenu()
-            } else {
-                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
-                val newLut = if (position == 1) "None" else luts[position - 2].name
-                if (isRawVideo) {
-                    currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(lut = newLut)
-                    markAdjusted()
-                    updateEditUi()
-                    showLutMenu()
-                    applyEditPreview()
-                } else {
-                    lifecycleScope.launch {
-                        ensureDngBytesLoaded()
-                        currentEditConfig = currentEditConfig?.copy(lut = newLut)
-                        markAdjusted()
-                        updateEditUi()
-                        showLutMenu()
-                        applyEditPreview()
-                    }
-                }
-            }
-        }
+        showLutMenu()
     }
 
     private fun showPillPopup(items: List<Pair<String, Boolean>>, autoDismiss: Boolean = true, onSelected: (String, Int) -> Unit) {
@@ -1321,21 +2056,14 @@ open class ImageViewerFragment : Fragment() {
         updateViewportPadding()
 
         // Hide standard controls
-        binding.bottomLeftControls.visibility = View.GONE
-        binding.bottomRightControls.visibility = View.GONE
+        binding.viewerBentoDeck.visibility = View.GONE
 
         // Show edit panel with animation
         binding.editAdjustmentPanel.visibility = View.VISIBLE
         binding.editAdjustmentPanel.alpha = 0f
 
-        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        if (isLandscape) {
-            binding.editAdjustmentPanel.translationX = 100f
-            binding.editAdjustmentPanel.translationY = 0f
-        } else {
-            binding.editAdjustmentPanel.translationX = 0f
-            binding.editAdjustmentPanel.translationY = 100f
-        }
+        binding.editAdjustmentPanel.translationX = 0f
+        binding.editAdjustmentPanel.translationY = 100f
 
         binding.editAdjustmentPanel.animate()
             .alpha(1f)
@@ -1357,6 +2085,8 @@ open class ImageViewerFragment : Fragment() {
             binding.groupFrameSelectionIntegrated.visibility = View.GONE
         }
 
+        updateAdjustmentTabButtons(binding.editTabs.selectedTabPosition.coerceAtLeast(0))
+        updateEditUi()
         updateSlidersInPanel()
         updateSelectionFeedback()
         updateBackPressedCallbackState()
@@ -1378,20 +2108,14 @@ open class ImageViewerFragment : Fragment() {
 
         updateViewportPadding()
 
-        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         val anim = binding.editAdjustmentPanel.animate()
             .alpha(0f)
+            .translationY(100f)
             .setDuration(200)
             .withEndAction {
                 binding.editAdjustmentPanel.visibility = View.GONE
                 updateControlsVisibility()
             }
-
-        if (isLandscape) {
-            anim.translationX(100f)
-        } else {
-            anim.translationY(100f)
-        }
         anim.start()
 
         updateSelectionFeedback()
@@ -1542,6 +2266,8 @@ open class ImageViewerFragment : Fragment() {
         isMotionPhotoAutoPlay = !isMotionPhotoAutoPlay
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY, isMotionPhotoAutoPlay).apply()
+        updateFormatBentoRow()
+        view?.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
         adapter.setMotionPhotoAutoPlayEnabled(isMotionPhotoAutoPlay)
 
         if (isMotionPhotoAutoPlay) {
@@ -1699,70 +2425,22 @@ open class ImageViewerFragment : Fragment() {
                             cachedBitmap2 = dngUri2?.let { processSingle(sourceDngBytes2, it, 1) }
                         }
 
-                        val b1 = if (config.isSwapped) cachedBitmap2 else cachedBitmap1
-                        val b2 = if (config.isSwapped) cachedBitmap1 else cachedBitmap2
+                        val activeLayout = config.hfLayout ?: currentGroup.hfLayout
+                        val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+                        val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
 
-                        if (b1 != null || b2 != null) {
-                            val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-                            val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
-                            val isSBS = !isTB
-
-                            val refW = b1?.width ?: b2?.width ?: 0
-                            val refH = b1?.height ?: b2?.height ?: 0
-
-                            // We need to ensure orientations are correct before composing
-                            val oriented1 = b1?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-                            val oriented2 = b2?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-
-                            val w1 = oriented1?.width ?: refW
-                            val h1 = oriented1?.height ?: refH
-                            val w2 = oriented2?.width ?: refW
-                            val h2 = oriented2?.height ?: refH
-                            val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(w1, h1)).toFloat()
-
-                            // If one is missing, create a temporary black bitmap to avoid crashes
-                            val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-                            val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-
-                            val composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
-
-                            val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-                            val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-
-                            // Swap timestamps if needed so they match the rendered positions
-                            val t1 = if (config.isSwapped) time2 else time1
-                            val t2 = if (config.isSwapped) time1 else time2
-
-                            compositeBitmap = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
-                                composite,
-                                config.showTimestamp,
-                                config.flareType >= 0,
-                                activeLayout ?: "SBS",
-                                time1 = t1,
-                                time2 = t2,
-                                flareType = config.flareType
-                            )
-                            if (compositeBitmap != composite) {
-                                composite.recycle()
-                            }
-
-                            if (oriented1 != b1) oriented1?.recycle()
-                            if (oriented2 != b2) oriented2?.recycle()
-                            if (tempB1 != oriented1) tempB1.recycle()
-                            if (tempB2 != oriented2) tempB2.recycle()
-
-                            if (isIndividual) {
-                                selectedFrameBitmap = if (selectedDngIndex == 0) {
-                                    android.graphics.Bitmap.createBitmap(compositeBitmap!!, 0, 0, w1, h1)
-                                } else {
-                                    if (isSBS) {
-                                        android.graphics.Bitmap.createBitmap(compositeBitmap!!, (w1 + gap).toInt(), 0, w2, h2)
-                                    } else {
-                                        android.graphics.Bitmap.createBitmap(compositeBitmap!!, 0, (h1 + gap).toInt(), w2, h2)
-                                    }
-                                }
-                            }
-
+                        compositeBitmap = HalfFrameComposer.compose(
+                            frame1 = cachedBitmap1,
+                            frame2 = cachedBitmap2,
+                            layout = activeLayout,
+                            isSwapped = config.isSwapped,
+                            showTimestamp = config.showTimestamp,
+                            flareType = config.flareType,
+                            time1 = time1,
+                            time2 = time2,
+                            downsample = false
+                        )
+                        if (compositeBitmap != null) {
                             lastPreviewConfig = config.copy()
                         }
                     }
@@ -2123,69 +2801,24 @@ open class ImageViewerFragment : Fragment() {
                         val f1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
                         val f2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
 
-                        val b1 = if (finalConfig.isSwapped) f2 else f1
-                        val b2 = if (finalConfig.isSwapped) f1 else f2
+                        val activeLayout = config.hfLayout ?: currentGroup.hfLayout
+                        val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+                        val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
 
-                        if (b1 != null || b2 != null) {
-                            val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-                            val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
-                            val isSBS = !isTB
-
-                            val refW = b1?.width ?: b2?.width ?: 0
-                            val refH = b1?.height ?: b2?.height ?: 0
-
-                            val oriented1 = b1?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-                            val oriented2 = b2?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-
-                            val w1 = oriented1?.width ?: refW
-                            val h1 = oriented1?.height ?: refH
-                            val w2 = oriented2?.width ?: refW
-                            val h2 = oriented2?.height ?: refH
-
-                            val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-                            val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-
-                            var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
-
-                            val economical = top.maary.darkbag.utils.HalfFrameManager(context).downsample
-                            if (economical) {
-                                val scale = 0.707f
-                                val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
-                                val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
-                                val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
-                                if (scaled != composite) {
-                                    composite.recycle()
-                                    composite = scaled
-                                }
-                            }
-
-                            if (oriented1 != b1) oriented1?.recycle()
-                            if (oriented2 != b2) oriented2?.recycle()
-                            if (tempB1 != oriented1) tempB1.recycle()
-                            if (tempB2 != oriented2) tempB2.recycle()
-
-                            val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-                            val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-
-                            val t1 = if (finalConfig.isSwapped) time2 else time1
-                            val t2 = if (finalConfig.isSwapped) time1 else time2
-
-                            val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
-                                composite,
-                                finalConfig.showTimestamp,
-                                finalConfig.flareType >= 0,
-                                activeLayout ?: "SBS",
-                                time1 = t1,
-                                time2 = t2,
-                                flareType = finalConfig.flareType
-                            )
-                            if (finalComposite != composite) {
-                                composite.recycle()
-                            }
-                            f1?.recycle()
-                            f2?.recycle()
-                            finalComposite
-                        } else null
+                        val finalComposite = HalfFrameComposer.compose(
+                            frame1 = f1,
+                            frame2 = f2,
+                            layout = activeLayout,
+                            isSwapped = finalConfig.isSwapped,
+                            showTimestamp = finalConfig.showTimestamp,
+                            flareType = finalConfig.flareType,
+                            time1 = time1,
+                            time2 = time2,
+                            downsample = top.maary.darkbag.utils.HalfFrameManager(context).downsample
+                        )
+                        f1?.recycle()
+                        f2?.recycle()
+                        finalComposite
                     }
 
                     finalBitmap?.let { bitmap ->
@@ -2242,14 +2875,23 @@ open class ImageViewerFragment : Fragment() {
                         onLongPressStarted = { handleLongPressStarted(it) }
                         onLongPressEnded = { handleLongPressEnded(it) }
                         onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
+                        onFormatChanged = { _, _ -> updateControlsVisibility() }
+                        onDerivativeVersionChanged = { _, _ -> updateControlsVisibility() }
                         onMultiCameraLensChanged = { _, _ ->
                             updateSplitButtons()
                             updateToolbarIcon()
+                            updateControlsVisibility()
                         }
                         onCinemaDngFrameSelected = { group, index, uri ->
                             val currentPosition = binding.imagePager.currentItem
                             if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
                                 currentCinemaDngFrame = Pair(index, uri)
+                                binding.filmstripBentoSeekbar?.setProgress(index, group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: 1)
+                            }
+                        }
+                        onVideoPlaybackStateChanged = { position, isPlaying, currentMs, totalMs ->
+                            if (_binding != null && ::adapter.isInitialized && position == binding.imagePager.currentItem) {
+                                updateVideoPlaybackButton(isPlaying, currentMs, totalMs)
                             }
                         }
                         setFormatSwitcherPersistentHidden(isAdjusted)
@@ -2389,63 +3031,23 @@ open class ImageViewerFragment : Fragment() {
                         val f1 = dngUri1?.let { processFullToTiff(sourceDngBytes, it, 0, null) }
                         val f2 = dngUri2?.let { processFullToTiff(sourceDngBytes2, it, 1, null) }
 
-                        val b1 = if (config.isSwapped) f2 else f1
-                        val b2 = if (config.isSwapped) f1 else f2
+                        val activeLayout = config.hfLayout ?: currentGroup.hfLayout
+                        val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+                        val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
 
-                        if (b1 != null || b2 != null) {
-                            val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-                            val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
-                            val isSBS = !isTB
+                        val finalComposite = HalfFrameComposer.compose(
+                            frame1 = f1,
+                            frame2 = f2,
+                            layout = activeLayout,
+                            isSwapped = config.isSwapped,
+                            showTimestamp = config.showTimestamp,
+                            flareType = config.flareType,
+                            time1 = time1,
+                            time2 = time2,
+                            downsample = top.maary.darkbag.utils.HalfFrameManager(context).downsample
+                        )
 
-                            val refW = b1?.width ?: b2?.width ?: 0
-                            val refH = b1?.height ?: b2?.height ?: 0
-
-                            val oriented1 = b1?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-                            val oriented2 = b2?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-
-                            val w1 = oriented1?.width ?: refW
-                            val h1 = oriented1?.height ?: refH
-                            val w2 = oriented2?.width ?: refW
-                            val h2 = oriented2?.height ?: refH
-
-                            val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-                            val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-
-                            var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
-
-                            val economical = top.maary.darkbag.utils.HalfFrameManager(context).downsample
-                            if (economical) {
-                                val scale = 0.707f
-                                val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
-                                val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
-                                val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
-                                if (scaled != composite) {
-                                    composite.recycle()
-                                    composite = scaled
-                                }
-                            }
-
-                            if (oriented1 != b1) oriented1?.recycle()
-                            if (oriented2 != b2) oriented2?.recycle()
-                            if (tempB1 != oriented1) tempB1.recycle()
-                            if (tempB2 != oriented2) tempB2.recycle()
-
-                            val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-                            val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-
-                            val t1 = if (config.isSwapped) time2 else time1
-                            val t2 = if (config.isSwapped) time1 else time2
-
-                            val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
-                                composite,
-                                config.showTimestamp,
-                                config.flareType >= 0,
-                                activeLayout ?: "SBS",
-                                time1 = t1,
-                                time2 = t2,
-                                flareType = config.flareType
-                            )
-
+                        if (finalComposite != null) {
                             val primaryUri = currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: Uri.EMPTY
                             var meta = repository.getCaptureMetadata(primaryUri) ?: top.maary.darkbag.models.CaptureMetadata()
                             if (meta.dateTimeOriginal == null) {
@@ -2460,14 +3062,10 @@ open class ImageViewerFragment : Fragment() {
                                 )
                             }
                             top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(finalComposite, tempTiff.absolutePath, meta)
-
-                            if (finalComposite != composite) {
-                                composite.recycle()
-                            }
                             finalComposite.recycle()
-                            f1?.recycle()
-                            f2?.recycle()
                         }
+                        f1?.recycle()
+                        f2?.recycle()
                     }
 
                     android.provider.DocumentsContract.buildDocumentUri(
@@ -2774,87 +3372,66 @@ open class ImageViewerFragment : Fragment() {
         return String.format("%.1f %s", size / 1024.0.pow(digitGroups.toDouble()), units[digitGroups])
     }
 
-    private data class SingleDeleteOption(
-        val label: String,
-        val uris: List<Uri>,
-        val isEntireGroup: Boolean
-    )
-
     private fun showDeleteDialog(group: ImageGroup) {
         val hasCdng = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
         val hasRawVid = group.isRawVideo || group.rawVideoUri != null
         val hasDerivatives = group.allDerivativeUris.isNotEmpty()
         val hasPhotoDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null || group.multiDngUris.isNotEmpty()
+        val hasRaw = hasPhotoDng || hasRawVid
 
-        val options = mutableListOf<SingleDeleteOption>()
+        val componentCount = (if (hasRaw) 1 else 0) + (if (hasDerivatives) 1 else 0) + (if (hasCdng) 1 else 0)
+        val hasMultipleComponents = componentCount > 1
 
-        if (hasCdng && hasRawVid) {
-            options.add(SingleDeleteOption(getString(R.string.delete_cdng_only), group.allCinemaDngUris, false))
-            options.add(SingleDeleteOption(getString(R.string.delete_rawvid_only), group.rawVideoMasterUris, false))
-            if (hasDerivatives) {
-                options.add(SingleDeleteOption(getString(R.string.delete_derivatives_only), group.allDerivativeUris, false))
-            }
-            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
-        } else if (hasCdng) {
-            options.add(SingleDeleteOption(getString(R.string.delete_cdng_only), group.allCinemaDngUris, false))
-            if (hasDerivatives) {
-                options.add(SingleDeleteOption(getString(R.string.delete_derivatives_only), group.allDerivativeUris, false))
-            }
-            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
-        } else if (hasRawVid) {
-            options.add(SingleDeleteOption(getString(R.string.delete_rawvid_only), group.rawVideoMasterUris, false))
-            if (hasDerivatives) {
-                options.add(SingleDeleteOption(getString(R.string.delete_derivatives_only), group.allDerivativeUris, false))
-            }
-            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
-        } else if (hasPhotoDng && hasDerivatives) {
-            options.add(SingleDeleteOption(getString(R.string.delete_photo_raw_only), group.photoMasterUris, false))
-            options.add(SingleDeleteOption(getString(R.string.delete_photo_jpg_only), group.allDerivativeUris, false))
-            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
-        } else if (hasPhotoDng) {
-            options.add(SingleDeleteOption(getString(R.string.delete_photo_raw_only), group.photoMasterUris, true))
-        } else if (hasDerivatives) {
-            if (group.allDerivativeUris.size > 1) {
-                val derivatives = adapter.getDerivativeUris(group)
-                val activeIndex = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
-                val activeUri = derivatives.getOrNull(activeIndex) ?: group.jpgUri ?: group.mp4VideoUri
-                if (activeUri != null) {
-                    options.add(SingleDeleteOption(getString(R.string.delete_this_format_only), listOf(activeUri), false))
-                }
-                options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
-            } else {
-                options.add(SingleDeleteOption(getString(R.string.delete_entire_group), group.allUris, true))
-            }
+        if (hasMultipleComponents) {
+            pendingSingleDeleteGroup = group
+            DarkbagBatchDeleteSheet.newInstance(
+                selectedCount = 1,
+                hasRaw = hasRaw,
+                hasDerivatives = hasDerivatives,
+                hasCinemaDng = hasCdng
+            ).show(childFragmentManager, DarkbagBatchDeleteSheet.TAG)
         } else {
-            options.add(SingleDeleteOption(getString(R.string.delete_entire_group), group.allUris, true))
-        }
-
-        if (group.isSingleFormat() || options.size <= 1) {
             com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.delete_image_title)
                 .setMessage(R.string.delete_image_message)
                 .setPositiveButton(R.string.delete_button_alt) { _, _ ->
-                    val chosen = options.firstOrNull()
-                    deleteImage(group, chosen?.uris ?: group.allUris, chosen?.isEntireGroup ?: true)
+                    deleteImage(group, group.allUris, true)
                 }
                 .setNegativeButton(R.string.cancel, null)
                 .show()
-            return
         }
+    }
 
-        val labels = options.map { it.label }.toTypedArray()
-        var checkedItem = options.size - 1
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.delete_image_title)
-            .setSingleChoiceItems(labels, checkedItem) { _, which ->
-                checkedItem = which
+    private fun executeSingleGroupDelete(group: ImageGroup, deleteMode: Int) {
+        val urisToDelete = mutableListOf<Uri>()
+        var isEntireGroup = false
+        when (deleteMode) {
+            DarkbagBatchDeleteSheet.MODE_ENTIRE_GROUP -> {
+                group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                urisToDelete.addAll(group.allUris)
+                isEntireGroup = true
             }
-            .setPositiveButton(R.string.delete_button_alt) { _, _ ->
-                val chosen = options[checkedItem]
-                deleteImage(group, chosen.uris, chosen.isEntireGroup)
+            DarkbagBatchDeleteSheet.MODE_RAW_ONLY -> {
+                if (group.isCinemaDng || group.cinemaDngFolderUri != null) {
+                    group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                }
+                urisToDelete.addAll(group.allMasterRawUris)
+                val remainingUris = group.allUris.filter { !urisToDelete.contains(it) }
+                isEntireGroup = remainingUris.isEmpty()
             }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+            DarkbagBatchDeleteSheet.MODE_DERIVATIVES_ONLY -> {
+                urisToDelete.addAll(group.allDerivativeUris)
+                val remainingUris = group.allUris.filter { !urisToDelete.contains(it) }
+                isEntireGroup = remainingUris.isEmpty()
+            }
+            DarkbagBatchDeleteSheet.MODE_CINEMADNG_ONLY -> {
+                group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                urisToDelete.addAll(group.allCinemaDngUris)
+                val remainingUris = group.allUris.filter { !urisToDelete.contains(it) }
+                isEntireGroup = remainingUris.isEmpty()
+            }
+        }
+        deleteImage(group, urisToDelete, isEntireGroup)
     }
 
     protected open fun deleteImage(group: ImageGroup, deleteGroup: Boolean) {
@@ -2962,7 +3539,7 @@ open class ImageViewerFragment : Fragment() {
     private fun setupToolbar() {
         updateSplitButtons()
         updateToolbarIcon()
-        binding.btnNavigation.setOnClickListener {
+        binding.btnBack.setOnClickListener {
             if (isGalleryMode) {
                 if (::galleryAdapter.isInitialized && galleryAdapter.isSelectionMode) {
                     galleryAdapter.setSelectionMode(false)
@@ -2970,8 +3547,8 @@ open class ImageViewerFragment : Fragment() {
                 } else {
                     exitGalleryMode()
                 }
-            } else if (binding.lutListContainer.visibility == View.VISIBLE) {
-                binding.lutListContainer.visibility = View.GONE
+            } else if (binding.lutListContainer?.visibility == View.VISIBLE) {
+                binding.lutListContainer?.visibility = View.GONE
                 binding.touchOverlay.visibility = View.GONE
                 updateBackPressedCallbackState()
             } else if (isEditingAdjustments) {
@@ -3043,7 +3620,9 @@ open class ImageViewerFragment : Fragment() {
             binding.btnGalleryPill.visibility = View.GONE
         } else {
             val currentPos = (position + 1).coerceIn(1, totalCount)
-            binding.btnGalleryPill.text = getString(R.string.gallery_pill_format, currentPos, totalCount)
+            val posStr = if (totalCount >= 10) String.format("%02d", currentPos) else "$currentPos"
+            val countStr = if (totalCount >= 10) String.format("%02d", totalCount) else "$totalCount"
+            binding.btnGalleryPill.text = "▦ $posStr / $countStr"
             binding.btnGalleryPill.visibility = if (isUiVisible && !isEditingAdjustments && !isGalleryMode) View.VISIBLE else View.GONE
         }
     }
@@ -3064,8 +3643,7 @@ open class ImageViewerFragment : Fragment() {
         binding.galleryContainer.animate().alpha(1f).setDuration(200).start()
 
         binding.topBarContainer.visibility = View.GONE
-        binding.bottomLeftControls.visibility = View.GONE
-        binding.bottomRightControls.visibility = View.GONE
+        binding.viewerBentoDeck.visibility = View.GONE
         binding.imagePager.visibility = View.INVISIBLE
 
         val currentCount = if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0
@@ -3265,12 +3843,10 @@ open class ImageViewerFragment : Fragment() {
         adapter.setUiVisibility(true)
 
         binding.topBarContainer.animate().cancel()
-        binding.bottomLeftControls.animate().cancel()
-        binding.bottomRightControls.animate().cancel()
+        binding.viewerBentoDeck.animate().cancel()
 
         binding.topBarContainer.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
-        binding.bottomLeftControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
-        binding.bottomRightControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
+        binding.viewerBentoDeck.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         updateViewportPadding()
     }
 
@@ -3282,18 +3858,15 @@ open class ImageViewerFragment : Fragment() {
         adapter.setUiVisibility(false)
 
         binding.topBarContainer.animate().cancel()
-        binding.bottomLeftControls.animate().cancel()
-        binding.bottomRightControls.animate().cancel()
+        binding.viewerBentoDeck.animate().cancel()
 
         val topShift = -(binding.topBarContainer.height + (binding.topBarContainer.layoutParams as ViewGroup.MarginLayoutParams).topMargin).toFloat()
-        val bottomShift = (binding.bottomLeftControls.height + (binding.bottomLeftControls.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin).toFloat()
+        val bottomShift = (binding.viewerBentoDeck.height + (binding.viewerBentoDeck.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin).toFloat()
 
         binding.topBarContainer.animate().translationY(topShift).alpha(0f).setDuration(200)
             .withEndAction { binding.topBarContainer.visibility = View.GONE }.start()
-        binding.bottomLeftControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
-            .withEndAction { binding.bottomLeftControls.visibility = View.GONE }.start()
-        binding.bottomRightControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
-            .withEndAction { binding.bottomRightControls.visibility = View.GONE }.start()
+        binding.viewerBentoDeck.animate().translationY(bottomShift).alpha(0f).setDuration(200)
+            .withEndAction { binding.viewerBentoDeck.visibility = View.GONE }.start()
         updateViewportPadding()
     }
 
@@ -3313,28 +3886,33 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
+        binding.viewerBentoDeck.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+            val newHeight = bottom - top
+            if (newHeight > 0 && newHeight != bentoDeckHeight) {
+                bentoDeckHeight = newHeight
+                updateViewportPadding()
+            }
+        }
+
         ViewCompat.setOnApplyWindowInsetsListener(binding.viewerRoot) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             systemTopInset = systemBars.top
             systemBottomInset = systemBars.bottom
             updateViewportPadding()
 
+            val density = resources.displayMetrics.density
+            val bentoMarginH = (12 * density).toInt()
+            val bentoMarginTop = (8 * density).toInt()
+
             binding.topBarContainer.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                topMargin = systemBars.top
+                topMargin = systemBars.top + bentoMarginTop
+                leftMargin = systemBars.left + bentoMarginH
+                rightMargin = systemBars.right + bentoMarginH
             }
-            binding.btnNavigation.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                leftMargin = marginMedium
-            }
-            binding.splitAction?.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                rightMargin = systemBars.right + marginMedium
-            }
-            binding.bottomLeftControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + marginMedium
-                leftMargin = systemBars.left + marginMedium
-            }
-            binding.bottomRightControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom
-                rightMargin = systemBars.right
+            binding.viewerBentoDeck.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                bottomMargin = systemBars.bottom + bentoMarginH
+                leftMargin = systemBars.left + bentoMarginH
+                rightMargin = systemBars.right + bentoMarginH
             }
 
             binding.galleryToolbar.updateLayoutParams<ViewGroup.MarginLayoutParams> {
@@ -3343,17 +3921,10 @@ open class ImageViewerFragment : Fragment() {
                 rightMargin = systemBars.right
             }
             binding.galleryBottomBar.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = 0
-                leftMargin = systemBars.left
-                rightMargin = systemBars.right
+                bottomMargin = systemBars.bottom + bentoMarginH
+                leftMargin = systemBars.left + bentoMarginH
+                rightMargin = systemBars.right + bentoMarginH
             }
-            val padVertical = resources.getDimensionPixelSize(R.dimen.margin_small)
-            binding.galleryBottomBar.setPadding(
-                marginMedium,
-                padVertical,
-                marginMedium,
-                systemBars.bottom + padVertical
-            )
             binding.galleryRecyclerView.setPadding(
                 systemBars.left,
                 0,
@@ -3363,9 +3934,10 @@ open class ImageViewerFragment : Fragment() {
 
             val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
             binding.editAdjustmentPanel.setPadding(
-                0, 0,
+                if (isLandscape) systemBars.left else 0,
+                0,
                 if (isLandscape) systemBars.right else 0,
-                if (isLandscape) 0 else systemBars.bottom
+                systemBars.bottom
             )
 
             insets
@@ -3373,22 +3945,20 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun updateViewportPadding() {
-        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-
         val topPadding: Int
         val bottomPadding: Int
 
         if (isEditingAdjustments) {
             topPadding = systemTopInset + topBarHeight
-            if (isLandscape) {
-                bottomPadding = topPadding
-            } else {
-                // In portrait edit mode, clear the adjustment panel (including its card margins and system insets)
-                bottomPadding = binding.editAdjustmentPanel.height
-            }
+            bottomPadding = binding.editAdjustmentPanel.height
         } else if (isUiVisible) {
             topPadding = systemTopInset + topBarHeight
-            bottomPadding = topPadding // SYMMETRIC CENTERING
+            val density = resources.displayMetrics.density
+            val bentoMargin = (8 * density).toInt()
+            val deckH = if (binding.viewerBentoDeck.visibility == View.VISIBLE) {
+                if (bentoDeckHeight > 0) bentoDeckHeight else binding.viewerBentoDeck.height
+            } else 0
+            bottomPadding = if (deckH > 0) deckH + systemBottomInset + bentoMargin else topPadding
         } else {
             topPadding = 0
             bottomPadding = 0
@@ -3437,7 +4007,7 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun updateBackPressedCallbackState() {
-        backPressedCallback.isEnabled = isGalleryMode || isAdjusted || isEditingAdjustments || binding.lutListContainer.visibility == View.VISIBLE
+        backPressedCallback.isEnabled = isGalleryMode || isAdjusted || isEditingAdjustments || (binding.lutListContainer?.visibility == View.VISIBLE)
     }
 
     protected open fun showDiscardChangesDialog() {
@@ -3808,6 +4378,15 @@ open class ImageViewerFragment : Fragment() {
     companion object {
         const val KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY = "viewer_motion_photo_auto_play"
 
+        val LOOK_DOT_COLORS = intArrayOf(
+            Color.parseColor("#FFD0BC"), // Soft Coral / Primary
+            Color.parseColor("#80D8FF"), // Soft Cyan
+            Color.parseColor("#FFE57F"), // Soft Amber / Classic Chrome
+            Color.parseColor("#B9F6CA"), // Soft Mint / Emerald
+            Color.parseColor("#EA80FC"), // Soft Lavender
+            Color.parseColor("#FF8A80")  // Soft Red
+        )
+
         private const val MENU_DETAILS = 1
         private const val MENU_DELETE = 2
         private const val MENU_SAVE_AS = 3
@@ -3903,70 +4482,25 @@ open class ImageViewerFragment : Fragment() {
                 val f1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
                 val f2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
 
-                val b1 = if (config.isSwapped) f2 else f1
-                val b2 = if (config.isSwapped) f1 else f2
+                        val activeLayout = config.hfLayout ?: currentGroup.hfLayout
+                        val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+                        val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
 
-                if (b1 != null || b2 != null) {
-                    val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-                    val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
-                    val isSBS = !isTB
-
-                    val refW = b1?.width ?: b2?.width ?: 0
-                    val refH = b1?.height ?: b2?.height ?: 0
-
-                    val oriented1 = b1?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-                    val oriented2 = b2?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-
-                    val w1 = oriented1?.width ?: refW
-                    val h1 = oriented1?.height ?: refH
-                    val w2 = oriented2?.width ?: refW
-                    val h2 = oriented2?.height ?: refH
-
-                    val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-                    val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-
-                    var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
-
-                    val economical = top.maary.darkbag.utils.HalfFrameManager(context).downsample
-                    if (economical) {
-                        val scale = 0.707f
-                        val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
-                        val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
-                        val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
-                        if (scaled != composite) {
-                            composite.recycle()
-                            composite = scaled
-                        }
+                        val finalComposite = HalfFrameComposer.compose(
+                            frame1 = f1,
+                            frame2 = f2,
+                            layout = activeLayout,
+                            isSwapped = config.isSwapped,
+                            showTimestamp = config.showTimestamp,
+                            flareType = config.flareType,
+                            time1 = time1,
+                            time2 = time2,
+                            downsample = top.maary.darkbag.utils.HalfFrameManager(context).downsample
+                        )
+                        f1?.recycle()
+                        f2?.recycle()
+                        finalComposite
                     }
-
-                    if (oriented1 != b1) oriented1?.recycle()
-                    if (oriented2 != b2) oriented2?.recycle()
-                    if (tempB1 != oriented1) tempB1.recycle()
-                    if (tempB2 != oriented2) tempB2.recycle()
-
-                    val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-                    val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-
-                    val t1 = if (config.isSwapped) time2 else time1
-                    val t2 = if (config.isSwapped) time1 else time2
-
-                    val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
-                        composite,
-                        config.showTimestamp,
-                        config.flareType >= 0,
-                        activeLayout ?: "SBS",
-                        time1 = t1,
-                        time2 = t2,
-                        flareType = config.flareType
-                    )
-                    if (finalComposite != composite) {
-                        composite.recycle()
-                    }
-                    f1?.recycle()
-                    f2?.recycle()
-                    finalComposite
-                } else null
-            }
         }
     }
 }

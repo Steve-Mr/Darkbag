@@ -46,6 +46,7 @@
         android:visibility="visible"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
+        <com.google.android.material.button.MaterialButton android:id="@+id/mode_switch_button" android:layout_width="wrap_content" android:layout_height="wrap_content" android:visibility="gone" />
         <com.google.android.material.button.MaterialButton android:id="@+id/camera_switch_button_alt" android:layout_width="wrap_content" android:layout_height="wrap_content" />
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/lens_controls_card"
@@ -90,19 +91,15 @@
         app:layout_constraintTop_toTopOf="@id/viewFinderContainer"
         app:layout_constraintStart_toStartOf="@id/viewFinderContainer" />
 
-    <!-- Level 2: Pro Parameter Connected Button Group in Landscape (M3 Expressive Connected Capsule) -->
-    <com.google.android.material.button.MaterialButtonToggleGroup
+    <!-- Level 2: Pro Parameter Bento Row in Landscape -->
+    <LinearLayout
         android:id="@+id/pro_info_bar_card"
         android:layout_width="0dp"
-        android:layout_height="36dp"
+        android:layout_height="48dp"
         android:layout_marginStart="6dp"
         android:layout_marginEnd="10dp"
         android:visibility="gone"
-        app:singleSelection="true"
-        app:selectionRequired="false"
-        app:cornerRadius="18dp"
-        app:elevation="2dp"
-        android:background="@drawable/bg_pro_connected_group"
+        android:orientation="horizontal"
         app:layout_constraintTop_toTopOf="@id/btn_pro_mode"
         app:layout_constraintBottom_toBottomOf="@id/btn_pro_mode"
         app:layout_constraintStart_toEndOf="@id/btn_pro_mode"
@@ -110,105 +107,133 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/pill_focus"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
+            android:layout_marginEnd="5dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:insetLeft="0dp"
             android:insetRight="0dp"
             android:paddingHorizontal="2dp"
+            android:paddingVertical="2dp"
             android:minWidth="0dp"
             android:minHeight="0dp"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:text="AF"
+            android:maxLines="2"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            app:cornerRadius="14dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:backgroundTint="?attr/colorSurfaceContainerHigh"
             android:textColor="?attr/colorOnSurface"
-            app:strokeWidth="0.5dp"
-            app:strokeColor="?attr/colorOutlineVariant" />
+            android:text="AF" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/pill_iso"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
+            android:layout_marginEnd="5dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:insetLeft="0dp"
             android:insetRight="0dp"
             android:paddingHorizontal="2dp"
+            android:paddingVertical="2dp"
             android:minWidth="0dp"
             android:minHeight="0dp"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:text="ISO"
+            android:maxLines="2"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            app:cornerRadius="14dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:backgroundTint="?attr/colorSurfaceContainerHigh"
             android:textColor="?attr/colorOnSurface"
-            app:strokeWidth="0.5dp"
-            app:strokeColor="?attr/colorOutlineVariant" />
+            android:text="ISO" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/pill_shutter"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
+            android:layout_marginEnd="5dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:insetLeft="0dp"
             android:insetRight="0dp"
             android:paddingHorizontal="2dp"
+            android:paddingVertical="2dp"
             android:minWidth="0dp"
             android:minHeight="0dp"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:text="SEC"
+            android:maxLines="2"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            app:cornerRadius="14dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:backgroundTint="?attr/colorSurfaceContainerHigh"
             android:textColor="?attr/colorOnSurface"
-            app:strokeWidth="0.5dp"
-            app:strokeColor="?attr/colorOutlineVariant" />
+            android:text="SEC" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/pill_ev"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
+            android:layout_marginEnd="0dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:insetLeft="0dp"
             android:insetRight="0dp"
             android:paddingHorizontal="2dp"
+            android:paddingVertical="2dp"
             android:minWidth="0dp"
             android:minHeight="0dp"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:text="EV"
+            android:maxLines="2"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            app:cornerRadius="14dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:backgroundTint="?attr/colorSurfaceContainerHigh"
             android:textColor="?attr/colorOnSurface"
-            app:strokeWidth="0.5dp"
-            app:strokeColor="?attr/colorOutlineVariant" />
+            android:text="EV" />
 
         <!-- Multi-Camera Sync Link Button in Landscape -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_pro_link"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="34dp"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="44dp"
             android:layout_height="match_parent"
+            android:layout_marginEnd="0dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:insetLeft="0dp"
             android:insetRight="0dp"
-            android:padding="0dp"
+            android:paddingHorizontal="2dp"
+            android:paddingVertical="2dp"
             android:minWidth="0dp"
             android:minHeight="0dp"
             app:icon="@drawable/ic_link"
             app:iconSize="18dp"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
             app:iconTint="?attr/colorOnSurface"
-            app:strokeWidth="0.5dp"
+            app:strokeWidth="1dp"
             app:strokeColor="?attr/colorOutlineVariant"
+            app:backgroundTint="?attr/colorSurfaceContainerHigh"
+            app:cornerRadius="14dp"
+            android:includeFontPadding="false"
+            android:gravity="center"
             android:visibility="gone"
             android:contentDescription="Toggle Multi-Camera Sync Link" />
-    </com.google.android.material.button.MaterialButtonToggleGroup>
+    </LinearLayout>
 
     <!-- Level 3: Pro Dial Wheel Top Panel in Landscape (Integrated directly below Level 2 bar) -->
     <com.google.android.material.card.MaterialCardView
@@ -347,15 +372,15 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <com.google.android.material.card.MaterialCardView
+    <top.maary.darkbag.ui.bento.BentoTrayCard
         android:id="@+id/bottom_island_card"
+        style="@style/Widget.Darkbag.BentoTray"
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:cardBackgroundColor="@android:color/transparent"
-        app:strokeWidth="0dp">
+        app:bentoContainerRole="surfaceContainer">
         <androidx.constraintlayout.widget.ConstraintLayout
             android:layout_width="wrap_content"
             android:layout_height="match_parent">
@@ -365,7 +390,7 @@
             <com.google.android.material.loadingindicator.LoadingIndicator android:id="@+id/processing_progress" android:layout_width="48dp" android:layout_height="48dp" android:visibility="gone" app:layout_constraintTop_toTopOf="@id/photo_view_button" app:layout_constraintBottom_toBottomOf="@id/photo_view_button" app:layout_constraintStart_toStartOf="@id/photo_view_button" app:layout_constraintEnd_toEndOf="@id/photo_view_button" />
             <com.google.android.material.button.MaterialButton android:id="@+id/camera_switch_button" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" />
         </androidx.constraintlayout.widget.ConstraintLayout>
-    </com.google.android.material.card.MaterialCardView>
+    </top.maary.darkbag.ui.bento.BentoTrayCard>
 
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/lut_list_container"

@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Darkbag · First-Install Onboarding Bento Prototype</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    /* Material 3 Expressive & Darkbag Bento Tokens */
+    .m3-dark {
+      --m3-surface: #141316;
+      --m3-surface-tile: #1F1E22;
+      --m3-surface-container-low: #1B1A1E;
+      --m3-surface-container: #222126;
+      --m3-surface-container-high: #2B2930;
+      --m3-on-surface: #E6E1E6;
+      --m3-on-surface-variant: #CAC4CF;
+      --m3-outline-variant: #49454E;
+
+      --m3-primary: #D0BCFF;
+      --m3-primary-container: #3B2963;
+      --m3-on-primary-container: #EADDFF;
+
+      --m3-secondary: #80D5D4;
+      --m3-secondary-container: #143E3F;
+      --m3-on-secondary-container: #A6F2F1;
+
+      --m3-tertiary: #FFB3C8;
+      --m3-tertiary-container: #542133;
+      --m3-on-tertiary-container: #FFD9E2;
+
+      --m3-success: #85E0A3;
+      --m3-success-container: #143D25;
+    }
+
+    .m3-light {
+      --m3-surface: #F7F5FA;
+      --m3-surface-tile: #FFFFFF; /* Pure white porcelain */
+      --m3-surface-container-low: #F1EEF6;
+      --m3-surface-container: #EBE7F2;
+      --m3-surface-container-high: #E4DFEC;
+      --m3-on-surface: #1D1B20;
+      --m3-on-surface-variant: #49454F;
+      --m3-outline-variant: #CAC4D0;
+
+      --m3-primary: #65558F;
+      --m3-primary-container: #EADDFF;
+      --m3-on-primary-container: #21005D;
+
+      --m3-secondary: #00696B;
+      --m3-secondary-container: #B4ECEC;
+      --m3-on-secondary-container: #002020;
+
+      --m3-tertiary: #8C4A60;
+      --m3-tertiary-container: #FFD9E2;
+      --m3-on-tertiary-container: #3A071D;
+
+      --m3-success: #186C3A;
+      --m3-success-container: #C6F6D5;
+    }
+
+    .bento-tray {
+      border-radius: 26px;
+      padding: 10px;
+      border-width: 0px;
+      transition: background-color 0.25s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .bento-tile {
+      background-color: var(--m3-surface-tile);
+      color: var(--m3-on-surface);
+      border-radius: 14px;
+      border: 1px solid var(--m3-outline-variant);
+      transition: all 0.22s cubic-bezier(0.2, 0, 0, 1);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .bento-tile:hover {
+      filter: brightness(1.04);
+    }
+
+    .bento-tile.active-primary {
+      border-radius: 10px;
+      background-color: var(--m3-primary-container);
+      color: var(--m3-on-primary-container);
+      border: 2px solid var(--m3-primary);
+    }
+
+    .bento-tile.active-secondary {
+      border-radius: 10px;
+      background-color: var(--m3-secondary-container);
+      color: var(--m3-on-secondary-container);
+      border: 1.5px solid var(--m3-secondary);
+    }
+
+    .bento-tile.active-tertiary {
+      border-radius: 10px;
+      background-color: var(--m3-tertiary-container);
+      color: var(--m3-on-tertiary-container);
+      border: 2px solid var(--m3-tertiary);
+    }
+
+    .bento-badge-primary {
+      background-color: var(--m3-primary-container);
+      color: var(--m3-primary);
+      border-radius: 9999px;
+      padding: 2px 8px;
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .bento-badge-secondary {
+      background-color: var(--m3-secondary-container);
+      color: var(--m3-secondary);
+      border-radius: 9999px;
+      padding: 2px 8px;
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .bento-badge-tertiary {
+      background-color: var(--m3-tertiary-container);
+      color: var(--m3-tertiary);
+      border-radius: 9999px;
+      padding: 2px 8px;
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    /* Custom Scrollbar inside Phone Frame */
+    .phone-scroll::-webkit-scrollbar {
+      width: 4px;
+    }
+    .phone-scroll::-webkit-scrollbar-thumb {
+      background: rgba(150, 150, 160, 0.3);
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased p-4 md:p-6">
+
+  <!-- Top Control Bar -->
+  <div class="max-w-6xl mx-auto mb-5 bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <div class="flex items-center gap-2">
+        <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[var(--primary)] text-[var(--primary-foreground)]">BENTO MATRIX · M3 EXPRESSIVE</span>
+        <h1 class="text-lg font-bold text-[var(--foreground)]">Darkbag 首次安装引导流程交互原型 (v1.1)</h1>
+      </div>
+      <p class="text-xs text-[var(--muted-foreground)] mt-1">
+        已应用微调：去中文名（Darkbag 即 Darkbag）、移除 RAW16 徽章、去 Color Engine、新增 <strong>Log/LUT 关联导入机制</strong>、去 Hardware 遥测冗余。
+      </p>
+    </div>
+
+    <div class="flex items-center gap-2 flex-wrap">
+      <!-- Step Quick Jumpers -->
+      <div class="flex items-center bg-[var(--background)] p-1 rounded-xl border border-[var(--border)] gap-1">
+        <button onclick="goToStep(1)" id="nav-btn-1" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all">1. 权限与模块</button>
+        <button onclick="goToStep(2)" id="nav-btn-2" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all">2. 格式与光学</button>
+        <button onclick="goToStep(3)" id="nav-btn-3" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all">3. 胶片配方关联</button>
+        <button onclick="goToStep(4)" id="nav-btn-4" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all">4. 操控层级定制</button>
+      </div>
+
+      <!-- Theme Switcher (Darkroom vs Porcelain Light) -->
+      <button onclick="togglePhoneTheme()" id="theme-toggle-btn" class="px-3.5 py-2 rounded-xl text-xs font-bold border border-[var(--border)] bg-[var(--card)] hover:opacity-90 flex items-center gap-1.5">
+        <span id="theme-icon">🌙</span>
+        <span id="theme-label">暗房深色 (Dark)</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Workspace Grid: Phone Simulator (Left) + Architecture & State Inspector (Right) -->
+  <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+    <!-- LEFT: Android Phone Mockup (5 cols on lg) -->
+    <div class="lg:col-span-5 flex justify-center">
+      <div id="phone-root" class="m3-dark w-full max-w-[400px] rounded-[42px] p-3 shadow-2xl border-4 border-zinc-700/80 transition-colors duration-300" style="background-color: var(--m3-surface); color: var(--m3-on-surface);">
+        
+        <!-- Status Bar & Camera Punch Hole -->
+        <div class="flex items-center justify-between px-5 pt-1 pb-2 text-xs font-semibold" style="color: var(--m3-on-surface-variant);">
+          <span>09:41</span>
+          <div class="w-3.5 h-3.5 rounded-full bg-black/80 border border-zinc-700"></div>
+          <div class="flex items-center gap-1.5">
+            <span>5G</span>
+            <span>100%</span>
+          </div>
+        </div>
+
+        <!-- Frameless Floating Header Bar (Invariant 5) -->
+        <div class="px-2 pt-1 pb-2">
+          <div class="flex items-center justify-between h-11">
+            <button onclick="prevStep()" id="btn-header-back" class="w-10 h-10 rounded-[16px] flex items-center justify-center text-sm font-bold transition-all" style="background-color: var(--m3-surface-container-high); color: var(--m3-on-surface);">
+              ←
+            </button>
+
+            <div class="flex flex-col items-center">
+              <span id="header-title" class="text-xs font-bold tracking-wider" style="color: var(--m3-on-surface);">DARKBAG SETUP</span>
+              <span id="header-sub" class="text-xs font-medium" style="color: var(--m3-on-surface-variant);">STEP 01 / 04</span>
+            </div>
+
+            <button onclick="skipOnboarding()" id="btn-header-skip" class="px-3 h-9 rounded-[14px] text-xs font-bold transition-all" style="background-color: var(--m3-surface-container-high); color: var(--m3-on-surface-variant);">
+              跳过
+            </button>
+          </div>
+
+          <!-- 4-Segment Expressive Progress Pill -->
+          <div class="grid grid-cols-4 gap-1.5 mt-2 px-1">
+            <div id="prog-1" class="h-1.5 rounded-full transition-all duration-300"></div>
+            <div id="prog-2" class="h-1.5 rounded-full transition-all duration-300"></div>
+            <div id="prog-3" class="h-1.5 rounded-full transition-all duration-300"></div>
+            <div id="prog-4" class="h-1.5 rounded-full transition-all duration-300"></div>
+          </div>
+        </div>
+
+        <!-- Scrollable Bento Matrix Area -->
+        <div class="phone-scroll overflow-y-auto px-1.5 py-1 space-y-3" style="max-height: 590px; min-height: 550px;">
+
+          <!-- ========================================== -->
+          <!-- STEP 1: WELCOME, STARTUP MODULE & PERMS    -->
+          <!-- ========================================== -->
+          <div id="step-1" class="space-y-3">
+            
+            <!-- Brand Hero Compact Strip (Pure Darkbag - No Chinese app translation, no unverified RAW16 badge) -->
+            <div class="bento-tray flex items-center gap-3.5" style="background-color: var(--m3-surface-container-high);">
+              <!-- 7-sided Shutter Cookie Emblem -->
+              <div class="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 font-black text-base shadow-inner" style="background-color: var(--m3-primary-container); color: var(--m3-primary); border: 2px solid var(--m3-primary);">
+                ◉
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-extrabold tracking-tight" style="color: var(--m3-on-surface);">欢迎使用 Darkbag</span>
+                </div>
+                <p class="text-xs mt-0.5 leading-snug" style="color: var(--m3-on-surface-variant);">
+                  计算摄影 · 无损底片 · 胶片暗房工作台
+                </p>
+              </div>
+            </div>
+
+            <!-- Tray 1A: STARTUP MODULE -->
+            <div class="bento-tray space-y-2" style="background-color: var(--m3-surface-container-high);">
+              <div class="flex items-center justify-between px-1">
+                <div>
+                  <div class="text-xs font-bold tracking-wide" style="color: var(--m3-primary);">STARTUP MODULE</div>
+                  <div class="text-xs" style="color: var(--m3-on-surface-variant);">默认启动模块</div>
+                </div>
+                <span class="bento-badge-primary">STARTUP</span>
+              </div>
+
+              <!-- 2-Column Split Starter Cards -->
+              <div class="grid grid-cols-2 gap-2">
+                <div id="card-startup-camera" onclick="selectStartup('camera')" class="bento-tile active-primary p-3 flex flex-col items-center justify-center text-center min-h-[68px]">
+                  <div class="text-xs font-bold">📷 CAMERA</div>
+                  <div class="text-xs opacity-85 mt-0.5">默认启动相机</div>
+                </div>
+                <div id="card-startup-playground" onclick="selectStartup('playground')" class="bento-tile p-3 flex flex-col items-center justify-center text-center min-h-[68px]">
+                  <div class="text-xs font-bold">🎨 PLAYGROUND</div>
+                  <div class="text-xs opacity-75 mt-0.5">外部暗房工作台</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tray 1B: CORE PERMISSIONS (PrimaryContainer) -->
+            <div class="bento-tray space-y-2" style="background-color: var(--m3-primary-container);">
+              <div class="flex items-center justify-between px-1">
+                <div>
+                  <div class="text-xs font-bold tracking-wide" style="color: var(--m3-on-primary-container);">CORE PERMISSIONS</div>
+                  <div class="text-xs opacity-85" style="color: var(--m3-on-primary-container);">点击磁贴授予硬件与后台冲印权限</div>
+                </div>
+                <span class="bento-badge-secondary">STEP 1</span>
+              </div>
+
+              <!-- Permission Tile 1: CAMERA (Required) -->
+              <div id="perm-tile-camera" onclick="togglePermission('camera')" class="bento-tile p-3 flex items-center justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-bold">📷 相机硬件访问</span>
+                    <span id="badge-perm-camera" class="bento-badge-primary">必选</span>
+                  </div>
+                  <div class="text-xs opacity-75 mt-0.5 truncate">开启 RAW 传感器数据流与计算摄影</div>
+                </div>
+                <div id="status-perm-camera" class="px-2.5 py-1 rounded-lg text-xs font-bold shrink-0" style="background-color: var(--m3-primary); color: var(--m3-primary-container);">
+                  授权
+                </div>
+              </div>
+
+              <!-- Permission Tile 2: POST_NOTIFICATIONS (Recommended) -->
+              <div id="perm-tile-notif" onclick="togglePermission('notifications')" class="bento-tile p-3 flex items-center justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-bold">🔔 后台冲印进度通知</span>
+                    <span class="bento-badge-secondary">推荐</span>
+                  </div>
+                  <div class="text-xs opacity-75 mt-0.5 truncate">显示后台照片合成与 DNG 冲印队列</div>
+                </div>
+                <div id="status-perm-notif" class="px-2.5 py-1 rounded-lg text-xs font-bold shrink-0" style="background-color: var(--m3-surface-container-high); color: var(--m3-on-surface);">
+                  授权
+                </div>
+              </div>
+
+              <!-- Permission Tile 3: RECORD_AUDIO (Optional for Video) -->
+              <div id="perm-tile-audio" onclick="togglePermission('audio')" class="bento-tile p-3 flex items-center justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-bold">🎙️ 麦克风音频录制</span>
+                    <span class="bento-badge-tertiary">视频可选</span>
+                  </div>
+                  <div class="text-xs opacity-75 mt-0.5 truncate">长按快门录 MP4 / RAW 视频音轨（拍照免授）</div>
+                </div>
+                <div id="status-perm-audio" class="px-2.5 py-1 rounded-lg text-xs font-bold shrink-0" style="background-color: var(--m3-surface-container-high); color: var(--m3-on-surface);">
+                  授权
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ========================================== -->
+          <!-- STEP 2: OUTPUT FORMATS & OPTICS            -->
+          <!-- ========================================== -->
+          <div id="step-2" class="space-y-3 hidden">
+            
+            <!-- Tray 2A: CAPTURE & OUTPUT (SecondaryContainer) -->
+            <div class="bento-tray space-y-2" style="background-color: var(--m3-secondary-container);">
+              <div class="flex items-center justify-between px-1">
+                <div>
+                  <div class="text-xs font-bold tracking-wide" style="color: var(--m3-on-secondary-container);">CAPTURE &amp; OUTPUT</div>
+                  <div class="text-xs opacity-85" style="color: var(--m3-on-secondary-container);">照片格式与暗房底片保留策略</div>
+                </div>
+                <span class="bento-badge-secondary">FORMAT</span>
+              </div>
+
+              <!-- 2-Column Format Porcelain Cards -->
+              <div class="grid grid-cols-2 gap-2">
+                <div id="tile-save-jpg" onclick="toggleFormat('jpg')" class="bento-tile active-secondary p-3 flex items-center justify-between min-h-[54px]">
+                  <div class="flex items-center gap-2">
+                    <span id="chk-jpg" class="w-4 h-4 rounded flex items-center justify-center text-xs font-bold" style="background-color: var(--m3-secondary); color: var(--m3-secondary-container);">✓</span>
+                    <span class="text-xs font-bold">保存 JPG 照片</span>
+                  </div>
+                  <span class="bento-badge-primary">JPG</span>
+                </div>
+
+                <div id="tile-save-raw" onclick="toggleFormat('raw')" class="bento-tile active-primary p-3 flex items-center justify-between min-h-[54px]">
+                  <div class="flex items-center gap-2">
+                    <span id="chk-raw" class="w-4 h-4 rounded flex items-center justify-center text-xs font-bold" style="background-color: var(--m3-primary); color: var(--m3-primary-container);">✓</span>
+                    <span class="text-xs font-bold">保存 DNG 底片</span>
+                  </div>
+                  <span class="bento-badge-secondary">DNG</span>
+                </div>
+              </div>
+
+              <!-- Dynamic Format Telemetry Hint Card -->
+              <div class="rounded-xl p-2.5 text-xs leading-relaxed" style="background-color: var(--m3-surface-tile); color: var(--m3-on-surface);">
+                <div id="format-explain-text" class="font-medium">
+                  ✨ <strong>JPG + DNG 双修 (推荐)</strong>：直出调色 JPG 方便即时分享，同时保存 <strong>无损压缩 DNG (~12MB)</strong>，供「暗房工作台」无损重调色彩与半格拼图。
+                </div>
+              </div>
+            </div>
+
+            <!-- Tray 2B: OPTICS & FOCAL BASE (SurfaceContainerHigh) -->
+            <div class="bento-tray space-y-2" style="background-color: var(--m3-surface-container-high);">
+              <div class="flex items-center justify-between px-1">
+                <div>
+                  <div class="text-xs font-bold tracking-wide" style="color: var(--m3-primary);">1.0X FOCAL BASE &amp; METADATA</div>
+                  <div class="text-xs" style="color: var(--m3-on-surface-variant);">主摄默认等效焦段与随手拍元数据</div>
+                </div>
+                <span class="bento-badge-primary">OPTICS</span>
+              </div>
+
+              <!-- 3-Column 1.0x Focal Base Selector -->
+              <div class="grid grid-cols-3 gap-2">
+                <div id="focal-24" onclick="selectFocal('24mm')" class="bento-tile active-primary py-2.5 px-2 flex flex-col items-center justify-center text-center min-h-[56px]">
+                  <span class="text-xs font-extrabold">24mm</span>
+                  <span class="text-xs opacity-80">原生广角</span>
+                </div>
+                <div id="focal-28" onclick="selectFocal('28mm')" class="bento-tile py-2.5 px-2 flex flex-col items-center justify-center text-center min-h-[56px]">
+                  <span class="text-xs font-extrabold">28mm</span>
+                  <span class="text-xs opacity-75">经典街拍</span>
+                </div>
+                <div id="focal-35" onclick="selectFocal('35mm')" class="bento-tile py-2.5 px-2 flex flex-col items-center justify-center text-center min-h-[56px]">
+                  <span class="text-xs font-extrabold">35mm</span>
+                  <span class="text-xs opacity-75">人文叙事</span>
+                </div>
+              </div>
+
+              <!-- Motion Photo & GPS Location Switches -->
+              <div class="space-y-2 pt-1">
+                <div id="tile-motion-photo" onclick="toggleSwitch('motionPhoto')" class="bento-tile px-3 py-2.5 flex items-center justify-between min-h-[48px]">
+                  <span class="text-xs font-bold">动态照片</span>
+                  <div class="flex items-center gap-2">
+                    <span class="bento-badge-secondary">LIVE</span>
+                    <div id="sw-motionPhoto" class="w-10 h-6 rounded-full p-0.5 transition-colors flex items-center" style="background-color: var(--m3-surface-container-high);">
+                      <div class="w-5 h-5 rounded-full bg-white shadow transform transition-transform"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="tile-save-location" onclick="toggleLocationSetting()" class="bento-tile px-3 py-2.5 flex items-center justify-between min-h-[48px]">
+                  <div>
+                    <div class="text-xs font-bold">记录地理位置</div>
+                    <div id="loc-perm-sub" class="text-xs opacity-75">开启时自动申请 GPS 权限写入 EXIF</div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="bento-badge-primary">GPS</span>
+                    <div id="sw-saveLocation" class="w-10 h-6 rounded-full p-0.5 transition-colors flex items-center" style="background-color: var(--m3-surface-container-high);">
+                      <div class="w-5 h-5 rounded-full bg-white shadow transform transition-transform"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ======================================================== -->
+          <!-- STEP 3: FILM RECIPES & LOG/LUT MANDATORY PAIRING          -->
+          <!-- (Color Engine removed; Focus on Log-LUT Pairing Workflow)-->
+          <!-- ======================================================== -->
+          <div id="step-3" class="space-y-3 hidden">
+
+            <!-- Tray 3A: LOG & 3D LUT ASSOCIATION TRAY (TertiaryContainer) -->
+            <div class="bento-tray space-y-2.5" style="background-color: var(--m3-tertiary-container);">
+              <div class="flex items-center justify-between px-1">
+                <div>
+                  <div class="text-xs font-bold tracking-wide" style="color: var(--m3-on-tertiary-container);">FILM RECIPE &amp; LOG PAIRING</div>
+                  <div class="text-xs opacity-85" style="color: var(--m3-on-tertiary-container);">建立 Log 色调曲线与 3D LUT 的关联配对</div>
+                </div>
+                <span class="bento-badge-tertiary">RECIPE</span>
+              </div>
+
+              <!-- Workflow Rationale Banner -->
+              <div class="rounded-xl p-3 text-xs leading-relaxed space-y-1.5" style="background-color: var(--m3-surface-tile); color: var(--m3-on-surface);">
+                <div class="font-bold flex items-center gap-1.5" style="color: var(--m3-tertiary);">
+                  <span>🔗</span> <strong>为什么导入 LUT 必须关联 Log 曲线？</strong>
+                </div>
+                <p class="text-xs opacity-85">
+                  胶片模拟 LUT 必须输入特定的 Log 色调空间（如富士 F-Log2、苹果 Apple Log、索尼 S-Log3）才能精准还原色彩。导入时建立关联，取景器便能根据选定的胶片配方<strong>自动切换匹配的 Log 曲线</strong>。
+                </p>
+              </div>
+
+              <!-- Two-Step Pairing Box -->
+              <div class="rounded-2xl p-3 space-y-2.5 border" style="background-color: var(--m3-surface-tile); border-color: var(--m3-outline-variant);">
+                
+                <!-- Step A: Select Input Log -->
+                <div>
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-bold" style="color: var(--m3-primary);">1. 选择适用的输入 Log 曲线</span>
+                    <span class="text-xs opacity-60">点击下方切换</span>
+                  </div>
+                  <div class="grid grid-cols-3 gap-1.5">
+                    <button onclick="setPairingLog('F-Log2')" id="btn-log-flog2" class="bento-tile active-primary py-2 px-1 text-center text-xs font-bold">F-Log2 (富士)</button>
+                    <button onclick="setPairingLog('Apple Log')" id="btn-log-apple" class="bento-tile py-2 px-1 text-center text-xs font-bold">Apple Log</button>
+                    <button onclick="setPairingLog('S-Log3')" id="btn-log-slog3" class="bento-tile py-2 px-1 text-center text-xs font-bold">S-Log3 (索尼)</button>
+                    <button onclick="setPairingLog('Arri LogC3')" id="btn-log-arri" class="bento-tile py-2 px-1 text-center text-xs font-bold">Arri LogC3</button>
+                    <button onclick="setPairingLog('Canon Log 2')" id="btn-log-clog" class="bento-tile py-2 px-1 text-center text-xs font-bold">Canon Log 2</button>
+                    <button onclick="setPairingLog('Rec.709')" id="btn-log-rec709" class="bento-tile py-2 px-1 text-center text-xs font-bold">Rec.709 (标准)</button>
+                  </div>
+                </div>
+
+                <!-- Step B: Import Matching .cube File -->
+                <div class="pt-2 border-t" style="border-color: var(--m3-outline-variant);">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-bold" style="color: var(--m3-tertiary);">2. 导入匹配该曲线的 .cube 胶片配方</span>
+                    <span id="label-selected-log-for-import" class="bento-badge-primary">TARGET: F-Log2</span>
+                  </div>
+
+                  <button onclick="simulateImportAssociatedLut()" id="btn-import-lut-action" class="w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all" style="background-color: var(--m3-tertiary-container); color: var(--m3-on-tertiary-container); border: 1.5px solid var(--m3-tertiary);">
+                    <span>📥</span>
+                    <span id="btn-import-text">导入匹配 <span id="btn-import-log-name">F-Log2</span> 的 .cube 文件</span>
+                  </button>
+
+                  <!-- Associated Pair Result Tag -->
+                  <div id="pairing-success-tag" class="mt-2 p-2 rounded-xl text-xs flex items-center justify-between hidden" style="background-color: var(--m3-success-container); color: var(--m3-success);">
+                    <span class="font-bold">✓ 已成功关联建立配方:</span>
+                    <span id="pairing-desc" class="font-mono text-xs font-bold">Classic_Neg.cube ➔ F-Log2</span>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- Skip / No-LUT Info Tile -->
+              <div class="px-2 py-1 text-xs opacity-75" style="color: var(--m3-on-tertiary-container);">
+                ℹ️ 提示：若当前暂无 LUT 文件，可直接点击「下一步」跳过；Darkbag 将默认使用 <strong>Sony Uchimura (GT7)</strong> 电影感色调算法直出。
+              </div>
+            </div>
+
+            <!-- Tray 3B: LIVE PREVIEW SWITCH (SurfaceContainerHigh) -->
+            <div class="bento-tray" style="background-color: var(--m3-surface-container-high);">
+              <div onclick="toggleSwitch('livePreview')" class="bento-tile px-3 py-2.5 flex items-center justify-between min-h-[48px]">
+                <span class="text-xs font-bold">实时滤镜预览 (WYSIWYG)</span>
+                <div class="flex items-center gap-2">
+                  <span class="bento-badge-tertiary">LUT</span>
+                  <div id="sw-livePreview" class="w-10 h-6 rounded-full p-0.5 transition-colors flex items-center" style="background-color: var(--m3-primary);">
+                    <div class="w-5 h-5 rounded-full bg-white shadow transform translate-x-4 transition-transform"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ======================================================== -->
+          <!-- STEP 4: VIEWFINDER UI TIER (Clean, No Hardware Telemetry) -->
+          <!-- ======================================================== -->
+          <div id="step-4" class="space-y-3 hidden">
+
+            <!-- Tray 4A: VIEWFINDER UI TIER (PrimaryContainer) -->
+            <div class="bento-tray space-y-2" style="background-color: var(--m3-primary-container);">
+              <div class="flex items-center justify-between px-1">
+                <div>
+                  <div class="text-xs font-bold tracking-wide" style="color: var(--m3-on-primary-container);">VIEWFINDER DECK TIER</div>
+                  <div class="text-xs opacity-85" style="color: var(--m3-on-primary-container);">选择符合您拍摄习惯的取景器操控复杂度</div>
+                </div>
+                <span class="bento-badge-primary">UI TIER</span>
+              </div>
+
+              <!-- 3-Tier Segmented Selector -->
+              <div class="grid grid-cols-3 gap-2">
+                <div id="tier-ps" onclick="selectUiTier('PS')" class="bento-tile py-2.5 px-2 flex flex-col items-center justify-center text-center min-h-[58px]">
+                  <span class="text-xs font-extrabold">P&amp;S</span>
+                  <span class="text-xs opacity-75">极简快拍层</span>
+                </div>
+                <div id="tier-film" onclick="selectUiTier('FILM')" class="bento-tile active-primary py-2.5 px-2 flex flex-col items-center justify-center text-center min-h-[58px]">
+                  <span class="text-xs font-extrabold">FILM</span>
+                  <span class="text-xs opacity-90">胶片创作层</span>
+                </div>
+                <div id="tier-pro" onclick="selectUiTier('PRO')" class="bento-tile py-2.5 px-2 flex flex-col items-center justify-center text-center min-h-[58px]">
+                  <span class="text-xs font-extrabold">PRO</span>
+                  <span class="text-xs opacity-75">专业手动层</span>
+                </div>
+              </div>
+
+              <!-- Dynamic Tier Description & Shutter Action -->
+              <div class="rounded-xl p-3 space-y-2.5" style="background-color: var(--m3-surface-tile); color: var(--m3-on-surface);">
+                <div id="tier-desc" class="text-xs leading-relaxed">
+                  🎞️ <strong>FILM 胶片创作层（推荐）</strong>：取景器常驻 <strong>Log/LUT 配方切换胶囊</strong>、<strong>半格胶片 / 多摄同开模式切换</strong> 与 <strong>HDR+ 动态欠曝</strong> 磁贴。
+                </div>
+                <!-- Shutter Hold Action Tile -->
+                <div onclick="cycleShutterHold()" class="pt-2 border-t flex items-center justify-between cursor-pointer" style="border-color: var(--m3-outline-variant);">
+                  <div>
+                    <div class="text-xs font-bold opacity-80">长按快门动作</div>
+                    <div class="text-xs opacity-60">点击在此切换长按行为</div>
+                  </div>
+                  <span id="val-shutter-hold" class="bento-badge-secondary">Standard MP4</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ready Summary Strip -->
+            <div class="rounded-2xl p-3.5 text-xs text-center leading-relaxed" style="background-color: var(--m3-surface-container-high); color: var(--m3-on-surface-variant);">
+              已为您配置完成！点击下方按钮直接进入 Darkbag，随时可在设置菜单中调整。
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- Bottom Primary Action Dock -->
+        <div class="pt-2 pb-1 px-1.5">
+          <button id="btn-primary-cta" onclick="handlePrimaryCta()" class="w-full py-3.5 rounded-[20px] font-extrabold text-xs tracking-wide shadow-lg transition-all flex items-center justify-center gap-2" style="background-color: var(--m3-primary); color: var(--m3-primary-container);">
+            <span id="cta-text">一键授予核心权限并继续 →</span>
+          </button>
+        </div>
+
+        <!-- Home Indicator Bar -->
+        <div class="flex justify-center pt-2 pb-1">
+          <div class="w-28 h-1 rounded-full opacity-40" style="background-color: var(--m3-on-surface);"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Design Rationale, Permission Matrix & Live SharedPreferences Inspector (7 cols on lg) -->
+    <div class="lg:col-span-7 space-y-4">
+
+      <!-- Active Step Design Card -->
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-2">
+          <span id="inspector-step-badge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[var(--secondary)] text-[var(--secondary-foreground)]">STEP 1 DESIGN SPEC</span>
+          <span class="text-xs text-[var(--muted-foreground)]">遵循 AGENTS.md Invariant 5 (Bento Matrix)</span>
+        </div>
+        <h2 id="inspector-title" class="text-base font-bold text-[var(--foreground)]">Step 1：启动模块定位与透明化权限申请</h2>
+        <p id="inspector-desc" class="text-xs text-[var(--muted-foreground)] mt-1.5 leading-relaxed">
+          去掉了中文翻译“暗袋”（Darkbag 即 Darkbag），去掉了无法在每个设备保证的 RAW16 徽章。用白瓷磁贴向用户解释：<strong>相机权限</strong>用于读取 RAW 传感器流与计算摄影，<strong>通知权限 (Android 13+)</strong> 用于展示后台冲印进度，<strong>麦克风权限</strong>仅在长按快门录制有声视频时需要。
+        </p>
+
+        <!-- Key Highlights for current step -->
+        <div id="inspector-bullets" class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+          <div class="p-3 rounded-xl bg-[var(--background)] border border-[var(--border)]">
+            <div class="font-bold text-[var(--foreground)]">🎯 核心必选 vs 推荐解耦</div>
+            <div class="text-[var(--muted-foreground)] mt-1">仅启用「外部暗房工作台」时可免相机权限进入；启用相机时仅强制要求 <code>CAMERA</code> 授权。</div>
+          </div>
+          <div class="p-3 rounded-xl bg-[var(--background)] border border-[var(--border)]">
+            <div class="font-bold text-[var(--foreground)]">🎨 同心圆与方圆角形变</div>
+            <div class="text-[var(--muted-foreground)] mt-1">外层托盘 <code>26dp</code> 无描边，内层白瓷卡选中态由 <code>14dp</code> 动态形变为 <code>10dp</code> 并附带主题色描边。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Permission & Hardware State Matrix -->
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-bold text-[var(--foreground)]">🔐 运行时权限状态矩阵 (Runtime Permission State)</h3>
+          <button onclick="grantAllPermissions()" class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-[var(--primary)] text-[var(--primary-foreground)]">模拟全部授权</button>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+          <div class="p-2.5 rounded-xl bg-[var(--background)] border border-[var(--border)]">
+            <div class="text-[var(--muted-foreground)] font-mono">CAMERA</div>
+            <div id="matrix-perm-cam" class="font-bold mt-1 text-amber-500">⏳ 待授权 (必选)</div>
+          </div>
+          <div class="p-2.5 rounded-xl bg-[var(--background)] border border-[var(--border)]">
+            <div class="text-[var(--muted-foreground)] font-mono">NOTIFICATIONS</div>
+            <div id="matrix-perm-notif" class="font-bold mt-1 text-[var(--muted-foreground)]">○ 未授权 (推荐)</div>
+          </div>
+          <div class="p-2.5 rounded-xl bg-[var(--background)] border border-[var(--border)]">
+            <div class="text-[var(--muted-foreground)] font-mono">RECORD_AUDIO</div>
+            <div id="matrix-perm-audio" class="font-bold mt-1 text-[var(--muted-foreground)]">○ 未授权 (视频)</div>
+          </div>
+          <div class="p-2.5 rounded-xl bg-[var(--background)] border border-[var(--border)]">
+            <div class="text-[var(--muted-foreground)] font-mono">FINE_LOCATION</div>
+            <div id="matrix-perm-loc" class="font-bold mt-1 text-[var(--muted-foreground)]">○ 按需 (Step 2)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live SharedPreferences ("camera_settings") Inspector -->
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <h3 class="text-sm font-bold text-[var(--foreground)]">⚡ 实时生成的 SharedPreferences (<code>camera_settings.xml</code>)</h3>
+          </div>
+          <button onclick="resetOnboardingState()" class="text-xs text-[var(--muted-foreground)] hover:underline">重置为初始状态</button>
+        </div>
+        <pre id="prefs-json-viewer" class="p-3.5 rounded-xl bg-[var(--background)] border border-[var(--border)] font-mono text-xs overflow-x-auto leading-relaxed text-[var(--foreground)]"></pre>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const LOG_OPTIONS = ["F-Log2", "Apple Log", "S-Log3", "Arri LogC3", "Canon Log 2", "Rec.709"];
+    const SHUTTER_HOLD_OPTIONS = [
+      "Standard MP4 (Default)",
+      "RAW Video (Bayer 10-bit)",
+      "Disabled"
+    ];
+
+    const state = {
+      currentStep: 1,
+      phoneDarkTheme: true,
+      selectedPairingLog: "F-Log2",
+      permissions: {
+        camera: false,
+        notifications: false,
+        audio: false,
+        location: false
+      },
+      prefs: {
+        onboarding_completed: false,
+        default_startup_page: "camera",
+        enable_camera: true,
+        enable_playground: true,
+        save_jpg: true,
+        save_raw: true,
+        default_focal_1x: "24mm",
+        motion_photo_enabled: false,
+        save_location_enabled: false,
+        color_engine_mode: 2, // 2 = Sony Uchimura (GT7, system default, user not bothered)
+        target_log: "None",
+        active_lut_filename: null,
+        lut_log_association: {}, // { "filename.cube": "Target_Log_Curve" }
+        imported_lut_count: 0,
+        enable_lut_preview: true,
+        ui_tier_preset: "FILM",
+        enable_manual_controls: false,
+        exp_focus_peaking: false,
+        show_lut_switcher: true,
+        show_hdr_plus_switch: true,
+        show_mode_switch_button: true,
+        shutter_long_press_action: "Standard MP4 (Default)"
+      }
+    };
+
+    const STEP_DOCS = {
+      1: {
+        badge: "STEP 1 · 欢迎与分级权限",
+        title: "Step 1：启动模块定位与透明化权限申请",
+        desc: "去掉了中文翻译“暗袋”（Darkbag 即 Darkbag），去掉了无法在每个设备保证的 RAW16 徽章。用白瓷磁贴向用户解释：相机权限用于读取 RAW 传感器流与计算摄影，通知权限 (Android 13+) 用于展示后台冲印进度，麦克风权限仅在长按快门录制有声视频时需要。",
+        b1Title: "🎯 核心必选 vs 推荐解耦",
+        b1Desc: "仅启用「外部暗房工作台」时可免相机权限进入；启用相机时仅强制要求 CAMERA 授权。",
+        b2Title: "🎨 同心圆与方圆角形变",
+        b2Desc: "外层托盘 26dp 无描边，内层白瓷卡选中态由 14dp 动态形变为 10dp 并附带主题色描边。"
+      },
+      2: {
+        badge: "STEP 2 · 出片格式与光学焦段",
+        title: "Step 2：化解存储空间惊吓，明确 DNG 暗房母带价值",
+        desc: "Darkbag 默认同时保存 JPG 与 ~12MB 的无损压缩 DNG。引导页第一时间让用户确认「JPG+DNG 双修」或「仅保存 JPG」，并告知 DNG 是暗房无损重调与半格拼图的母带基础；在开启地理位置开关时按需触发 GPS 权限。",
+        b1Title: "💾 16-bit Lossless JPEG 压缩",
+        b1Desc: "遵循 Invariant 1：统一走原生 write_dng 引擎，体积减半且保留完整 OpcodeList2 校准数据。",
+        b2Title: "📍 上下文按需位置权限",
+        b2Desc: "不在冷启动强申定位权限；仅当用户在 Step 2 主动开启「记录地理位置」时即时请求授权。"
+      },
+      3: {
+        badge: "STEP 3 · 胶片配方与 Log 关联导入",
+        title: "Step 3：Log 与 3D LUT 强关联导入机制",
+        desc: "已根据评审微调：完全移除了不需要用户操心的 Color Engine 技术选择。核心打造「先选曲线，再导入 LUT」的关联机制：每个导入的 .cube 配方强制绑定其适用的 Log 色调曲线（如 F-Log2 / Apple Log），打下数据层基础！若用户暂无 LUT，可直接点击下一步跳过。",
+        b1Title: "🔗 Log 与 LUT 强绑定",
+        b1Desc: "解决胶片 LUT 挂错曲线导致色彩崩坏的问题，为取景器切配方自动切 Log 打下架构基础。",
+        b2Title: "⚡ 零打扰快速跳过通道",
+        b2Desc: "未导入时系统内部默认采用 Sony Uchimura GT7 电影感色调算法直出，绝不强迫用户配置。"
+      },
+      4: {
+        badge: "STEP 4 · 操控层级与极简就绪",
+        title: "Step 4：三大操控层级一键定制，去除一切硬件自检冗余",
+        desc: "已根据评审微调：彻底去除了冗余的 Hardware Calibrated 硬件遥测卡片（用户不关心的工程参数一律不展示）。纯粹聚焦于操控层级选择（P&S 极简层 / FILM 胶片层 / PRO 专业层），一键完成进入相机！",
+        b1Title: "🎛️ 操控密度因人而异",
+        b1Desc: "P&S 纯粹构图、FILM 强化胶片配方与半格/多摄切换、PRO 解锁手动 ISO/快门拨盘与峰值对焦。",
+        b2Title: "🚀 老用户零延迟直达",
+        b2Desc: "完成引导写入 onboarding_completed = true 后，后续启动耗时 0ms 直达目标页面。"
+      }
+    };
+
+    function renderAll() {
+      // Update Step visibility
+      for (let i = 1; i <= 4; i++) {
+        const el = document.getElementById(`step-${i}`);
+        el.classList.toggle("hidden", state.currentStep !== i);
+
+        // Top nav button highlight
+        const navBtn = document.getElementById(`nav-btn-${i}`);
+        if (state.currentStep === i) {
+          navBtn.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm";
+        } else {
+          navBtn.className = "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all text-[var(--muted-foreground)] hover:text-[var(--foreground)]";
+        }
+
+        // Phone progress bar
+        const prog = document.getElementById(`prog-${i}`);
+        if (i <= state.currentStep) {
+          prog.style.backgroundColor = "var(--m3-primary)";
+        } else {
+          prog.style.backgroundColor = "var(--m3-surface-container-high)";
+        }
+      }
+
+      // Header controls
+      document.getElementById("header-sub").textContent = `STEP 0${state.currentStep} / 04`;
+      const backBtn = document.getElementById("btn-header-back");
+      backBtn.style.visibility = state.currentStep === 1 ? "hidden" : "visible";
+
+      // Step 1 Startup cards
+      const isCam = state.prefs.default_startup_page === "camera";
+      document.getElementById("card-startup-camera").className = `bento-tile p-3 flex flex-col items-center justify-center text-center min-h-[68px] ${isCam ? "active-primary" : ""}`;
+      document.getElementById("card-startup-playground").className = `bento-tile p-3 flex flex-col items-center justify-center text-center min-h-[68px] ${!isCam ? "active-tertiary" : ""}`;
+
+      // Step 1 Permissions
+      updatePermTile("camera", "perm-tile-camera", "status-perm-camera", "active-primary");
+      updatePermTile("notifications", "perm-tile-notif", "status-perm-notif", "active-secondary");
+      updatePermTile("audio", "perm-tile-audio", "status-perm-audio", "active-tertiary");
+
+      // Step 2 Formats
+      const isJpg = state.prefs.save_jpg;
+      const isRaw = state.prefs.save_raw;
+      document.getElementById("tile-save-jpg").className = `bento-tile p-3 flex items-center justify-between min-h-[54px] ${isJpg ? "active-secondary" : ""}`;
+      document.getElementById("chk-jpg").textContent = isJpg ? "✓" : "";
+      document.getElementById("tile-save-raw").className = `bento-tile p-3 flex items-center justify-between min-h-[54px] ${isRaw ? "active-primary" : ""}`;
+      document.getElementById("chk-raw").textContent = isRaw ? "✓" : "";
+
+      const explainEl = document.getElementById("format-explain-text");
+      if (isJpg && isRaw) {
+        explainEl.innerHTML = "✨ <strong>JPG + DNG 双修 (默认推荐)</strong>：直出调色 JPG 方便即时分享，同时保存 <strong>无损压缩 DNG (~12MB)</strong>，供「暗房工作台」无损重调色彩与半格拼图。";
+      } else if (isJpg && !isRaw) {
+        explainEl.innerHTML = "⚡ <strong>仅保存 JPG 照片</strong>：最节省存储空间，适合轻快记录（注：无 DNG 底片无法在暗房中二次无损调色）。";
+      } else {
+        explainEl.innerHTML = "🎞️ <strong>纯 DNG 数字底片模式</strong>：仅保存无损压缩 DNG 母带，完全交由「暗房工作台」或外部专业后期软件冲印。";
+      }
+
+      // Step 2 Focal
+      ["24mm", "28mm", "35mm"].forEach(f => {
+        const id = "focal-" + f.replace("mm", "");
+        const active = state.prefs.default_focal_1x === f;
+        document.getElementById(id).className = `bento-tile py-2.5 px-2 flex flex-col items-center justify-center text-center min-h-[56px] ${active ? "active-primary" : ""}`;
+      });
+
+      // Step 2 Switches
+      renderSwitch("sw-motionPhoto", state.prefs.motion_photo_enabled);
+      renderSwitch("sw-saveLocation", state.prefs.save_location_enabled);
+      document.getElementById("loc-perm-sub").textContent = state.permissions.location
+        ? "✓ 已授予 GPS 位置权限，将写入照片 EXIF"
+        : "开启时自动申请 GPS 权限写入 EXIF";
+
+      // Step 3 Pairing UI
+      const logMap = {
+        "F-Log2": "btn-log-flog2",
+        "Apple Log": "btn-log-apple",
+        "S-Log3": "btn-log-slog3",
+        "Arri LogC3": "btn-log-arri",
+        "Canon Log 2": "btn-log-clog",
+        "Rec.709": "btn-log-rec709"
+      };
+      Object.keys(logMap).forEach(key => {
+        const btn = document.getElementById(logMap[key]);
+        const active = state.selectedPairingLog === key;
+        btn.className = `bento-tile py-2 px-1 text-center text-xs font-bold ${active ? "active-primary" : ""}`;
+      });
+
+      document.getElementById("label-selected-log-for-import").textContent = `TARGET: ${state.selectedPairingLog}`;
+      document.getElementById("btn-import-log-name").textContent = state.selectedPairingLog;
+
+      renderSwitch("sw-livePreview", state.prefs.enable_lut_preview);
+
+      // Step 4 UI Tier
+      const tier = state.prefs.ui_tier_preset;
+      document.getElementById("tier-ps").className = `bento-tile py-2.5 px-2 flex flex-col items-center justify-center text-center min-h-[58px] ${tier === "PS" ? "active-primary" : ""}`;
+      document.getElementById("tier-film").className = `bento-tile py-2.5 px-2 flex flex-col items-center justify-center text-center min-h-[58px] ${tier === "FILM" ? "active-primary" : ""}`;
+      document.getElementById("tier-pro").className = `bento-tile py-2.5 px-2 flex flex-col items-center justify-center text-center min-h-[58px] ${tier === "PRO" ? "active-primary" : ""}`;
+
+      const tierDescEl = document.getElementById("tier-desc");
+      if (tier === "PS") {
+        tierDescEl.innerHTML = "📷 <strong>P&S 极简快拍层</strong>：隐藏高阶参数与模式磁贴，仅保留焦段切换与快门，专注街头抓拍构图。";
+      } else if (tier === "FILM") {
+        tierDescEl.innerHTML = "🎞️ <strong>FILM 胶片创作层（推荐）</strong>：取景器常驻 <strong>Log/LUT 配方切换胶囊</strong>、<strong>半格胶片 / 多摄同开模式切换</strong> 与 <strong>HDR+ 动态欠曝</strong> 磁贴。";
+      } else {
+        tierDescEl.innerHTML = "🎛️ <strong>PRO 专业手动层</strong>：全功能开启 <strong>手动 ISO / 快门速度 / 对焦拨盘</strong> 与 <strong>峰值对焦辅助高亮 (Focus Peaking)</strong>。";
+      }
+
+      const shortHold = state.prefs.shutter_long_press_action.startsWith("RAW")
+        ? "RAW Video (10-bit)"
+        : state.prefs.shutter_long_press_action.startsWith("Standard")
+        ? "Standard MP4"
+        : "Disabled";
+      document.getElementById("val-shutter-hold").textContent = shortHold;
+
+      // Primary CTA Button
+      const ctaText = document.getElementById("cta-text");
+      if (state.currentStep === 1) {
+        if (!state.permissions.camera && state.prefs.default_startup_page === "camera") {
+          ctaText.textContent = "一键授予核心权限并继续 →";
+        } else {
+          ctaText.textContent = "下一步 · 格式与光学偏好 →";
+        }
+      } else if (state.currentStep === 2) {
+        ctaText.textContent = "下一步 · 胶片配方关联导入 →";
+      } else if (state.currentStep === 3) {
+        ctaText.textContent = "下一步 · 操控层级定制 →";
+      } else {
+        ctaText.textContent = state.prefs.onboarding_completed
+          ? "✓ 已完成配置 · 正在进入 Darkbag..."
+          : "◉ 完成配置 · 进入 Darkbag";
+      }
+
+      // Update Right Inspector Panel
+      const doc = STEP_DOCS[state.currentStep];
+      document.getElementById("inspector-step-badge").textContent = doc.badge;
+      document.getElementById("inspector-title").textContent = doc.title;
+      document.getElementById("inspector-desc").textContent = doc.desc;
+      document.getElementById("inspector-bullets").innerHTML = `
+        <div class="p-3 rounded-xl bg-[var(--background)] border border-[var(--border)]">
+          <div class="font-bold text-[var(--foreground)]">${doc.b1Title}</div>
+          <div class="text-[var(--muted-foreground)] mt-1">${doc.b1Desc}</div>
+        </div>
+        <div class="p-3 rounded-xl bg-[var(--background)] border border-[var(--border)]">
+          <div class="font-bold text-[var(--foreground)]">${doc.b2Title}</div>
+          <div class="text-[var(--muted-foreground)] mt-1">${doc.b2Desc}</div>
+        </div>
+      `;
+
+      // Update Permission Matrix
+      document.getElementById("matrix-perm-cam").textContent = state.permissions.camera ? "✓ GRANTED" : "⏳ 待授权 (必选)";
+      document.getElementById("matrix-perm-cam").className = `font-bold mt-1 ${state.permissions.camera ? "text-emerald-500" : "text-amber-500"}`;
+
+      document.getElementById("matrix-perm-notif").textContent = state.permissions.notifications ? "✓ GRANTED" : "○ 未授权 (推荐)";
+      document.getElementById("matrix-perm-notif").className = `font-bold mt-1 ${state.permissions.notifications ? "text-emerald-500" : "text-[var(--muted-foreground)]"}`;
+
+      document.getElementById("matrix-perm-audio").textContent = state.permissions.audio ? "✓ GRANTED" : "○ 未授权 (视频)";
+      document.getElementById("matrix-perm-audio").className = `font-bold mt-1 ${state.permissions.audio ? "text-emerald-500" : "text-[var(--muted-foreground)]"}`;
+
+      document.getElementById("matrix-perm-loc").textContent = state.permissions.location ? "✓ GRANTED" : "○ 按需 (Step 2)";
+      document.getElementById("matrix-perm-loc").className = `font-bold mt-1 ${state.permissions.location ? "text-emerald-500" : "text-[var(--muted-foreground)]"}`;
+
+      // Update JSON Inspector
+      document.getElementById("prefs-json-viewer").textContent = JSON.stringify(state.prefs, null, 2);
+    }
+
+    function updatePermTile(key, tileId, statusId, activeClass) {
+      const granted = state.permissions[key];
+      const tile = document.getElementById(tileId);
+      const status = document.getElementById(statusId);
+      tile.className = `bento-tile p-3 flex items-center justify-between gap-2 ${granted ? activeClass : ""}`;
+      if (granted) {
+        status.textContent = "✓ 已授权";
+        status.style.backgroundColor = "var(--m3-success-container)";
+        status.style.color = "var(--m3-success)";
+      } else {
+        status.textContent = "授权";
+        status.style.backgroundColor = key === "camera" ? "var(--m3-primary)" : "var(--m3-surface-container-high)";
+        status.style.color = key === "camera" ? "var(--m3-primary-container)" : "var(--m3-on-surface)";
+      }
+    }
+
+    function renderSwitch(id, checked) {
+      const sw = document.getElementById(id);
+      const knob = sw.querySelector("div");
+      if (checked) {
+        sw.style.backgroundColor = "var(--m3-primary)";
+        knob.className = "w-5 h-5 rounded-full bg-white shadow transform translate-x-4 transition-transform";
+      } else {
+        sw.style.backgroundColor = "var(--m3-surface-container-high)";
+        knob.className = "w-5 h-5 rounded-full bg-white shadow transform translate-x-0 transition-transform";
+      }
+    }
+
+    function goToStep(step) {
+      state.currentStep = step;
+      renderAll();
+    }
+
+    function prevStep() {
+      if (state.currentStep > 1) {
+        state.currentStep--;
+        renderAll();
+      }
+    }
+
+    function handlePrimaryCta() {
+      if (state.currentStep === 1) {
+        if (!state.permissions.camera) {
+          state.permissions.camera = true;
+          state.permissions.notifications = true;
+          state.permissions.audio = true;
+        }
+        state.currentStep = 2;
+      } else if (state.currentStep < 4) {
+        state.currentStep++;
+      } else {
+        state.prefs.onboarding_completed = true;
+      }
+      renderAll();
+    }
+
+    function skipOnboarding() {
+      state.permissions.camera = true;
+      state.prefs.onboarding_completed = true;
+      state.currentStep = 4;
+      renderAll();
+    }
+
+    function selectStartup(mode) {
+      state.prefs.default_startup_page = mode;
+      renderAll();
+    }
+
+    function togglePermission(key) {
+      state.permissions[key] = !state.permissions[key];
+      renderAll();
+    }
+
+    function grantAllPermissions() {
+      state.permissions.camera = true;
+      state.permissions.notifications = true;
+      state.permissions.audio = true;
+      state.permissions.location = true;
+      state.prefs.save_location_enabled = true;
+      renderAll();
+    }
+
+    function toggleFormat(type) {
+      if (type === "jpg") {
+        if (state.prefs.save_jpg && !state.prefs.save_raw) return;
+        state.prefs.save_jpg = !state.prefs.save_jpg;
+      } else {
+        if (state.prefs.save_raw && !state.prefs.save_jpg) return;
+        state.prefs.save_raw = !state.prefs.save_raw;
+      }
+      renderAll();
+    }
+
+    function selectFocal(focal) {
+      state.prefs.default_focal_1x = focal;
+      renderAll();
+    }
+
+    function toggleSwitch(name) {
+      if (name === "motionPhoto") {
+        state.prefs.motion_photo_enabled = !state.prefs.motion_photo_enabled;
+      } else if (name === "livePreview") {
+        state.prefs.enable_lut_preview = !state.prefs.enable_lut_preview;
+      }
+      renderAll();
+    }
+
+    function toggleLocationSetting() {
+      const next = !state.prefs.save_location_enabled;
+      state.prefs.save_location_enabled = next;
+      if (next) {
+        state.permissions.location = true;
+      }
+      renderAll();
+    }
+
+    function setPairingLog(logName) {
+      state.selectedPairingLog = logName;
+      renderAll();
+    }
+
+    function simulateImportAssociatedLut() {
+      const log = state.selectedPairingLog;
+      const lutNames = {
+        "F-Log2": "Classic_Neg_FLog2.cube",
+        "Apple Log": "Cinema_TealOrange_AppleLog.cube",
+        "S-Log3": "Venice_Golden_SLog3.cube",
+        "Arri LogC3": "Alexa_Monochrome_LogC3.cube",
+        "Canon Log 2": "Cine_Warm_CLog2.cube",
+        "Rec.709": "Vintage_Film_Rec709.cube"
+      };
+      const lutFile = lutNames[log] || "Film_Simulation.cube";
+
+      // Bind association
+      state.prefs.target_log = log;
+      state.prefs.active_lut_filename = lutFile;
+      state.prefs.lut_log_association[lutFile] = log;
+      state.prefs.imported_lut_count += 1;
+      state.prefs.save_jpg = true; // Auto-ensure JPG is saved when LUT is active
+
+      const tag = document.getElementById("pairing-success-tag");
+      tag.classList.remove("hidden");
+      document.getElementById("pairing-desc").textContent = `${lutFile} ➔ ${log}`;
+
+      renderAll();
+    }
+
+    function selectUiTier(tier) {
+      state.prefs.ui_tier_preset = tier;
+      if (tier === "PS") {
+        state.prefs.enable_manual_controls = false;
+        state.prefs.exp_focus_peaking = false;
+        state.prefs.show_lut_switcher = false;
+        state.prefs.show_hdr_plus_switch = false;
+        state.prefs.show_mode_switch_button = false;
+      } else if (tier === "FILM") {
+        state.prefs.enable_manual_controls = false;
+        state.prefs.exp_focus_peaking = false;
+        state.prefs.show_lut_switcher = true;
+        state.prefs.show_hdr_plus_switch = true;
+        state.prefs.show_mode_switch_button = true;
+      } else {
+        state.prefs.enable_manual_controls = true;
+        state.prefs.exp_focus_peaking = true;
+        state.prefs.show_lut_switcher = true;
+        state.prefs.show_hdr_plus_switch = true;
+        state.prefs.show_mode_switch_button = true;
+      }
+      renderAll();
+    }
+
+    function cycleShutterHold() {
+      const idx = SHUTTER_HOLD_OPTIONS.indexOf(state.prefs.shutter_long_press_action);
+      state.prefs.shutter_long_press_action = SHUTTER_HOLD_OPTIONS[(idx + 1) % SHUTTER_HOLD_OPTIONS.length];
+      renderAll();
+    }
+
+    function togglePhoneTheme() {
+      state.phoneDarkTheme = !state.phoneDarkTheme;
+      const root = document.getElementById("phone-root");
+      root.classList.toggle("m3-dark", state.phoneDarkTheme);
+      root.classList.toggle("m3-light", !state.phoneDarkTheme);
+      document.getElementById("theme-icon").textContent = state.phoneDarkTheme ? "🌙" : "☀️";
+      document.getElementById("theme-label").textContent = state.phoneDarkTheme ? "暗房深色 (Dark)" : "白瓷亮色 (Porcelain)";
+    }
+
+    function resetOnboardingState() {
+      state.currentStep = 1;
+      state.selectedPairingLog = "F-Log2";
+      state.permissions = { camera: false, notifications: false, audio: false, location: false };
+      state.prefs = {
+        onboarding_completed: false,
+        default_startup_page: "camera",
+        enable_camera: true,
+        enable_playground: true,
+        save_jpg: true,
+        save_raw: true,
+        default_focal_1x: "24mm",
+        motion_photo_enabled: false,
+        save_location_enabled: false,
+        color_engine_mode: 2,
+        target_log: "None",
+        active_lut_filename: null,
+        lut_log_association: {},
+        imported_lut_count: 0,
+        enable_lut_preview: true,
+        ui_tier_preset: "FILM",
+        enable_manual_controls: false,
+        exp_focus_peaking: false,
+        show_lut_switcher: true,
+        show_hdr_plus_switch: true,
+        show_mode_switch_button: true,
+        shutter_long_press_action: "Standard MP4 (Default)"
+      };
+      document.getElementById("pairing-success-tag").classList.add("hidden");
+      renderAll();
+    }
+
+    renderAll();
+  </script>
+</body>
+</html>

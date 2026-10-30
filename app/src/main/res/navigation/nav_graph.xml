@@ -2,6 +2,7 @@
 <navigation xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" android:id="@+id/nav_graph" app:startDestination="@id/permissions_fragment">
 
     <fragment android:id="@+id/permissions_fragment" android:name="top.maary.darkbag.fragments.PermissionsFragment" android:label="PermissionsFragment">
+        <argument android:name="force_onboarding" app:argType="boolean" android:defaultValue="false" />
 
         <action android:id="@+id/action_permissions_to_camera" app:destination="@id/camera_fragment" app:popUpTo="@id/permissions_fragment" app:popUpToInclusive="true" />
 
@@ -38,6 +39,7 @@
     <fragment android:id="@+id/settings_fragment" android:name="top.maary.darkbag.fragments.SettingsFragment" android:label="SettingsFragment">
 
         <action android:id="@+id/action_settings_to_lut_management" app:destination="@id/lut_management_fragment" />
+        <action android:id="@+id/action_settings_to_permissions" app:destination="@id/permissions_fragment" />
     </fragment>
 
     <fragment android:id="@+id/lut_management_fragment" android:name="top.maary.darkbag.fragments.LutManagementFragment" android:label="Manage LUTs" />

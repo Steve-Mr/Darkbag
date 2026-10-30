@@ -32,6 +32,8 @@ class RawVideoPlayer(
     private var currentFrameIndex: Int = 0
 
     private val isPlaying = AtomicBoolean(false)
+    val isPlayingVideo: Boolean
+        get() = isPlaying.get()
     private var playbackJob: Job? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 

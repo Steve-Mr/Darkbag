@@ -82,48 +82,57 @@
 
         </FrameLayout>
 
-        <!-- Multi-Camera Lens Switcher Container (Dynamically positioned below image) -->
-        <FrameLayout
-            android:id="@+id/multiCameraToggleContainer"
+        <!-- Camera Overlays Vertical Group (Collisions 1 & 2 resolved: Never overlap) -->
+        <LinearLayout
+            android:id="@+id/camera_overlays_vertical_group"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom|center_horizontal"
-            android:layout_marginBottom="16dp"
-            android:background="@drawable/bg_multi_camera_capsule"
-            android:elevation="3dp"
-            android:padding="4dp"
-            android:visibility="gone">
+            android:layout_marginBottom="20dp"
+            android:orientation="vertical"
+            android:gravity="center_horizontal">
 
-            <LinearLayout
-                android:id="@+id/multiCameraToggleGroup"
+            <!-- Multi-Camera Lens Switcher Container (Dynamically positioned below image) -->
+            <FrameLayout
+                android:id="@+id/multiCameraToggleContainer"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center" />
-        </FrameLayout>
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/bg_multi_camera_capsule"
+                android:elevation="3dp"
+                android:padding="4dp"
+                android:visibility="gone">
 
-        <!-- Derivative Version Stacking Dots Container (Dynamically positioned below image) -->
-        <FrameLayout
-            android:id="@+id/derivativeDotsContainer"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom|center_horizontal"
-            android:layout_marginBottom="16dp"
-            android:background="@drawable/bg_multi_camera_capsule"
-            android:elevation="3dp"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:paddingTop="4dp"
-            android:paddingBottom="4dp"
-            android:visibility="gone">
+                <LinearLayout
+                    android:id="@+id/multiCameraToggleGroup"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center" />
+            </FrameLayout>
 
-            <LinearLayout
-                android:id="@+id/derivativeDotsGroup"
+            <!-- Derivative Version Stacking Dots Container (Dynamically positioned below image) -->
+            <FrameLayout
+                android:id="@+id/derivativeDotsContainer"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center" />
-        </FrameLayout>
+                android:background="@drawable/bg_multi_camera_capsule"
+                android:elevation="3dp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:id="@+id/derivativeDotsGroup"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center" />
+            </FrameLayout>
+
+        </LinearLayout>
 
         <!-- Video Duration Indicator Container -->
         <FrameLayout
@@ -132,7 +141,7 @@
             android:layout_height="wrap_content"
             android:layout_gravity="bottom|end"
             android:layout_marginEnd="16dp"
-            android:layout_marginBottom="16dp"
+            android:layout_marginBottom="76dp"
             android:visibility="gone">
 
             <com.google.android.material.button.MaterialButton
@@ -170,7 +179,7 @@
         android:id="@+id/filmstrip_container"
         android:layout_width="match_parent"
         android:layout_height="48dp"
-        android:layout_marginBottom="16dp"
+        android:layout_marginBottom="76dp"
         android:layout_marginStart="16dp"
         android:layout_marginEnd="16dp"
         android:visibility="gone"
