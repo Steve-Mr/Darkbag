@@ -30,17 +30,17 @@
     <string name="zoom_2x">2x</string>
     <string name="toggle_flash">切换闪光灯</string>
     <string name="toggle_motion_photo">实况照片开关</string>
-    <string name="motion_photo_title">实况照片 (Motion Photo)</string>
+    <string name="motion_photo_title">实况照片</string>
     <string name="enable_motion_photo">开启实况照片</string>
     <string name="lut_menu_log">Log 曲线</string>
     <string name="lut_menu_lut">胶片 LUT</string>
     <string name="lut_menu_select_log_first">LUT: (请先选择 Log 曲线)</string>
-    <string name="lut_none">无 (None)</string>
+    <string name="lut_none">无</string>
 
     <string name="half_frame_mode_title">半格相机模式</string>
     <string name="enable_half_frame_mode">开启半格相机模式</string>
     <string name="half_frame_layout_hint">半格画幅排布</string>
-    <string name="half_frame_downsample_title">省流经济模式 (采样下分)</string>
+    <string name="half_frame_downsample_title">省流经济模式</string>
     <string name="half_frame_date_stamp">复古日期戳印</string>
     <string name="half_frame_light_leak">随机拟真漏光</string>
     <string name="half_frame_auto_burst">连拍两张成组</string>
@@ -51,7 +51,7 @@
     <string name="multi_camera_force_enable_summary">若厂商未声明原生多摄，将使用并发独立相机流或极速接力快拍</string>
     <string name="multi_camera_count_pref_title">镜头开启偏好</string>
     <string name="multi_camera_dual_pair_title">双摄组合偏好</string>
-    <string name="multi_camera_save_raw">为所有物理机位保存独立 RAW (DNG)</string>
+    <string name="multi_camera_save_raw">为所有物理机位保存独立 RAW</string>
     <string name="multi_camera_status_supported">硬件支持原生逻辑多摄同开</string>
     <string name="multi_camera_status_unsupported">设备不支持逻辑多摄并发</string>
     <string name="multi_camera_mode_enabled_toast">已进入多机位同摄模式</string>
@@ -170,12 +170,12 @@
     <string name="export_hub_subtitle_default">选择色彩方案与母带衍生体导出规格</string>
     <string name="export_hub_subtitle_rawvid">%1$s (%2$d 帧 / %3$s)</string>
     <string name="export_hub_subtitle_cdng">%1$s (%2$d 帧 CinemaDNG)</string>
-    <string name="export_hub_section_color_preset">调色预设 (Color Grading)</string>
+    <string name="export_hub_section_color_preset">调色预设</string>
     <string name="export_hub_color_preset_hint">选定的 Log 与 LUT 将同时应用于 MP4 视频与静态 JPG 照片</string>
     <string name="export_hub_log_tone_curve">Log 色调曲线</string>
     <string name="export_hub_film_simulation">胶片模拟 (3D LUT)</string>
-    <string name="export_hub_section_video_delivery">视频导出 (Video Delivery)</string>
-    <string name="export_hub_resolution_title">导出分辨率 (Resolution)</string>
+    <string name="export_hub_section_video_delivery">视频导出</string>
+    <string name="export_hub_resolution_title">导出分辨率</string>
     <string name="export_hub_res_1080p">1080p (全高清 - 推荐)</string>
     <string name="export_hub_res_4k">4K (超高清 - 2160p)</string>
     <string name="export_hub_mp4_action">导出调色 MP4 视频</string>
@@ -205,10 +205,10 @@
     <string name="toast_low_storage_recording_stopped">存储空间不足 (&lt;500MB)，已自动停止录制</string>
     <string name="toast_recording_too_short">录制时间过短，已取消</string>
     <string name="multi_camera_detected_lenses">检测到镜头: %1$s</string>
-    <string name="multi_camera_hw_native">硬件原生逻辑多摄 (Native Logical Multi-Camera)</string>
-    <string name="multi_camera_hw_concurrent">独立多摄并发模式 (Concurrent Multi-Camera)</string>
-    <string name="multi_camera_hw_relay">极速接力快拍模式 (Fast Relay Burst Mode)</string>
-    <string name="multi_camera_hw_none">未检测到多物理镜头 (Single Camera Only)</string>
+    <string name="multi_camera_hw_native">硬件原生逻辑多摄</string>
+    <string name="multi_camera_hw_concurrent">独立多摄并发模式</string>
+    <string name="multi_camera_hw_relay">极速接力快拍模式</string>
+    <string name="multi_camera_hw_none">未检测到多物理镜头</string>
 
     <string name="pref_raw_video">RAW 视频设置</string>
     <string name="raw_video_fps_hint">RAW 视频目标帧率</string>
@@ -227,7 +227,7 @@
     <string name="toast_audio_permission_granted">已授予麦克风权限，将包含音频录制</string>
 
     <string name="setting_raw_format_hint">RAW 格式</string>
-    <string name="raw_output_type_bayer">Bayer CFA RAW (~12MB, 默认)</string>
+    <string name="raw_output_type_bayer">Bayer CFA RAW (~12MB)</string>
     <string name="raw_output_type_linear">线性 RGB RAW (~50MB)</string>
 
     <!-- 设置分组 -->
@@ -245,9 +245,9 @@
     <string name="settings_sub_hdr_engine">HDR+ 计算合成引擎</string>
     <string name="settings_sub_formats_output">照片格式与输出目标</string>
     <string name="settings_sub_metadata_media">拍摄元数据与动态多媒体</string>
-    <string name="settings_ui_tier_ps">便携快拍 (P&amp;S) 控件</string>
-    <string name="settings_ui_tier_film">胶片模拟 (FILM) 控件</string>
-    <string name="settings_ui_tier_pro">专业电影 (PRO) 控件</string>
+    <string name="settings_ui_tier_ps">便携快拍控件</string>
+    <string name="settings_ui_tier_film">胶片模拟控件</string>
+    <string name="settings_ui_tier_pro">专业手动控件</string>
     <string name="settings_ui_tier_custom">自定义</string>
     <string name="settings_ui_tier_viewer">导航与相册查看器</string>
     <string name="settings_ui_open_customizer">取景器按键排布与实时预览</string>
@@ -263,15 +263,94 @@
     <string name="viewfinder_group_pro">专业手动控制</string>
     <string name="settings_section_setup_wizard">初始化向导</string>
     <string name="settings_btn_replay_onboarding">重新配置启动与出片偏好</string>
-    <string name="settings_adv_hdr_title">HDR+ 计算摄影</string>
-    <string name="settings_adv_video_title">视频录制</string>
+    <string name="settings_adv_hdr_title">HDR+ 计算摄影与合成</string>
+    <string name="settings_adv_video_title">视频录制与编码</string>
     <string name="settings_adv_multicam_title">多摄同拍</string>
     <string name="settings_adv_storage_title">底片编码与存储</string>
     <string name="settings_adv_viewfinder_title">取景器界面定制</string>
+    <string name="settings_section_startup">默认启动模块</string>
+    <string name="settings_badge_startup">启动</string>
+    <string name="settings_section_capture_output">拍摄与输出</string>
+    <string name="settings_badge_standard">标准</string>
+    <string name="settings_section_half_frame">半格胶片创作</string>
+    <string name="settings_section_half_frame_sub">双格画幅 · 胶片创作</string>
+    <string name="settings_badge_film">胶片</string>
+    <string name="settings_section_color_recipes">色彩科学与配方</string>
+    <string name="settings_section_about">系统与关于</string>
+    <string name="settings_section_about_sub">连按 5 次版本号解锁实验室</string>
+    <string name="settings_badge_dev_unlocked">已解锁</string>
+
+    <!-- Bento 瓷贴遥测标签 -->
+    <string name="pref_default_lens_label">默认镜头</string>
+    <string name="pref_default_focal_1x_label">1.0X 焦段</string>
+    <string name="pref_target_log_label">目标 LOG</string>
+    <string name="pref_manage_luts_label">色彩配方</string>
+    <string name="pref_hdr_fusion_label">合成算法</string>
+    <string name="pref_burst_frames_label">连拍帧数</string>
+    <string name="pref_underexposure_label">动态欠曝</string>
+    <string name="pref_color_engine_label">色彩引擎</string>
+    <string name="pref_antibanding_label">工频抗频闪</string>
+    <string name="pref_burst_strategy_label">处理策略</string>
+    <string name="pref_shutter_hold_label">快门长按</string>
+    <string name="pref_raw_video_label">RAW 规格</string>
+    <string name="pref_external_viewer_label">第三方查看器</string>
+    <string name="pref_dng_compression_label">DNG 压缩</string>
+    <string name="pref_dng_format_label">滤镜排列</string>
+    <string name="pref_multi_camera_count_label">协同机位</string>
+    <string name="pref_multi_camera_dual_pair_label">双摄组合</string>
+    <string name="pref_deck_customizer_label">取景器定制</string>
+    <string name="pref_clear_cache_label">清理缓存</string>
+    <string name="pref_app_version_label">版本信息</string>
+    <string name="pref_storage_jpg_label">JPG 目录</string>
+    <string name="pref_storage_raw_label">RAW 目录</string>
+    <string name="pref_multi_camera_save_raw_short">独立 RAW</string>
+    <string name="btn_copy_log">复制日志</string>
+    <string name="btn_clear_log">清除日志</string>
+
+    <!-- Bento 瓷贴值格式与展示 -->
+    <string name="pref_burst_frames_count_format">%1$s 帧</string>
+    <string name="pref_option_dynamic">动态补偿</string>
+    <string name="pref_option_off">关闭</string>
+    <string name="pref_option_none">无</string>
+    <string name="pref_option_auto">自动</string>
+    <string name="pref_option_disabled">已停用</string>
+    <string name="pref_burst_strategy_balanced">均衡模式</string>
+    <string name="pref_burst_strategy_rapid">极速连拍</string>
+    <string name="pref_dng_compress_lossless">16 位无损 JPEG</string>
+    <string name="pref_dng_compress_uncompressed">未压缩</string>
+    <string name="pref_cfa_bayer">Bayer 阵列</string>
+    <string name="pref_cfa_linear">Linear 线性</string>
+    <string name="pref_shutter_action_mp4">标准 MP4</string>
+    <string name="pref_shutter_action_raw_video">10-bit RAW 视频</string>
+    <string name="pref_multicam_count_auto">自动最大机位</string>
+    <string name="pref_multicam_count_dual">双摄协同 (2)</string>
+    <string name="pref_multicam_count_triple">三摄协同 (3)</string>
+    <string name="pref_multicam_pair_wide_uw">超广角 + 广角</string>
+    <string name="pref_multicam_pair_wide_tele">广角 + 长焦</string>
+    <string name="pref_multicam_pair_uw_tele">超广角 + 长焦</string>
+    <string name="pref_fusion_sabre">Sabre 超分</string>
+    <string name="pref_fusion_spatial">空间融合 + RCD</string>
+    <string name="pref_fusion_classic">Wiener 降噪</string>
+    <string name="pref_fusion_auto">自动智能选择</string>
+    <string name="pref_fusion_auto_desc">自适应选择最优空间对齐融合或 Sabre 超分辨率</string>
+    <string name="pref_fusion_spatial_desc">高精度空间对齐融合与 RCD 色彩去马赛克</string>
+    <string name="pref_fusion_sabre_desc">光学亚像素微振多帧超分辨率重构算法</string>
+    <string name="pref_fusion_classic_desc">传统维纳滤波 HDR+ 多帧降噪与动态范围融合</string>
+
+    <!-- UI Tier 紧凑切换按键 -->
+    <string name="settings_tier_ps_tag">P&amp;S</string>
+    <string name="settings_tier_ps_sub">极简</string>
+    <string name="settings_tier_film_tag">FILM</string>
+    <string name="settings_tier_film_sub">胶片</string>
+    <string name="settings_tier_pro_tag">PRO</string>
+    <string name="settings_tier_pro_sub">专业</string>
+    <string name="settings_tier_custom_tag">CUSTOM</string>
+    <string name="settings_tier_custom_sub">自定义</string>
+
     <string name="settings_ui_lens_controls">显示镜头控制与变焦行</string>
     <string name="settings_ui_camera_switch">显示前后置镜头切换按钮</string>
     <string name="settings_ui_settings_tile">显示快捷设置入口磁贴</string>
-    <string name="settings_ui_lut_switcher">显示胶片色彩配方 (Log/LUT) 切换器</string>
+    <string name="settings_ui_lut_switcher">显示胶片色彩配方切换器</string>
     <string name="settings_ui_hdr_tile">显示 HDR+ 计算摄影磁贴</string>
     <string name="settings_ui_underexposure_tile">显示 DYN 欠曝高光磁贴</string>
     <string name="settings_ui_mode_switch_tile">显示半格 / 多机位同开模式磁贴</string>

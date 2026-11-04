@@ -167,7 +167,7 @@ class SettingsFragment : Fragment() {
         }
 
         binding.btnReplayOnboarding.text = CameraBentoDeckView.formatProTelemetry(
-            label = "SETUP WIZARD",
+            label = getString(R.string.settings_section_setup_wizard),
             value = getString(R.string.settings_btn_replay_onboarding),
             isTabActive = false,
             context = requireContext()
@@ -223,7 +223,7 @@ class SettingsFragment : Fragment() {
             ?: lenses.firstOrNull()
         val lensName = currentLens?.name ?: "Wide (1.0x)"
         binding.btnMenuDefaultLens.text = CameraBentoDeckView.formatProTelemetry(
-            label = "DEFAULT LENS",
+            label = getString(R.string.pref_default_lens_label),
             value = lensName,
             isTabActive = false,
             isValueManual = true,
@@ -238,7 +238,7 @@ class SettingsFragment : Fragment() {
         val baseFocalName = presets1x.firstOrNull()?.name ?: "24mm"
         val savedFocal = prefs.getString(KEY_DEFAULT_FOCAL_1X, baseFocalName) ?: baseFocalName
         binding.btnMenuDefaultFocal1x.text = CameraBentoDeckView.formatProTelemetry(
-            label = "1.0X FOCAL BASE",
+            label = getString(R.string.pref_default_focal_1x_label),
             value = savedFocal,
             isTabActive = false,
             isValueManual = true,
@@ -251,13 +251,14 @@ class SettingsFragment : Fragment() {
         val savedLog = prefs.getString(KEY_TARGET_LOG, "None") ?: "None"
         val isLogActive = savedLog != "None"
         val rawLog = savedLog.replace(" (Rec.709)", "").replace(" (BT.709)", "")
-        val displayLog = if (rawLog.length > 14) {
-            rawLog.take(13) + "…"
+        val localizedLog = if (!isLogActive) getString(R.string.pref_option_none) else rawLog
+        val displayLog = if (localizedLog.length > 14) {
+            localizedLog.take(13) + "…"
         } else {
-            rawLog
+            localizedLog
         }
         binding.btnMenuTargetLog.text = CameraBentoDeckView.formatProTelemetry(
-            label = "TARGET LOG",
+            label = getString(R.string.pref_target_log_label),
             value = displayLog,
             isTabActive = isLogActive,
             isValueManual = isLogActive,
@@ -275,7 +276,7 @@ class SettingsFragment : Fragment() {
             rawName
         }
         binding.btnManageLuts.text = CameraBentoDeckView.formatProTelemetry(
-            label = "3D LUT RECIPES",
+            label = getString(R.string.pref_manage_luts_label),
             value = displayLut,
             isTabActive = activeLut != null,
             isValueManual = true,
@@ -287,14 +288,14 @@ class SettingsFragment : Fragment() {
         val ctx = context ?: return
         val savedFusion = prefs.getString(KEY_HDR_FUSION_MODE, HDR_FUSION_SABRE) ?: HDR_FUSION_SABRE
         val displayLabel = when (savedFusion) {
-            HDR_FUSION_SABRE -> "Sabre (Default)"
-            HDR_FUSION_SPATIAL_RCD -> "Spatial Merge + RCD"
-            HDR_FUSION_CLASSIC -> "Classic (Wiener)"
-            HDR_FUSION_AUTO -> "Auto (Sabre Zoom)"
+            HDR_FUSION_SABRE -> getString(R.string.pref_fusion_sabre)
+            HDR_FUSION_SPATIAL_RCD -> getString(R.string.pref_fusion_spatial)
+            HDR_FUSION_CLASSIC -> getString(R.string.pref_fusion_classic)
+            HDR_FUSION_AUTO -> getString(R.string.pref_fusion_auto)
             else -> savedFusion
         }
         binding.btnMenuHdrFusionMode.text = CameraBentoDeckView.formatProTelemetry(
-            label = "HDR+ MERGE",
+            label = getString(R.string.pref_hdr_fusion_label),
             value = displayLabel,
             isTabActive = true,
             isValueManual = true,
@@ -306,8 +307,8 @@ class SettingsFragment : Fragment() {
         val ctx = context ?: return
         val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "5") ?: "5"
         binding.btnMenuHdrBurstMode.text = CameraBentoDeckView.formatProTelemetry(
-            label = "BURST FRAMES",
-            value = "$savedBurst Frames",
+            label = getString(R.string.pref_burst_frames_label),
+            value = getString(R.string.pref_burst_frames_count_format, savedBurst),
             isTabActive = false,
             isValueManual = true,
             context = ctx
@@ -319,12 +320,12 @@ class SettingsFragment : Fragment() {
         val saved = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic") ?: "Dynamic"
         val displayValue = when {
             saved.endsWith("EV") -> saved
-            saved == "Off" || saved.startsWith("Off") -> saved
-            saved.startsWith("Dynamic") -> "Dynamic"
+            saved == "Off" || saved.startsWith("Off") -> getString(R.string.pref_option_off)
+            saved.startsWith("Dynamic") -> getString(R.string.pref_option_dynamic)
             else -> "$saved EV"
         }
         binding.btnMenuUnderexposureMode.text = CameraBentoDeckView.formatProTelemetry(
-            label = "UNDEREXPOSURE",
+            label = getString(R.string.pref_underexposure_label),
             value = displayValue,
             isTabActive = false,
             isValueManual = saved != "Off",
@@ -343,7 +344,7 @@ class SettingsFragment : Fragment() {
             else -> COLOR_ENGINE_MODES[savedIndex]
         }
         binding.btnMenuColorEngine.text = CameraBentoDeckView.formatProTelemetry(
-            label = "COLOR ENGINE",
+            label = getString(R.string.pref_color_engine_label),
             value = name,
             isTabActive = false,
             isValueManual = true,
@@ -354,9 +355,13 @@ class SettingsFragment : Fragment() {
     private fun updateAntibandingTile() {
         val ctx = context ?: return
         val saved = prefs.getString(KEY_ANTIBANDING, "Auto") ?: "Auto"
-        val display = saved
+        val display = when (saved) {
+            "Auto" -> getString(R.string.pref_option_auto)
+            "Off" -> getString(R.string.pref_option_off)
+            else -> saved
+        }
         binding.btnMenuAntibanding.text = CameraBentoDeckView.formatProTelemetry(
-            label = "ANTIBANDING",
+            label = getString(R.string.pref_antibanding_label),
             value = display,
             isTabActive = false,
             isValueManual = saved != "Off",
@@ -367,9 +372,13 @@ class SettingsFragment : Fragment() {
     private fun updateBurstStrategyTile() {
         val ctx = context ?: return
         val saved = prefs.getString(KEY_BURST_PROCESSING_STRATEGY, BURST_STRATEGY_BALANCED) ?: BURST_STRATEGY_BALANCED
-        val display = if (saved == BURST_STRATEGY_BALANCED) "Balanced" else "Rapid Burst (Max)"
+        val display = if (saved == BURST_STRATEGY_BALANCED) {
+            getString(R.string.pref_burst_strategy_balanced)
+        } else {
+            getString(R.string.pref_burst_strategy_rapid)
+        }
         binding.btnMenuBurstProcessingStrategy.text = CameraBentoDeckView.formatProTelemetry(
-            label = "BURST STRATEGY",
+            label = getString(R.string.pref_burst_strategy_label),
             value = display,
             isTabActive = false,
             isValueManual = true,
@@ -381,12 +390,12 @@ class SettingsFragment : Fragment() {
         val ctx = context ?: return
         val saved = prefs.getString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_MP4) ?: SHUTTER_LONG_PRESS_MP4
         val display = when (saved) {
-            SHUTTER_LONG_PRESS_MP4 -> "Standard MP4"
-            SHUTTER_LONG_PRESS_RAW_VIDEO -> "RAW Video (10-bit)"
-            else -> "Disabled"
+            SHUTTER_LONG_PRESS_MP4 -> getString(R.string.pref_shutter_action_mp4)
+            SHUTTER_LONG_PRESS_RAW_VIDEO -> getString(R.string.pref_shutter_action_raw_video)
+            else -> getString(R.string.pref_option_disabled)
         }
         binding.btnMenuShutterLongPress.text = CameraBentoDeckView.formatProTelemetry(
-            label = "SHUTTER HOLD ACTION",
+            label = getString(R.string.pref_shutter_hold_label),
             value = display,
             isTabActive = false,
             isValueManual = saved != SHUTTER_LONG_PRESS_DISABLED,
@@ -405,7 +414,7 @@ class SettingsFragment : Fragment() {
             else -> "Max Native"
         }
         binding.btnMenuRawVideo.text = CameraBentoDeckView.formatProTelemetry(
-            label = "RAW VIDEO",
+            label = getString(R.string.pref_raw_video_label),
             value = "$savedFps FPS · $shortRes",
             isTabActive = false,
             isValueManual = true,
@@ -418,7 +427,7 @@ class SettingsFragment : Fragment() {
         val defaultName = getString(R.string.pref_external_viewer_default)
         val savedName = prefs.getString(KEY_EXTERNAL_VIEWER_NAME, defaultName) ?: defaultName
         binding.btnMenuExternalViewer.text = CameraBentoDeckView.formatProTelemetry(
-            label = "EXTERNAL VIEWER",
+            label = getString(R.string.pref_external_viewer_label),
             value = savedName,
             isTabActive = false,
             isValueManual = savedName != defaultName,
@@ -430,11 +439,11 @@ class SettingsFragment : Fragment() {
         val ctx = context ?: return
         val savedDngIndex = prefs.getInt(KEY_DNG_COMPRESSION_MODE, 0).coerceIn(0, DNG_COMPRESSION_MODES.size - 1)
         val modeName = when (savedDngIndex) {
-            0 -> "16-bit Lossless JPEG"
-            else -> "Uncompressed"
+            0 -> getString(R.string.pref_dng_compress_lossless)
+            else -> getString(R.string.pref_dng_compress_uncompressed)
         }
         binding.btnMenuDngCompression.text = CameraBentoDeckView.formatProTelemetry(
-            label = "DNG COMPRESS",
+            label = getString(R.string.pref_dng_compression_label),
             value = modeName,
             isTabActive = true,
             isValueManual = true,
@@ -446,11 +455,11 @@ class SettingsFragment : Fragment() {
         val ctx = context ?: return
         val savedFormatIndex = prefs.getInt(KEY_RAW_OUTPUT_TYPE, 0).coerceIn(0, RAW_OUTPUT_TYPES.size - 1)
         val formatName = when (savedFormatIndex) {
-            0 -> "Bayer CFA"
-            else -> "Linear RGB"
+            0 -> getString(R.string.pref_cfa_bayer)
+            else -> getString(R.string.pref_cfa_linear)
         }
         binding.btnMenuDngFormat.text = CameraBentoDeckView.formatProTelemetry(
-            label = "CFA FORMAT",
+            label = getString(R.string.pref_dng_format_label),
             value = formatName,
             isTabActive = false,
             isValueManual = true,
@@ -460,21 +469,11 @@ class SettingsFragment : Fragment() {
 
     private fun updateMultiCameraCountTile() {
         val ctx = context ?: return
-        val countOptions = listOf(
-            MultiCameraCountPreference.AUTO_MAX.title,
-            MultiCameraCountPreference.DUAL.title,
-            MultiCameraCountPreference.TRIPLE.title
-        )
-        val countKeys = listOf(
-            MultiCameraCountPreference.AUTO_MAX.key,
-            MultiCameraCountPreference.DUAL.key,
-            MultiCameraCountPreference.TRIPLE.key
-        )
         val savedCountKey = prefs.getString(KEY_MULTI_CAMERA_COUNT_PREF, MultiCameraCountPreference.AUTO_MAX.key)
-        val currentCountIndex = countKeys.indexOf(savedCountKey).coerceAtLeast(0)
+        val pref = MultiCameraCountPreference.fromKey(savedCountKey)
         binding.btnMenuMultiCameraCount.text = CameraBentoDeckView.formatProTelemetry(
-            label = "CAMERA COUNT",
-            value = countOptions[currentCountIndex],
+            label = getString(R.string.pref_multi_camera_count_label),
+            value = pref.getDisplayName(ctx),
             isTabActive = false,
             isValueManual = true,
             context = ctx
@@ -483,21 +482,11 @@ class SettingsFragment : Fragment() {
 
     private fun updateMultiCameraDualPairTile() {
         val ctx = context ?: return
-        val pairOptions = listOf(
-            DualLensPairPreference.WIDE_ULTRAWIDE.title,
-            DualLensPairPreference.WIDE_TELE.title,
-            DualLensPairPreference.ULTRAWIDE_TELE.title
-        )
-        val pairKeys = listOf(
-            DualLensPairPreference.WIDE_ULTRAWIDE.key,
-            DualLensPairPreference.WIDE_TELE.key,
-            DualLensPairPreference.ULTRAWIDE_TELE.key
-        )
         val savedPairKey = prefs.getString(KEY_MULTI_CAMERA_DUAL_PAIR, DualLensPairPreference.WIDE_ULTRAWIDE.key)
-        val currentPairIndex = pairKeys.indexOf(savedPairKey).coerceAtLeast(0)
+        val pref = DualLensPairPreference.fromKey(savedPairKey)
         binding.btnMenuMultiCameraDualPair.text = CameraBentoDeckView.formatProTelemetry(
-            label = "MULTI-CAMERA",
-            value = pairOptions[currentPairIndex],
+            label = getString(R.string.pref_multi_camera_dual_pair_label),
+            value = pref.getDisplayName(ctx),
             isTabActive = false,
             isValueManual = true,
             context = ctx
@@ -575,10 +564,13 @@ class SettingsFragment : Fragment() {
         binding.btnMenuTargetLog.setOnClickListener {
             val currentLog = prefs.getString(KEY_TARGET_LOG, "None") ?: "None"
             val selectedIndex = LOG_CURVES.indexOf(currentLog).coerceAtLeast(0)
+            val logOptions = LOG_CURVES.map { curve ->
+                if (curve == "None") getString(R.string.pref_option_none) else curve
+            }
             BentoSelectionBottomSheet.show(
                 fragmentManager = childFragmentManager,
                 title = getString(R.string.target_log_hint),
-                options = LOG_CURVES,
+                options = logOptions,
                 selectedIndex = selectedIndex,
                 badge = "LOG"
             ) { which ->
@@ -599,16 +591,22 @@ class SettingsFragment : Fragment() {
         binding.btnMenuHdrFusionMode.setOnClickListener {
             val savedFusion = prefs.getString(KEY_HDR_FUSION_MODE, HDR_FUSION_SABRE) ?: HDR_FUSION_SABRE
             val selectedIndex = HDR_FUSION_MODES.indexOf(savedFusion).coerceAtLeast(0)
+            val fusionOptions = listOf(
+                getString(R.string.pref_fusion_auto),
+                getString(R.string.pref_fusion_spatial),
+                getString(R.string.pref_fusion_sabre),
+                getString(R.string.pref_fusion_classic)
+            )
             val descriptions = listOf(
-                "Adaptive spatial merge or Sabre super-resolution",
-                "High detail spatial alignment with RCD demosaicing",
-                "Super-resolution & optical subpixel alignment",
-                "Traditional Wiener filter HDR+ multi-frame blending"
+                getString(R.string.pref_fusion_auto_desc),
+                getString(R.string.pref_fusion_spatial_desc),
+                getString(R.string.pref_fusion_sabre_desc),
+                getString(R.string.pref_fusion_classic_desc)
             )
             BentoSelectionBottomSheet.show(
                 fragmentManager = childFragmentManager,
                 title = getString(R.string.pref_hdr_fusion_mode_title),
-                options = HDR_FUSION_MODES,
+                options = fusionOptions,
                 selectedIndex = selectedIndex,
                 badge = "COMPUTE",
                 descriptions = descriptions
@@ -622,7 +620,7 @@ class SettingsFragment : Fragment() {
         binding.btnMenuHdrBurstMode.setOnClickListener {
             val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "5") ?: "5"
             val selectedIndex = BURST_SIZES.indexOf(savedBurst).coerceAtLeast(0)
-            val options = BURST_SIZES.map { "$it Frames" }
+            val options = BURST_SIZES.map { getString(R.string.pref_burst_frames_count_format, it) }
             BentoSelectionBottomSheet.show(
                 fragmentManager = childFragmentManager,
                 title = getString(R.string.pref_burst_frames),
@@ -639,10 +637,17 @@ class SettingsFragment : Fragment() {
         binding.btnMenuUnderexposureMode.setOnClickListener {
             val saved = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic") ?: "Dynamic"
             val selectedIndex = HDR_UNDEREXPOSURE_MODES.indexOf(saved).coerceAtLeast(0)
+            val underexposureOptions = HDR_UNDEREXPOSURE_MODES.map { mode ->
+                when {
+                    mode == "Off" -> getString(R.string.pref_option_off)
+                    mode.startsWith("Dynamic") -> getString(R.string.pref_option_dynamic)
+                    else -> mode
+                }
+            }
             BentoSelectionBottomSheet.show(
                 fragmentManager = childFragmentManager,
                 title = getString(R.string.pref_hdr_underexposure),
-                options = HDR_UNDEREXPOSURE_MODES,
+                options = underexposureOptions,
                 selectedIndex = selectedIndex,
                 badge = "EXPOSURE"
             ) { which ->
@@ -670,10 +675,17 @@ class SettingsFragment : Fragment() {
         binding.btnMenuAntibanding.setOnClickListener {
             val saved = prefs.getString(KEY_ANTIBANDING, "Auto") ?: "Auto"
             val selectedIndex = ANTIBANDING_MODES.indexOf(saved).coerceAtLeast(0)
+            val antibandingOptions = ANTIBANDING_MODES.map { mode ->
+                when (mode) {
+                    "Auto" -> getString(R.string.pref_option_auto)
+                    "Off" -> getString(R.string.pref_option_off)
+                    else -> mode
+                }
+            }
             BentoSelectionBottomSheet.show(
                 fragmentManager = childFragmentManager,
                 title = getString(R.string.pref_antibanding),
-                options = ANTIBANDING_MODES,
+                options = antibandingOptions,
                 selectedIndex = selectedIndex,
                 badge = "FLICKER"
             ) { which ->
@@ -686,10 +698,14 @@ class SettingsFragment : Fragment() {
         binding.btnMenuBurstProcessingStrategy.setOnClickListener {
             val saved = prefs.getString(KEY_BURST_PROCESSING_STRATEGY, BURST_STRATEGY_BALANCED) ?: BURST_STRATEGY_BALANCED
             val selectedIndex = BURST_PROCESSING_STRATEGIES.indexOf(saved).coerceAtLeast(0)
+            val burstStrategyOptions = listOf(
+                getString(R.string.pref_burst_strategy_balanced),
+                getString(R.string.pref_burst_strategy_rapid)
+            )
             BentoSelectionBottomSheet.show(
                 fragmentManager = childFragmentManager,
                 title = getString(R.string.pref_burst_processing_strategy),
-                options = BURST_PROCESSING_STRATEGIES,
+                options = burstStrategyOptions,
                 selectedIndex = selectedIndex,
                 badge = "QUEUE"
             ) { which ->
@@ -702,10 +718,15 @@ class SettingsFragment : Fragment() {
         binding.btnMenuShutterLongPress.setOnClickListener {
             val saved = prefs.getString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_MP4) ?: SHUTTER_LONG_PRESS_MP4
             val selectedIndex = SHUTTER_LONG_PRESS_OPTIONS.indexOf(saved).coerceAtLeast(0)
+            val shutterActionOptions = listOf(
+                getString(R.string.pref_shutter_action_mp4),
+                getString(R.string.pref_shutter_action_raw_video),
+                getString(R.string.pref_option_disabled)
+            )
             BentoSelectionBottomSheet.show(
                 fragmentManager = childFragmentManager,
                 title = getString(R.string.pref_shutter_long_press_action),
-                options = SHUTTER_LONG_PRESS_OPTIONS,
+                options = shutterActionOptions,
                 selectedIndex = selectedIndex,
                 badge = "SHUTTER"
             ) { which ->
@@ -1036,8 +1057,8 @@ class SettingsFragment : Fragment() {
             btn.maxLines = 2
             btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatCompactTierLabel(
                 context = ctx,
-                enLabel = title,
-                zhSub = subtitle,
+                title = title,
+                subtitle = subtitle,
                 isActive = isActive
             )
             val density = resources.displayMetrics.density
@@ -1067,10 +1088,30 @@ class SettingsFragment : Fragment() {
         }
 
         fun updateUiTierButtons(checkedId: Int) {
-            styleTierButton(binding.btnTierPs, "P&S", "极简", checkedId == R.id.btn_tier_ps)
-            styleTierButton(binding.btnTierFilm, "FILM", "胶片", checkedId == R.id.btn_tier_film)
-            styleTierButton(binding.btnTierPro, "PRO", "专业", checkedId == R.id.btn_tier_pro)
-            styleTierButton(binding.btnTierCustom, "CUSTOM", "自定义", checkedId == R.id.btn_tier_custom)
+            styleTierButton(
+                binding.btnTierPs,
+                getString(R.string.settings_tier_ps_tag),
+                getString(R.string.settings_tier_ps_sub),
+                checkedId == R.id.btn_tier_ps
+            )
+            styleTierButton(
+                binding.btnTierFilm,
+                getString(R.string.settings_tier_film_tag),
+                getString(R.string.settings_tier_film_sub),
+                checkedId == R.id.btn_tier_film
+            )
+            styleTierButton(
+                binding.btnTierPro,
+                getString(R.string.settings_tier_pro_tag),
+                getString(R.string.settings_tier_pro_sub),
+                checkedId == R.id.btn_tier_pro
+            )
+            styleTierButton(
+                binding.btnTierCustom,
+                getString(R.string.settings_tier_custom_tag),
+                getString(R.string.settings_tier_custom_sub),
+                checkedId == R.id.btn_tier_custom
+            )
         }
 
         var isSyncingTierSelection = false
@@ -1112,7 +1153,7 @@ class SettingsFragment : Fragment() {
         }
 
         binding.btnOpenDeckCustomizer.text = CameraBentoDeckView.formatProTelemetry(
-            label = "VIEWFINDER CUSTOMIZER",
+            label = getString(R.string.pref_deck_customizer_label),
             value = getString(R.string.viewfinder_customizer_btn_subtitle),
             context = requireContext()
         )
@@ -1224,9 +1265,9 @@ class SettingsFragment : Fragment() {
         }
 
         val countOptions = listOf(
-            MultiCameraCountPreference.AUTO_MAX.title,
-            MultiCameraCountPreference.DUAL.title,
-            MultiCameraCountPreference.TRIPLE.title
+            MultiCameraCountPreference.AUTO_MAX.getDisplayName(requireContext()),
+            MultiCameraCountPreference.DUAL.getDisplayName(requireContext()),
+            MultiCameraCountPreference.TRIPLE.getDisplayName(requireContext())
         )
         val countKeys = listOf(
             MultiCameraCountPreference.AUTO_MAX.key,
@@ -1251,9 +1292,9 @@ class SettingsFragment : Fragment() {
         }
 
         val pairOptions = listOf(
-            DualLensPairPreference.WIDE_ULTRAWIDE.title,
-            DualLensPairPreference.WIDE_TELE.title,
-            DualLensPairPreference.ULTRAWIDE_TELE.title
+            DualLensPairPreference.WIDE_ULTRAWIDE.getDisplayName(requireContext()),
+            DualLensPairPreference.WIDE_TELE.getDisplayName(requireContext()),
+            DualLensPairPreference.ULTRAWIDE_TELE.getDisplayName(requireContext())
         )
         val pairKeys = listOf(
             DualLensPairPreference.WIDE_ULTRAWIDE.key,
@@ -1366,10 +1407,14 @@ class SettingsFragment : Fragment() {
     private fun setupStorageSettings() {
         binding.btnMenuDngCompression.setOnClickListener {
             val savedIndex = prefs.getInt(KEY_DNG_COMPRESSION_MODE, 0).coerceIn(0, DNG_COMPRESSION_MODES.size - 1)
+            val dngCompressionOptions = listOf(
+                getString(R.string.pref_dng_compress_lossless),
+                getString(R.string.pref_dng_compress_uncompressed)
+            )
             BentoSelectionBottomSheet.show(
                 fragmentManager = childFragmentManager,
                 title = getString(R.string.pref_dng_compression),
-                options = DNG_COMPRESSION_MODES,
+                options = dngCompressionOptions,
                 selectedIndex = savedIndex,
                 badge = "CODEC"
             ) { which ->
@@ -1408,7 +1453,7 @@ class SettingsFragment : Fragment() {
                     val ctx = requireContext()
                     binding.btnClearCache.isEnabled = false
                     binding.btnClearCache.text = CameraBentoDeckView.formatProTelemetry(
-                        label = "CLEAR CACHE",
+                        label = getString(R.string.pref_clear_cache_label),
                         value = getString(R.string.pref_cache_calculating),
                         isTabActive = false,
                         isValueManual = false,
@@ -1420,7 +1465,7 @@ class SettingsFragment : Fragment() {
                         withContext(Dispatchers.Main) {
                             _binding?.btnClearCache?.isEnabled = true
                             _binding?.btnClearCache?.text = CameraBentoDeckView.formatProTelemetry(
-                                label = "CLEAR CACHE",
+                                label = getString(R.string.pref_clear_cache_label),
                                 value = CacheManager.formatSize(0L),
                                 isTabActive = false,
                                 isValueManual = false,
@@ -1451,7 +1496,7 @@ class SettingsFragment : Fragment() {
         val appContext = ctx.applicationContext
         binding.btnClearCache.isEnabled = false
         binding.btnClearCache.text = CameraBentoDeckView.formatProTelemetry(
-            label = "CLEAR CACHE",
+            label = getString(R.string.pref_clear_cache_label),
             value = getString(R.string.pref_cache_calculating),
             isTabActive = false,
             isValueManual = false,
@@ -1463,7 +1508,7 @@ class SettingsFragment : Fragment() {
             withContext(Dispatchers.Main) {
                 _binding?.btnClearCache?.isEnabled = true
                 _binding?.btnClearCache?.text = CameraBentoDeckView.formatProTelemetry(
-                    label = "CLEAR CACHE",
+                    label = getString(R.string.pref_clear_cache_label),
                     value = formatted,
                     isTabActive = false,
                     isValueManual = false,

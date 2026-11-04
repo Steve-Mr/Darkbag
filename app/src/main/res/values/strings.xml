@@ -55,7 +55,7 @@
     <string name="half_frame_mode_title">Half-frame Mode</string>
     <string name="enable_half_frame_mode">Enable Half-frame Mode</string>
     <string name="half_frame_layout_hint">Half-frame Layout</string>
-    <string name="half_frame_downsample_title">Economical Mode (Downsample)</string>
+    <string name="half_frame_downsample_title">Economical Downsampling</string>
     <string name="half_frame_date_stamp">Date Stamp</string>
     <string name="half_frame_light_leak">Random Light Leak</string>
     <string name="half_frame_auto_burst">Auto Burst (Double Shot)</string>
@@ -66,7 +66,7 @@
     <string name="multi_camera_force_enable_summary">Use standalone camera aggregation or fast relay if native multi-camera is not declared by OEM</string>
     <string name="multi_camera_count_pref_title">Lens Count Preference</string>
     <string name="multi_camera_dual_pair_title">Dual-Lens Preference</string>
-    <string name="multi_camera_save_raw">Save Individual RAW (DNG) for All Lenses</string>
+    <string name="multi_camera_save_raw">Save Individual RAW for All Lenses</string>
     <string name="multi_camera_status_supported">Hardware supports multi-camera logical streaming</string>
     <string name="multi_camera_status_unsupported">Device does not support logical multi-camera</string>
     <string name="multi_camera_mode_enabled_toast">Multi-Camera Simultaneous Mode</string>
@@ -246,7 +246,7 @@
     <string name="toast_audio_permission_granted">Microphone permission granted; audio recording enabled</string>
 
     <string name="setting_raw_format_hint">RAW Format</string>
-    <string name="raw_output_type_bayer">Bayer CFA RAW (~12MB, Default)</string>
+    <string name="raw_output_type_bayer">Bayer CFA RAW (~12MB)</string>
     <string name="raw_output_type_linear">Linear RGB RAW (~50MB)</string>
 
     <!-- HDR+ Fusion Engine -->
@@ -290,11 +290,89 @@
     <string name="viewfinder_group_pro">Pro Manual Controls</string>
     <string name="settings_section_setup_wizard">Initial Setup Wizard</string>
     <string name="settings_btn_replay_onboarding">Reconfigure Startup &amp; Formats</string>
-    <string name="settings_adv_hdr_title">HDR+ Compute Pipeline</string>
-    <string name="settings_adv_video_title">Video Recording</string>
-    <string name="settings_adv_multicam_title">Multi-Camera Capture</string>
-    <string name="settings_adv_storage_title">DNG &amp; Storage</string>
-    <string name="settings_adv_viewfinder_title">Viewfinder UI Customization</string>
+    <string name="settings_adv_hdr_title">Compute &amp; Merge</string>
+    <string name="settings_adv_video_title">Video &amp; Encoding</string>
+    <string name="settings_adv_multicam_title">Multi-Camera</string>
+    <string name="settings_adv_storage_title">RAW &amp; Storage</string>
+    <string name="settings_adv_viewfinder_title">Viewfinder Deck</string>
+    <string name="settings_section_startup">Startup Module</string>
+    <string name="settings_badge_startup">STARTUP</string>
+    <string name="settings_section_capture_output">Capture &amp; Output</string>
+    <string name="settings_badge_standard">STANDARD</string>
+    <string name="settings_section_half_frame">Half-Frame Film</string>
+    <string name="settings_section_half_frame_sub">Diener double-frame · Analog craft</string>
+    <string name="settings_badge_film">FILM</string>
+    <string name="settings_section_color_recipes">Color Science &amp; Recipes</string>
+    <string name="settings_section_about">System &amp; About</string>
+    <string name="settings_section_about_sub">Tap version 5 times to unlock lab</string>
+    <string name="settings_badge_dev_unlocked">DEV UNLOCKED</string>
+
+    <!-- Bento Telemetry Labels -->
+    <string name="pref_default_lens_label">DEFAULT LENS</string>
+    <string name="pref_default_focal_1x_label">1.0X FOCAL BASE</string>
+    <string name="pref_target_log_label">TARGET LOG</string>
+    <string name="pref_manage_luts_label">3D LUT RECIPES</string>
+    <string name="pref_hdr_fusion_label">HDR+ MERGE</string>
+    <string name="pref_burst_frames_label">BURST FRAMES</string>
+    <string name="pref_underexposure_label">UNDEREXPOSURE</string>
+    <string name="pref_color_engine_label">COLOR ENGINE</string>
+    <string name="pref_antibanding_label">ANTIBANDING</string>
+    <string name="pref_burst_strategy_label">BURST STRATEGY</string>
+    <string name="pref_shutter_hold_label">SHUTTER HOLD ACTION</string>
+    <string name="pref_raw_video_label">RAW VIDEO</string>
+    <string name="pref_external_viewer_label">EXTERNAL VIEWER</string>
+    <string name="pref_dng_compression_label">DNG COMPRESS</string>
+    <string name="pref_dng_format_label">CFA FORMAT</string>
+    <string name="pref_multi_camera_count_label">CAMERA COUNT</string>
+    <string name="pref_multi_camera_dual_pair_label">DUAL PAIR</string>
+    <string name="pref_deck_customizer_label">VIEWFINDER DECK</string>
+    <string name="pref_clear_cache_label">CLEAR CACHE</string>
+    <string name="pref_app_version_label">APP VERSION</string>
+    <string name="pref_storage_jpg_label">STORAGE JPG</string>
+    <string name="pref_storage_raw_label">STORAGE RAW</string>
+    <string name="pref_multi_camera_save_raw_short">Separate RAW</string>
+    <string name="btn_copy_log">Copy Logs</string>
+    <string name="btn_clear_log">Clear Logs</string>
+
+    <!-- Bento Telemetry Formats & Values -->
+    <string name="pref_burst_frames_count_format">%1$s Frames</string>
+    <string name="pref_option_dynamic">Dynamic</string>
+    <string name="pref_option_off">Off</string>
+    <string name="pref_option_none">None</string>
+    <string name="pref_option_auto">Auto</string>
+    <string name="pref_option_disabled">Disabled</string>
+    <string name="pref_burst_strategy_balanced">Balanced</string>
+    <string name="pref_burst_strategy_rapid">Rapid Burst</string>
+    <string name="pref_dng_compress_lossless">16-bit Lossless JPEG</string>
+    <string name="pref_dng_compress_uncompressed">Uncompressed</string>
+    <string name="pref_cfa_bayer">Bayer CFA</string>
+    <string name="pref_cfa_linear">Linear RGB</string>
+    <string name="pref_shutter_action_mp4">Standard MP4</string>
+    <string name="pref_shutter_action_raw_video">RAW Video (10-bit)</string>
+    <string name="pref_multicam_count_auto">Auto (Max Available)</string>
+    <string name="pref_multicam_count_dual">Dual Cameras (2)</string>
+    <string name="pref_multicam_count_triple">Triple Cameras (3)</string>
+    <string name="pref_multicam_pair_wide_uw">Ultra-Wide + Wide</string>
+    <string name="pref_multicam_pair_wide_tele">Wide + Telephoto</string>
+    <string name="pref_multicam_pair_uw_tele">Ultra-Wide + Telephoto</string>
+    <string name="pref_fusion_sabre">Sabre (Super-Res)</string>
+    <string name="pref_fusion_spatial">Spatial + RCD</string>
+    <string name="pref_fusion_classic">Classic (Wiener)</string>
+    <string name="pref_fusion_auto">Auto (Sabre Zoom)</string>
+    <string name="pref_fusion_auto_desc">Adaptive spatial merge or Sabre super-resolution</string>
+    <string name="pref_fusion_spatial_desc">High detail spatial alignment with RCD demosaicing</string>
+    <string name="pref_fusion_sabre_desc">Super-resolution &amp; optical subpixel alignment</string>
+    <string name="pref_fusion_classic_desc">Traditional Wiener filter HDR+ multi-frame blending</string>
+
+    <!-- UI Tier Compact Buttons -->
+    <string name="settings_tier_ps_tag">P&amp;S</string>
+    <string name="settings_tier_ps_sub">Auto</string>
+    <string name="settings_tier_film_tag">FILM</string>
+    <string name="settings_tier_film_sub">Recipe</string>
+    <string name="settings_tier_pro_tag">PRO</string>
+    <string name="settings_tier_pro_sub">Manual</string>
+    <string name="settings_tier_custom_tag">CUSTOM</string>
+    <string name="settings_tier_custom_sub">Deck</string>
     <string name="settings_ui_lens_controls">Show Lens Controls / Zoom Row</string>
     <string name="settings_ui_camera_switch">Show Camera Switch Button</string>
     <string name="settings_ui_settings_tile">Show Quick Settings Tile</string>
