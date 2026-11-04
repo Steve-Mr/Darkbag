@@ -181,8 +181,10 @@ class MotionPhotoAudioRecorder(
                         outputMediaFormat = codec.outputFormat
                         val csd0 = outputMediaFormat?.getByteBuffer("csd-0")
                         if (csd0 != null) {
-                            val csdBytes = ByteArray(csd0.remaining())
-                            csd0.get(csdBytes)
+                            val dup = csd0.duplicate()
+                            dup.rewind()
+                            val csdBytes = ByteArray(dup.remaining())
+                            dup.get(csdBytes)
                             ringBuffer.setCodecConfig(csdBytes)
                         }
                     } else if (outputBufferIndex >= 0) {

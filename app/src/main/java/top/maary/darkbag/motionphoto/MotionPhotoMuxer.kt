@@ -105,9 +105,33 @@ object MotionPhotoMuxer {
             val videoTrackIndex = muxer.addTrack(mediaFormat)
             val effectiveAudio = hasAudio && preparedAudioSamples.isNotEmpty()
             val audioTrackIndex = if (effectiveAudio) {
-                if (!audioFormat!!.containsKey("csd-0") && audioSlice?.csd0Buffer != null) {
-                    audioFormat.setByteBuffer("csd-0", ByteBuffer.wrap(audioSlice.csd0Buffer))
+                // Ensure audioFormat has a valid, unconsumed csd-0 buffer
+                val csdBytes = audioSlice?.csd0Buffer ?: run {
+                    val buf = if (audioFormat!!.containsKey("csd-0")) audioFormat.getByteBuffer("csd-0") else null
+                    buf?.let {
+                        val dup = it.duplicate()
+                        dup.rewind()
+                        val bytes = ByteArray(dup.remaining())
+                        dup.get(bytes)
+                        bytes
+                    }
+                } ?: run {
+                    // Fallback synthesis for AAC-LC AudioSpecificConfig (2 bytes)
+                    val sampleRate = if (audioFormat!!.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                        audioFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                    } else 48000
+                    val channelCount = if (audioFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                        audioFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    } else 1
+                    val freqIdx = when (sampleRate) {
+                        96000 -> 0; 88200 -> 1; 64000 -> 2; 48000 -> 3; 44100 -> 4
+                        32000 -> 5; 24000 -> 6; 22050 -> 7; 16000 -> 8; 12000 -> 9
+                        11025 -> 10; 8000 -> 11; 7350 -> 12; else -> 3
+                    }
+                    val configVal = (2 shl 11) or (freqIdx shl 7) or (channelCount shl 3)
+                    byteArrayOf(((configVal shr 8) and 0xFF).toByte(), (configVal and 0xFF).toByte())
                 }
+                audioFormat!!.setByteBuffer("csd-0", ByteBuffer.wrap(csdBytes))
                 muxer.addTrack(audioFormat)
             } else {
                 -1
