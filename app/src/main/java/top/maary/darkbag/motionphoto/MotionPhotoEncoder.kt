@@ -29,7 +29,7 @@ class MotionPhotoEncoder(
         private const val I_FRAME_INTERVAL = 1 // 1 second between keyframes
     }
 
-    private val ringBuffer = CircularVideoRingBuffer(maxRetentionDurationUs = 3_500_000L)
+    private val ringBuffer = CircularVideoRingBuffer(maxRetentionDurationUs = 4_500_000L)
     private var mediaCodec: MediaCodec? = null
     private var inputSurface: Surface? = null
     private var mediaFormat: MediaFormat? = null
@@ -191,7 +191,7 @@ class MotionPhotoEncoder(
     fun captureSnapshot(
         captureTimestampNs: Long,
         preDurationMs: Long = 1500L,
-        postDurationMs: Long = 750L,
+        postDurationMs: Long = 1500L,
         outputFile: File,
         orientationDegrees: Int = 0,
         onComplete: (file: File?, stillPtsUs: Long) -> Unit

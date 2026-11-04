@@ -48,7 +48,7 @@ data class MotionPhotoAudioSlice(
  * to support zero-lag pre-roll capturing for Motion Photos with sound.
  */
 class CircularAudioRingBuffer(
-    val maxRetentionDurationUs: Long = 3_500_000L // 3.5 seconds retention
+    val maxRetentionDurationUs: Long = 4_500_000L // 4.5 seconds retention to match video buffer
 ) {
     companion object {
         private const val TAG = "CircularAudioRingBuffer"
