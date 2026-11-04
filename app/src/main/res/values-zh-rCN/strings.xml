@@ -392,4 +392,12 @@
     <string name="lut_desc_nlog">尼康 N-Log 高清动态曲线</string>
     <string name="lut_desc_dlog">大疆 D-Log 航拍电影感曲线</string>
     <string name="lut_desc_rec709">标准 SDR Rec.709 色彩空间转换</string>
+    <string name="lut_mgmt_header_title">3D LUT 胶片配方</string>
+    <string name="lut_mgmt_stats_label">配方统计</string>
+    <string name="lut_mgmt_stats_format">共 %1$d 款 · %2$d 款已关联</string>
+    <string name="lut_mgmt_import_label">导入 .CUBE</string>
+    <string name="lut_mgmt_import_sub">+ 选定 Log 并添加</string>
+    <string name="lut_mgmt_empty_title">暂无导入的胶片配方</string>
+    <string name="lut_mgmt_empty_desc">导入匹配相机 Log 曲线的 .cube 3D LUT 胶片模拟配方。</string>
+    <string name="lut_mgmt_filter_all">全部</string>
 </resources>

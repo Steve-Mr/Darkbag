@@ -417,4 +417,12 @@
     <string name="lut_desc_nlog">Nikon N-Log high-definition profile</string>
     <string name="lut_desc_dlog">DJI D-Log aerial cinematic profile</string>
     <string name="lut_desc_rec709">Standard SDR Rec.709 color conversion</string>
+    <string name="lut_mgmt_header_title">3D LUT RECIPES</string>
+    <string name="lut_mgmt_stats_label">TOTAL RECIPES</string>
+    <string name="lut_mgmt_stats_format">%1$d Total · %2$d Paired</string>
+    <string name="lut_mgmt_import_label">IMPORT .CUBE</string>
+    <string name="lut_mgmt_import_sub">+ Select Log &amp; Add</string>
+    <string name="lut_mgmt_empty_title">No Film Recipes Imported</string>
+    <string name="lut_mgmt_empty_desc">Import .cube 3D LUT film simulation recipes paired with your camera Log curves.</string>
+    <string name="lut_mgmt_filter_all">All</string>
 </resources>

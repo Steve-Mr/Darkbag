@@ -136,4 +136,37 @@ class LutManagerLogBindingTest {
         val noneLogList = lutManager.getLutsForLog("None")
         assertTrue(noneLogList.any { it.name == "Legacy_Filter.cube" && it.isUniversal })
     }
+
+    @Test
+    fun testLutItemSnapshotDetectsAssociationChangeForDiffUtil() {
+        val testFile = File(lutManager.lutDir, "Portra_400.cube").apply { writeText("LUT_3D_SIZE 2\n0 0 0\n1 1 1") }
+
+        // Initial snapshot before association (null -> universal)
+        val initialItems = lutManager.getAllLutItems()
+        assertEquals(1, initialItems.size)
+        val snapshot1 = initialItems[0]
+        assertNull(snapshot1.associatedLog)
+        assertTrue(snapshot1.isUniversal)
+
+        // Associate with Apple Log
+        lutManager.setAssociatedLog(testFile.name, "Apple Log")
+        val updatedItems = lutManager.getAllLutItems()
+        assertEquals(1, updatedItems.size)
+        val snapshot2 = updatedItems[0]
+        assertEquals("Apple Log", snapshot2.associatedLog)
+        assertFalse(snapshot2.isUniversal)
+
+        // Guarantee DiffUtil areContentsTheSame will be false
+        org.junit.Assert.assertNotEquals(snapshot1, snapshot2)
+        assertEquals(snapshot1.file, snapshot2.file)
+        assertEquals(snapshot1.name, snapshot2.name)
+        org.junit.Assert.assertNotEquals(snapshot1.associatedLog, snapshot2.associatedLog)
+
+        // Re-associate with Rec.709
+        lutManager.setAssociatedLog(testFile.name, LutManager.LOG_REC709)
+        val snapshot3 = lutManager.getAllLutItems()[0]
+        assertEquals(LutManager.LOG_REC709, snapshot3.associatedLog)
+        assertTrue(snapshot3.isRec709)
+        org.junit.Assert.assertNotEquals(snapshot2, snapshot3)
+    }
 }

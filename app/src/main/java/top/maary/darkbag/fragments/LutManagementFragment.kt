@@ -3,13 +3,19 @@ package top.maary.darkbag.fragments
 import android.app.AlertDialog
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,6 +26,8 @@ import androidx.navigation.Navigation
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
 import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentLutManagementBinding
@@ -38,6 +46,7 @@ class LutManagementFragment : Fragment() {
     private lateinit var adapter: LutManagementAdapter
 
     private var pendingImportLog: String? = null
+    private var selectedCategoryFilter: String = FILTER_ALL
 
     private val supportedLogCurves by lazy {
         listOf(
@@ -108,10 +117,26 @@ class LutManagementFragment : Fragment() {
         lutManager = LutManager(requireContext())
         prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
-        // Apply Edge-to-Edge Insets
-        ViewCompat.setOnApplyWindowInsetsListener(binding.appBar) { v, insets ->
+        applyEdgeToEdgeInsets()
+        setupHeaderActions()
+        setupCategoryFilters()
+
+        binding.rvLutManagement.layoutManager = LinearLayoutManager(requireContext())
+        adapter = LutManagementAdapter()
+        binding.rvLutManagement.adapter = adapter
+
+        updateList()
+    }
+
+    private fun applyEdgeToEdgeInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.cardLutHeader) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(v.paddingLeft, systemBars.top, v.paddingRight, v.paddingBottom)
+            val lp = v.layoutParams as? ViewGroup.MarginLayoutParams
+            val defaultMarginTop = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, 8f, resources.displayMetrics
+            ).toInt()
+            lp?.topMargin = defaultMarginTop + systemBars.top
+            v.layoutParams = lp
             insets
         }
 
@@ -121,30 +146,88 @@ class LutManagementFragment : Fragment() {
             v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, initialBottom + systemBars.bottom)
             insets
         }
+    }
 
-        val initialFabMargin = resources.getDimensionPixelSize(R.dimen.margin_medium)
-        ViewCompat.setOnApplyWindowInsetsListener(binding.fabImport) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            val params = v.layoutParams as ViewGroup.MarginLayoutParams
-            params.bottomMargin = initialFabMargin + systemBars.bottom
-            params.rightMargin = initialFabMargin + systemBars.right
-            v.layoutParams = params
-            insets
+    private fun setupHeaderActions() {
+        binding.btnBack.setOnClickListener {
+            Navigation.findNavController(requireActivity(), R.id.fragment_container).navigateUp()
         }
 
-        binding.toolbar.setNavigationOnClickListener {
-             Navigation.findNavController(requireActivity(), R.id.fragment_container).navigateUp()
+        val importAction = { showImportLogSelectionSheet() }
+        binding.btnHeaderImport.setOnClickListener { importAction() }
+        binding.btnTileImport.setOnClickListener { importAction() }
+        binding.btnEmptyImport.setOnClickListener { importAction() }
+    }
+
+    private fun setupCategoryFilters() {
+        val filterOptions = listOf(
+            FILTER_ALL to getString(R.string.lut_mgmt_filter_all),
+            "F-Log2" to "F-Log2",
+            "F-Log" to "F-Log",
+            "S-Log3" to "S-Log3",
+            "Arri LogC3" to "Arri LogC3",
+            "Canon Log 2" to "Canon Log 2",
+            "Rec.709" to "Rec.709",
+            LutManager.LOG_UNIVERSAL to getString(R.string.lut_badge_universal),
+            FILTER_UNASSIGNED to getString(R.string.lut_badge_unassigned)
+        )
+
+        binding.layoutFilterContainer.removeAllViews()
+        val density = resources.displayMetrics.density
+
+        filterOptions.forEach { (filterKey, label) ->
+            val btn = MaterialButton(
+                requireContext(),
+                null,
+                com.google.android.material.R.attr.materialButtonStyle
+            ).apply {
+                val margin = (4 * density).roundToInt()
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (34 * density).roundToInt()
+                ).apply {
+                    setMargins(margin, 0, margin, 0)
+                }
+                text = label
+                tag = filterKey
+                isAllCaps = false
+                textSize = 12f
+                insetTop = 0
+                insetBottom = 0
+                setPadding((12 * density).roundToInt(), 0, (12 * density).roundToInt(), 0)
+
+                setOnClickListener {
+                    selectedCategoryFilter = filterKey
+                    updateFilterButtonStates()
+                    updateList()
+                }
+            }
+            binding.layoutFilterContainer.addView(btn)
         }
+        updateFilterButtonStates()
+    }
 
-        binding.rvLutManagement.layoutManager = LinearLayoutManager(requireContext())
-        adapter = LutManagementAdapter()
-        binding.rvLutManagement.adapter = adapter
+    private fun updateFilterButtonStates() {
+        val density = resources.displayMetrics.density
+        val colorPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer)
+        val colorOnPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimaryContainer)
+        val colorSurfaceContainerHigh = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerHigh)
+        val colorOnSurfaceVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant)
 
-        binding.fabImport.setOnClickListener {
-            showImportLogSelectionSheet()
+        for (i in 0 until binding.layoutFilterContainer.childCount) {
+            val btn = binding.layoutFilterContainer.getChildAt(i) as? MaterialButton ?: continue
+            val filterKey = btn.tag as? String ?: continue
+            val isSelected = filterKey == selectedCategoryFilter
+            if (isSelected) {
+                btn.backgroundTintList = ColorStateList.valueOf(colorPrimaryContainer)
+                btn.setTextColor(colorOnPrimaryContainer)
+                btn.cornerRadius = (10 * density).roundToInt()
+            } else {
+                btn.backgroundTintList = ColorStateList.valueOf(colorSurfaceContainerHigh)
+                btn.setTextColor(colorOnSurfaceVariant)
+                btn.cornerRadius = (17 * density).roundToInt()
+            }
         }
-
-        updateList()
     }
 
     private fun showImportLogSelectionSheet() {
@@ -200,9 +283,32 @@ class LutManagementFragment : Fragment() {
     }
 
     private fun updateList() {
-        val luts = lutManager.getLuts()
+        val allItems = lutManager.getAllLutItems()
         val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
-        adapter.submitList(luts, activeLut)
+
+        // 1. Update Bento Telemetry Tile
+        val pairedCount = allItems.count { !it.isUniversal && !it.associatedLog.isNullOrEmpty() }
+        binding.btnTileStats.text = "${getString(R.string.lut_mgmt_stats_label)}\n${getString(R.string.lut_mgmt_stats_format, allItems.size, pairedCount)}"
+
+        // 2. Filter dataset according to selectedCategoryFilter
+        val filteredList = when (selectedCategoryFilter) {
+            FILTER_ALL -> allItems
+            FILTER_UNASSIGNED -> allItems.filter { it.associatedLog.isNullOrEmpty() }
+            LutManager.LOG_UNIVERSAL -> allItems.filter { it.isUniversal }
+            else -> allItems.filter { it.associatedLog.equals(selectedCategoryFilter, ignoreCase = true) }
+        }
+
+        // 3. Toggle Empty State vs List
+        if (filteredList.isEmpty()) {
+            binding.cardEmptyState.visibility = View.VISIBLE
+            binding.rvLutManagement.visibility = View.GONE
+        } else {
+            binding.cardEmptyState.visibility = View.GONE
+            binding.rvLutManagement.visibility = View.VISIBLE
+        }
+
+        // 4. Submit immutable LutItem snapshot
+        adapter.submitList(filteredList, activeLut)
     }
 
     override fun onDestroyView() {
@@ -211,32 +317,32 @@ class LutManagementFragment : Fragment() {
     }
 
     private inner class LutManagementAdapter : RecyclerView.Adapter<LutManagementAdapter.ViewHolder>() {
-        private var luts: List<File> = emptyList()
+        private var items: List<LutManager.LutItem> = emptyList()
         private var activeLut: String? = null
 
-        fun submitList(list: List<File>, active: String?) {
-            val oldLuts = luts
+        fun submitList(list: List<LutManager.LutItem>, active: String?) {
+            val oldItems = items
             val oldActiveLut = activeLut
 
-            luts = list
+            items = list
             activeLut = active
 
             val diffResult = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
-                override fun getOldListSize(): Int = oldLuts.size
+                override fun getOldListSize(): Int = oldItems.size
                 override fun getNewListSize(): Int = list.size
 
                 override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                    return oldLuts[oldItemPosition].absolutePath == list[newItemPosition].absolutePath
+                    return oldItems[oldItemPosition].file.absolutePath == list[newItemPosition].file.absolutePath
                 }
 
                 override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                    val oldFile = oldLuts[oldItemPosition]
-                    val newFile = list[newItemPosition]
-                    val oldLog = lutManager.getAssociatedLog(oldFile.name)
-                    val newLog = lutManager.getAssociatedLog(newFile.name)
-                    return oldFile.name == newFile.name &&
-                           (oldFile.name == oldActiveLut) == (newFile.name == active) &&
-                           oldLog == newLog
+                    val oldItem = oldItems[oldItemPosition]
+                    val newItem = list[newItemPosition]
+                    val isOldActive = oldItem.name == oldActiveLut
+                    val isNewActive = newItem.name == active
+                    return oldItem.name == newItem.name &&
+                           oldItem.associatedLog == newItem.associatedLog &&
+                           isOldActive == isNewActive
                 }
             })
 
@@ -249,52 +355,78 @@ class LutManagementFragment : Fragment() {
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val file = luts[position]
-            val displayName = file.nameWithoutExtension
-            val isActive = file.name == activeLut
-            val assocLog = lutManager.getAssociatedLog(file.name)
+            val item = items[position]
+            val displayName = item.file.nameWithoutExtension
+            val isActive = item.name == activeLut
+            val assocLog = item.associatedLog
             val density = holder.itemView.resources.displayMetrics.density
 
             holder.tvName.text = displayName
 
-            // Log association badge styling
-            val badgeDrawable = GradientDrawable().apply {
-                cornerRadius = 6f * density
+            // 1. Concentric Bento Card Squircle Morphing & Active Styling
+            if (isActive) {
+                holder.card.radius = 10f * density
+                holder.card.strokeWidth = (1.5f * density).roundToInt()
+                holder.card.strokeColor = MaterialColors.getColor(holder.itemView, android.R.attr.colorPrimary)
+                holder.card.setCardBackgroundColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSecondaryContainer))
+                holder.tvActiveBadge.visibility = View.VISIBLE
+                holder.tvName.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSecondaryContainer))
+
+                holder.iconContainer.background = GradientDrawable().apply {
+                    cornerRadius = 8f * density
+                    setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorPrimaryContainer))
+                }
+                holder.ivIcon.imageTintList = ColorStateList.valueOf(
+                    MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnPrimaryContainer)
+                )
+            } else {
+                holder.card.radius = 14f * density
+                holder.card.strokeWidth = 0
+                holder.card.strokeColor = Color.TRANSPARENT
+                holder.card.setCardBackgroundColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurface))
+                holder.tvActiveBadge.visibility = View.GONE
+                holder.tvName.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface))
+
+                holder.iconContainer.background = GradientDrawable().apply {
+                    cornerRadius = 8f * density
+                    setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurfaceContainerHigh))
+                }
+                holder.ivIcon.imageTintList = ColorStateList.valueOf(
+                    MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurfaceVariant)
+                )
+            }
+
+            // 2. Interactive Bento Log Pill Styling
+            val pillDrawable = GradientDrawable().apply {
+                cornerRadius = 7f * density
                 shape = GradientDrawable.RECTANGLE
             }
 
             when {
                 assocLog.isNullOrEmpty() -> {
-                    holder.tvLog.text = getString(R.string.lut_badge_unassigned)
-                    badgeDrawable.setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurfaceContainerHighest))
-                    holder.tvLog.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurfaceVariant))
+                    holder.tvLog.text = "${getString(R.string.lut_badge_unassigned)} ▾"
+                    pillDrawable.setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorErrorContainer))
+                    holder.tvLog.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnErrorContainer))
                 }
                 assocLog == LutManager.LOG_UNIVERSAL -> {
-                    holder.tvLog.text = getString(R.string.lut_badge_universal)
-                    badgeDrawable.setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSecondaryContainer))
+                    holder.tvLog.text = "${getString(R.string.lut_badge_universal)} ▾"
+                    pillDrawable.setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSecondaryContainer))
                     holder.tvLog.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSecondaryContainer))
                 }
                 else -> {
-                    holder.tvLog.text = assocLog
-                    badgeDrawable.setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorPrimaryContainer))
+                    holder.tvLog.text = "$assocLog ▾"
+                    pillDrawable.setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorPrimaryContainer))
                     holder.tvLog.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnPrimaryContainer))
                 }
             }
-            holder.tvLog.background = badgeDrawable
+            holder.tvLog.background = pillDrawable
 
-            if (isActive) {
-                val colorPrimary = MaterialColors.getColor(holder.itemView, android.R.attr.colorPrimary)
-                holder.tvName.setTextColor(colorPrimary)
-            } else {
-                val colorOnSurface = MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface)
-                holder.tvName.setTextColor(colorOnSurface)
-            }
-
-            holder.itemView.setOnClickListener {
+            // 3. Click Listeners
+            holder.card.setOnClickListener {
                 if (isActive) {
                     prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
                 } else {
-                    val editor = prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, file.name)
+                    val editor = prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, item.name)
                     if (!assocLog.isNullOrEmpty() && assocLog != LutManager.LOG_UNIVERSAL) {
                         val targetPrefLog = lutManager.toTargetLogPreference(assocLog)
                         editor.putString(SettingsFragment.KEY_TARGET_LOG, targetPrefLog)
@@ -305,28 +437,27 @@ class LutManagementFragment : Fragment() {
             }
 
             holder.tvLog.setOnClickListener {
-                showChangeLogSheet(file)
-            }
-
-            holder.btnChangeLog.setOnClickListener {
-                showChangeLogSheet(file)
+                showChangeLogSheet(item.file)
             }
 
             holder.btnRename.setOnClickListener {
-                showRenameDialog(file)
+                showRenameDialog(item.file)
             }
 
             holder.btnDelete.setOnClickListener {
-                showDeleteDialog(file)
+                showDeleteDialog(item.file)
             }
         }
 
-        override fun getItemCount() = luts.size
+        override fun getItemCount(): Int = items.size
 
         inner class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+            val card: MaterialCardView = view.findViewById(R.id.card_lut_item)
+            val iconContainer: FrameLayout = view.findViewById(R.id.layout_recipe_icon_container)
+            val ivIcon: ImageView = view.findViewById(R.id.iv_recipe_icon)
             val tvName: TextView = view.findViewById(R.id.tv_lut_name)
             val tvLog: TextView = view.findViewById(R.id.tv_lut_log)
-            val btnChangeLog: View = view.findViewById(R.id.btn_change_log)
+            val tvActiveBadge: TextView = view.findViewById(R.id.tv_active_badge)
             val btnRename: View = view.findViewById(R.id.btn_rename)
             val btnDelete: View = view.findViewById(R.id.btn_delete)
         }
@@ -367,5 +498,10 @@ class LutManagementFragment : Fragment() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    companion object {
+        private const val FILTER_ALL = "FILTER_ALL"
+        private const val FILTER_UNASSIGNED = "FILTER_UNASSIGNED"
     }
 }
