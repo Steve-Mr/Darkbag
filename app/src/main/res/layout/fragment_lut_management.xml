@@ -82,53 +82,7 @@
     </com.google.android.material.card.MaterialCardView>
 
     <!-- ====================================================================== -->
-    <!-- 1. Bento Overview Tray: Telemetry & Import Action                      -->
-    <!-- ====================================================================== -->
-    <top.maary.darkbag.ui.bento.BentoTrayCard
-        android:id="@+id/card_overview_tray"
-        style="@style/Widget.Darkbag.BentoTray"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="12dp"
-        android:layout_marginEnd="12dp"
-        android:layout_marginBottom="8dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <!-- Stats Micro-Telemetry Porcelain Tile -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_tile_stats"
-                style="@style/Widget.Darkbag.BentoTile.Button"
-                android:layout_width="0dp"
-                android:layout_height="52dp"
-                android:layout_weight="1"
-                android:layout_marginEnd="4dp"
-                app:backgroundTint="?attr/colorSurface"
-                android:text="TOTAL RECIPES\n0 Total · 0 Paired"
-                android:textColor="?attr/colorOnSurface"
-                android:textSize="11.5sp"
-                android:clickable="false" />
-
-            <!-- Primary Action Bento Tile: Import .cube -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_tile_import"
-                style="@style/Widget.Darkbag.BentoTile.Button"
-                android:layout_width="0dp"
-                android:layout_height="52dp"
-                android:layout_weight="1"
-                android:layout_marginStart="4dp"
-                app:backgroundTint="?attr/colorPrimaryContainer"
-                android:text="IMPORT .CUBE\n+ Select Log &amp; Add"
-                android:textColor="?attr/colorOnPrimaryContainer"
-                android:textSize="11.5sp" />
-        </LinearLayout>
-    </top.maary.darkbag.ui.bento.BentoTrayCard>
-
-    <!-- ====================================================================== -->
-    <!-- 2. Horizontal Bento Category Filter Bar                                -->
+    <!-- 1. Horizontal Bento Category Filter Bar                                -->
     <!-- ====================================================================== -->
     <HorizontalScrollView
         android:id="@+id/scroll_filter"

@@ -155,7 +155,6 @@ class LutManagementFragment : Fragment() {
 
         val importAction = { showImportLogSelectionSheet() }
         binding.btnHeaderImport.setOnClickListener { importAction() }
-        binding.btnTileImport.setOnClickListener { importAction() }
         binding.btnEmptyImport.setOnClickListener { importAction() }
     }
 
@@ -286,11 +285,7 @@ class LutManagementFragment : Fragment() {
         val allItems = lutManager.getAllLutItems()
         val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
 
-        // 1. Update Bento Telemetry Tile
-        val pairedCount = allItems.count { !it.isUniversal && !it.associatedLog.isNullOrEmpty() }
-        binding.btnTileStats.text = "${getString(R.string.lut_mgmt_stats_label)}\n${getString(R.string.lut_mgmt_stats_format, allItems.size, pairedCount)}"
-
-        // 2. Filter dataset according to selectedCategoryFilter
+        // 1. Filter dataset according to selectedCategoryFilter
         val filteredList = when (selectedCategoryFilter) {
             FILTER_ALL -> allItems
             FILTER_UNASSIGNED -> allItems.filter { it.associatedLog.isNullOrEmpty() }
@@ -363,42 +358,81 @@ class LutManagementFragment : Fragment() {
 
             holder.tvName.text = displayName
 
-            // 1. Concentric Bento Card Squircle Morphing & Active Styling
+            // 1. Concentric Bento Card Squircle Morphing & Active High-Contrast Styling
             if (isActive) {
-                holder.card.radius = 10f * density
-                holder.card.strokeWidth = (1.5f * density).roundToInt()
+                holder.card.radius = 12f * density
+                holder.card.strokeWidth = (2f * density).roundToInt()
                 holder.card.strokeColor = MaterialColors.getColor(holder.itemView, android.R.attr.colorPrimary)
-                holder.card.setCardBackgroundColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSecondaryContainer))
-                holder.tvActiveBadge.visibility = View.VISIBLE
-                holder.tvName.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSecondaryContainer))
+                holder.card.setCardBackgroundColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurfaceContainerHigh))
 
+                holder.tvActiveBadge.visibility = View.VISIBLE
+                holder.tvActiveBadge.background = GradientDrawable().apply {
+                    cornerRadius = 6f * density
+                    setColor(MaterialColors.getColor(holder.itemView, android.R.attr.colorPrimary))
+                }
+                holder.tvActiveBadge.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnPrimary))
+                holder.tvActiveBadge.text = "✓ ACTIVE"
+
+                holder.tvName.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface))
+
+                // High-visibility Solid Primary Icon Badge with white icon
                 holder.iconContainer.background = GradientDrawable().apply {
-                    cornerRadius = 8f * density
-                    setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorPrimaryContainer))
+                    cornerRadius = 10f * density
+                    setColor(MaterialColors.getColor(holder.itemView, android.R.attr.colorPrimary))
                 }
                 holder.ivIcon.imageTintList = ColorStateList.valueOf(
-                    MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnPrimaryContainer)
+                    MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnPrimary)
+                )
+
+                // Porcelain buttons on active card
+                holder.btnRename.backgroundTintList = ColorStateList.valueOf(
+                    MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurface)
+                )
+                holder.btnRename.iconTint = ColorStateList.valueOf(
+                    MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface)
+                )
+
+                holder.btnDelete.backgroundTintList = ColorStateList.valueOf(
+                    MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurface)
+                )
+                holder.btnDelete.iconTint = ColorStateList.valueOf(
+                    MaterialColors.getColor(holder.itemView, androidx.appcompat.R.attr.colorError)
                 )
             } else {
-                holder.card.radius = 14f * density
+                holder.card.radius = 16f * density
                 holder.card.strokeWidth = 0
                 holder.card.strokeColor = Color.TRANSPARENT
-                holder.card.setCardBackgroundColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurface))
+                holder.card.setCardBackgroundColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurfaceContainerLow))
                 holder.tvActiveBadge.visibility = View.GONE
                 holder.tvName.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface))
 
+                // Porcelain Icon Tile with subtle variant tint
                 holder.iconContainer.background = GradientDrawable().apply {
-                    cornerRadius = 8f * density
-                    setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurfaceContainerHigh))
+                    cornerRadius = 10f * density
+                    setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurface))
                 }
                 holder.ivIcon.imageTintList = ColorStateList.valueOf(
                     MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurfaceVariant)
+                )
+
+                holder.btnRename.backgroundTintList = ColorStateList.valueOf(
+                    MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurface)
+                )
+                holder.btnRename.iconTint = ColorStateList.valueOf(
+                    MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurfaceVariant)
+                )
+
+                holder.btnDelete.backgroundTintList = ColorStateList.valueOf(
+                    MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurface)
+                )
+                holder.btnDelete.iconTint = ColorStateList.valueOf(
+                    MaterialColors.getColor(holder.itemView, androidx.appcompat.R.attr.colorError)
                 )
             }
 
             // 2. Interactive Bento Log Pill Styling
             val pillDrawable = GradientDrawable().apply {
-                cornerRadius = 7f * density
+                cornerRadius = 8f * density
                 shape = GradientDrawable.RECTANGLE
             }
 
@@ -410,8 +444,9 @@ class LutManagementFragment : Fragment() {
                 }
                 assocLog == LutManager.LOG_UNIVERSAL -> {
                     holder.tvLog.text = "${getString(R.string.lut_badge_universal)} ▾"
-                    pillDrawable.setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSecondaryContainer))
-                    holder.tvLog.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSecondaryContainer))
+                    pillDrawable.setColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorSurface))
+                    pillDrawable.setStroke((1 * density).roundToInt(), MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOutlineVariant))
+                    holder.tvLog.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface))
                 }
                 else -> {
                     holder.tvLog.text = "$assocLog ▾"
@@ -458,8 +493,8 @@ class LutManagementFragment : Fragment() {
             val tvName: TextView = view.findViewById(R.id.tv_lut_name)
             val tvLog: TextView = view.findViewById(R.id.tv_lut_log)
             val tvActiveBadge: TextView = view.findViewById(R.id.tv_active_badge)
-            val btnRename: View = view.findViewById(R.id.btn_rename)
-            val btnDelete: View = view.findViewById(R.id.btn_delete)
+            val btnRename: MaterialButton = view.findViewById(R.id.btn_rename)
+            val btnDelete: MaterialButton = view.findViewById(R.id.btn_delete)
         }
     }
 
