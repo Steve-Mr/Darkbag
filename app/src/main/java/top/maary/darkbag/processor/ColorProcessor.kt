@@ -374,7 +374,7 @@ object ColorProcessor {
             lensShadingRows = fm.lensShadingRows,
             lensShadingCols = fm.lensShadingCols,
             distortionMode = hw.getDistortionMode(),
-            distortionCoeffs = hw.lensDistortion,
+            distortionCoeffs = hw.getEffectiveDistortionCoeffs(),
             intrinsicCalibration = hw.intrinsicCalibration,
             focalLength = hw.focalLength
         )

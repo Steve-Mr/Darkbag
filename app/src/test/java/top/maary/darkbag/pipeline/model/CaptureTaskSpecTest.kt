@@ -1,7 +1,9 @@
 package top.maary.darkbag.pipeline.model
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -125,18 +127,34 @@ class CaptureTaskSpecTest {
         )
         assertEquals(1, hw.getDistortionMode())
         assertEquals(false, hw.isUltraWide())
+        assertArrayEquals(floatArrayOf(0.02f, -0.005f, 0.001f, 0f, 0f), hw.getEffectiveDistortionCoeffs()!!, 0.0001f)
     }
 
     @Test
-    fun testHardwareProfile_DistortionMode_OpticalProjectionFallback() {
+    fun testHardwareProfile_DistortionMode_CustomCalibration() {
+        // Custom calibration takes precedence over missing or dummy lens distortion
+        val customCalib = top.maary.darkbag.calibration.CustomLensCalibration(
+            lensId = "2",
+            focalLength = 2.1f,
+            k1 = -0.065f,
+            k2 = 0.002f,
+            isEnabled = true
+        )
         val hw = HardwareProfile(
             lensId = "2",
             focalLength = 2.1f, // ultrawide
             lensDistortion = null,
-            intrinsicCalibration = floatArrayOf(1500f, 1500f, 2000f, 1500f, 0f)
+            intrinsicCalibration = floatArrayOf(1500f, 1500f, 2000f, 1500f, 0f),
+            customCalibration = customCalib
         )
         assertEquals(true, hw.isUltraWide())
-        assertEquals(2, hw.getDistortionMode())
+        assertEquals(1, hw.getDistortionMode())
+        assertArrayEquals(floatArrayOf(-0.065f, 0.002f, 0f, 0f, 0f), hw.getEffectiveDistortionCoeffs()!!, 0.0001f)
+
+        // When custom calibration is disabled, should return 0 (no mode 2 fallback)
+        val hwDisabled = hw.copy(customCalibration = customCalib.copy(isEnabled = false))
+        assertEquals(0, hwDisabled.getDistortionMode())
+        assertNull(hwDisabled.getEffectiveDistortionCoeffs())
     }
 
     @Test
@@ -149,6 +167,7 @@ class CaptureTaskSpecTest {
         )
         assertEquals(false, hw.isUltraWide())
         assertEquals(0, hw.getDistortionMode())
+        assertNull(hw.getEffectiveDistortionCoeffs())
     }
 
     @Test
@@ -160,6 +179,7 @@ class CaptureTaskSpecTest {
             lensDistortion = floatArrayOf(0f, 0f, 0f, 0f, 0f)
         )
         assertEquals(0, hwZero.getDistortionMode())
+        assertNull(hwZero.getEffectiveDistortionCoeffs())
 
         val hwDummy = HardwareProfile(
             lensId = "0",
@@ -167,6 +187,7 @@ class CaptureTaskSpecTest {
             lensDistortion = floatArrayOf(0.001f, 0f, 0f, 0f, 0f)
         )
         assertEquals(0, hwDummy.getDistortionMode())
+        assertNull(hwDummy.getEffectiveDistortionCoeffs())
     }
 
     @Test
@@ -220,12 +241,13 @@ class CaptureTaskSpecTest {
         // 0.1f is inclusive lower bound
         val hwLower = HardwareProfile(focalLength = 0.1f, intrinsicCalibration = calib)
         assertEquals(true, hwLower.isUltraWide())
-        assertEquals(2, hwLower.getDistortionMode())
+        // Without distortion coeffs, returns 0 (Mode 2 is removed)
+        assertEquals(0, hwLower.getDistortionMode())
 
         // 3.2f is inclusive upper bound
         val hwUpper = HardwareProfile(focalLength = 3.2f, intrinsicCalibration = calib)
         assertEquals(true, hwUpper.isUltraWide())
-        assertEquals(2, hwUpper.getDistortionMode())
+        assertEquals(0, hwUpper.getDistortionMode())
 
         // Above 3.2f is not ultrawide (e.g. 3.21f or 5.0f main lens)
         val hwAbove = HardwareProfile(focalLength = 3.21f, intrinsicCalibration = calib)
@@ -241,9 +263,9 @@ class CaptureTaskSpecTest {
             lensDistortion = floatArrayOf(),
             intrinsicCalibration = floatArrayOf(1500f, 1500f, 2000f, 1500f, 0f)
         )
-        // Should fall back to Mode 2 since lensDistortion is empty
+        // With Mode 2 removed, returns 0
         assertEquals(true, hwEmptyDist.isUltraWide())
-        assertEquals(2, hwEmptyDist.getDistortionMode())
+        assertEquals(0, hwEmptyDist.getDistortionMode())
 
         // Empty intrinsic calibration array
         val hwEmptyCalib = HardwareProfile(
