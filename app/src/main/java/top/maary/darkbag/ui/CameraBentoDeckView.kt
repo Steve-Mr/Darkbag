@@ -998,40 +998,40 @@ class CameraBentoDeckView @JvmOverloads constructor(
         @JvmOverloads
         fun formatCompactTierLabel(
             context: Context,
-            enLabel: String,
-            zhSub: String,
+            title: String,
+            subtitle: String = "",
             isActive: Boolean = false
         ): CharSequence {
-            val text = "$enLabel\n$zhSub"
+            val text = if (subtitle.isNotEmpty()) "$title\n$subtitle" else title
             val builder = SpannableStringBuilder(text)
             val displayMetrics = context.resources.displayMetrics
-            val enPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 10f, displayMetrics).roundToInt()
-            val zhPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 9f, displayMetrics).roundToInt()
+            val titlePx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 10f, displayMetrics).roundToInt()
+            val subPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 9f, displayMetrics).roundToInt()
 
             val colorOnSurface = MaterialColors.getColor(context, com.google.android.material.R.attr.colorOnSurface, Color.BLACK)
             val colorOnSurfaceVariant = MaterialColors.getColor(context, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.DKGRAY)
             val colorOnPrimaryContainer = MaterialColors.getColor(context, com.google.android.material.R.attr.colorOnPrimaryContainer, Color.WHITE)
 
-            val (enColor, zhColor) = if (isActive) {
+            val (titleColor, subColor) = if (isActive) {
                 Pair(colorOnPrimaryContainer, ColorUtils.setAlphaComponent(colorOnPrimaryContainer, 220))
             } else {
                 Pair(colorOnSurface, colorOnSurfaceVariant)
             }
 
-            val enEnd = enLabel.length
-            if (enEnd > 0) {
-                builder.setSpan(AbsoluteSizeSpan(enPx, false), 0, enEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                builder.setSpan(StyleSpan(Typeface.BOLD), 0, enEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                builder.setSpan(ProLetterSpacingSpan(0.04f), 0, enEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                builder.setSpan(ForegroundColorSpan(enColor), 0, enEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            val titleEnd = title.length
+            if (titleEnd > 0) {
+                builder.setSpan(AbsoluteSizeSpan(titlePx, false), 0, titleEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(StyleSpan(Typeface.BOLD), 0, titleEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(ProLetterSpacingSpan(0.04f), 0, titleEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(ForegroundColorSpan(titleColor), 0, titleEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
 
-            val zhStart = enEnd + 1
-            val zhEnd = text.length
-            if (zhStart < zhEnd) {
-                builder.setSpan(AbsoluteSizeSpan(zhPx, false), zhStart, zhEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                builder.setSpan(StyleSpan(Typeface.BOLD), zhStart, zhEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                builder.setSpan(ForegroundColorSpan(zhColor), zhStart, zhEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            val subStart = titleEnd + 1
+            val subEnd = text.length
+            if (subStart < subEnd) {
+                builder.setSpan(AbsoluteSizeSpan(subPx, false), subStart, subEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(StyleSpan(Typeface.BOLD), subStart, subEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(ForegroundColorSpan(subColor), subStart, subEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
 
             return builder

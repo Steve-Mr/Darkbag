@@ -2,6 +2,7 @@
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -52,7 +53,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="DARKBAG SETTINGS"
+                android:text="@string/settings_title"
                 android:textStyle="bold"
                 android:textSize="14sp"
                 android:letterSpacing="0.08"
@@ -107,13 +108,13 @@
                         android:gravity="center_vertical"
                         android:paddingHorizontal="4dp"
                         android:paddingVertical="2dp"
-                        android:layout_marginBottom="4dp">
+                        android:layout_marginBottom="8dp">
 
                         <TextView
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="STARTUP MODULE"
+                            android:text="@string/settings_section_startup"
                             android:textSize="11sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorPrimary" />
@@ -124,21 +125,11 @@
                             android:background="@drawable/bg_bento_badge_primary"
                             android:paddingHorizontal="8dp"
                             android:paddingVertical="2dp"
-                            android:text="STARTUP"
+                            android:text="@string/settings_badge_startup"
                             android:textSize="10.5sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorPrimary" />
                     </LinearLayout>
-
-                    <!-- Sub-label: 默认启动模块 -->
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:paddingHorizontal="4dp"
-                        android:paddingBottom="4dp"
-                        android:text="默认启动模块"
-                        android:textSize="10sp"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
 
                     <!-- Split Starter Cards (cardStartupCamera and cardStartupPlayground, height 64dp, 2-column) -->
                     <top.maary.darkbag.ui.bento.BentoRowLayout
@@ -169,7 +160,7 @@
                                     android:id="@+id/txt_startup_camera_title"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="📷 CAMERA"
+                                    android:text="@string/settings_startup_camera_title"
                                     android:textSize="11.5sp"
                                     android:textStyle="bold"
                                     android:textColor="?attr/colorOnSurface" />
@@ -178,7 +169,7 @@
                                     android:id="@+id/txt_startup_camera_desc"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="默认启动相机"
+                                    android:text="@string/settings_startup_camera_desc"
                                     android:textSize="9.5sp"
                                     android:textColor="?attr/colorOnSurfaceVariant"
                                     android:layout_marginTop="2dp" />
@@ -208,7 +199,7 @@
                                     android:id="@+id/txt_startup_playground_title"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="🎨 PLAYGROUND"
+                                    android:text="@string/settings_startup_playground_title"
                                     android:textSize="11.5sp"
                                     android:textStyle="bold"
                                     android:textColor="?attr/colorOnSurface" />
@@ -217,7 +208,7 @@
                                     android:id="@+id/txt_startup_playground_desc"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="外部暗房工作台"
+                                    android:text="@string/settings_startup_playground_desc"
                                     android:textSize="9.5sp"
                                     android:textColor="?attr/colorOnSurfaceVariant"
                                     android:layout_marginTop="2dp" />
@@ -277,7 +268,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="CAPTURE &amp; OUTPUT"
+                            android:text="@string/settings_section_capture_output"
                             android:textSize="11sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorOnSecondaryContainer" />
@@ -288,7 +279,7 @@
                             android:background="@drawable/bg_bento_badge_secondary"
                             android:paddingHorizontal="8dp"
                             android:paddingVertical="2dp"
-                            android:text="STANDARD"
+                            android:text="@string/settings_badge_standard"
                             android:textSize="10.5sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorOnSecondaryContainer" />
@@ -486,7 +477,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="HALF-FRAME FILM"
+                            android:text="@string/settings_section_half_frame"
                             android:textSize="11sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorTertiary" />
@@ -497,7 +488,7 @@
                             android:background="@drawable/bg_bento_badge_tertiary"
                             android:paddingHorizontal="8dp"
                             android:paddingVertical="2dp"
-                            android:text="FILM"
+                            android:text="@string/settings_badge_film"
                             android:textSize="10.5sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorTertiary" />
@@ -510,7 +501,7 @@
                         android:layout_height="wrap_content"
                         android:paddingHorizontal="4dp"
                         android:paddingBottom="6dp"
-                        android:text="双格画幅 · 胶片创作"
+                        android:text="@string/settings_section_half_frame_sub"
                         android:textSize="10sp"
                         android:textColor="?attr/colorOnSurfaceVariant" />
 
@@ -627,7 +618,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="COLOR SCIENCE &amp; RECIPES"
+                            android:text="@string/settings_section_color_recipes"
                             android:textSize="11sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorOnTertiaryContainer" />
@@ -729,7 +720,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="ADVANCED SETTINGS"
+                                android:text="@string/settings_section_advanced"
                                 android:textAppearance="?attr/textAppearanceTitleMedium"
                                 android:textColor="?attr/colorOnSurface"
                                 android:textSize="11.5sp"
@@ -738,7 +729,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="计算摄影 · 视频录制 · 多摄同拍 · 界面定制"
+                                android:text="@string/settings_section_advanced_sub"
                                 android:textAppearance="?attr/textAppearanceBodySmall"
                                 android:textColor="?attr/colorOnSurfaceVariant"
                                 android:textSize="9.5sp" />
@@ -788,20 +779,11 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="COMPUTE &amp; MERGE"
+                                        android:text="@string/settings_adv_hdr_title"
                                         android:textSize="10.5sp"
                                         android:textStyle="bold"
                                         android:letterSpacing="0.06"
                                         android:textColor="?attr/colorPrimary" />
-
-                                    <TextView
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginStart="6dp"
-                                        android:text="@string/settings_adv_hdr_title"
-                                        android:textSize="10.5sp"
-                                        android:textStyle="bold"
-                                        android:textColor="?attr/colorOnPrimaryContainer" />
                                 </LinearLayout>
 
                         <!-- Row 1: HDR+ Merge & Burst Frames -->
@@ -926,20 +908,11 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="VIDEO &amp; ENCODING"
-                                        android:textSize="10.5sp"
-                                        android:textStyle="bold"
-                                        android:letterSpacing="0.06"
-                                        android:textColor="?attr/colorPrimary" />
-
-                                    <TextView
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginStart="6dp"
                                         android:text="@string/settings_adv_video_title"
                                         android:textSize="10.5sp"
                                         android:textStyle="bold"
-                                        android:textColor="?attr/colorOnSecondaryContainer" />
+                                        android:letterSpacing="0.06"
+                                        android:textColor="?attr/colorSecondary" />
                                 </LinearLayout>
 
                                 <!-- Row 1: Shutter Long Press & RAW Video -->
@@ -1000,20 +973,11 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="MULTI-CAMERA"
-                                        android:textSize="10.5sp"
-                                        android:textStyle="bold"
-                                        android:letterSpacing="0.06"
-                                        android:textColor="?attr/colorPrimary" />
-
-                                    <TextView
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginStart="6dp"
                                         android:text="@string/settings_adv_multicam_title"
                                         android:textSize="10.5sp"
                                         android:textStyle="bold"
-                                        android:textColor="?attr/colorOnTertiaryContainer" />
+                                        android:letterSpacing="0.06"
+                                        android:textColor="?attr/colorTertiary" />
                                 </LinearLayout>
 
                                 <!-- Multi-camera status text -->
@@ -1106,7 +1070,7 @@
                                                 android:layout_width="0dp"
                                                 android:layout_height="wrap_content"
                                                 android:layout_weight="1"
-                                                android:text="独立 RAW"
+                                                android:text="@string/pref_multi_camera_save_raw_short"
                                                 android:textSize="10.5sp"
                                                 android:textStyle="bold"
                                                 android:textColor="?attr/colorOnSurface" />
@@ -1154,20 +1118,11 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="RAW &amp; STORAGE"
+                                        android:text="@string/settings_adv_storage_title"
                                         android:textSize="10.5sp"
                                         android:textStyle="bold"
                                         android:letterSpacing="0.06"
                                         android:textColor="?attr/colorPrimary" />
-
-                                    <TextView
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginStart="6dp"
-                                        android:text="@string/settings_adv_storage_title"
-                                        android:textSize="10.5sp"
-                                        android:textStyle="bold"
-                                        android:textColor="?attr/colorOnSecondaryContainer" />
                                 </LinearLayout>
 
                                 <!-- Row 1: DNG Compress & CFA Format -->
@@ -1227,7 +1182,7 @@
                                             <TextView
                                                 android:layout_width="wrap_content"
                                                 android:layout_height="wrap_content"
-                                                android:text="STORAGE JPG"
+                                                android:text="@string/pref_storage_jpg_label"
                                                 android:textSize="9.5sp"
                                                 android:textStyle="bold"
                                                 android:letterSpacing="0.06"
@@ -1270,7 +1225,7 @@
                                             <TextView
                                                 android:layout_width="wrap_content"
                                                 android:layout_height="wrap_content"
-                                                android:text="STORAGE RAW"
+                                                android:text="@string/pref_storage_raw_label"
                                                 android:textSize="9.5sp"
                                                 android:textStyle="bold"
                                                 android:letterSpacing="0.06"
@@ -1321,20 +1276,11 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="VIEWFINDER DECK"
+                                        android:text="@string/settings_adv_viewfinder_title"
                                         android:textSize="10.5sp"
                                         android:textStyle="bold"
                                         android:letterSpacing="0.06"
                                         android:textColor="?attr/colorPrimary" />
-
-                                    <TextView
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginStart="6dp"
-                                        android:text="@string/settings_adv_viewfinder_title"
-                                        android:textSize="10.5sp"
-                                        android:textStyle="bold"
-                                        android:textColor="?attr/colorOnPrimaryContainer" />
                                 </LinearLayout>
 
                                 <!-- 4-Tier Selector Tray -->
@@ -1370,7 +1316,7 @@
                                             android:maxLines="2"
                                             android:ellipsize="end"
                                             app:cornerRadius="12dp"
-                                            android:text="P&amp;S\n极简"
+                                            tools:text="P&amp;S\nAuto"
                                             android:textSize="9.5sp" />
 
                                         <com.google.android.material.button.MaterialButton
@@ -1389,7 +1335,7 @@
                                             android:maxLines="2"
                                             android:ellipsize="end"
                                             app:cornerRadius="12dp"
-                                            android:text="FILM\n胶片"
+                                            tools:text="FILM\nRecipe"
                                             android:textSize="9.5sp" />
 
                                         <com.google.android.material.button.MaterialButton
@@ -1408,7 +1354,7 @@
                                             android:maxLines="2"
                                             android:ellipsize="end"
                                             app:cornerRadius="12dp"
-                                            android:text="PRO\n专业"
+                                            tools:text="PRO\nManual"
                                             android:textSize="9.5sp" />
 
                                         <com.google.android.material.button.MaterialButton
@@ -1426,7 +1372,7 @@
                                             android:maxLines="2"
                                             android:ellipsize="end"
                                             app:cornerRadius="12dp"
-                                            android:text="CUSTOM\n自定义"
+                                            tools:text="CUSTOM\nDeck"
                                             android:textSize="9.5sp" />
                                     </top.maary.darkbag.ui.BentoSegmentedButtonGroup>
                                 </com.google.android.material.card.MaterialCardView>
@@ -1446,7 +1392,7 @@
                                     app:icon="@drawable/ic_arrow_forward"
                                     app:iconGravity="end"
                                     app:iconTint="?attr/colorOnSurfaceVariant"
-                                    android:text="VIEWFINDER CUSTOMIZER\n取景器按键排布与实时预览" />
+                                    tools:text="VIEWFINDER DECK\nControls Layout &amp; Live Preview" />
 
                                 <!-- Internal / External Viewer -->
                                 <top.maary.darkbag.ui.bento.BentoSwitchTile
@@ -1497,20 +1443,11 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="SETUP WIZARD"
+                                        android:text="@string/settings_section_setup_wizard"
                                         android:textSize="10.5sp"
                                         android:textStyle="bold"
                                         android:letterSpacing="0.06"
                                         android:textColor="?attr/colorPrimary" />
-
-                                    <TextView
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginStart="6dp"
-                                        android:text="@string/settings_section_setup_wizard"
-                                        android:textSize="10.5sp"
-                                        android:textStyle="bold"
-                                        android:textColor="?attr/colorOnSurfaceVariant" />
                                 </LinearLayout>
 
                                 <com.google.android.material.button.MaterialButton
@@ -1561,7 +1498,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="SYSTEM &amp; ABOUT"
+                            android:text="@string/settings_section_about"
                             android:textSize="11sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorOnSurfaceVariant" />
@@ -1571,7 +1508,7 @@
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:gravity="end"
-                            android:text="连按 5 次版本号解锁实验室"
+                            android:text="@string/settings_section_about_sub"
                             android:textSize="10sp"
                             android:textColor="?attr/colorOnSurfaceVariant" />
                     </LinearLayout>
@@ -1616,7 +1553,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="APP VERSION"
+                                    android:text="@string/pref_app_version_label"
                                     android:textSize="9.5sp"
                                     android:textStyle="bold"
                                     android:letterSpacing="0.06"
@@ -1675,7 +1612,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="EXPERIMENTAL LAB 🧪"
+                            android:text="@string/settings_section_experimental"
                             android:textSize="11sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorOnErrorContainer" />
@@ -1686,7 +1623,7 @@
                             android:background="@drawable/bg_bento_badge_tertiary"
                             android:paddingHorizontal="8dp"
                             android:paddingVertical="2dp"
-                            android:text="DEV UNLOCKED"
+                            android:text="@string/settings_badge_dev_unlocked"
                             android:textSize="10.5sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorTertiary" />
@@ -1698,7 +1635,7 @@
                         android:layout_height="wrap_content"
                         android:paddingHorizontal="4dp"
                         android:paddingBottom="6dp"
-                        android:text="硬件实验性特性"
+                        android:text="@string/settings_section_experimental_sub"
                         android:textSize="10sp"
                         android:textColor="?attr/colorOnErrorContainer" />
 
@@ -1766,7 +1703,7 @@
                             app:backgroundTint="?attr/colorSurface"
                             android:textColor="?attr/colorOnSurface"
                             app:strokeWidth="0dp"
-                            android:text="复制日志"
+                            android:text="@string/btn_copy_log"
                             android:textSize="11sp" />
 
                         <com.google.android.material.button.MaterialButton
@@ -1781,7 +1718,7 @@
                             app:backgroundTint="?attr/colorSurface"
                             android:textColor="?attr/colorOnSurface"
                             app:strokeWidth="0dp"
-                            android:text="清除日志"
+                            android:text="@string/btn_clear_log"
                             android:textSize="11sp" />
                     </top.maary.darkbag.ui.bento.BentoRowLayout>
 

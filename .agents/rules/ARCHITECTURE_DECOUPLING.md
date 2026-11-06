@@ -66,7 +66,12 @@ When implementing, modifying, or reviewing code in `app/src/main/` or related te
   3. Dynamic Mode Reactivity: Mode switches (Camera Bento Deck, Settings Half-Frame tray, Startup cards) MUST immediately update container background colors.
   4. Concentric Geometry: 26dp/18dp outer radius, 14dp inner blocks, 10dp squircle morphing when selected. Standard 8dp row and 8dp column gutters.
   5. Plain & Professional Copywriting: No verbose/flamboyant wording, no redundant parenthetical explanations, defensive 2-line micro-telemetry (<=16 chars, maxLines="2", ellipsize="end").
-  6. Frameless Floating Islands: Top floating cards must have transparent AppBarLayout, 0 elevation, elevation on card, and smooth scrolling underneath.
+  6. Strict Internationalization (i18n) & Single-Language Presentation:
+     - No dual-language concatenation in the same UI component (e.g. NEVER `COMPUTE & MERGE HDR+ 计算摄影` or `P&S\n极简`).
+     - Single semantic UI elements bound to `@string/...` or dynamic localized string formatting via `context.getString(...)`.
+     - Layout XML preview placeholders must use `tools:text` instead of hardcoded bilingual `android:text`.
+     - Dialog & bottom sheet options (e.g. `BentoSelectionBottomSheet.show`) must pass pure localized strings.
+  7. Frameless Floating Islands: Top floating cards must have transparent AppBarLayout, 0 elevation, elevation on card, and smooth scrolling underneath.
 
 ---
 

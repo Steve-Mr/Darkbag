@@ -492,6 +492,128 @@ class SettingsFragmentTest {
     }
 
     @Test
+    fun testBentoSettingsHeadersAndTelemetryLocalization() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+
+        // 1. Verify English header and telemetry strings exist and do not contain bilingual duplication
+        val enHdrTitle = context.getString(R.string.settings_adv_hdr_title)
+        assertEquals("Compute & Merge", enHdrTitle)
+
+        val enVideoTitle = context.getString(R.string.settings_adv_video_title)
+        assertEquals("Video & Encoding", enVideoTitle)
+
+        val enMulticamTitle = context.getString(R.string.settings_adv_multicam_title)
+        assertEquals("Multi-Camera", enMulticamTitle)
+
+        val enStorageTitle = context.getString(R.string.settings_adv_storage_title)
+        assertEquals("RAW & Storage", enStorageTitle)
+
+        val enHdrFusionLabel = context.getString(R.string.pref_hdr_fusion_label)
+        assertEquals("HDR+ MERGE", enHdrFusionLabel)
+
+        val enBurstFramesLabel = context.getString(R.string.pref_burst_frames_label)
+        assertEquals("BURST FRAMES", enBurstFramesLabel)
+
+        // 2. Multi-camera count & dual pair preferences localized display names
+        val autoCountName = top.maary.darkbag.utils.MultiCameraCountPreference.AUTO_MAX.getDisplayName(context)
+        assertEquals("Auto (Max Available)", autoCountName)
+
+        val dualPairName = top.maary.darkbag.utils.DualLensPairPreference.WIDE_ULTRAWIDE.getDisplayName(context)
+        assertEquals("Ultra-Wide + Wide", dualPairName)
+
+        // 3. Compact tier label formatter
+        val tierText = top.maary.darkbag.ui.CameraBentoDeckView.formatCompactTierLabel(
+            context = context,
+            title = context.getString(R.string.settings_tier_ps_tag),
+            subtitle = context.getString(R.string.settings_tier_ps_sub),
+            isActive = true
+        )
+        assertEquals("P&S\nAuto", tierText.toString())
+
+        // 4. Default startup entry titles retain emojis
+        val enCameraStartup = context.getString(R.string.settings_startup_camera_title)
+        assertEquals("📷 Camera", enCameraStartup)
+
+        val enPlaygroundStartup = context.getString(R.string.settings_startup_playground_title)
+        assertEquals("🎨 Playground", enPlaygroundStartup)
+    }
+
+    @Test
+    fun testChineseLocaleStringsCleanAndNoParentheses() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val config = android.content.res.Configuration(context.resources.configuration)
+        config.setLocale(java.util.Locale.SIMPLIFIED_CHINESE)
+        val zhContext = context.createConfigurationContext(config)
+
+        val zhHdrTitle = zhContext.getString(R.string.settings_adv_hdr_title)
+        assertEquals("HDR+ 计算摄影与合成", zhHdrTitle)
+        assertFalse(zhHdrTitle.contains("COMPUTE", ignoreCase = true))
+
+        val zhRelay = zhContext.getString(R.string.multi_camera_hw_relay)
+        assertEquals("极速接力快拍模式", zhRelay)
+        assertFalse(zhRelay.contains("("))
+        assertFalse(zhRelay.contains(")"))
+
+        val zhNative = zhContext.getString(R.string.multi_camera_hw_native)
+        assertEquals("硬件原生逻辑多摄", zhNative)
+        assertFalse(zhNative.contains("("))
+
+        val zhConcurrent = zhContext.getString(R.string.multi_camera_hw_concurrent)
+        assertEquals("独立多摄并发模式", zhConcurrent)
+        assertFalse(zhConcurrent.contains("("))
+
+        val zhMotionPhoto = zhContext.getString(R.string.motion_photo_title)
+        assertEquals("实况照片", zhMotionPhoto)
+        assertFalse(zhMotionPhoto.contains("("))
+
+        val zhBurstFramesLabel = zhContext.getString(R.string.pref_burst_frames_label)
+        assertEquals("连拍帧数", zhBurstFramesLabel)
+
+        val zhTierText = top.maary.darkbag.ui.CameraBentoDeckView.formatCompactTierLabel(
+            context = zhContext,
+            title = zhContext.getString(R.string.settings_tier_ps_tag),
+            subtitle = zhContext.getString(R.string.settings_tier_ps_sub),
+            isActive = false
+        )
+        assertEquals("P&S\n极简", zhTierText.toString())
+
+        // Additional checks for eliminated parentheses
+        val zhHalfDownsample = zhContext.getString(R.string.half_frame_downsample_title)
+        assertEquals("省流经济模式", zhHalfDownsample)
+        assertFalse(zhHalfDownsample.contains("("))
+
+        val zhMultiCamSaveRaw = zhContext.getString(R.string.multi_camera_save_raw)
+        assertEquals("为所有物理机位保存独立 RAW", zhMultiCamSaveRaw)
+        assertFalse(zhMultiCamSaveRaw.contains("("))
+
+        val zhColorPreset = zhContext.getString(R.string.export_hub_section_color_preset)
+        assertEquals("调色预设", zhColorPreset)
+        assertFalse(zhColorPreset.contains("("))
+
+        val zhVideoDelivery = zhContext.getString(R.string.export_hub_section_video_delivery)
+        assertEquals("视频导出", zhVideoDelivery)
+        assertFalse(zhVideoDelivery.contains("("))
+
+        val zhResolution = zhContext.getString(R.string.export_hub_resolution_title)
+        assertEquals("导出分辨率", zhResolution)
+        assertFalse(zhResolution.contains("("))
+
+        val zhBayerRaw = zhContext.getString(R.string.raw_output_type_bayer)
+        assertEquals("Bayer CFA RAW (~12MB)", zhBayerRaw)
+        assertFalse(zhBayerRaw.contains("默认"))
+
+        val enBayerRaw = context.getString(R.string.raw_output_type_bayer)
+        assertEquals("Bayer CFA RAW (~12MB)", enBayerRaw)
+        assertFalse(enBayerRaw.contains("Default"))
+
+        val zhCameraStartup = zhContext.getString(R.string.settings_startup_camera_title)
+        assertEquals("📷 相机", zhCameraStartup)
+
+        val zhPlaygroundStartup = zhContext.getString(R.string.settings_startup_playground_title)
+        assertEquals("🎨 暗房", zhPlaygroundStartup)
+    }
+
+    @Test
     fun testMotionPhotoAudioSwitchAndPreference() {
         assertEquals("motion_photo_audio_enabled", SettingsFragment.KEY_MOTION_PHOTO_AUDIO)
 

@@ -74,6 +74,11 @@ Darkbag has undergone a comprehensive architectural decoupling to eliminate God-
   - **Plain & Professional Copywriting**:
     - Plain, concise, professional camera terminology (e.g., `保存 JPG`, `保存 DNG 底片`, `动态照片`, `记录地理位置`, `光学防抖`, `抗频闪`).
     - Two-line micro-telemetry: Line 1 short uppercase label (e.g., `BURST FRAMES`), Line 2 status/value (e.g., `5 Frames`), protected defensively by `android:maxLines="2"` and `android:ellipsize="end"`.
+  - **Strict Internationalization (i18n) & Single-Language Presentation (纯正单语言规范)**:
+    - **NEVER** concatenate dual-language titles or labels in the same UI component (e.g., **STRICTLY FORBIDDEN**: dual-`TextView` layout anti-pattern like `COMPUTE & MERGE HDR+ 计算摄影`, or buttons with `P&S\n极简`, `FILM\n胶片`, `PRO\n专业`).
+    - **Single Semantic Elements**: Bento tray headers, button titles, and telemetry labels must use a single `TextView` or Button bound to `@string/...` resources (or formatted dynamically via code), allowing Android's resource resolution mechanism (`values/strings.xml` vs `values-zh-rCN/strings.xml`) to display the respective single language cleanly according to the device locale.
+    - **No Bilingual Placeholders in Layout XML**: Use `tools:text` instead of `android:text` for preview placeholders in layouts where texts are dynamically formatted at runtime.
+    - **Dialogs & BottomSheet Localization**: All selection bottom sheets (e.g. `BentoSelectionBottomSheet.show`), popup menus, and toasts must pass localized string options and descriptions dynamically resolved through `context.getString(...)`.
   - **Frameless Floating Islands**: Floating header cards MUST be standalone floating islands with elevation (e.g. 6dp) and `appBarLayout` set to transparent with 0 elevation and `translationZ`. Scrolling content (e.g. `RecyclerView`) MUST smoothly pass underneath the floating island without clipping.
 
 ---

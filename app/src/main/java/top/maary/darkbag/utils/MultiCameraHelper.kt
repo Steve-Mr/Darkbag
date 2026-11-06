@@ -13,6 +13,12 @@ enum class MultiCameraCountPreference(val key: String, val title: String) {
     DUAL("dual", "Dual Cameras (2)"),
     TRIPLE("triple", "Triple Cameras (3)");
 
+    fun getDisplayName(context: Context): String = when (this) {
+        AUTO_MAX -> context.getString(R.string.pref_multicam_count_auto)
+        DUAL -> context.getString(R.string.pref_multicam_count_dual)
+        TRIPLE -> context.getString(R.string.pref_multicam_count_triple)
+    }
+
     companion object {
         fun fromKey(key: String?): MultiCameraCountPreference {
             return entries.find { it.key == key } ?: AUTO_MAX
@@ -24,6 +30,12 @@ enum class DualLensPairPreference(val key: String, val title: String) {
     WIDE_ULTRAWIDE("wide_ultrawide", "Ultra-Wide + Wide (0.6x + 1.0x)"),
     WIDE_TELE("wide_tele", "Wide + Telephoto (1.0x + Tele)"),
     ULTRAWIDE_TELE("ultrawide_tele", "Ultra-Wide + Telephoto (0.6x + Tele)");
+
+    fun getDisplayName(context: Context): String = when (this) {
+        WIDE_ULTRAWIDE -> context.getString(R.string.pref_multicam_pair_wide_uw)
+        WIDE_TELE -> context.getString(R.string.pref_multicam_pair_wide_tele)
+        ULTRAWIDE_TELE -> context.getString(R.string.pref_multicam_pair_uw_tele)
+    }
 
     companion object {
         fun fromKey(key: String?): DualLensPairPreference {
