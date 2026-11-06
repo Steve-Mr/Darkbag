@@ -3809,7 +3809,7 @@ open class ImageViewerFragment : Fragment() {
             animate().cancel()
             visibility = View.VISIBLE
             alpha = 0f
-            translationY = 40f
+            translationY = -40f
             animate()
                 .alpha(1f)
                 .translationY(0f)
@@ -3824,7 +3824,7 @@ open class ImageViewerFragment : Fragment() {
             animate().cancel()
             animate()
                 .alpha(0f)
-                .translationY(40f)
+                .translationY(-40f)
                 .setDuration(200)
                 .withEndAction {
                     visibility = View.GONE

@@ -968,13 +968,13 @@
             style="@style/Widget.Darkbag.BentoTray"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="24dp"
+            android:layout_marginTop="16dp"
             android:visibility="gone"
             app:cardCornerRadius="22dp"
             app:bentoContainerRole="surfaceContainerHigh"
             app:contentPadding="10dp"
             app:cardElevation="10dp"
-            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/gallery_toolbar"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
 
