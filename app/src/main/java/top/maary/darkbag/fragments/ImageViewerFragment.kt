@@ -3800,12 +3800,12 @@ open class ImageViewerFragment : Fragment() {
 
     protected fun showGalleryDeletingIndicator(count: Int) {
         if (_binding == null) return
-        binding.tvGalleryDeletingStatus.text = if (count > 0) {
+        binding.tvGalleryDeletingStatus?.text = if (count > 0) {
             getString(R.string.gallery_deleting_count, count)
         } else {
             getString(R.string.gallery_deleting)
         }
-        binding.galleryDeletingIndicator.apply {
+        binding.galleryDeletingIndicator?.apply {
             animate().cancel()
             visibility = View.VISIBLE
             alpha = 0f
@@ -3820,7 +3820,7 @@ open class ImageViewerFragment : Fragment() {
 
     protected fun hideGalleryDeletingIndicator() {
         if (_binding == null) return
-        binding.galleryDeletingIndicator.apply {
+        binding.galleryDeletingIndicator?.apply {
             animate().cancel()
             animate()
                 .alpha(0f)
