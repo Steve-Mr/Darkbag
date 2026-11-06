@@ -950,6 +950,51 @@
                 android:textColor="?attr/colorOnErrorContainer" />
         </top.maary.darkbag.ui.bento.BentoTrayCard>
 
+        <!-- Deletion Status Indicator Capsule (shown during batch deletion & animation) -->
+        <top.maary.darkbag.ui.bento.BentoTrayCard
+            android:id="@+id/gallery_deleting_indicator"
+            style="@style/Widget.Darkbag.BentoTray"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp"
+            android:visibility="gone"
+            app:cardCornerRadius="22dp"
+            app:bentoContainerRole="surfaceContainerHigh"
+            app:contentPadding="10dp"
+            app:cardElevation="10dp"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="6dp"
+                android:paddingEnd="12dp">
+
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/gallery_deleting_progress"
+                    style="@style/Widget.Material3Expressive.CircularProgressIndicator.Wavy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:indeterminate="true"
+                    app:indicatorSize="22dp"
+                    app:trackThickness="3dp"
+                    app:indicatorColor="?attr/colorError" />
+
+                <TextView
+                    android:id="@+id/tv_gallery_deleting_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:text="@string/gallery_deleting"
+                    android:textAppearance="?attr/textAppearanceLabelLarge"
+                    android:textColor="?attr/colorOnSurface" />
+            </LinearLayout>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
+
     </androidx.constraintlayout.widget.ConstraintLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

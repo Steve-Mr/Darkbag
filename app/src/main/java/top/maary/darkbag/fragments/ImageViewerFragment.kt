@@ -95,6 +95,10 @@ open class ImageViewerFragment : Fragment() {
     private val deleteLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (result.resultCode != Activity.RESULT_OK) {
             context?.let { Toast.makeText(it, "Failed to delete image", Toast.LENGTH_SHORT).show() }
+            hideGalleryDeletingIndicator()
+            if (_binding != null) {
+                binding.galleryRecyclerView.isEnabled = true
+            }
         }
         lifecycleScope.launch {
             repository.invalidateCache()
@@ -111,6 +115,7 @@ open class ImageViewerFragment : Fragment() {
     protected lateinit var adapter: ImageViewerAdapter
     protected lateinit var galleryAdapter: DarkbagGalleryGridAdapter
     protected var isGalleryMode = false
+    protected var startedInGalleryMode = false
     protected open val isGallerySupported: Boolean = true
 
     var isMotionPhotoAutoPlay = true
@@ -218,6 +223,8 @@ open class ImageViewerFragment : Fragment() {
                 if (::galleryAdapter.isInitialized && galleryAdapter.isSelectionMode) {
                     galleryAdapter.setSelectionMode(false)
                     updateGallerySelectionUI(0)
+                } else if (startedInGalleryMode) {
+                    findNavController().navigateUp()
                 } else {
                     exitGalleryMode()
                 }
@@ -254,6 +261,13 @@ open class ImageViewerFragment : Fragment() {
         setupEdgeToEdge()
         setupToolbar()
         setupGalleryView()
+
+        if (savedInstanceState == null && args.startInGalleryMode) {
+            startedInGalleryMode = true
+            enterGalleryMode(targetPosition = -1, animated = false)
+        } else if (savedInstanceState != null) {
+            startedInGalleryMode = savedInstanceState.getBoolean("startedInGalleryMode", false)
+        }
 
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, backPressedCallback)
 
@@ -366,6 +380,7 @@ open class ImageViewerFragment : Fragment() {
         lifecycleScope.launch {
             repository.getGroupedImagesFlow(targetUri).collect { groups ->
                 if (groups.isEmpty()) {
+                    hideGalleryDeletingIndicator()
                     if (isGalleryMode) {
                         exitGalleryMode()
                     }
@@ -374,7 +389,24 @@ open class ImageViewerFragment : Fragment() {
                 }
 
                 if (::galleryAdapter.isInitialized) {
-                    galleryAdapter.submitList(groups)
+                    galleryAdapter.submitList(groups) {
+                        if (_binding != null) {
+                            val animator = binding.galleryRecyclerView.itemAnimator
+                            if (animator != null && animator.isRunning) {
+                                animator.isRunning {
+                                    hideGalleryDeletingIndicator()
+                                    if (_binding != null) {
+                                        binding.galleryRecyclerView.isEnabled = true
+                                    }
+                                }
+                            } else {
+                                hideGalleryDeletingIndicator()
+                                if (_binding != null) {
+                                    binding.galleryRecyclerView.isEnabled = true
+                                }
+                            }
+                        }
+                    }
                     if (isGalleryMode && !galleryAdapter.isSelectionMode) {
                         binding.galleryToolbar.title = "${getString(R.string.gallery_title)} (${groups.size})"
                     }
@@ -401,6 +433,10 @@ open class ImageViewerFragment : Fragment() {
                         groups.indexOfFirst { it.baseName.isNotEmpty() && targetUri.contains(it.baseName) }
                     }
                 } else -1
+
+                if (targetPos != -1 && isGalleryMode && isFirstLoad) {
+                    binding.galleryRecyclerView.scrollToPosition(targetPos)
+                }
 
                 if (isFirstLoad) {
                     adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
@@ -3568,6 +3604,7 @@ open class ImageViewerFragment : Fragment() {
 
         galleryAdapter = DarkbagGalleryGridAdapter(requireContext()).apply {
             onItemClick = { group, pos, lensTag ->
+                startedInGalleryMode = false
                 exitGalleryMode(pos, lensTag)
             }
             onItemLongClick = { _, _, _ ->
@@ -3593,6 +3630,10 @@ open class ImageViewerFragment : Fragment() {
 
         binding.galleryRecyclerView.layoutManager = layoutManager
         binding.galleryRecyclerView.adapter = galleryAdapter
+        (binding.galleryRecyclerView.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)?.apply {
+            removeDuration = 250
+            moveDuration = 250
+        }
 
         binding.btnGalleryPill.setOnClickListener {
             enterGalleryMode()
@@ -3602,6 +3643,8 @@ open class ImageViewerFragment : Fragment() {
             if (galleryAdapter.isSelectionMode) {
                 galleryAdapter.setSelectionMode(false)
                 updateGallerySelectionUI(0)
+            } else if (startedInGalleryMode) {
+                findNavController().navigateUp()
             } else {
                 exitGalleryMode()
             }
@@ -3627,7 +3670,7 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
-    fun enterGalleryMode(targetPosition: Int = binding.imagePager.currentItem) {
+    fun enterGalleryMode(targetPosition: Int = binding.imagePager.currentItem, animated: Boolean = true) {
         if (!isGallerySupported) return
         if (isEditingAdjustments || isAdjusted) return
         if (isGalleryMode) return
@@ -3639,8 +3682,12 @@ open class ImageViewerFragment : Fragment() {
         }
 
         binding.galleryContainer.visibility = View.VISIBLE
-        binding.galleryContainer.alpha = 0f
-        binding.galleryContainer.animate().alpha(1f).setDuration(200).start()
+        if (animated) {
+            binding.galleryContainer.alpha = 0f
+            binding.galleryContainer.animate().alpha(1f).setDuration(200).start()
+        } else {
+            binding.galleryContainer.alpha = 1f
+        }
 
         binding.topBarContainer.visibility = View.GONE
         binding.viewerBentoDeck.visibility = View.GONE
@@ -3660,6 +3707,9 @@ open class ImageViewerFragment : Fragment() {
     fun exitGalleryMode(targetPosition: Int = -1, targetLensTag: String? = null) {
         if (!isGalleryMode) return
         isGalleryMode = false
+        startedInGalleryMode = false
+        hideGalleryDeletingIndicator()
+        binding.galleryRecyclerView.isEnabled = true
 
         if (::galleryAdapter.isInitialized) {
             galleryAdapter.setSelectionMode(false)
@@ -3748,8 +3798,47 @@ open class ImageViewerFragment : Fragment() {
             .show(childFragmentManager, DarkbagBatchDeleteSheet.TAG)
     }
 
+    protected fun showGalleryDeletingIndicator(count: Int) {
+        if (_binding == null) return
+        binding.tvGalleryDeletingStatus.text = if (count > 0) {
+            getString(R.string.gallery_deleting_count, count)
+        } else {
+            getString(R.string.gallery_deleting)
+        }
+        binding.galleryDeletingIndicator.apply {
+            animate().cancel()
+            visibility = View.VISIBLE
+            alpha = 0f
+            translationY = 40f
+            animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(200)
+                .start()
+        }
+    }
+
+    protected fun hideGalleryDeletingIndicator() {
+        if (_binding == null) return
+        binding.galleryDeletingIndicator.apply {
+            animate().cancel()
+            animate()
+                .alpha(0f)
+                .translationY(40f)
+                .setDuration(200)
+                .withEndAction {
+                    visibility = View.GONE
+                }
+                .start()
+        }
+    }
+
     private fun deleteBatchImages(selectedItems: List<GallerySelectedItem>, deleteMode: Int) {
         val context = context ?: return
+        showGalleryDeletingIndicator(selectedItems.size)
+        binding.galleryRecyclerView.isEnabled = false
+        binding.galleryBottomBar.visibility = View.GONE
+
         lifecycleScope.launch {
             val urisToDelete = mutableListOf<Uri>()
 
@@ -3794,15 +3883,17 @@ open class ImageViewerFragment : Fragment() {
             }
 
             val securityExceptionUris = mutableListOf<Uri>()
-            for (uri in urisToDelete.distinct()) {
-                try {
-                    deleteUriSafe(context, uri)
-                } catch (e: SecurityException) {
-                    if (uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
-                        securityExceptionUris.add(uri)
+            withContext(Dispatchers.IO) {
+                for (uri in urisToDelete.distinct()) {
+                    try {
+                        deleteUriSafe(context, uri)
+                    } catch (e: SecurityException) {
+                        if (uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
+                            securityExceptionUris.add(uri)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("ImageViewerFragment", "Failed to delete $uri", e)
                     }
-                } catch (e: Exception) {
-                    Log.e("ImageViewerFragment", "Failed to delete $uri", e)
                 }
             }
 
@@ -3817,6 +3908,10 @@ open class ImageViewerFragment : Fragment() {
                     context.let { Toast.makeText(it, "Failed to launch delete prompt", Toast.LENGTH_SHORT).show() }
                     repository.invalidateCache()
                     loadImages(forceRefresh = true)
+                    hideGalleryDeletingIndicator()
+                    if (_binding != null) {
+                        binding.galleryRecyclerView.isEnabled = true
+                    }
                 }
             } else {
                 repository.invalidateCache()
@@ -4407,6 +4502,7 @@ open class ImageViewerFragment : Fragment() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         pendingDeleteNextTargetUri?.let { outState.putString("pendingDeleteNextTargetUri", it) }
+        outState.putBoolean("startedInGalleryMode", startedInGalleryMode)
     }
 
     protected suspend fun generateProcessedBitmap(config: top.maary.darkbag.models.EditConfig, currentGroup: ImageGroup): android.graphics.Bitmap? {

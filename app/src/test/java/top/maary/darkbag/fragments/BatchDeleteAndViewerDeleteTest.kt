@@ -209,4 +209,24 @@ class BatchDeleteAndViewerDeleteTest {
         assertFalse(urisMode2.contains(rawVideo))
         assertFalse(urisMode2.contains(frame0))
     }
+
+    @Test
+    fun testImageViewerStartInGalleryModeBundle() {
+        val bundle = android.os.Bundle().apply {
+            putString("initial_uri", "content://media/external/images/media/100")
+            putBoolean("start_in_gallery_mode", true)
+        }
+        assertEquals("content://media/external/images/media/100", bundle.getString("initial_uri"))
+        assertTrue("start_in_gallery_mode must be true", bundle.getBoolean("start_in_gallery_mode"))
+    }
+
+    @Test
+    fun testGalleryDeletingStrings() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val deletingStr = context.getString(top.maary.darkbag.R.string.gallery_deleting)
+        assertTrue(deletingStr.isNotEmpty())
+
+        val deletingCountStr = context.getString(top.maary.darkbag.R.string.gallery_deleting_count, 3)
+        assertTrue(deletingCountStr.contains("3"))
+    }
 }
