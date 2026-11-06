@@ -48,7 +48,7 @@ data class MotionPhotoSlice(
  * to support zero-lag pre-roll capturing for Motion Photos.
  */
 class CircularVideoRingBuffer(
-    val maxRetentionDurationUs: Long = 3_000_000L // 3.0 seconds window in microsecond
+    val maxRetentionDurationUs: Long = 4_500_000L // 4.5 seconds retention window to comfortably buffer 1.5s+ pre-roll
 ) {
     companion object {
         private const val TAG = "CircularVideoRingBuffer"
@@ -102,7 +102,7 @@ class CircularVideoRingBuffer(
     fun slice(
         triggerTimestampUs: Long,
         preDurationUs: Long = 1_500_000L,
-        postDurationUs: Long = 750_000L
+        postDurationUs: Long = 1_500_000L
     ): MotionPhotoSlice? {
         synchronized(lock) {
             if (bufferQueue.isEmpty()) {

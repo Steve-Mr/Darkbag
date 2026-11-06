@@ -300,6 +300,7 @@
     <string name="pref_save_jpg">保存 JPG 照片</string>
     <string name="pref_save_raw">保存 DNG 底片</string>
     <string name="pref_motion_photo">动态照片</string>
+    <string name="pref_motion_photo_audio">动态照片声音</string>
     <string name="pref_save_location">记录地理位置</string>
     <string name="pref_default_lens">默认启动镜头</string>
     <string name="pref_default_focal_1x">1.0x 默认等效焦段</string>

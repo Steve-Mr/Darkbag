@@ -327,6 +327,7 @@
     <string name="pref_save_jpg">Save JPEG Photo</string>
     <string name="pref_save_raw">Save RAW Master</string>
     <string name="pref_motion_photo">Motion Photo</string>
+    <string name="pref_motion_photo_audio">Record Audio</string>
     <string name="pref_save_location">Record Location</string>
     <string name="pref_default_lens">Default Startup Lens</string>
     <string name="pref_default_focal_1x">1.0x Default Focal Length</string>

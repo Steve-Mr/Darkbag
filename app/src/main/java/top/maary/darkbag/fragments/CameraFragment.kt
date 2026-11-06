@@ -448,7 +448,7 @@ class CameraFragment : Fragment() {
                     motionPhotoEncoder?.captureSnapshot(
                         captureTimestampNs = System.nanoTime(),
                         preDurationMs = 1500L,
-                        postDurationMs = 750L,
+                        postDurationMs = 1500L,
                         outputFile = tempMp4,
                         orientationDegrees = currentOrientation
                     ) { file, stillPtsUs ->
@@ -690,6 +690,11 @@ class CameraFragment : Fragment() {
         if (!isAdded) return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         isMotionPhotoEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false)
+        val isAudioEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true) &&
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    requireContext(),
+                    android.Manifest.permission.RECORD_AUDIO
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
         if (isMotionPhotoEnabled && (activeCoordinator?.mode ?: resolveActiveCaptureMode(prefs)).supportsMotionPhoto) {
             if (motionPhotoEncoder == null) {
@@ -697,10 +702,13 @@ class CameraFragment : Fragment() {
                     width = 1080,
                     height = 1440,
                     frameRate = 30,
-                    bitRate = 10_000_000
+                    bitRate = 10_000_000,
+                    isAudioEnabled = isAudioEnabled
                 ).apply {
                     start()
                 }
+            } else {
+                motionPhotoEncoder?.updateAudioEnabled(isAudioEnabled)
             }
             lutProcessor?.setEncoderSurface(motionPhotoEncoder?.surface, 1080, 1440)
         } else {
@@ -2119,7 +2127,7 @@ class CameraFragment : Fragment() {
                 if (motionMp4Path == null && pendingMotionPhotoTask != null) {
                     val task = pendingMotionPhotoTask
                     pendingMotionPhotoTask = null
-                    val result = withTimeoutOrNull(2500L) { task?.await() }
+                    val result = withTimeoutOrNull(3500L) { task?.await() }
                     motionMp4Path = result?.first
                     motionStillPtsUs = result?.second ?: 0L
                 }
@@ -3895,7 +3903,7 @@ class CameraFragment : Fragment() {
                 if (pendingMotionPhotoTask != null) {
                     val task = pendingMotionPhotoTask
                     pendingMotionPhotoTask = null
-                    val result = withTimeoutOrNull(2500L) { task?.await() }
+                    val result = withTimeoutOrNull(3500L) { task?.await() }
                     motionMp4Path = result?.first
                     motionStillPtsUs = result?.second ?: 0L
                 }
@@ -4168,7 +4176,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     if (pendingMotionPhotoTask != null) {
                         val task = pendingMotionPhotoTask
                         pendingMotionPhotoTask = null
-                        val result = withTimeoutOrNull(2500L) { task?.await() }
+                        val result = withTimeoutOrNull(3500L) { task?.await() }
                         motionMp4Path = result?.first
                         motionStillPtsUs = result?.second ?: 0L
                     }
@@ -4456,7 +4464,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 if (pendingMotionPhotoTask != null) {
                     val task = pendingMotionPhotoTask
                     pendingMotionPhotoTask = null
-                    val res = withTimeoutOrNull(2500L) { task?.await() }
+                    val res = withTimeoutOrNull(3500L) { task?.await() }
                     motionMp4Path = res?.first
                     motionStillPtsUs = res?.second ?: 0L
                 }
