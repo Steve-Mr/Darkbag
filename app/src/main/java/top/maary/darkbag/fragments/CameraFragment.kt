@@ -1833,17 +1833,17 @@ class CameraFragment : Fragment() {
 
         cameraUiContainerBinding?.photoViewButton?.setOnLongClickListener {
             val safeActivity = activity ?: return@setOnLongClickListener false
-            lifecycleScope.launch {
-                val navController = Navigation.findNavController(safeActivity, R.id.fragment_container)
-                if (navController.currentDestination?.id == R.id.camera_fragment) {
-                    val uri = currentThumbnailUri ?: mediaStoreUtils.getLatestAppImage()
-                    navController.navigate(
-                        CameraFragmentDirections.actionCameraToImageViewer(
-                            initialUri = uri?.toString(),
-                            startInGalleryMode = true
-                        )
+            val navController = Navigation.findNavController(safeActivity, R.id.fragment_container)
+            if (navController.currentDestination?.id == R.id.camera_fragment) {
+                // Instantly navigate without blocking on getLatestAppImage(). If thumbnail is available, use it;
+                // if null, gallery mode will load asynchronously and scroll to latest photo upon completion.
+                val uri = currentThumbnailUri
+                navController.navigate(
+                    CameraFragmentDirections.actionCameraToImageViewer(
+                        initialUri = uri?.toString(),
+                        startInGalleryMode = true
                     )
-                }
+                )
             }
             true
         }
