@@ -15,6 +15,7 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -24,6 +25,7 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
+import top.maary.darkbag.R
 import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.utils.LutManager
 import kotlin.math.roundToInt
@@ -37,7 +39,9 @@ object ColorRecipeBottomSheet {
 
     private data class LutEntry(
         val displayName: String,
-        val fileName: String?
+        val fileName: String?,
+        val associatedLog: String? = null,
+        val isUniversal: Boolean = false
     )
 
     /**
@@ -300,13 +304,56 @@ object ColorRecipeBottomSheet {
         }
         rootLayout.addView(lutRecyclerView)
 
+        // Empty hint view when no LUTs are available for selected Log
+        val emptyHintView = TextView(context).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                val hPad = (20 * density).roundToInt()
+                val vPad = (8 * density).roundToInt()
+                setPadding(hPad, 0, hPad, vPad)
+            }
+            textSize = 12f
+            setTextColor(colorOnSurfaceVariant)
+            gravity = Gravity.CENTER_HORIZONTAL
+            visibility = View.GONE
+        }
+        rootLayout.addView(emptyHintView)
+
         // Build LUT dataset
         val lutEntries = mutableListOf<LutEntry>()
-        lutEntries.add(LutEntry(displayName = "None", fileName = null))
-        lutManager.getLuts().forEach { file ->
-            val display = CameraBentoDeckView.formatRecipeLabel(file.name, file.nameWithoutExtension)
-            lutEntries.add(LutEntry(displayName = display, fileName = file.name))
+
+        fun reloadLutEntries() {
+            lutEntries.clear()
+            lutEntries.add(LutEntry(displayName = "None", fileName = null))
+            val filteredItems = lutManager.getLutsForLog(currentLog)
+            filteredItems.forEach { item ->
+                val baseDisplay = CameraBentoDeckView.formatRecipeLabel(item.name, item.file.nameWithoutExtension)
+                val display = if (item.isUniversal) {
+                    "$baseDisplay\n[${context.getString(R.string.lut_badge_universal)}]"
+                } else {
+                    baseDisplay
+                }
+                lutEntries.add(
+                    LutEntry(
+                        displayName = display,
+                        fileName = item.name,
+                        associatedLog = item.associatedLog,
+                        isUniversal = item.isUniversal
+                    )
+                )
+            }
+
+            if (lutEntries.size <= 1 && currentLog != "None") {
+                emptyHintView.text = "${context.getString(R.string.lut_empty_log_hint, currentLog)}\n${context.getString(R.string.lut_empty_import_action, currentLog)}"
+                emptyHintView.visibility = View.VISIBLE
+            } else {
+                emptyHintView.visibility = View.GONE
+            }
         }
+
+        reloadLutEntries()
 
         // Helper to check if an entry matches current active LUT
         fun isEntryActive(entry: LutEntry, activeLut: String?): Boolean {
@@ -356,19 +403,19 @@ object ColorRecipeBottomSheet {
                     val margin = (4 * density).roundToInt()
                     layoutParams = RecyclerView.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
-                        (46 * density).roundToInt()
+                        (52 * density).roundToInt()
                     ).apply {
                         setMargins(margin, margin, margin, margin)
                     }
-                    maxLines = 1
+                    maxLines = 2
                     ellipsize = TextUtils.TruncateAt.END
                     isAllCaps = false
-                    textSize = 12.5f
+                    textSize = 12f
                     setTypeface(typeface, Typeface.BOLD)
                     gravity = Gravity.CENTER
                     insetTop = 0
                     insetBottom = 0
-                    setPadding((12 * density).roundToInt(), 0, (12 * density).roundToInt(), 0)
+                    setPadding((8 * density).roundToInt(), 0, (8 * density).roundToInt(), 0)
                 }
                 return LutViewHolder(btn)
             }
@@ -402,21 +449,20 @@ object ColorRecipeBottomSheet {
                         prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
                     } else {
                         val fileName = entry.fileName
-                        val lutManager = LutManager(context)
-                        val assocLog = fileName?.let { lutManager.getAssociatedLog(it) }
-                        if (!assocLog.isNullOrEmpty()) {
-                            currentLog = assocLog
-                            prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, currentLog).apply()
-                            updateLogButtonsUi()
-                        } else if (currentLog == "None") {
-                            // If current Log is "None" when picking a LUT, auto-select standard Log curve
-                            val defaultLog = SettingsFragment.LOG_CURVES.getOrNull(1) ?: "Arri LogC3"
-                            currentLog = defaultLog
-                            prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, currentLog).apply()
-                            updateLogButtonsUi()
-                        }
                         currentLut = fileName
                         prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, currentLut).apply()
+
+                        // If clicking a log-specific LUT, ensure current Log synchronizes
+                        val assocLog = entry.associatedLog
+                        if (!entry.isUniversal && !assocLog.isNullOrEmpty()) {
+                            val targetPrefLog = lutManager.toTargetLogPreference(assocLog)
+                            if (targetPrefLog != currentLog) {
+                                currentLog = targetPrefLog
+                                prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, currentLog).apply()
+                                updateLogButtonsUi()
+                                reloadLutEntries()
+                            }
+                        }
                     }
                     onRecipeSelected(currentLog, currentLut)
                     notifyDataSetChanged()
@@ -448,11 +494,17 @@ object ColorRecipeBottomSheet {
 
                 setOnClickListener {
                     currentLog = logName
-                    if (currentLog == "None") {
-                        currentLut = null
-                        prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT)
-                    }
                     prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, currentLog).apply()
+
+                    // Check active LUT compatibility
+                    if (currentLut != null && !lutManager.isLutCompatibleWithLog(currentLut, currentLog)) {
+                        currentLut = null
+                        prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                        val msg = context.getString(R.string.lut_reset_incompatible_toast, currentLog)
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
+
+                    reloadLutEntries()
                     onRecipeSelected(currentLog, currentLut)
                     updateLogButtonsUi()
                     lutAdapter.notifyDataSetChanged()
@@ -470,6 +522,7 @@ object ColorRecipeBottomSheet {
                 .putString(SettingsFragment.KEY_TARGET_LOG, "None")
                 .remove(SettingsFragment.KEY_ACTIVE_LUT)
                 .apply()
+            reloadLutEntries()
             onRecipeSelected("None", null)
             updateLogButtonsUi()
             lutAdapter.notifyDataSetChanged()

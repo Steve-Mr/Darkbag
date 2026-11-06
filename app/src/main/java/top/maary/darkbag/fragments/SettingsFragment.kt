@@ -7,6 +7,7 @@ import top.maary.darkbag.utils.CacheManager
 import top.maary.darkbag.utils.MultiCameraHelper
 import top.maary.darkbag.utils.MultiCameraCountPreference
 import top.maary.darkbag.utils.DualLensPairPreference
+import top.maary.darkbag.utils.LutManager
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -74,6 +75,10 @@ class SettingsFragment : Fragment() {
             Toast.makeText(context, R.string.toast_audio_permission_granted, Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(context, R.string.error_mic_permission_silent_video, Toast.LENGTH_SHORT).show()
+            if (_binding != null && binding.switchMotionPhotoAudio.isChecked) {
+                binding.switchMotionPhotoAudio.isChecked = false
+                prefs.edit().putBoolean(KEY_MOTION_PHOTO_AUDIO, false).apply()
+            }
         }
     }
 
@@ -138,6 +143,7 @@ class SettingsFragment : Fragment() {
         updateCheckboxStates()
         syncLocationSettingState()
         updateStorageVisibility()
+        updateMotionPhotoVisibility()
         updateCacheSize()
     }
 
@@ -269,11 +275,19 @@ class SettingsFragment : Fragment() {
     private fun updateLutsTile() {
         val ctx = context ?: return
         val activeLut = prefs.getString(KEY_ACTIVE_LUT, null)
-        val rawName = activeLut?.removeSuffix(".cube")?.removeSuffix(".CUBE") ?: "Classic Neg"
-        val displayLut = if (rawName.length > 14) {
-            rawName.take(13) + "…"
+        val rawName = activeLut?.removeSuffix(".cube")?.removeSuffix(".CUBE") ?: "None"
+        val assocLog = activeLut?.let { LutManager(ctx).getAssociatedLog(it) }
+        val displayLut = if (activeLut != null) {
+            val label = if (!assocLog.isNullOrEmpty() && assocLog != LutManager.LOG_UNIVERSAL) {
+                "$rawName ($assocLog)"
+            } else if (assocLog == LutManager.LOG_UNIVERSAL) {
+                "$rawName (Universal)"
+            } else {
+                rawName
+            }
+            if (label.length > 18) label.take(17) + "…" else label
         } else {
-            rawName
+            "None"
         }
         binding.btnManageLuts.text = CameraBentoDeckView.formatProTelemetry(
             label = getString(R.string.pref_manage_luts_label),
@@ -576,8 +590,12 @@ class SettingsFragment : Fragment() {
             ) { which ->
                 val selected = LOG_CURVES[which]
                 val editor = prefs.edit().putString(KEY_TARGET_LOG, selected)
-                if (selected == "None") {
+                val activeLut = prefs.getString(KEY_ACTIVE_LUT, null)
+                val lutMgr = LutManager(requireContext())
+                if (!lutMgr.isLutCompatibleWithLog(activeLut, selected)) {
                     editor.remove(KEY_ACTIVE_LUT)
+                    val msg = getString(R.string.lut_reset_incompatible_toast, selected)
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                 }
                 editor.apply()
                 updateTargetLogTile()
@@ -990,6 +1008,25 @@ class SettingsFragment : Fragment() {
         updateStorageVisibility()
 
         setupSwitch(binding.switchMotionPhoto, KEY_MOTION_PHOTO, false)
+        binding.switchMotionPhoto.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_MOTION_PHOTO, isChecked).apply()
+            updateMotionPhotoVisibility()
+        }
+
+        setupSwitch(binding.switchMotionPhotoAudio, KEY_MOTION_PHOTO_AUDIO, true)
+        binding.switchMotionPhotoAudio.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                if (androidx.core.content.ContextCompat.checkSelfPermission(
+                        requireContext(),
+                        android.Manifest.permission.RECORD_AUDIO
+                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) {
+                    audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                }
+            }
+            prefs.edit().putBoolean(KEY_MOTION_PHOTO_AUDIO, isChecked).apply()
+        }
+        updateMotionPhotoVisibility()
 
         syncLocationSettingState()
         binding.switchSaveLocation.setOnCheckedChangeListener { _, isChecked ->
@@ -1165,6 +1202,10 @@ class SettingsFragment : Fragment() {
 
         setupSwitch(binding.switchForce60fps, KEY_FORCE_60FPS, false)
 
+        binding.btnOpenLensCalibration.setOnClickListener {
+            top.maary.darkbag.ui.LensCalibrationBottomSheet.show(childFragmentManager)
+        }
+
         binding.btnCloseExperimental.setOnClickListener {
             prefs.edit().putBoolean(KEY_DEBUG_ENABLED, false).apply()
             updateDebugVisibility()
@@ -1199,6 +1240,12 @@ class SettingsFragment : Fragment() {
 
         binding.tvJpgPath.text = prefs.getString(KEY_JPG_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
         binding.tvRawPath.text = prefs.getString(KEY_RAW_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
+    }
+
+    private fun updateMotionPhotoVisibility() {
+        if (_binding == null) return
+        val motionEnabled = binding.switchMotionPhoto.isChecked
+        binding.switchMotionPhotoAudio.visibility = if (motionEnabled) View.VISIBLE else View.GONE
     }
 
     private val jpgPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -1568,6 +1615,7 @@ class SettingsFragment : Fragment() {
         const val KEY_FORCE_60FPS = "force_60fps"
         const val KEY_DEBUG_ENABLED = "debug_enabled"
         const val KEY_MOTION_PHOTO = "motion_photo_enabled"
+        const val KEY_MOTION_PHOTO_AUDIO = "motion_photo_audio_enabled"
         const val KEY_SAVE_LOCATION = "save_location_enabled"
         const val KEY_SAVE_RAW = "save_raw"
         const val KEY_RAW_OUTPUT_TYPE = "raw_output_type"

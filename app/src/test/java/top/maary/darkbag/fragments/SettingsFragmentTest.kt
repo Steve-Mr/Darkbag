@@ -529,6 +529,13 @@ class SettingsFragmentTest {
             isActive = true
         )
         assertEquals("P&S\nAuto", tierText.toString())
+
+        // 4. Default startup entry titles retain emojis
+        val enCameraStartup = context.getString(R.string.settings_startup_camera_title)
+        assertEquals("📷 Camera", enCameraStartup)
+
+        val enPlaygroundStartup = context.getString(R.string.settings_startup_playground_title)
+        assertEquals("🎨 Playground", enPlaygroundStartup)
     }
 
     @Test
@@ -598,5 +605,32 @@ class SettingsFragmentTest {
         val enBayerRaw = context.getString(R.string.raw_output_type_bayer)
         assertEquals("Bayer CFA RAW (~12MB)", enBayerRaw)
         assertFalse(enBayerRaw.contains("Default"))
+
+        val zhCameraStartup = zhContext.getString(R.string.settings_startup_camera_title)
+        assertEquals("📷 相机", zhCameraStartup)
+
+        val zhPlaygroundStartup = zhContext.getString(R.string.settings_startup_playground_title)
+        assertEquals("🎨 暗房", zhPlaygroundStartup)
+    }
+
+    @Test
+    fun testMotionPhotoAudioSwitchAndPreference() {
+        assertEquals("motion_photo_audio_enabled", SettingsFragment.KEY_MOTION_PHOTO_AUDIO)
+
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
+        val inflater = LayoutInflater.from(themedContext)
+        val binding = top.maary.darkbag.databinding.FragmentSettingsBinding.inflate(inflater)
+
+        assertNotNull(binding.switchMotionPhoto)
+        assertNotNull(binding.switchMotionPhotoAudio)
+        assertEquals("AUDIO", binding.switchMotionPhotoAudio.badgeText)
+
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true).apply()
+        assertTrue(prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, false))
+
+        prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, false).apply()
+        assertFalse(prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true))
     }
 }

@@ -22,23 +22,28 @@ data class HardwareProfile(
     val useSensorColorMatrix: Boolean = false,
     val lensDistortion: FloatArray? = null,
     val intrinsicCalibration: FloatArray? = null,
-    val focalLength: Float = 0f
+    val focalLength: Float = 0f,
+    val customCalibration: top.maary.darkbag.calibration.CustomLensCalibration? = null
 ) {
     fun isUltraWide(): Boolean = focalLength in 0.1f..3.2f
 
-    fun getDistortionMode(): Int {
+    fun getEffectiveDistortionCoeffs(): FloatArray? {
+        if (customCalibration != null && customCalibration.isEnabled) {
+            return customCalibration.toCoefficientsArray()
+        }
         val ld = lensDistortion
         if (ld != null && ld.isNotEmpty()) {
             val sumAbs = ld.fold(0f) { acc, v -> acc + kotlin.math.abs(v) }
             val isDummy = ld.size >= 1 && kotlin.math.abs(ld[0] - 0.001f) < 1e-4f && (sumAbs - kotlin.math.abs(ld[0])) < 1e-4f
             if (sumAbs > 0.005f && !isDummy) {
-                return 1
+                return ld
             }
         }
-        if (isUltraWide() && intrinsicCalibration != null && intrinsicCalibration.isNotEmpty()) {
-            return 2
-        }
-        return 0
+        return null
+    }
+
+    fun getDistortionMode(): Int {
+        return if (getEffectiveDistortionCoeffs() != null) 1 else 0
     }
 
     override fun equals(other: Any?): Boolean {
@@ -89,6 +94,7 @@ data class HardwareProfile(
             if (!intrinsicCalibration.contentEquals(other.intrinsicCalibration)) return false
         } else if (other.intrinsicCalibration != null) return false
         if (focalLength != other.focalLength) return false
+        if (customCalibration != other.customCalibration) return false
         return true
     }
 
@@ -110,6 +116,7 @@ data class HardwareProfile(
         result = 31 * result + (lensDistortion?.contentHashCode() ?: 0)
         result = 31 * result + (intrinsicCalibration?.contentHashCode() ?: 0)
         result = 31 * result + focalLength.hashCode()
+        result = 31 * result + (customCalibration?.hashCode() ?: 0)
         return result
     }
 }

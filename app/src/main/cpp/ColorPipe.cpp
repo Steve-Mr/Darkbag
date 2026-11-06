@@ -1327,19 +1327,7 @@ bool process_and_save_image(
     }
 
     auto map_backward_coords = [&](int inX, int inY, int& outX, int& outY) {
-        if (distortionMode == 2 && distFocalPx > 1.0f) {
-            float dx = static_cast<float>(inX) - distCx;
-            float dy = static_cast<float>(inY) - distCy;
-            float ru = std::sqrt(dx * dx + dy * dy);
-            if (ru > 0.001f) {
-                float theta = std::atan(ru / distFocalPx);
-                float rd = distFocalPx * theta;
-                float s = rd / ru;
-                outX = std::clamp(static_cast<int>(std::round(distCx + dx * s)), 0, width - 1);
-                outY = std::clamp(static_cast<int>(std::round(distCy + dy * s)), 0, height - 1);
-                return;
-            }
-        } else if (distortionMode == 1 && distFocalPx > 1.0f) {
+        if (distortionMode == 1 && distFocalPx > 1.0f) {
             float dx = static_cast<float>(inX) - distCx;
             float dy = static_cast<float>(inY) - distCy;
             float ru = std::sqrt(dx * dx + dy * dy) / distFocalPx;
@@ -2143,14 +2131,8 @@ static std::vector<uint8_t> build_dng_warp_opcodes(
     double kt0 = 0.0;
     double kt1 = 0.0;
 
-    if (distortionMode == 2) {
-        // Mode 2 (Optical fallback):
-        // Taylor series coefficients: k0 = 1.0, k1 = 1/3 * (m/f)^2, k2 = 2/15 * (m/f)^4, k3 = 17/315 * (m/f)^6
-        k1 = (1.0 / 3.0) * mf2;
-        k2 = (2.0 / 15.0) * mf4;
-        k3 = (17.0 / 315.0) * mf2 * mf4;
-    } else if (distortionMode == 1 && distortionCoeffs) {
-        // Mode 1 (Polynomial from Camera2 LENS_DISTORTION):
+    if (distortionMode == 1 && distortionCoeffs) {
+        // Mode 1 (Polynomial from Camera2 LENS_DISTORTION or custom calibration):
         k1 = static_cast<double>(distortionCoeffs[0]) * mf2;
         k2 = static_cast<double>(distortionCoeffs[1]) * mf4;
         k3 = static_cast<double>(distortionCoeffs[2]) * mf2 * mf4;

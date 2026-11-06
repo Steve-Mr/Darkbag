@@ -181,6 +181,12 @@ class BentoSwitchTile @JvmOverloads constructor(
         titleView.text = text
     }
 
+    val title: CharSequence?
+        get() = titleView.text
+
+    val badgeText: CharSequence?
+        get() = badgeView.text
+
     fun setBadge(badgeText: CharSequence?, style: BentoBadgeStyle = BentoBadgeStyle.SECONDARY) {
         if (badgeText.isNullOrEmpty()) {
             badgeView.visibility = View.GONE
