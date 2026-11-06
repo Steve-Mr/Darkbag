@@ -1969,8 +1969,16 @@ open class ImageViewerFragment : Fragment() {
 
     private fun showLutMenu() {
         val lutManager = top.maary.darkbag.utils.LutManager(requireContext())
-        top.maary.darkbag.ui.ColorRecipeBottomSheet.show(requireContext(), lutManager) { selectedLog, selectedLut ->
-            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val config = currentEditConfig ?: currentGroup.editConfig
+        val initialLog = config?.log ?: "None"
+        val initialLut = config?.lut?.takeIf { !it.equals("None", ignoreCase = true) }
+        top.maary.darkbag.ui.ColorRecipeBottomSheet.show(
+            context = requireContext(),
+            lutManager = lutManager,
+            initialLog = initialLog,
+            initialLut = initialLut
+        ) { selectedLog, selectedLut ->
             val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
             if (isRawVideo) {
                 currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(

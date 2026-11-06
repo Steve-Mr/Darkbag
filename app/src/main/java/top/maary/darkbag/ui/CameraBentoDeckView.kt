@@ -860,10 +860,8 @@ class CameraBentoDeckView @JvmOverloads constructor(
             binding.btnProLink?.let { styleBentoProLink(it, isLinked = true) }
 
             // Row B: Film Recipe & Quick Switches
-            val targetLogName = prefs.getString(top.maary.darkbag.fragments.SettingsFragment.KEY_TARGET_LOG, "F-Log2")
-                ?.takeIf { !it.equals("None", ignoreCase = true) } ?: "F-Log2"
+            val targetLogName = prefs.getString(top.maary.darkbag.fragments.SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
             val activeLutName = prefs.getString(top.maary.darkbag.fragments.SettingsFragment.KEY_ACTIVE_LUT, null)
-                ?.takeIf { !it.equals("None", ignoreCase = true) } ?: "Classic Neg"
             bindRecipeRow(binding, targetLogName, activeLutName)
 
             val isHdrPlus = prefs.getBoolean(top.maary.darkbag.fragments.CameraFragment.KEY_HDR_PLUS_ENABLED, true)
