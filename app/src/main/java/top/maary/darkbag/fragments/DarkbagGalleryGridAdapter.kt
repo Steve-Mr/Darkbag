@@ -35,7 +35,8 @@ data class GallerySelectedItem(
 )
 
 class DarkbagGalleryGridAdapter(
-    private val context: Context
+    private val context: Context,
+    var repository: top.maary.darkbag.repository.ImageRepository? = null
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
@@ -46,6 +47,17 @@ class DarkbagGalleryGridAdapter(
     var onItemClick: ((ImageGroup, Int, String?) -> Unit)? = null
     var onItemLongClick: ((ImageGroup, Int, String?) -> Unit)? = null
     var onSelectionChanged: ((Int) -> Unit)? = null
+
+    var columnCount: Int = 3
+        set(value) {
+            if (field != value) {
+                field = value
+                notifyItemRangeChanged(0, itemCount, "COLUMN_COUNT_CHANGED")
+            }
+        }
+
+    private val metadataCache = android.util.LruCache<String, top.maary.darkbag.models.CaptureMetadata>(100)
+    private val dateFormatter = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
 
     // Format for keys: "baseName" for single image; "baseName#lensTag" for multi-camera lens
     private val selectedItemKeys = mutableSetOf<String>()
@@ -190,6 +202,14 @@ class DarkbagGalleryGridAdapter(
             }
             return
         }
+        if (payloads.contains("COLUMN_COUNT_CHANGED")) {
+            val group = getItem(position)
+            if (holder is SingleViewHolder) {
+                val targetUri = group.jpgUri ?: group.derivativeJpgUris.firstOrNull() ?: group.mp4VideoUri ?: group.derivativeMp4Uris.firstOrNull() ?: group.cinemaDngFirstFrameUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
+                bindSingleColumnMode(holder, group, targetUri)
+            }
+            return
+        }
         super.onBindViewHolder(holder, position, payloads)
     }
 
@@ -278,8 +298,9 @@ class DarkbagGalleryGridAdapter(
             holder.binding.thumbnailView.setImageDrawable(null)
         }
 
-        // Setup format badges
+        // Setup format badges & single-column mode layout
         setupSingleBadges(holder, group)
+        bindSingleColumnMode(holder, group, targetUri)
 
         // Setup selection state
         bindSingleSelectionState(holder, group)
@@ -313,26 +334,117 @@ class DarkbagGalleryGridAdapter(
         }
     }
 
+    private fun bindSingleColumnMode(holder: SingleViewHolder, group: ImageGroup, targetUri: Uri?) {
+        val lp = holder.binding.thumbnailView.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        if (columnCount == 1) {
+            lp.dimensionRatio = "4:3"
+            holder.binding.thumbnailView.layoutParams = lp
+
+            holder.binding.layoutSingleColInfo.visibility = View.VISIBLE
+            holder.binding.badgesContainer.visibility = View.GONE
+
+            holder.binding.tvSingleCaptureTime.text = if (group.captureTime > 0L) dateFormatter.format(java.util.Date(group.captureTime)) else "--"
+            holder.binding.tvSingleFilename.text = group.baseName
+
+            val badgeText = resolveFormatBadgeText(group)
+            if (badgeText.isNotBlank()) {
+                holder.binding.tvSingleFormatPill.visibility = View.VISIBLE
+                holder.binding.tvSingleFormatPill.text = badgeText
+            } else {
+                holder.binding.tvSingleFormatPill.visibility = View.GONE
+            }
+
+            bindSingleExifParams(holder, group, targetUri)
+        } else {
+            lp.dimensionRatio = "1:1"
+            holder.binding.thumbnailView.layoutParams = lp
+
+            holder.binding.layoutSingleColInfo.visibility = View.GONE
+            holder.binding.badgesContainer.visibility = View.VISIBLE
+        }
+    }
+
+    private fun bindSingleExifParams(holder: SingleViewHolder, group: ImageGroup, targetUri: Uri?) {
+        if (targetUri == null) {
+            holder.binding.tvSingleExifParams.text = "--"
+            return
+        }
+        val cached = metadataCache.get(group.baseName)
+        if (cached != null) {
+            holder.binding.tvSingleExifParams.text = formatExifParams(cached)
+            return
+        }
+
+        holder.binding.tvSingleExifParams.text = "--"
+        val repo = repository ?: return
+        val groupBase = group.baseName
+        adapterScope.launch {
+            try {
+                val meta = repo.getCaptureMetadata(targetUri)
+                if (meta != null) {
+                    metadataCache.put(groupBase, meta)
+                    withContext(Dispatchers.Main) {
+                        if (holder.bindingAdapterPosition != RecyclerView.NO_POSITION &&
+                            getItem(holder.bindingAdapterPosition).baseName == groupBase) {
+                            holder.binding.tvSingleExifParams.text = formatExifParams(meta)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("DarkbagGalleryGridAdapter", "Failed to load metadata for $targetUri", e)
+            }
+        }
+    }
+
+    private fun formatExifParams(meta: top.maary.darkbag.models.CaptureMetadata): String {
+        val parts = mutableListOf<String>()
+        val focal = meta.focalLengthIn35mmFilm ?: meta.focalLength?.toInt()
+        if (focal != null && focal > 0) parts.add("${focal}mm")
+        if (meta.fNumber != null && meta.fNumber > 0f) parts.add("ƒ/${String.format(java.util.Locale.US, "%.1f", meta.fNumber)}")
+        if (meta.exposureTime != null && meta.exposureTime > 0L) parts.add(formatShutterSpeed(meta.exposureTime))
+        if (meta.iso != null && meta.iso > 0) parts.add("ISO ${meta.iso}")
+        return if (parts.isNotEmpty()) parts.joinToString(" · ") else "--"
+    }
+
+    private fun formatShutterSpeed(ns: Long): String {
+        val sec = ns / 1_000_000_000.0
+        return if (sec >= 1.0) {
+            String.format(java.util.Locale.US, "%.1fs", sec)
+        } else if (sec > 0.0) {
+            val denom = kotlin.math.round((1.0 / sec)).toInt()
+            "1/${denom}s"
+        } else "--"
+    }
+
     private fun bindSingleSelectionState(holder: SingleViewHolder, group: ImageGroup) {
         val selected = selectedItemKeys.contains(group.baseName)
+        val density = holder.itemView.resources.displayMetrics.density
+        val primaryColor = com.google.android.material.color.MaterialColors.getColor(holder.itemView, android.R.attr.colorPrimary)
+
         if (isSelectionMode) {
             holder.binding.selectionOverlay.visibility = if (selected) View.VISIBLE else View.GONE
             holder.binding.iconSelected.visibility = if (selected) View.VISIBLE else View.GONE
             holder.binding.iconUnselected.visibility = if (selected) View.GONE else View.VISIBLE
-            holder.binding.cardRoot.strokeColor = if (selected) {
-                com.google.android.material.color.MaterialColors.getColor(holder.itemView, android.R.attr.colorPrimary)
+            if (selected) {
+                holder.binding.cardRoot.radius = 10f * density
+                holder.binding.cardRoot.strokeWidth = (1.5f * density).toInt()
+                holder.binding.cardRoot.strokeColor = primaryColor
             } else {
-                Color.TRANSPARENT
+                holder.binding.cardRoot.radius = 14f * density
+                holder.binding.cardRoot.strokeWidth = 0
+                holder.binding.cardRoot.strokeColor = Color.TRANSPARENT
             }
         } else {
             holder.binding.selectionOverlay.visibility = View.GONE
             holder.binding.iconSelected.visibility = View.GONE
             holder.binding.iconUnselected.visibility = View.GONE
+            holder.binding.cardRoot.radius = 14f * density
+            holder.binding.cardRoot.strokeWidth = 0
             holder.binding.cardRoot.strokeColor = Color.TRANSPARENT
         }
     }
 
-    private fun setupSingleBadges(holder: SingleViewHolder, group: ImageGroup) {
+    fun resolveFormatBadgeText(group: ImageGroup): String {
         val isCinemaDng = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
         val isRawVideo = group.isRawVideo || group.rawVideoUri != null
         val hasMp4 = group.isMp4Video || group.mp4VideoUri != null || group.derivativeMp4Uris.isNotEmpty()
@@ -340,39 +452,28 @@ class DarkbagGalleryGridAdapter(
         val hasDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
         val derivCount = group.allDerivativeUris.size
 
-        if (isCinemaDng) {
+        return when {
+            isCinemaDng -> if (derivCount >= 2) "CDNG+${derivCount}V" else if (hasMp4) "CDNG+MP4" else if (hasJpg) "CDNG+JPG" else "CDNG"
+            isRawVideo -> if (derivCount >= 2) "RAW+${derivCount}V" else if (hasMp4) "RAW+MP4" else "RAW VID"
+            group.isMp4Video && !hasDng && !hasJpg -> if (derivCount >= 2) "GRADED+${derivCount}V" else if (group.derivativeMp4Uris.isNotEmpty()) "GRADED" else "MP4"
+            group.isHalfFrame() -> context.getString(R.string.format_half_frame)
+            hasDng && derivCount >= 2 -> "RAW+${derivCount}V"
+            hasJpg && hasDng -> context.getString(R.string.format_raw_jpg)
+            hasDng -> context.getString(R.string.format_raw)
+            hasJpg -> if (derivCount >= 2) "${derivCount}V" else context.getString(R.string.format_jpg)
+            else -> ""
+        }
+    }
+
+    private fun setupSingleBadges(holder: SingleViewHolder, group: ImageGroup) {
+        val isCinemaDng = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
+        val isRawVideo = group.isRawVideo || group.rawVideoUri != null
+        val hasMp4 = group.isMp4Video || group.mp4VideoUri != null || group.derivativeMp4Uris.isNotEmpty()
+
+        val badgeText = resolveFormatBadgeText(group)
+        if (badgeText.isNotEmpty()) {
             holder.binding.tvFormatBadge.visibility = View.VISIBLE
-            holder.binding.tvFormatBadge.text = when {
-                derivCount >= 2 -> "CDNG+${derivCount}V"
-                hasMp4 -> "CDNG+MP4"
-                hasJpg -> "CDNG+JPG"
-                else -> "CDNG"
-            }
-        } else if (isRawVideo) {
-            holder.binding.tvFormatBadge.visibility = View.VISIBLE
-            holder.binding.tvFormatBadge.text = when {
-                derivCount >= 2 -> "RAW+${derivCount}V"
-                hasMp4 -> "RAW+MP4"
-                else -> "RAW VID"
-            }
-        } else if (group.isMp4Video && !hasDng && !hasJpg) {
-            holder.binding.tvFormatBadge.visibility = View.VISIBLE
-            holder.binding.tvFormatBadge.text = if (derivCount >= 2) "GRADED+${derivCount}V" else if (group.derivativeMp4Uris.isNotEmpty()) "GRADED" else "MP4"
-        } else if (group.isHalfFrame()) {
-            holder.binding.tvFormatBadge.visibility = View.VISIBLE
-            holder.binding.tvFormatBadge.text = context.getString(R.string.format_half_frame)
-        } else if (hasDng && derivCount >= 2) {
-            holder.binding.tvFormatBadge.visibility = View.VISIBLE
-            holder.binding.tvFormatBadge.text = "RAW+${derivCount}V"
-        } else if (hasJpg && hasDng) {
-            holder.binding.tvFormatBadge.visibility = View.VISIBLE
-            holder.binding.tvFormatBadge.text = context.getString(R.string.format_raw_jpg)
-        } else if (hasDng) {
-            holder.binding.tvFormatBadge.visibility = View.VISIBLE
-            holder.binding.tvFormatBadge.text = context.getString(R.string.format_raw)
-        } else if (hasJpg) {
-            holder.binding.tvFormatBadge.visibility = View.VISIBLE
-            holder.binding.tvFormatBadge.text = if (derivCount >= 2) "${derivCount}V" else context.getString(R.string.format_jpg)
+            holder.binding.tvFormatBadge.text = badgeText
         } else {
             holder.binding.tvFormatBadge.visibility = View.GONE
         }

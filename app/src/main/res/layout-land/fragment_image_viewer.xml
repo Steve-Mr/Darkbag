@@ -2,6 +2,7 @@
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/viewer_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -904,62 +905,362 @@
         android:visibility="gone"
         android:elevation="15dp">
 
-        <com.google.android.material.appbar.MaterialToolbar
-            android:id="@+id/gallery_toolbar"
-            android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            app:navigationIcon="@drawable/ic_back"
-            app:navigationIconTint="?attr/colorOnSurface"
-            app:title="@string/gallery_title"
-            app:titleTextAppearance="?attr/textAppearanceTitleMedium"
+        <!-- Floating Bento Island Header Card -->
+        <top.maary.darkbag.ui.bento.BentoTrayCard
+            android:id="@+id/gallery_header_card"
+            style="@style/Widget.Darkbag.BentoTray"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="12dp"
+            android:layout_marginTop="8dp"
+            app:layout_constrainedWidth="true"
+            app:layout_constraintWidth_max="540dp"
+            app:cardCornerRadius="26dp"
+            app:bentoContainerRole="surfaceContainer"
+            app:cardElevation="6dp"
+            app:contentPadding="6dp"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <!-- Left Action Button: Back in Normal Mode / Close in Selection Mode -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_gallery_header_action"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
+                    android:padding="0dp"
+                    app:cornerRadius="14dp"
+                    app:icon="@drawable/ic_back"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconTint="?attr/colorOnSurface"
+                    app:backgroundTint="?attr/colorSurface"
+                    android:contentDescription="@string/back_button_alt" />
+
+                <!-- Center Title: Album Name in Normal Mode / Selected Count in Selection Mode -->
+                <TextView
+                    android:id="@+id/tv_gallery_header_title"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="@string/gallery_album_darkroom"
+                    android:textColor="?attr/colorOnSurface"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:singleLine="true"
+                    android:ellipsize="end" />
+
+                <!-- Right Action Button: Info in Normal Mode -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_gallery_header_info"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
+                    android:padding="0dp"
+                    app:cornerRadius="14dp"
+                    app:icon="@drawable/ic_info"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconTint="?attr/colorOnSurface"
+                    app:backgroundTint="?attr/colorSurface"
+                    android:contentDescription="@string/gallery_info_title" />
+
+                <!-- Right Action Button: Select All / Deselect All Toggle in Selection Mode -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_gallery_header_select_all"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="42dp"
+                    android:minWidth="54dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:visibility="gone"
+                    app:cornerRadius="14dp"
+                    android:text="@string/gallery_select_all"
+                    android:textColor="?attr/colorOnSurface"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    app:backgroundTint="?attr/colorSurface" />
+
+            </LinearLayout>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/gallery_recycler_view"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
+            android:layout_height="match_parent"
             android:clipToPadding="false"
-            android:padding="2dp"
-            app:layout_constraintTop_toBottomOf="@id/gallery_toolbar"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            android:paddingTop="72dp"
+            android:paddingBottom="84dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
 
-        <!-- Bottom Action Bar (Floating Concentric Bento Tray in selection mode) -->
+        <!-- Floating Bento Action Dock -->
         <top.maary.darkbag.ui.bento.BentoTrayCard
             android:id="@+id/gallery_bottom_bar"
             style="@style/Widget.Darkbag.BentoTray"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_margin="12dp"
-            android:visibility="gone"
-            app:cardCornerRadius="26dp"
-            app:bentoContainerRole="surfaceContainerLow"
-            app:contentPadding="8dp"
-            app:cardElevation="6dp"
             app:layout_constrainedWidth="true"
             app:layout_constraintWidth_max="540dp"
+            app:cardCornerRadius="26dp"
+            app:bentoContainerRole="surfaceContainer"
+            app:contentPadding="6dp"
+            app:cardElevation="6dp"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_gallery_delete"
-                style="@style/Widget.Material3.Button.TonalButton"
+            <FrameLayout
                 android:layout_width="match_parent"
-                android:layout_height="46dp"
-                android:insetTop="0dp"
-                android:insetBottom="0dp"
-                android:text="@string/playground_btn_delete"
-                android:textStyle="bold"
-                app:cornerRadius="18dp"
-                app:icon="@drawable/ic_delete"
-                app:iconGravity="textStart"
-                app:iconTint="?attr/colorOnErrorContainer"
-                app:backgroundTint="?attr/colorErrorContainer"
-                android:textColor="?attr/colorOnErrorContainer" />
+                android:layout_height="wrap_content">
+
+                <!-- Normal Mode Actions: Select All, Layout Toggle, Import -->
+                <LinearLayout
+                    android:id="@+id/layout_gallery_normal_actions"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_gallery_dock_select_all"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="5dp"
+                        android:insetLeft="0dp"
+                        android:insetTop="0dp"
+                        android:insetRight="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="2dp"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_select_all"
+                        app:iconGravity="textStart"
+                        app:iconPadding="4dp"
+                        app:iconTint="?attr/colorOnSurface"
+                        app:backgroundTint="?attr/colorSurface"
+                        android:textColor="?attr/colorOnSurface"
+                        android:text="@string/gallery_select_all"
+                        android:textSize="11.5sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_gallery_dock_layout"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="5dp"
+                        android:insetLeft="0dp"
+                        android:insetTop="0dp"
+                        android:insetRight="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="2dp"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_grid_view"
+                        app:iconGravity="textStart"
+                        app:iconPadding="4dp"
+                        app:iconTint="?attr/colorOnSurface"
+                        app:backgroundTint="?attr/colorSurface"
+                        android:textColor="?attr/colorOnSurface"
+                        tools:text="3 Cols"
+                        android:textSize="11.5sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_gallery_dock_import"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:insetLeft="0dp"
+                        android:insetTop="0dp"
+                        android:insetRight="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="2dp"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_add"
+                        app:iconGravity="textStart"
+                        app:iconPadding="4dp"
+                        app:iconTint="?attr/colorOnSurface"
+                        app:backgroundTint="?attr/colorSurface"
+                        android:textColor="?attr/colorOnSurface"
+                        android:text="@string/gallery_import"
+                        android:textSize="11.5sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- Selection Mode Actions: Merge, Batch Grade, Share, Delete -->
+                <LinearLayout
+                    android:id="@+id/layout_gallery_selection_actions"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:visibility="gone">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_gallery_dock_merge"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="4dp"
+                        android:insetLeft="0dp"
+                        android:insetTop="0dp"
+                        android:insetRight="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="2dp"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_mode_half_side"
+                        app:iconGravity="textStart"
+                        app:iconPadding="2dp"
+                        app:iconTint="?attr/colorOnSurface"
+                        app:backgroundTint="?attr/colorSurface"
+                        android:textColor="?attr/colorOnSurface"
+                        android:text="@string/gallery_action_merge"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_gallery_dock_batch_grade"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1.25"
+                        android:layout_marginEnd="4dp"
+                        android:insetLeft="0dp"
+                        android:insetTop="0dp"
+                        android:insetRight="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="2dp"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_style"
+                        app:iconGravity="textStart"
+                        app:iconPadding="2dp"
+                        app:iconTint="?attr/colorOnSurface"
+                        app:backgroundTint="?attr/colorSurface"
+                        android:textColor="?attr/colorOnSurface"
+                        android:text="@string/gallery_action_batch_grade"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_gallery_dock_share"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="4dp"
+                        android:insetLeft="0dp"
+                        android:insetTop="0dp"
+                        android:insetRight="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="2dp"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_share"
+                        app:iconGravity="textStart"
+                        app:iconPadding="2dp"
+                        app:iconTint="?attr/colorOnSurface"
+                        app:backgroundTint="?attr/colorSurface"
+                        android:textColor="?attr/colorOnSurface"
+                        android:text="@string/gallery_action_share"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_gallery_dock_delete"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:insetLeft="0dp"
+                        android:insetTop="0dp"
+                        android:insetRight="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="2dp"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_delete"
+                        app:iconGravity="textStart"
+                        app:iconPadding="2dp"
+                        app:iconTint="?attr/colorOnErrorContainer"
+                        app:backgroundTint="?attr/colorErrorContainer"
+                        android:textColor="?attr/colorOnErrorContainer"
+                        android:text="@string/playground_btn_delete"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+            </FrameLayout>
+
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
+
+        <!-- Deletion Status Indicator Capsule (shown during batch deletion & animation) -->
+        <top.maary.darkbag.ui.bento.BentoTrayCard
+            android:id="@+id/gallery_deleting_indicator"
+            style="@style/Widget.Darkbag.BentoTray"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:visibility="gone"
+            app:cardCornerRadius="22dp"
+            app:bentoContainerRole="surfaceContainerHigh"
+            app:contentPadding="10dp"
+            app:cardElevation="10dp"
+            app:layout_constraintTop_toBottomOf="@id/gallery_header_card"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="6dp"
+                android:paddingEnd="12dp">
+
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/gallery_deleting_progress"
+                    style="@style/Widget.Material3Expressive.CircularProgressIndicator.Wavy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:indeterminate="true"
+                    app:indicatorSize="22dp"
+                    app:trackThickness="3dp"
+                    app:indicatorColor="?attr/colorError" />
+
+                <TextView
+                    android:id="@+id/tv_gallery_deleting_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:text="@string/gallery_deleting"
+                    android:textAppearance="?attr/textAppearanceLabelLarge"
+                    android:textColor="?attr/colorOnSurface" />
+            </LinearLayout>
         </top.maary.darkbag.ui.bento.BentoTrayCard>
 
     </androidx.constraintlayout.widget.ConstraintLayout>

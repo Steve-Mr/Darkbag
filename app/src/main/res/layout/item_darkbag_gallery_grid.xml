@@ -1,108 +1,191 @@
 <?xml version="1.0" encoding="utf-8"?>
 <com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/card_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_margin="2dp"
+    android:layout_margin="4dp"
     android:clickable="true"
     android:focusable="true"
-    app:cardCornerRadius="8dp"
+    app:cardCornerRadius="14dp"
     app:cardElevation="0dp"
+    app:cardBackgroundColor="?attr/colorSurface"
     app:strokeWidth="1dp"
     app:strokeColor="@android:color/transparent">
 
-    <androidx.constraintlayout.widget.ConstraintLayout
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content">
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
 
-        <ImageView
-            android:id="@+id/thumbnail_view"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:scaleType="centerCrop"
-            app:layout_constraintDimensionRatio="1:1"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent" />
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/media_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
 
-        <!-- Selection Overlay Tint -->
-        <View
-            android:id="@+id/selection_overlay"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:background="#66000000"
-            android:visibility="gone"
-            app:layout_constraintTop_toTopOf="@id/thumbnail_view"
-            app:layout_constraintBottom_toBottomOf="@id/thumbnail_view"
-            app:layout_constraintStart_toStartOf="@id/thumbnail_view"
-            app:layout_constraintEnd_toEndOf="@id/thumbnail_view" />
+            <ImageView
+                android:id="@+id/thumbnail_view"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:scaleType="centerCrop"
+                app:layout_constraintDimensionRatio="1:1"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent" />
 
-        <!-- Selection Check Icon -->
-        <ImageView
-            android:id="@+id/icon_selected"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:layout_margin="6dp"
-            android:src="@drawable/ic_check_circle"
-            app:tint="?attr/colorPrimary"
-            android:visibility="gone"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            <!-- Selection Overlay Tint -->
+            <View
+                android:id="@+id/selection_overlay"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:background="#4D000000"
+                android:visibility="gone"
+                app:layout_constraintTop_toTopOf="@id/thumbnail_view"
+                app:layout_constraintBottom_toBottomOf="@id/thumbnail_view"
+                app:layout_constraintStart_toStartOf="@id/thumbnail_view"
+                app:layout_constraintEnd_toEndOf="@id/thumbnail_view" />
 
-        <!-- Selection Radio / Circle Placeholder (shown in selection mode when unselected) -->
-        <ImageView
-            android:id="@+id/icon_unselected"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:layout_margin="6dp"
-            android:src="@drawable/ic_radio_button_unchecked"
-            app:tint="#DDFFFFFF"
-            android:visibility="gone"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            <!-- Selection Check Icon -->
+            <ImageView
+                android:id="@+id/icon_selected"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_margin="6dp"
+                android:src="@drawable/ic_check_circle"
+                app:tint="?attr/colorPrimary"
+                android:visibility="gone"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- Badges Container -->
-        <LinearLayout
-            android:id="@+id/badges_container"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_margin="6dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintStart_toStartOf="parent">
+            <!-- Selection Radio / Circle Placeholder (shown in selection mode when unselected) -->
+            <ImageView
+                android:id="@+id/icon_unselected"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_margin="6dp"
+                android:src="@drawable/ic_radio_button_unchecked"
+                app:tint="#DDFFFFFF"
+                android:visibility="gone"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintEnd_toEndOf="parent" />
 
-            <!-- Format Badge (RAW, RAW+JPG, JPG, HF) -->
-            <TextView
-                android:id="@+id/tv_format_badge"
+            <!-- Badges Container (Multi-column Corner Capsules) -->
+            <LinearLayout
+                android:id="@+id/badges_container"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_badge_capsule"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
-                android:paddingTop="2dp"
-                android:paddingBottom="2dp"
-                android:text="RAW+JPG"
-                android:textColor="@android:color/white"
-                android:textSize="10sp"
-                android:textStyle="bold"
-                android:visibility="gone" />
+                android:layout_margin="6dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintStart_toStartOf="parent">
 
-            <!-- Motion Photo Badge -->
-            <ImageView
-                android:id="@+id/icon_motion_badge"
-                android:layout_width="20dp"
-                android:layout_height="20dp"
-                android:layout_marginStart="4dp"
-                android:background="@drawable/bg_badge_capsule"
-                android:padding="3dp"
-                android:src="@drawable/ic_play_arrow"
-                app:tint="@android:color/white"
-                android:visibility="gone" />
+                <!-- Format Badge (RAW, RAW+JPG, JPG, HF) -->
+                <TextView
+                    android:id="@+id/tv_format_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_badge_capsule"
+                    android:paddingStart="7dp"
+                    android:paddingEnd="7dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp"
+                    tools:text="RAW+JPG"
+                    android:textColor="@android:color/white"
+                    android:textSize="9.5sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
+                <!-- Motion Photo Badge -->
+                <ImageView
+                    android:id="@+id/icon_motion_badge"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/bg_badge_capsule"
+                    android:padding="3dp"
+                    android:src="@drawable/ic_play_arrow"
+                    app:tint="@android:color/white"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
+
+        <!-- 1-Column Detail Telemetry Panel (Visible ONLY in Single Column mode) -->
+        <LinearLayout
+            android:id="@+id/layout_single_col_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="10dp"
+            android:visibility="gone">
+
+            <!-- Row 1: Capture Time & Filename -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tv_single_capture_time"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    tools:text="2026-11-06 15:42"
+                    android:textColor="?attr/colorOnSurface"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_single_filename"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    tools:text="DBAG_20261106_154210"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:textSize="10.5sp"
+                    android:singleLine="true"
+                    android:ellipsize="middle" />
+            </LinearLayout>
+
+            <!-- Row 2: Format & Optical Parameters (Pill + EXIF) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tv_single_format_pill"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_badge_capsule"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="2dp"
+                    tools:text="RAW+JPG"
+                    android:textColor="@android:color/white"
+                    android:textSize="9.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_single_exif_params"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    tools:text="24mm · ƒ/1.7 · 1/250s · ISO 100"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:textSize="11sp"
+                    android:singleLine="true"
+                    android:ellipsize="end" />
+            </LinearLayout>
+
         </LinearLayout>
 
-    </androidx.constraintlayout.widget.ConstraintLayout>
+    </LinearLayout>
 
 </com.google.android.material.card.MaterialCardView>
