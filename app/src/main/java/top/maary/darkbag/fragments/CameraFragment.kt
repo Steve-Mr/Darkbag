@@ -142,6 +142,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.sync.withLock
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
@@ -1115,6 +1117,18 @@ class CameraFragment : Fragment() {
                     }
                 }
                 launch {
+                    cameraViewModel.uiState
+                        .map { Pair(it.activeLogName, it.activeLutName) }
+                        .distinctUntilChanged()
+                        .collect { (log, lut) ->
+                            val cleanLut = lut.takeIf { !it.equals("None", ignoreCase = true) }
+                            cameraUiContainerBinding?.let { binding ->
+                                CameraBentoDeckView.bindRecipeRow(binding, log, cleanLut)
+                            }
+                            updateLiveLut(log, cleanLut)
+                        }
+                }
+                launch {
                     cameraViewModel.effects.collect { effect ->
                         when (effect) {
                             is CameraEffect.ShutterBlackout -> showShutterBlackout()
@@ -1881,14 +1895,15 @@ class CameraFragment : Fragment() {
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
-        val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+        val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
+        cameraViewModel.updateColorRecipe(targetLogName, activeLutName ?: "None")
         cameraUiContainerBinding?.let {
             CameraBentoDeckView.bindRecipeRow(it, targetLogName, activeLutName)
             CameraBentoDeckView.applyDynamicRowHeights(it)
         }
         updateCameraSwitchButton()
         initLensControls()
-        updateLiveLut()
+        updateLiveLut(targetLogName, activeLutName)
         updateFocusPeakingState()
     }
 
@@ -3665,7 +3680,9 @@ class CameraFragment : Fragment() {
                 if (currentName == null) holder.text.setTextColor(colorPrimary)
                 holder.itemView.setOnClickListener {
                     prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
-                    updateLiveLut()
+                    val logName = cameraViewModel.uiState.value.activeLogName
+                    cameraViewModel.updateColorRecipe(logName, "None")
+                    updateLiveLut(logName, null)
 
                     val oldPosition = if (currentName != null) luts.indexOfFirst { it.name == currentName } + 1 else 0
                     notifyItemChanged(oldPosition)
@@ -3680,7 +3697,9 @@ class CameraFragment : Fragment() {
                 if (currentName == file.name) holder.text.setTextColor(colorPrimary)
                 holder.itemView.setOnClickListener {
                     prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, file.name).apply()
-                    updateLiveLut()
+                    val logName = cameraViewModel.uiState.value.activeLogName
+                    cameraViewModel.updateColorRecipe(logName, file.name)
+                    updateLiveLut(logName, file.name)
 
                     val oldPosition = if (currentName != null) luts.indexOfFirst { it.name == currentName } + 1 else 0
                     notifyItemChanged(oldPosition)
@@ -3734,17 +3753,18 @@ class CameraFragment : Fragment() {
 
     }
 
-    private fun updateLiveLut() {
+    private fun updateLiveLut(
+        targetLogName: String = cameraViewModel.uiState.value.activeLogName,
+        activeLutName: String? = cameraViewModel.uiState.value.activeLutName.takeIf { !it.equals("None", ignoreCase = true) }
+    ) {
         val prefs =
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
-        val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
-        val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+        val cleanLutName = activeLutName?.takeIf { !it.equals("None", ignoreCase = true) }
         val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
         val isPreviewEnabled = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, true)
 
-        cameraUiContainerBinding?.let { CameraBentoDeckView.bindRecipeRow(it, targetLogName, activeLutName) }
-        cameraViewModel.updateColorRecipe(targetLogName ?: "None", activeLutName ?: "None")
+        cameraUiContainerBinding?.let { CameraBentoDeckView.bindRecipeRow(it, targetLogName, cleanLutName) }
 
         val proc = lutProcessor ?: return
 
@@ -3752,8 +3772,8 @@ class CameraFragment : Fragment() {
         activeLutJob = lifecycleScope.launch(Dispatchers.IO) {
             var lutData: FloatArray? = null
             var size = 0
-            if (isPreviewEnabled && activeLutName != null) {
-                val file = File(lutManager.lutDir, activeLutName)
+            if (isPreviewEnabled && cleanLutName != null) {
+                val file = File(lutManager.lutDir, cleanLutName)
                 if (file.exists()) {
                     lutData = ColorProcessor.loadLutData(file.absolutePath)
                     if (lutData != null) {
@@ -3772,9 +3792,25 @@ class CameraFragment : Fragment() {
 
     private fun showLutMenu() {
         if (!isAdded) return
-        ColorRecipeBottomSheet.show(requireContext(), lutManager) { logName, lutName ->
+        val currentLog = cameraViewModel.uiState.value.activeLogName
+        val currentLut = cameraViewModel.uiState.value.activeLutName.takeIf { !it.equals("None", ignoreCase = true) }
+        ColorRecipeBottomSheet.show(
+            context = requireContext(),
+            lutManager = lutManager,
+            initialLog = currentLog,
+            initialLut = currentLut
+        ) { logName, lutName ->
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+            editor.putString(SettingsFragment.KEY_TARGET_LOG, logName)
+            if (lutName == null || lutName.equals("None", ignoreCase = true)) {
+                editor.remove(SettingsFragment.KEY_ACTIVE_LUT)
+            } else {
+                editor.putString(SettingsFragment.KEY_ACTIVE_LUT, lutName)
+            }
+            editor.apply()
+
             cameraViewModel.updateColorRecipe(logName, lutName ?: "None")
-            updateLiveLut()
         }
     }
 
@@ -3789,11 +3825,18 @@ class CameraFragment : Fragment() {
                 showLutMenu()
             } else {
                 val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, selectedLog).apply()
-                if (selectedLog == getString(R.string.lut_none)) {
-                    prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                val editor = prefs.edit()
+                editor.putString(SettingsFragment.KEY_TARGET_LOG, selectedLog)
+                val currentLut = if (selectedLog == getString(R.string.lut_none)) {
+                    editor.remove(SettingsFragment.KEY_ACTIVE_LUT)
+                    null
+                } else {
+                    prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
                 }
-                updateLiveLut()
+                editor.apply()
+
+                cameraViewModel.updateColorRecipe(selectedLog, currentLut ?: "None")
+                updateLiveLut(selectedLog, currentLut)
                 showLutMenu()
             }
         }
@@ -3811,13 +3854,17 @@ class CameraFragment : Fragment() {
                 showLutMenu()
             } else {
                 val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                if (position == 1) {
+                val newLut = if (position == 1) {
                     prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                    null
                 } else {
                     val filename = luts[position - 2].name
                     prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, filename).apply()
+                    filename
                 }
-                updateLiveLut()
+                val currentLog = cameraViewModel.uiState.value.activeLogName
+                cameraViewModel.updateColorRecipe(currentLog, newLut ?: "None")
+                updateLiveLut(currentLog, newLut)
                 showLutMenu()
             }
         }

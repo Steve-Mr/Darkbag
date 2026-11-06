@@ -71,14 +71,15 @@ object ColorRecipeBottomSheet {
     fun show(
         context: Context,
         lutManager: LutManager,
+        initialLog: String = "None",
+        initialLut: String? = null,
         onRecipeSelected: (logName: String, lutFileName: String?) -> Unit
     ): BottomSheetDialog {
         val dialog = BottomSheetDialog(context)
         val density = context.resources.displayMetrics.density
 
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        var currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
-        var currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+        var currentLog = if (initialLog.isNotBlank()) initialLog else "None"
+        var currentLut = initialLut?.takeIf { !it.equals("None", ignoreCase = true) }
 
         // Dynamic Material 3 colors
         val colorSurfaceContainerLow = MaterialColors.getColor(
@@ -446,11 +447,9 @@ object ColorRecipeBottomSheet {
                     if (entry.fileName == null) {
                         // User chose "None" LUT
                         currentLut = null
-                        prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
                     } else {
                         val fileName = entry.fileName
                         currentLut = fileName
-                        prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, currentLut).apply()
 
                         // If clicking a log-specific LUT, ensure current Log synchronizes
                         val assocLog = entry.associatedLog
@@ -458,7 +457,6 @@ object ColorRecipeBottomSheet {
                             val targetPrefLog = lutManager.toTargetLogPreference(assocLog)
                             if (targetPrefLog != currentLog) {
                                 currentLog = targetPrefLog
-                                prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, currentLog).apply()
                                 updateLogButtonsUi()
                                 reloadLutEntries()
                             }
@@ -494,12 +492,10 @@ object ColorRecipeBottomSheet {
 
                 setOnClickListener {
                     currentLog = logName
-                    prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, currentLog).apply()
 
                     // Check active LUT compatibility
                     if (currentLut != null && !lutManager.isLutCompatibleWithLog(currentLut, currentLog)) {
                         currentLut = null
-                        prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
                         val msg = context.getString(R.string.lut_reset_incompatible_toast, currentLog)
                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     }
@@ -518,10 +514,6 @@ object ColorRecipeBottomSheet {
         resetButton.setOnClickListener {
             currentLog = "None"
             currentLut = null
-            prefs.edit()
-                .putString(SettingsFragment.KEY_TARGET_LOG, "None")
-                .remove(SettingsFragment.KEY_ACTIVE_LUT)
-                .apply()
             reloadLutEntries()
             onRecipeSelected("None", null)
             updateLogButtonsUi()
@@ -533,6 +525,10 @@ object ColorRecipeBottomSheet {
         dialog.window?.let { window ->
             window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             WindowCompat.setDecorFitsSystemWindows(window, false)
+        }
+
+        dialog.setOnDismissListener {
+            onRecipeSelected(currentLog, currentLut)
         }
 
         dialog.setOnShowListener {
