@@ -1835,7 +1835,15 @@ class CameraFragment : Fragment() {
             val safeActivity = activity ?: return@setOnLongClickListener false
             val navController = Navigation.findNavController(safeActivity, R.id.fragment_container)
             if (navController.currentDestination?.id == R.id.camera_fragment) {
-                navController.navigate(R.id.action_camera_to_playground_gallery)
+                // Instantly navigate without blocking on getLatestAppImage(). If thumbnail is available, use it;
+                // if null, gallery mode will load asynchronously and scroll to latest photo upon completion.
+                val uri = currentThumbnailUri
+                navController.navigate(
+                    CameraFragmentDirections.actionCameraToImageViewer(
+                        initialUri = uri?.toString(),
+                        startInGalleryMode = true
+                    )
+                )
             }
             true
         }
