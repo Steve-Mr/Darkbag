@@ -127,8 +127,8 @@ class ColorRecipeSyncAndIsolationTest {
         dialog.dismiss()
         org.robolectric.shadows.ShadowLooper.idleMainLooper()
 
-        // Caller callback gets initial state if nothing was tapped
-        assertEquals("None", selectedLogResult)
+        // When dismissed without user modification, callback is NOT invoked, preventing false edit state in viewer
+        assertNull(selectedLogResult)
         assertNull(selectedLutResult)
 
         // Camera preferences are still strictly untouched after dismissal!
@@ -224,5 +224,26 @@ class ColorRecipeSyncAndIsolationTest {
         dialog.dismiss()
         assertEquals("None", lastLog)
         assertNull(lastLut)
+    }
+
+    @Test
+    fun testColorRecipeBottomSheet_DismissWithoutModificationDoesNotEmitCallback() {
+        var callbackInvocationCount = 0
+
+        val dialog = ColorRecipeBottomSheet.show(
+            context = themedContext,
+            lutManager = lutManager,
+            initialLog = "F-Log2",
+            initialLut = "SomeLut.cube"
+        ) { _, _ ->
+            callbackInvocationCount++
+        }
+
+        // User does not click anything and simply dismisses the sheet
+        dialog.dismiss()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+
+        // Callback must NOT be invoked when user only viewed without modifying
+        assertEquals(0, callbackInvocationCount)
     }
 }

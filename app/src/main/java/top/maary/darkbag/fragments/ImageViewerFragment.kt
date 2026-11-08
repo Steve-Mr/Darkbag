@@ -1979,6 +1979,15 @@ open class ImageViewerFragment : Fragment() {
             initialLog = initialLog,
             initialLut = initialLut
         ) { selectedLog, selectedLut ->
+            val normInitialLog = if (initialLog.isBlank()) "None" else initialLog
+            val normInitialLut = initialLut?.takeIf { !it.equals("None", ignoreCase = true) }
+            val normSelectedLog = if (selectedLog.isBlank()) "None" else selectedLog
+            val normSelectedLut = selectedLut?.takeIf { !it.equals("None", ignoreCase = true) }
+
+            if (normInitialLog == normSelectedLog && normInitialLut == normSelectedLut) {
+                return@show
+            }
+
             val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
             if (isRawVideo) {
                 currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(
@@ -2386,8 +2395,7 @@ open class ImageViewerFragment : Fragment() {
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 
                         val meta = repository.getCaptureMetadata(uri) ?: top.maary.darkbag.models.CaptureMetadata()
-                        // Use a private JNI call or update current one to support metadata for TIFF?
-                        // For now we use the existing one but we should ideally pass metadata.
+                        val colorEngineMode = config.colorEngineMode ?: currentGroup.editConfig?.colorEngineMode ?: 0
                         top.maary.darkbag.processor.ColorProcessor.processRaw(
                             dngData = finalBytes,
                             targetLog = logIndex,
@@ -2406,7 +2414,9 @@ open class ImageViewerFragment : Fragment() {
                             mirror = false,
                             outputBitmap = previewBitmap,
                             downsampleFactor = ds,
-                            zoomFactor = config.zoomFactor
+                            zoomFactor = config.zoomFactor,
+                            metadata = meta,
+                            colorEngineMode = colorEngineMode
                         )
                         return previewBitmap
                     }

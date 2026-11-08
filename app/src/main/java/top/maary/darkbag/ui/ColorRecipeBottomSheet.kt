@@ -80,6 +80,9 @@ object ColorRecipeBottomSheet {
 
         var currentLog = if (initialLog.isNotBlank()) initialLog else "None"
         var currentLut = initialLut?.takeIf { !it.equals("None", ignoreCase = true) }
+        val normalizedInitialLog = currentLog
+        val normalizedInitialLut = currentLut
+        var hasUserModified = false
 
         // Dynamic Material 3 colors
         val colorSurfaceContainerLow = MaterialColors.getColor(
@@ -444,6 +447,7 @@ object ColorRecipeBottomSheet {
                 }
 
                 btn.setOnClickListener {
+                    hasUserModified = true
                     if (entry.fileName == null) {
                         // User chose "None" LUT
                         currentLut = null
@@ -491,6 +495,7 @@ object ColorRecipeBottomSheet {
                 insetBottom = 0
 
                 setOnClickListener {
+                    hasUserModified = true
                     currentLog = logName
 
                     // Check active LUT compatibility
@@ -512,6 +517,7 @@ object ColorRecipeBottomSheet {
 
         // Reset button action
         resetButton.setOnClickListener {
+            hasUserModified = true
             currentLog = "None"
             currentLut = null
             reloadLutEntries()
@@ -528,7 +534,12 @@ object ColorRecipeBottomSheet {
         }
 
         dialog.setOnDismissListener {
-            onRecipeSelected(currentLog, currentLut)
+            val normCurrentLog = if (currentLog.isNotBlank()) currentLog else "None"
+            val normCurrentLut = currentLut?.takeIf { !it.equals("None", ignoreCase = true) }
+            val isActuallyChanged = normCurrentLog != normalizedInitialLog || normCurrentLut != normalizedInitialLut
+            if (hasUserModified && isActuallyChanged) {
+                onRecipeSelected(currentLog, currentLut)
+            }
         }
 
         dialog.setOnShowListener {
