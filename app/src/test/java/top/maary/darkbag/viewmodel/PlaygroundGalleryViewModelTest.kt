@@ -110,7 +110,7 @@ class PlaygroundGalleryViewModelTest {
     fun testToggleSelectAll() {
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()
         val repo = PlaygroundRepository(app)
-        val pDir = repo.getPlaygroundDir()
+        val pDir = repo.playgroundDir
         val file1 = File(pDir, "test1.dng").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val file2 = File(pDir, "test2.dng").apply { writeBytes(byteArrayOf(4, 5, 6)) }
 
@@ -154,7 +154,7 @@ class PlaygroundGalleryViewModelTest {
     fun testDeleteSelected() = runBlocking {
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()
         val repo = PlaygroundRepository(app)
-        val pDir = repo.getPlaygroundDir()
+        val pDir = repo.playgroundDir
         val file1 = File(pDir, "to_delete.dng").apply { writeBytes(byteArrayOf(1, 2, 3)) }
 
         val vm = PlaygroundGalleryViewModel(app, repo)
@@ -176,7 +176,7 @@ class PlaygroundGalleryViewModelTest {
     fun testDisbandSelected() = runBlocking {
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()
         val repo = PlaygroundRepository(app)
-        val pDir = repo.getPlaygroundDir()
+        val pDir = repo.playgroundDir
         val base = "test_group_${System.currentTimeMillis()}"
         val jpg = File(pDir, "$base.jpg").apply { writeBytes(byteArrayOf(1, 2)) }
         val dng1 = File(pDir, "${base}_1.dng").apply { writeBytes(byteArrayOf(3, 4)) }
