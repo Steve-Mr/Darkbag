@@ -1152,14 +1152,16 @@ bool process_and_save_image(
             }
         }
 
-        r = std::min(r, 65535.0f);
-        g = std::min(g, 65535.0f);
-        b = std::min(b, 65535.0f);
+        // In standard Display Rec709 rendering without log/LUT, prevent overflow beyond container
+        if (targetLog == 0 && lut.size == 0) {
+            r = std::min(r, 65535.0f);
+            g = std::min(g, 65535.0f);
+            b = std::min(b, 65535.0f);
+        }
 
         // Minimal path: neutralize sensor-saturated pixels here, i.e. after white
-        // balance and the container clamp. Equalizing in the raw domain would not be
-        // neutral once the per-channel gains are applied (R and B clamp while G does
-        // not), which would leave a magenta ring at the saturation boundary.
+        // balance. Equalizing in the raw domain would not be neutral once per-channel
+        // gains are applied, which would leave a magenta ring at the saturation boundary.
         if (sensorBlown) {
             float max_wb = std::max({r, g, b});
             r = max_wb;

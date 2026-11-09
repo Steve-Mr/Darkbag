@@ -1097,20 +1097,7 @@ open class ImageViewerFragment : Fragment() {
         selectedDngIndex = 0
         previewJob?.cancel()
 
-        currentEditConfig = group.editConfig?.let {
-            if (it.exposure == 0f && it.adjustments == null) {
-                val baseEv = if (it.digitalGain > 0f) kotlin.math.log2(it.digitalGain) else 0f
-                it.copy(exposure = baseEv)
-            } else if (it.adjustments != null) {
-                val newAdjs = it.adjustments.map { adj ->
-                    if (adj.exposure == 0f) {
-                        val baseEv = if (adj.digitalGain > 0f) kotlin.math.log2(adj.digitalGain) else 0f
-                        adj.copy(exposure = baseEv)
-                    } else adj
-                }
-                it.copy(adjustments = newAdjs)
-            } else it
-        }?.copy() ?: top.maary.darkbag.models.EditConfig(
+        currentEditConfig = group.editConfig?.copy() ?: top.maary.darkbag.models.EditConfig(
             adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
         )
 
