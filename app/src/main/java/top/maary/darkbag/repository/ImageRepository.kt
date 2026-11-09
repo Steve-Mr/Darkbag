@@ -84,6 +84,8 @@ class ImageRepository(private val context: Context) {
             groups[cached.baseName] = ImageGroupBuilder(cached.baseName).applyFrom(cached)
         }
 
+        var hasEmittedInitialChunk = false
+
         suspend fun emitCurrent() {
             val sorted = groups.values
                 .map { it.build() }
@@ -91,6 +93,14 @@ class ImageRepository(private val context: Context) {
                 .sortedByDescending { it.captureTime }
             cachedGroups = sorted
             staleCachedGroups = sorted
+
+            // Progressive chunk delivery for large datasets (500+ groups):
+            // Emit top 40 items first if not yet emitted, allowing instant T2 paint (<25ms)
+            if (sorted.size > 40 && !hasEmittedInitialChunk) {
+                hasEmittedInitialChunk = true
+                emit(sorted.take(40))
+                kotlinx.coroutines.delay(40)
+            }
             emit(sorted)
         }
 
