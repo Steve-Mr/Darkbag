@@ -26,6 +26,10 @@ class ImageRepository(private val context: Context) {
         @VisibleForTesting
         internal var cachedGroups: List<ImageGroup>? = null
 
+        @Volatile
+        @VisibleForTesting
+        internal var staleCachedGroups: List<ImageGroup>? = null
+
         private val CINEMADNG_FRAME_REGEX = Regex("^(?:DBAG_)?((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)_([0-9]{6})\\.dng$", RegexOption.IGNORE_CASE)
         private val CINEMADNG_AUDIO_REGEX = Regex("^(?:DBAG_)?((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)\\.wav$", RegexOption.IGNORE_CASE)
 
@@ -74,8 +78,9 @@ class ImageRepository(private val context: Context) {
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val groups = mutableMapOf<String, ImageGroupBuilder>()
 
-        // Pre-populate with cached metadata if available
-        cachedGroups?.forEach { cached ->
+        // Pre-populate with cached metadata if available (Stale-While-Revalidate)
+        val initialCache = cachedGroups ?: staleCachedGroups
+        initialCache?.forEach { cached ->
             groups[cached.baseName] = ImageGroupBuilder(cached.baseName).applyFrom(cached)
         }
 
@@ -85,7 +90,13 @@ class ImageRepository(private val context: Context) {
                 .filter { it.hasAny() && !it.isInProgress }
                 .sortedByDescending { it.captureTime }
             cachedGroups = sorted
+            staleCachedGroups = sorted
             emit(sorted)
+        }
+
+        // Stage 0: Stale-While-Revalidate instant T2 delivery (0ms)
+        if (groups.isNotEmpty()) {
+            emitCurrent()
         }
 
         val safJpgUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
@@ -114,10 +125,17 @@ class ImageRepository(private val context: Context) {
             }
 
             val msResults = jobMediaStore.await()
+            val hadCached = groups.isNotEmpty()
+            mergeGroupMaps(groups, msResults)
+
+            // If starting from completely cold cache, emit early progressive milestone from MediaStore
+            if (!hadCached && msResults.isNotEmpty()) {
+                emitCurrent()
+            }
+
             val jpgResults = jobSafJpg.await()
             val rawResults = jobSafRaw.await()
 
-            mergeGroupMaps(groups, msResults)
             mergeGroupMaps(groups, jpgResults)
             mergeGroupMaps(groups, rawResults)
 
@@ -126,7 +144,9 @@ class ImageRepository(private val context: Context) {
                 baseName in validBaseNames || groups[baseName]?.isInProgress == true
             }
 
-            preloadInitialMetadata(groups, initialUri)
+            withContext(Dispatchers.IO) {
+                preloadInitialMetadata(groups, initialUri)
+            }
         }
 
         emitCurrent()
@@ -346,7 +366,12 @@ class ImageRepository(private val context: Context) {
         updated
     }
 
-    fun invalidateCache() {
+    fun invalidateCache(clearStale: Boolean = false) {
+        if (!clearStale && cachedGroups != null) {
+            staleCachedGroups = cachedGroups
+        } else if (clearStale) {
+            staleCachedGroups = null
+        }
         cachedGroups = null
     }
 

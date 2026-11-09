@@ -102,7 +102,7 @@ open class ImageViewerFragment : Fragment() {
             }
         }
         lifecycleScope.launch {
-            repository.invalidateCache()
+            repository.invalidateCache(clearStale = true)
             loadImages(pendingDeleteNextTargetUri, forceRefresh = true)
             pendingDeleteNextTargetUri = null
         }
@@ -380,6 +380,10 @@ open class ImageViewerFragment : Fragment() {
         if (!isGalleryMode) {
             binding.initialLoadingIndicator.visibility = View.VISIBLE
             binding.imagePager.visibility = View.INVISIBLE
+        } else {
+            if (::galleryAdapter.isInitialized && galleryAdapter.itemCount == 0) {
+                showGalleryLoadingIndicator()
+            }
         }
 
         var hasNavigatedToTargetUri = false
@@ -387,6 +391,7 @@ open class ImageViewerFragment : Fragment() {
         lifecycleScope.launch {
             repository.getGroupedImagesFlow(targetUri).collect { groups ->
                 if (groups.isEmpty()) {
+                    hideGalleryLoadingIndicator()
                     hideGalleryDeletingIndicator()
                     if (isGalleryMode) {
                         exitGalleryMode()
@@ -398,6 +403,7 @@ open class ImageViewerFragment : Fragment() {
                 if (::galleryAdapter.isInitialized) {
                     galleryAdapter.submitList(groups) {
                         if (_binding != null) {
+                            hideGalleryLoadingIndicator()
                             val animator = binding.galleryRecyclerView.itemAnimator
                             if (animator != null && animator.isRunning) {
                                 animator.isRunning {
@@ -3550,7 +3556,7 @@ open class ImageViewerFragment : Fragment() {
 
             // Calculate nextTargetUri for single file deletion after successful deletion attempts
             if (!deleteGroup) {
-                repository.invalidateCache()
+                repository.invalidateCache(clearStale = true)
                 val remainingGroup = repository.getGroupedImages(forceRefresh = true).find { it.baseName == group.baseName }
                 nextTargetUri = if (remainingGroup != null && remainingGroup.hasAny()) {
                     remainingGroup.firstAvailableUri?.toString()
@@ -3570,11 +3576,11 @@ open class ImageViewerFragment : Fragment() {
                     deleteLauncher.launch(IntentSenderRequest.Builder(deleteRequest.intentSender).build())
                 } catch (e: Exception) {
                     context.let { Toast.makeText(it, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show() }
-                    repository.invalidateCache()
+                    repository.invalidateCache(clearStale = true)
                     loadImages(nextTargetUri, forceRefresh = true)
                 }
             } else {
-                repository.invalidateCache()
+                repository.invalidateCache(clearStale = true)
                 loadImages(nextTargetUri, forceRefresh = true)
             }
         }
@@ -3791,6 +3797,12 @@ open class ImageViewerFragment : Fragment() {
         binding.tvGalleryHeaderTitle.text = "${getString(R.string.gallery_album_darkroom)} ($currentCount)"
         updateGallerySelectionUI(0)
 
+        if (currentCount == 0) {
+            showGalleryLoadingIndicator()
+        } else {
+            hideGalleryLoadingIndicator()
+        }
+
         if (targetPosition in 0 until (if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0)) {
             binding.galleryRecyclerView.scrollToPosition(targetPosition)
         }
@@ -3803,6 +3815,7 @@ open class ImageViewerFragment : Fragment() {
         isGalleryMode = false
         startedInGalleryMode = false
         hideGalleryDeletingIndicator()
+        hideGalleryLoadingIndicator()
         binding.galleryRecyclerView.isEnabled = true
 
         if (::galleryAdapter.isInitialized) {
@@ -4232,6 +4245,41 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
+    protected fun showGalleryLoadingIndicator() {
+        if (_binding == null) return
+        binding.galleryLoadingIndicator?.apply {
+            animate().cancel()
+            visibility = View.VISIBLE
+            alpha = 0f
+            scaleX = 0.9f
+            scaleY = 0.9f
+            animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(180)
+                .start()
+        }
+    }
+
+    protected fun hideGalleryLoadingIndicator() {
+        if (_binding == null) return
+        binding.galleryLoadingIndicator?.apply {
+            if (visibility == View.VISIBLE) {
+                animate().cancel()
+                animate()
+                    .alpha(0f)
+                    .scaleX(0.9f)
+                    .scaleY(0.9f)
+                    .setDuration(150)
+                    .withEndAction {
+                        visibility = View.GONE
+                    }
+                    .start()
+            }
+        }
+    }
+
     private fun deleteBatchImages(selectedItems: List<GallerySelectedItem>, deleteMode: Int) {
         val context = context ?: return
         showGalleryDeletingIndicator(selectedItems.size)
@@ -4305,7 +4353,7 @@ open class ImageViewerFragment : Fragment() {
                     deleteLauncher.launch(IntentSenderRequest.Builder(deleteRequest.intentSender).build())
                 } catch (e: Exception) {
                     context.let { Toast.makeText(it, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show() }
-                    repository.invalidateCache()
+                    repository.invalidateCache(clearStale = true)
                     loadImages(forceRefresh = true)
                     hideGalleryDeletingIndicator()
                     if (_binding != null) {
@@ -4314,7 +4362,7 @@ open class ImageViewerFragment : Fragment() {
                     }
                 }
             } else {
-                repository.invalidateCache()
+                repository.invalidateCache(clearStale = true)
                 loadImages(forceRefresh = true)
             }
         }

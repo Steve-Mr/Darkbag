@@ -88,15 +88,45 @@ class ImageRepositoryCacheTest {
     }
 
     @Test
-    fun testGetGroupedImagesFlow_prunesStalePrepopulatedItems() = runBlocking {
+    fun testGetGroupedImagesFlow_staleWhileRevalidateAndPrune() = runBlocking {
         val staleGroup = ImageGroup(baseName = "stale_deleted_item", metadataLoaded = true, isInProgress = false)
         ImageRepository.cachedGroups = listOf(staleGroup)
 
-        // Collecting the flow runs Stage 1, which retains only items on disk or in progress
-        val results = repository.getGroupedImagesFlow().first()
+        val emissions = mutableListOf<List<ImageGroup>>()
+        repository.getGroupedImagesFlow().collect { emissions.add(it) }
 
-        assertFalse("Stale group not found on disk should be pruned from flow emission", results.any { it.baseName == "stale_deleted_item" })
+        // Emission 1 should be the instant cached emission (Stale-While-Revalidate)
+        assertTrue("Flow should emit at least 2 times (cache then disk)", emissions.size >= 2)
+        assertTrue("First emission should contain cached stale item", emissions.first().any { it.baseName == "stale_deleted_item" })
+
+        // Final emission should prune items not on disk
+        val finalResults = emissions.last()
+        assertFalse("Stale group not found on disk should be pruned from final flow emission", finalResults.any { it.baseName == "stale_deleted_item" })
         assertFalse("Stale group should be pruned from cachedGroups", ImageRepository.cachedGroups?.any { it.baseName == "stale_deleted_item" } ?: false)
+    }
+
+    @Test
+    fun testInvalidateCache_preservesStaleCacheByDefault() {
+        val group = ImageGroup(baseName = "photo_1", metadataLoaded = true)
+        ImageRepository.cachedGroups = listOf(group)
+
+        repository.invalidateCache() // default clearStale = false
+
+        assertNull("cachedGroups should be null", ImageRepository.cachedGroups)
+        assertNotNull("staleCachedGroups should preserve previous cache", ImageRepository.staleCachedGroups)
+        assertEquals(1, ImageRepository.staleCachedGroups!!.size)
+        assertEquals("photo_1", ImageRepository.staleCachedGroups!![0].baseName)
+    }
+
+    @Test
+    fun testInvalidateCache_clearStaleTrue_clearsBoth() {
+        val group = ImageGroup(baseName = "photo_1", metadataLoaded = true)
+        ImageRepository.cachedGroups = listOf(group)
+
+        repository.invalidateCache(clearStale = true)
+
+        assertNull("cachedGroups should be null", ImageRepository.cachedGroups)
+        assertNull("staleCachedGroups should be null when clearStale = true", ImageRepository.staleCachedGroups)
     }
 
     @Test
