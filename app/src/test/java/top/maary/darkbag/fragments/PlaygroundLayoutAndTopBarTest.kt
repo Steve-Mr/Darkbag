@@ -18,6 +18,7 @@ import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
 import top.maary.darkbag.databinding.FragmentPlaygroundGalleryBinding
 import top.maary.darkbag.databinding.ItemPlaygroundImageBinding
+import top.maary.darkbag.models.PlaygroundItem
 import top.maary.darkbag.ui.bento.BentoContainerRole
 import top.maary.darkbag.ui.bento.BentoTrayCard
 import java.io.File
@@ -166,6 +167,7 @@ class PlaygroundLayoutAndTopBarTest {
         assertNotNull(binding.btnPlaygroundSettings)
         assertNotNull(binding.recyclerView)
         assertNotNull(binding.emptyStateText)
+        assertNotNull(binding.playgroundLoadingIndicator)
         assertNotNull(binding.fabAdd)
         assertNotNull(binding.btnMerge)
         assertNotNull(binding.btnDisband)

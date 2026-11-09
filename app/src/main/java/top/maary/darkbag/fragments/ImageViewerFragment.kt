@@ -3636,6 +3636,8 @@ open class ImageViewerFragment : Fragment() {
         val layoutManager = createGridLayoutManager(initialCols)
         binding.galleryRecyclerView.layoutManager = layoutManager
         binding.galleryRecyclerView.adapter = galleryAdapter
+        binding.galleryRecyclerView.setHasFixedSize(true)
+        binding.galleryRecyclerView.setItemViewCacheSize(20)
         (binding.galleryRecyclerView.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)?.apply {
             removeDuration = 250
             moveDuration = 250
@@ -3835,7 +3837,11 @@ open class ImageViewerFragment : Fragment() {
         }
 
         if (targetPosition in 0 until (if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0)) {
-            binding.galleryRecyclerView.scrollToPosition(targetPosition)
+            binding.galleryRecyclerView.post {
+                if (_binding != null) {
+                    binding.galleryRecyclerView.scrollToPosition(targetPosition)
+                }
+            }
         }
 
         updateBackPressedCallbackState()

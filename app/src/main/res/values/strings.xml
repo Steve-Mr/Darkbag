@@ -108,6 +108,14 @@
     <string name="playground_btn_import">Import</string>
     <string name="playground_btn_merge">Merge</string>
     <string name="playground_btn_export">Export</string>
+    <string name="playground_import_success">Successfully imported %1$d files</string>
+    <string name="playground_export_hint">Long-press or tap ALL to select files to export</string>
+    <string name="playground_merge_layout_title">Select Collage Layout</string>
+    <string name="playground_merge_need_two">Select exactly 2 DNG images to merge</string>
+    <string name="playground_exporting">Exporting %1$d files…</string>
+    <string name="playground_export_success">Successfully exported %1$d files</string>
+    <string name="playground_empty_hint">No DNG files in Playground\nTap + below to import</string>
+    <string name="playground_loading">Loading playground…</string>
     <string name="gallery_groups_count">%1$d groups</string>
     <string name="gallery_layout_waterfall">Aspect</string>
 
