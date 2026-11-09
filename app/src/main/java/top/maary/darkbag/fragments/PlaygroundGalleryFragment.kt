@@ -857,7 +857,7 @@ class PlaygroundGalleryFragment : Fragment() {
                                     shadows = adj.shadows,
                                     whites = adj.whites,
                                     blacks = adj.blacks,
-                                    digitalGain = adj.digitalGain,
+                                    digitalGain = adj.digitalGain.takeIf { it > 0f } ?: config.digitalGain.takeIf { it > 0f } ?: 1.0f,
                                     outputJpgPath = tempJpgFile.absolutePath,
                                     useGpu = false,
                                     orientation = rotDegrees,
@@ -865,7 +865,8 @@ class PlaygroundGalleryFragment : Fragment() {
                                     outputBitmap = null,
                                     downsampleFactor = 1,
                                     zoomFactor = config.zoomFactor,
-                                    metadata = meta
+                                    metadata = meta,
+                                    colorEngineMode = config.colorEngineMode ?: 0
                                 )
 
                                 if (tempJpgFile.exists()) {
@@ -950,7 +951,7 @@ class PlaygroundGalleryFragment : Fragment() {
                                     shadows = adj.shadows,
                                     whites = adj.whites,
                                     blacks = adj.blacks,
-                                    digitalGain = adj.digitalGain,
+                                    digitalGain = adj.digitalGain.takeIf { it > 0f } ?: config.digitalGain.takeIf { it > 0f } ?: 1.0f,
                                     outputJpgPath = tempJpgFile.absolutePath,
                                     useGpu = false,
                                     orientation = rotDegrees,
@@ -958,7 +959,8 @@ class PlaygroundGalleryFragment : Fragment() {
                                     outputBitmap = null,
                                     downsampleFactor = 1,
                                     zoomFactor = config.zoomFactor,
-                                    metadata = meta
+                                    metadata = meta,
+                                    colorEngineMode = config.colorEngineMode ?: 0
                                 )
 
                                 if (!tempJpgFile.exists()) return null
