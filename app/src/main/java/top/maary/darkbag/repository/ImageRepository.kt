@@ -884,20 +884,97 @@ class ImageRepository(private val context: Context) {
         }
     }
 
+    private fun parseBaselineExposureFromPfd(pfd: android.os.ParcelFileDescriptor): Float {
+        return try {
+            val channel = java.io.FileInputStream(pfd.fileDescriptor).channel
+            channel.position(0)
+            val header = java.nio.ByteBuffer.allocate(8)
+            if (channel.read(header) < 8) return 0f
+            header.flip()
+
+            val b0 = header.get()
+            val b1 = header.get()
+            val isLe = (b0 == 'I'.code.toByte() && b1 == 'I'.code.toByte())
+            val isBe = (b0 == 'M'.code.toByte() && b1 == 'M'.code.toByte())
+            if (!isLe && !isBe) return 0f
+
+            val byteOrder = if (isLe) java.nio.ByteOrder.LITTLE_ENDIAN else java.nio.ByteOrder.BIG_ENDIAN
+            header.order(byteOrder)
+
+            val magic = header.short.toInt() and 0xFFFF
+            if (magic != 42) return 0f
+
+            var ifdOffset = header.int.toLong() and 0xFFFFFFFFL
+            val entryBuf = java.nio.ByteBuffer.allocate(12).order(byteOrder)
+            val countBuf = java.nio.ByteBuffer.allocate(2).order(byteOrder)
+            val nextIfdBuf = java.nio.ByteBuffer.allocate(4).order(byteOrder)
+            val valBuf = java.nio.ByteBuffer.allocate(8).order(byteOrder)
+
+            while (ifdOffset > 0 && ifdOffset + 2 <= channel.size()) {
+                channel.position(ifdOffset)
+                countBuf.clear()
+                if (channel.read(countBuf) < 2) break
+                countBuf.flip()
+                val numEntries = countBuf.short.toInt() and 0xFFFF
+
+                for (i in 0 until numEntries) {
+                    entryBuf.clear()
+                    if (channel.read(entryBuf) < 12) break
+                    entryBuf.flip()
+                    val tag = entryBuf.short.toInt() and 0xFFFF
+                    val typ = entryBuf.short.toInt() and 0xFFFF
+                    val count = entryBuf.int.toLong() and 0xFFFFFFFFL
+                    val valOrOffset = entryBuf.int.toLong() and 0xFFFFFFFFL
+
+                    if (tag == 50730 && typ == 10 && count == 1L) { // BaselineExposure (SRATIONAL)
+                        val savedPos = channel.position()
+                        if (valOrOffset + 8 <= channel.size()) {
+                            channel.position(valOrOffset)
+                            valBuf.clear()
+                            if (channel.read(valBuf) == 8) {
+                                valBuf.flip()
+                                val num = valBuf.int
+                                val den = valBuf.int
+                                if (den != 0) {
+                                    return num.toFloat() / den.toFloat()
+                                }
+                            }
+                        }
+                        channel.position(savedPos)
+                    }
+                }
+
+                nextIfdBuf.clear()
+                if (channel.read(nextIfdBuf) == 4) {
+                    nextIfdBuf.flip()
+                    ifdOffset = nextIfdBuf.int.toLong() and 0xFFFFFFFFL
+                } else {
+                    break
+                }
+            }
+            0f
+        } catch (e: Exception) {
+            android.util.Log.w("ImageRepository", "Failed to parse DNG BaselineExposure", e)
+            0f
+        }
+    }
+
     fun readDngBaselineExposure(uri: Uri, isHalfFrame: Boolean, index: Int = 0): EditConfig? {
         return try {
             context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                // TAG_BASELINE_EXPOSURE is 50730
-                val baselineExposure = exif.getAttributeDouble("BaselineExposure", 0.0).toFloat()
-                val digitalGain = Math.pow(2.0, baselineExposure.toDouble()).toFloat()
+                val baselineExposure = parseBaselineExposureFromPfd(pfd)
+                val digitalGain = if (baselineExposure != 0f) {
+                    Math.pow(2.0, baselineExposure.toDouble()).toFloat()
+                } else {
+                    1.0f
+                }
 
                 if (isHalfFrame) {
                     val adjs = mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
-                    adjs[index] = top.maary.darkbag.models.BasicAdjustments(exposure = baselineExposure, digitalGain = digitalGain)
+                    adjs[index] = top.maary.darkbag.models.BasicAdjustments(exposure = 0f, digitalGain = digitalGain)
                     EditConfig(adjustments = adjs)
                 } else {
-                    EditConfig(exposure = baselineExposure, digitalGain = digitalGain)
+                    EditConfig(exposure = 0f, digitalGain = digitalGain)
                 }
             }
         } catch (e: Exception) {

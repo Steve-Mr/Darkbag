@@ -1162,7 +1162,7 @@ open class ImageViewerFragment : Fragment() {
                                 if (currentEditConfig?.exposure == 0f) {
                                     currentEditConfig = currentEditConfig?.copy(
                                         digitalGain = configFromExif.digitalGain,
-                                        exposure = if (configFromExif.digitalGain > 0f) kotlin.math.log2(configFromExif.digitalGain) else 0f
+                                        exposure = 0f
                                     )
                                     updateEditUi()
                                     if (isEditingAdjustments) updateSlidersInPanel()
@@ -2407,7 +2407,7 @@ open class ImageViewerFragment : Fragment() {
                             shadows = adj.shadows,
                             whites = adj.whites,
                             blacks = adj.blacks,
-                            digitalGain = 1.0f, // Gain is already in adj.exposure
+                            digitalGain = adj.digitalGain.takeIf { it > 0f } ?: config.digitalGain.takeIf { it > 0f } ?: currentGroup.editConfig?.digitalGain ?: 1.0f,
                             outputJpgPath = null,
                             useGpu = false,
                             orientation = rotDegrees,
@@ -2491,7 +2491,7 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun top.maary.darkbag.models.EditConfig.toBasic() = top.maary.darkbag.models.BasicAdjustments(
-        exposure, contrast, saturation, highlights, shadows, whites, blacks
+        exposure, contrast, saturation, highlights, shadows, whites, blacks, digitalGain
     )
 
     protected open fun saveEdit(isReplacement: Boolean) {
@@ -2743,6 +2743,7 @@ open class ImageViewerFragment : Fragment() {
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 
                         val meta = repository.getCaptureMetadata(uri)
+                        val colorEngineMode = config.colorEngineMode ?: currentGroup.editConfig?.colorEngineMode ?: 0
                         top.maary.darkbag.processor.ColorProcessor.processRaw(
                             dngData = finalBytes,
                             targetLog = logIndex,
@@ -2754,7 +2755,7 @@ open class ImageViewerFragment : Fragment() {
                             shadows = adj.shadows,
                             whites = adj.whites,
                             blacks = adj.blacks,
-                            digitalGain = 1.0f, // Gain is already in adj.exposure
+                            digitalGain = adj.digitalGain.takeIf { it > 0f } ?: config.digitalGain.takeIf { it > 0f } ?: currentGroup.editConfig?.digitalGain ?: 1.0f,
                             outputJpgPath = null,
                             useGpu = false,
                             orientation = rotDegrees,
@@ -2762,7 +2763,8 @@ open class ImageViewerFragment : Fragment() {
                             outputBitmap = previewBitmap,
                             downsampleFactor = 1,
                             zoomFactor = config.zoomFactor,
-                            metadata = meta
+                            metadata = meta,
+                            colorEngineMode = colorEngineMode
                         )
                         return previewBitmap
                     }
@@ -3016,6 +3018,7 @@ open class ImageViewerFragment : Fragment() {
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 
                         val meta = repository.getCaptureMetadata(uri)
+                        val colorEngineMode = config.colorEngineMode ?: currentGroup.editConfig?.colorEngineMode ?: 0
                         top.maary.darkbag.processor.ColorProcessor.processRaw(
                             dngData = finalBytes,
                             targetLog = logIndex,
@@ -3027,7 +3030,7 @@ open class ImageViewerFragment : Fragment() {
                             shadows = adj.shadows,
                             whites = adj.whites,
                             blacks = adj.blacks,
-                            digitalGain = 1.0f,
+                            digitalGain = adj.digitalGain.takeIf { it > 0f } ?: config.digitalGain.takeIf { it > 0f } ?: currentGroup.editConfig?.digitalGain ?: 1.0f,
                             outputJpgPath = null,
                             outputTiffPath = targetTiffPath,
                             useGpu = false,
@@ -3036,7 +3039,8 @@ open class ImageViewerFragment : Fragment() {
                             outputBitmap = if (targetTiffPath != null) null else previewBitmap,
                             downsampleFactor = 1,
                             zoomFactor = config.zoomFactor,
-                            metadata = meta
+                            metadata = meta,
+                            colorEngineMode = colorEngineMode
                         )
                         return previewBitmap
                     }
@@ -4464,9 +4468,10 @@ open class ImageViewerFragment : Fragment() {
                 val bmpW = (fullW / config.zoomFactor).toInt()
                 val bmpH = (fullH / config.zoomFactor).toInt()
                 val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
-                val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks)
+                val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
 
                 val meta = repository.getCaptureMetadata(uri)
+                val colorEngineMode = config.colorEngineMode ?: currentGroup.editConfig?.colorEngineMode ?: 0
                 top.maary.darkbag.processor.ColorProcessor.processRaw(
                     dngData = finalBytes,
                     targetLog = logIndex,
@@ -4478,7 +4483,7 @@ open class ImageViewerFragment : Fragment() {
                     shadows = adj.shadows,
                     whites = adj.whites,
                     blacks = adj.blacks,
-                    digitalGain = 1.0f,
+                    digitalGain = adj.digitalGain.takeIf { it > 0f } ?: config.digitalGain.takeIf { it > 0f } ?: currentGroup.editConfig?.digitalGain ?: 1.0f,
                     outputJpgPath = null,
                     outputTiffPath = null,
                     useGpu = false,
@@ -4487,7 +4492,8 @@ open class ImageViewerFragment : Fragment() {
                     outputBitmap = previewBitmap,
                     downsampleFactor = 1,
                     zoomFactor = config.zoomFactor,
-                    metadata = meta
+                    metadata = meta,
+                    colorEngineMode = colorEngineMode
                 )
                 return previewBitmap
             }

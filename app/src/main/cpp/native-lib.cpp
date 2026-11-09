@@ -14,6 +14,7 @@
 
 #define TAG "ColorProcessorNative"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 namespace {
@@ -140,6 +141,159 @@ ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
     meta.imageDescription = getStringField(env, metadataObj, g_metadataFields.imageDescription, "Processed by Darkbag");
 
     return meta;
+}
+
+static inline uint16_t read_u16_endian(const uint8_t* p, bool le) {
+    return le ? (static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8))
+              : ((static_cast<uint16_t>(p[0]) << 8) | static_cast<uint16_t>(p[1]));
+}
+
+static inline uint32_t read_u32_endian(const uint8_t* p, bool le) {
+    return le ? (static_cast<uint32_t>(p[0]) |
+                 (static_cast<uint32_t>(p[1]) << 8) |
+                 (static_cast<uint32_t>(p[2]) << 16) |
+                 (static_cast<uint32_t>(p[3]) << 24))
+              : ((static_cast<uint32_t>(p[0]) << 24) |
+                 (static_cast<uint32_t>(p[1]) << 16) |
+                 (static_cast<uint32_t>(p[2]) << 8) |
+                 static_cast<uint32_t>(p[3]));
+}
+
+static inline int32_t read_i32_endian(const uint8_t* p, bool le) {
+    return static_cast<int32_t>(read_u32_endian(p, le));
+}
+
+static inline uint32_t swap_u32_be(uint32_t v) {
+    return ((v >> 24) & 0xff) | ((v << 8) & 0xff0000) | ((v >> 8) & 0xff00) | ((v << 24) & 0xff000000);
+}
+
+static inline float swap_f32_be(uint32_t v) {
+    uint32_t s = swap_u32_be(v);
+    float f = 0.0f;
+    std::memcpy(&f, &s, 4);
+    return f;
+}
+
+bool parse_dng_baseline_exposure(const uint8_t* dngData, size_t dataLen, float& outExposure) {
+    if (!dngData || dataLen < 16) return false;
+    bool le = (dngData[0] == 'I' && dngData[1] == 'I');
+    if (!le && !(dngData[0] == 'M' && dngData[1] == 'M')) return false;
+    uint16_t magic = read_u16_endian(dngData + 2, le);
+    if (magic != 42) return false;
+
+    uint32_t ifdOffset = read_u32_endian(dngData + 4, le);
+    while (ifdOffset > 0 && ifdOffset + 2 <= dataLen) {
+        uint16_t numEntries = read_u16_endian(dngData + ifdOffset, le);
+        size_t entryPtr = ifdOffset + 2;
+        if (entryPtr + static_cast<size_t>(numEntries) * 12 > dataLen) break;
+
+        for (uint16_t i = 0; i < numEntries; ++i) {
+            uint16_t tag = read_u16_endian(dngData + entryPtr, le);
+            uint16_t typ = read_u16_endian(dngData + entryPtr + 2, le);
+            uint32_t count = read_u32_endian(dngData + entryPtr + 4, le);
+            uint32_t valOrOffset = read_u32_endian(dngData + entryPtr + 8, le);
+            entryPtr += 12;
+
+            if (tag == 50730 && typ == 10 && count == 1) { // BaselineExposure (SRATIONAL)
+                if (valOrOffset + 8 <= dataLen) {
+                    int32_t num = read_i32_endian(dngData + valOrOffset, le);
+                    int32_t den = read_i32_endian(dngData + valOrOffset + 4, le);
+                    if (den != 0) {
+                        outExposure = static_cast<float>(num) / static_cast<float>(den);
+                        return true;
+                    }
+                }
+            }
+        }
+        if (entryPtr + 4 <= dataLen) {
+            ifdOffset = read_u32_endian(dngData + entryPtr, le);
+        } else {
+            break;
+        }
+    }
+    return false;
+}
+
+bool parse_dng_gainmap_opcodes(
+    const uint8_t* dngData,
+    size_t dataLen,
+    std::vector<float>& outLensShadingMap,
+    int& outRows,
+    int& outCols
+) {
+    if (!dngData || dataLen < 16) return false;
+    bool le = (dngData[0] == 'I' && dngData[1] == 'I');
+    if (!le && !(dngData[0] == 'M' && dngData[1] == 'M')) return false;
+    uint16_t magic = read_u16_endian(dngData + 2, le);
+    if (magic != 42) return false;
+
+    uint32_t ifdOffset = read_u32_endian(dngData + 4, le);
+    while (ifdOffset > 0 && ifdOffset + 2 <= dataLen) {
+        uint16_t numEntries = read_u16_endian(dngData + ifdOffset, le);
+        size_t entryPtr = ifdOffset + 2;
+        if (entryPtr + static_cast<size_t>(numEntries) * 12 > dataLen) break;
+
+        for (uint16_t i = 0; i < numEntries; ++i) {
+            uint16_t tag = read_u16_endian(dngData + entryPtr, le);
+            uint32_t count = read_u32_endian(dngData + entryPtr + 4, le);
+            uint32_t valOrOffset = read_u32_endian(dngData + entryPtr + 8, le);
+            entryPtr += 12;
+
+            if (tag == 51009) { // TIFFTAG_OPCODELIST2
+                uint32_t opOffset = valOrOffset;
+                if (opOffset + count > dataLen || count < 8) return false;
+                const uint8_t* opPtr = dngData + opOffset;
+                const uint8_t* opEnd = opPtr + count;
+
+                uint32_t numOpcodes = read_u32_endian(opPtr, false); // DNG Opcodes are ALWAYS Big Endian!
+                opPtr += 4;
+
+                int detectedRows = 0, detectedCols = 0;
+                std::vector<float> fullMap;
+
+                for (uint32_t opIdx = 0; opIdx < numOpcodes && opPtr + 16 <= opEnd; ++opIdx) {
+                    uint32_t opId = read_u32_endian(opPtr, false);
+                    uint32_t pBytes = read_u32_endian(opPtr + 12, false);
+                    opPtr += 16;
+                    if (opPtr + pBytes > opEnd) break;
+
+                    if (opId == 9 && pBytes >= 40 + 32 + 4) { // GainMap
+                        uint32_t rows = read_u32_endian(opPtr + 32, false);
+                        uint32_t cols = read_u32_endian(opPtr + 36, false);
+                        uint32_t mapPlanes = read_u32_endian(opPtr + 72, false);
+                        const uint8_t* gainData = opPtr + 76;
+                        uint32_t numFloats = rows * cols * mapPlanes;
+                        if (gainData + static_cast<size_t>(numFloats) * 4 <= opPtr + pBytes) {
+                            if (detectedRows == 0) {
+                                detectedRows = static_cast<int>(rows);
+                                detectedCols = static_cast<int>(cols);
+                            }
+                            for (uint32_t fIdx = 0; fIdx < numFloats; ++fIdx) {
+                                uint32_t rawVal;
+                                std::memcpy(&rawVal, gainData + fIdx * 4, 4);
+                                fullMap.push_back(swap_f32_be(rawVal));
+                            }
+                        }
+                    }
+                    opPtr += pBytes;
+                }
+
+                if (!fullMap.empty() && detectedRows > 1 && detectedCols > 1 &&
+                    fullMap.size() == static_cast<size_t>(4 * detectedRows * detectedCols)) {
+                    outLensShadingMap = std::move(fullMap);
+                    outRows = detectedRows;
+                    outCols = detectedCols;
+                    return true;
+                }
+            }
+        }
+        if (entryPtr + 4 <= dataLen) {
+            ifdOffset = read_u32_endian(dngData + entryPtr, le);
+        } else {
+            break;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -291,6 +445,25 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
             env->GetFloatArrayRegion(lensShadingMap, 0, expected, lensShadingVec.data());
             lens_shading_ptr = lensShadingVec.data();
         }
+    } else {
+        int parsedRows = 0, parsedCols = 0;
+        if (parse_dng_gainmap_opcodes(buf, len, lensShadingVec, parsedRows, parsedCols)) {
+            lens_shading_ptr = lensShadingVec.data();
+            lensShadingRows = parsedRows;
+            lensShadingCols = parsedCols;
+            LOGI("Native processRaw: recovered OpcodeList2 GainMap from DNG (%dx%d, %zu floats)",
+                 lensShadingCols, lensShadingRows, lensShadingVec.size());
+        }
+    }
+
+    float effectiveDigitalGain = digitalGain;
+    if (effectiveDigitalGain <= 1.0f) {
+        float parsedExposure = 0.0f;
+        if (parse_dng_baseline_exposure(buf, len, parsedExposure) && parsedExposure != 0.0f) {
+            effectiveDigitalGain = std::pow(2.0f, parsedExposure);
+            LOGI("Native processRaw: recovered BaselineExposure from DNG: %.3f EV (effectiveDigitalGain=%.3f)",
+                 parsedExposure, effectiveDigitalGain);
+        }
     }
 
     // Use Shared Pipeline
@@ -299,7 +472,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         lens_shading_ptr, lensShadingRows, lensShadingCols,
         image->width,
         image->height,
-        digitalGain,
+        effectiveDigitalGain,
         targetLog,
         lut,
         exposure, contrast, saturation, highlights, shadows, whites, blacks,
