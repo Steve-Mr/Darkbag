@@ -240,12 +240,23 @@ class PlaygroundGalleryFragment : Fragment() {
             }
         )
 
-        val spanCount = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 3 else 2
-        val staggeredLayoutManager = StaggeredGridLayoutManager(spanCount, StaggeredGridLayoutManager.VERTICAL).apply {
+        var currentSpanCount = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 3 else 2
+        val staggeredLayoutManager = StaggeredGridLayoutManager(currentSpanCount, StaggeredGridLayoutManager.VERTICAL).apply {
             gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_NONE
         }
         binding.recyclerView.layoutManager = staggeredLayoutManager
         binding.recyclerView.adapter = adapter
+
+        binding.btnPlaygroundDockLayout.text = getString(R.string.gallery_layout_cols, currentSpanCount)
+        binding.btnPlaygroundDockLayout.setOnClickListener {
+            currentSpanCount = if (currentSpanCount == 2) 3 else 2
+            (binding.recyclerView.layoutManager as? StaggeredGridLayoutManager)?.spanCount = currentSpanCount
+            binding.btnPlaygroundDockLayout.text = getString(R.string.gallery_layout_cols, currentSpanCount)
+        }
+
+        binding.btnPlaygroundDockSelectAll.setOnClickListener {
+            toggleSelectAll()
+        }
 
         binding.fabAdd.setOnClickListener {
             importDngLauncher.launch("image/x-adobe-dng")
@@ -534,123 +545,73 @@ class PlaygroundGalleryFragment : Fragment() {
     private fun updateBottomBar() {
         val ctx = context ?: return
         val sandboxCount = adapter.currentList.size
-        val subtitleText = "外部暗房 · $sandboxCount 组"
+        val hasSelection = isSelectionMode && selectedFiles.isNotEmpty()
+
+        val titleText = getString(R.string.playground_title)
+        val subtitleText = if (hasSelection) {
+            getString(R.string.gallery_selected_count, selectedFiles.size)
+        } else {
+            getString(R.string.playground_subtitle_format, sandboxCount)
+        }
+        binding.toolbar.title = titleText
         binding.toolbar.subtitle = subtitleText
+        binding.tvPlaygroundTitle.text = titleText
         binding.tvPlaygroundSubtitle.text = subtitleText
 
-        (binding.playgroundBentoDock as? BentoTrayCard)?.let { dockCard ->
-            val role = if (isSelectionMode && selectedFiles.isNotEmpty()) {
-                BentoContainerRole.SECONDARY_CONTAINER
-            } else {
-                BentoContainerRole.SURFACE_CONTAINER_LOW
-            }
-            dockCard.setContainerRole(role, animated = true)
+        val role = if (hasSelection) {
+            BentoContainerRole.PRIMARY_CONTAINER
+        } else {
+            BentoContainerRole.SURFACE_CONTAINER
         }
+        (binding.playgroundBentoDock as? BentoTrayCard)?.setContainerRole(role, animated = true)
+        (binding.playgroundTopBentoCard as? BentoTrayCard)?.setContainerRole(role, animated = true)
 
         val prefs = ctx.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
         binding.btnPlaygroundBack.visibility = if (enableCamera || isSelectionMode) View.VISIBLE else View.GONE
 
-        val titleText = if (isSelectionMode && selectedFiles.isNotEmpty()) {
-            "${selectedFiles.size} SELECTED"
-        } else {
-            "PLAYGROUND"
-        }
-        binding.toolbar.title = titleText
-        binding.tvPlaygroundTitle.text = titleText
-
         val allFilesCount = adapter.currentList.size
         val isAllSelected = isSelectionMode && selectedFiles.size >= allFilesCount && allFilesCount > 0
-        binding.btnPlaygroundSelectAll.text = if (isAllSelected) "☒ NONE" else "☑ ALL"
+        binding.btnPlaygroundSelectAll.setText(if (isAllSelected) R.string.gallery_deselect_all else R.string.gallery_select_all)
 
         val selectAllItem = binding.toolbar.menu.findItem(R.id.action_select_all)
         if (selectAllItem != null) {
             selectAllItem.setIcon(if (isAllSelected) R.drawable.ic_deselect else R.drawable.ic_select_all)
-            selectAllItem.title = if (isAllSelected) "Deselect All" else "Select All"
+            selectAllItem.title = getString(if (isAllSelected) R.string.gallery_deselect_all else R.string.gallery_select_all)
         }
 
-        // Always keep playground_bento_dock and fabAdd visible
         binding.playgroundBentoDock.visibility = View.VISIBLE
-        binding.fabAdd.visibility = View.VISIBLE
-        binding.fabAdd.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "＋ IMPORT",
-            value = "导入外部 DNG",
-            isTabActive = false,
-            context = ctx
-        )
 
-        val density = resources.displayMetrics.density
-        val stroke1dp = (1f * density).toInt()
-        val stroke1_5dp = (1.5f * density).toInt()
-        val radius12dp = (12f * density).toInt()
-        val radius14dp = (14f * density).toInt()
-
-        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
-        val colorPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
-        val colorSecondaryContainer = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondaryContainer, android.graphics.Color.DKGRAY)
-        val colorOnSecondaryContainer = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSecondaryContainer, android.graphics.Color.WHITE)
-        val colorSurfaceContainerHigh = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.GRAY)
-        val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.DKGRAY)
-
-        // Merge button: always visible in dock; active when exactly 2 DNGs are selected
-        val allDngs = selectedFiles.isNotEmpty() && selectedFiles.all { it.extension.lowercase() == "dng" }
-        val isMergeActive = isSelectionMode && selectedFiles.size == 2 && allDngs
-        binding.btnMerge.visibility = View.VISIBLE
-        binding.btnMerge.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "⊞ MERGE HF",
-            value = "半格拼图",
-            isTabActive = isMergeActive,
-            context = ctx
-        )
-        if (isMergeActive) {
-            binding.btnMerge.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
-            binding.btnMerge.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
-            binding.btnMerge.strokeWidth = stroke1_5dp
-            binding.btnMerge.cornerRadius = radius12dp
-            binding.btnMerge.alpha = 1.0f
-        } else {
-            binding.btnMerge.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-            binding.btnMerge.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
-            binding.btnMerge.strokeWidth = stroke1dp
-            binding.btnMerge.cornerRadius = radius14dp
-            binding.btnMerge.alpha = 0.5f
-        }
-
-        // Disband button: visible when all selected items are merged Half-Frame groups
-        val allGroups = isSelectionMode && selectedFiles.isNotEmpty() && selectedFiles.all { selectedFile ->
-            adapter.currentList.any { item -> item is PlaygroundItem.Group && item.jpgFile == selectedFile }
-        }
-        binding.btnDisband.visibility = if (allGroups) View.VISIBLE else View.GONE
-        binding.btnDisband.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "✂ DISBAND",
-            value = "拆分半格",
-            isTabActive = allGroups,
-            context = ctx
-        )
-
-        // Export button: always visible in dock
-        val hasSelection = isSelectionMode && selectedFiles.isNotEmpty()
-        binding.btnExport.visibility = View.VISIBLE
-        binding.btnExport.isEnabled = true
-        binding.btnExport.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "↗ EXPORT",
-            value = if (hasSelection) "导出 (${selectedFiles.size})" else "批量导出",
-            isTabActive = false,
-            context = ctx
-        )
         if (hasSelection) {
-            binding.btnExport.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSecondaryContainer)
-            binding.btnExport.setTextColor(colorOnSecondaryContainer)
-            binding.btnExport.alpha = 1.0f
-        } else {
-            binding.btnExport.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-            binding.btnExport.alpha = 0.5f
-        }
+            binding.layoutPlaygroundNormalActions.visibility = View.GONE
+            binding.layoutPlaygroundSelectionActions.visibility = View.VISIBLE
 
-        // Delete button: always visible in dock
-        binding.btnDelete.visibility = View.VISIBLE
-        binding.btnDelete.isEnabled = hasSelection
-        binding.btnDelete.alpha = if (hasSelection) 1.0f else 0.4f
+            // Merge button: active when exactly 2 DNGs are selected
+            val allDngs = selectedFiles.all { it.extension.lowercase() == "dng" }
+            val isMergeActive = selectedFiles.size == 2 && allDngs
+            binding.btnMerge.isEnabled = isMergeActive
+            binding.btnMerge.alpha = if (isMergeActive) 1.0f else 0.4f
+            binding.btnMerge.setText(R.string.playground_btn_merge)
+
+            // Disband button: visible when all selected items are merged Half-Frame groups
+            val allGroups = selectedFiles.all { selectedFile ->
+                adapter.currentList.any { item -> item is PlaygroundItem.Group && item.jpgFile == selectedFile }
+            }
+            binding.btnDisband.visibility = if (allGroups) View.VISIBLE else View.GONE
+            binding.btnDisband.setText(R.string.playground_btn_disband)
+
+            // Export button
+            binding.btnExport.isEnabled = true
+            binding.btnExport.alpha = 1.0f
+            binding.btnExport.setText(R.string.playground_btn_export)
+
+            // Delete button
+            binding.btnDelete.isEnabled = true
+            binding.btnDelete.alpha = 1.0f
+        } else {
+            binding.layoutPlaygroundNormalActions.visibility = View.VISIBLE
+            binding.layoutPlaygroundSelectionActions.visibility = View.GONE
+        }
     }
 
     private fun clearSelectionAndReload() {
