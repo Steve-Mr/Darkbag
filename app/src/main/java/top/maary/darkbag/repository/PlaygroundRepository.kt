@@ -35,7 +35,7 @@ import java.util.UUID
  */
 class PlaygroundRepository(private val context: Context) {
 
-    private val playgroundDir: File by lazy {
+    val playgroundDir: File by lazy {
         val dir = File(context.filesDir, "playground_dngs")
         if (!dir.exists()) {
             dir.mkdirs()
@@ -47,8 +47,6 @@ class PlaygroundRepository(private val context: Context) {
     private var cachedItems: List<PlaygroundItem>? = null
 
     private val aspectRatioCache = mutableMapOf<String, String>()
-
-    fun getPlaygroundDir(): File = playgroundDir
 
     fun getPlaygroundItemsFlow(forceRefresh: Boolean = false): Flow<List<PlaygroundItem>> = flow {
         // Stage 0: Stale-While-Revalidate 瞬时 T2 交付
