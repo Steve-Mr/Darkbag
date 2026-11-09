@@ -422,7 +422,7 @@ open class ImageViewerFragment : Fragment() {
                     }
                     if (isGalleryMode && !galleryAdapter.isSelectionMode) {
                         binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
-                        binding.tvGalleryHeaderSubtitle.text = getString(R.string.gallery_groups_count, groups.size)
+                        binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_groups_count, groups.size)
                     }
                 }
 
@@ -3825,7 +3825,7 @@ open class ImageViewerFragment : Fragment() {
 
         val currentCount = if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0
         binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
-        binding.tvGalleryHeaderSubtitle.text = getString(R.string.gallery_groups_count, currentCount)
+        binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_groups_count, currentCount)
         updateGallerySelectionUI(0)
 
         if (currentCount == 0) {
@@ -3882,7 +3882,7 @@ open class ImageViewerFragment : Fragment() {
             binding.galleryHeaderCard.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.PRIMARY_CONTAINER, animated = true)
             binding.btnGalleryHeaderAction.setIconResource(R.drawable.ic_close)
             binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
-            binding.tvGalleryHeaderSubtitle.text = getString(R.string.gallery_selected_count, selectedCount)
+            binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_selected_count, selectedCount)
             binding.btnGalleryHeaderInfo.visibility = View.GONE
             binding.btnGalleryHeaderSelectAll.visibility = View.VISIBLE
 
@@ -3915,7 +3915,7 @@ open class ImageViewerFragment : Fragment() {
             binding.btnGalleryHeaderAction.setIconResource(R.drawable.ic_back)
             val count = galleryAdapter.itemCount
             binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
-            binding.tvGalleryHeaderSubtitle.text = getString(R.string.gallery_groups_count, count)
+            binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_groups_count, count)
             binding.btnGalleryHeaderInfo.visibility = View.VISIBLE
             binding.btnGalleryHeaderSelectAll.visibility = View.GONE
 
