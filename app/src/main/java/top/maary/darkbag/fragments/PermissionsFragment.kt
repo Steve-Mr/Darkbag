@@ -393,11 +393,33 @@ class PermissionsFragment : Fragment() {
             updateFocalTiles("35mm")
         }
 
-        // Switches
-        binding.switchMotionPhoto.isChecked = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false)
+        // Motion photo & audio switches
+        fun updateMotionPhotoAudioVisibility(motionEnabled: Boolean) {
+            binding.switchMotionPhotoAudio.visibility = if (motionEnabled) View.VISIBLE else View.GONE
+            binding.cardMotionPhotoAudioHint.visibility = if (motionEnabled) View.VISIBLE else View.GONE
+        }
+
+        val motionEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false)
+        binding.switchMotionPhoto.isChecked = motionEnabled
         binding.switchMotionPhoto.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO, isChecked).apply()
+            updateMotionPhotoAudioVisibility(isChecked)
         }
+
+        binding.switchMotionPhotoAudio.isChecked = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true)
+        binding.switchMotionPhotoAudio.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                if (ContextCompat.checkSelfPermission(
+                        requireContext(),
+                        Manifest.permission.RECORD_AUDIO
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+            prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, isChecked).apply()
+        }
+        updateMotionPhotoAudioVisibility(motionEnabled)
 
         val hasLoc = LocationHelper.hasPermission(requireContext()) && prefs.getBoolean(SettingsFragment.KEY_SAVE_LOCATION, false)
         binding.switchSaveLocation.isChecked = hasLoc
@@ -554,6 +576,24 @@ class PermissionsFragment : Fragment() {
             }
             prefs.edit().putString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, nextAction).apply()
             updateShutterHoldText()
+        }
+
+        // Internal vs External Viewer
+        fun updateViewerDescription(useInternal: Boolean) {
+            binding.tvViewerDesc.text = if (useInternal) {
+                getString(R.string.onboarding_viewer_internal_desc)
+            } else {
+                getString(R.string.onboarding_viewer_external_desc)
+            }
+        }
+
+        val useInternalViewer = prefs.getBoolean(SettingsFragment.KEY_USE_INTERNAL_VIEWER, true)
+        binding.switchUseInternalViewer.isChecked = useInternalViewer
+        updateViewerDescription(useInternalViewer)
+
+        binding.switchUseInternalViewer.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(SettingsFragment.KEY_USE_INTERNAL_VIEWER, isChecked).apply()
+            updateViewerDescription(isChecked)
         }
 
         updateUiTierSelection("FILM")
