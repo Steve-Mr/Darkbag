@@ -481,10 +481,14 @@
     <string name="onboarding_perm_camera_desc">Access RAW sensor stream and computational photography</string>
     <string name="onboarding_perm_notif_title">Background Processing Notifications</string>
     <string name="onboarding_perm_notif_desc">Show background photo synthesis and DNG export progress</string>
+    <string name="onboarding_badge_required">REQUIRED</string>
+    <string name="onboarding_badge_recommended">RECOMMENDED</string>
+    <string name="onboarding_badge_optional">OPTIONAL</string>
     <string name="onboarding_perm_audio_title">Microphone Audio Recording</string>
-    <string name="onboarding_perm_audio_desc">Record audio for MP4 &amp; RAW video (not needed for photos)</string>
+    <string name="onboarding_perm_audio_desc">Record audio for Motion Photos and long-press video (optional for still photos)</string>
     <string name="onboarding_perm_granted">✓ GRANTED</string>
     <string name="onboarding_perm_grant">Grant</string>
+    <string name="onboarding_motion_photo_audio_hint">Motion Photo audio recording requires microphone permission. Videos will be silent if permission is not granted.</string>
     <string name="onboarding_format_dual_desc">✨ JPG + DNG (Recommended): Instant shareable graded JPGs while preserving lossless compressed DNG negatives for darkroom grading.</string>
     <string name="onboarding_format_jpg_desc">⚡ JPG Only: Saves maximum storage, ideal for everyday snapshots (no DNG negatives for darkroom lossless re-grading).</string>
     <string name="onboarding_format_raw_desc">🎞️ DNG Only: Pure digital negatives, ready to be graded in Darkbag Playground or desktop software.</string>
@@ -496,6 +500,9 @@
     <string name="onboarding_tier_film_desc">🎞️ FILM Simulation Layer (Recommended): Viewfinder includes Film Recipe capsule, Half-frame &amp; Multi-cam modes, and dynamic HDR+ underexposure.</string>
     <string name="onboarding_tier_pro_desc">🎛️ PRO Manual Layer: Unlocks manual dials (ISO, Shutter speed, Manual focus) and focus peaking highlight.</string>
     <string name="onboarding_ready_desc">Setup complete! You can adjust any of these options at any time in Darkbag Settings.</string>
+    <string name="onboarding_viewer_title">PHOTO VIEWER</string>
+    <string name="onboarding_viewer_internal_desc">Built-in Darkroom Viewer: inspect lossless DNG negatives, play back Motion Photos, and launch one-tap darkroom grading.</string>
+    <string name="onboarding_viewer_external_desc">External Viewer: launch system default gallery or third-party photo viewer when tapping thumbnail.</string>
     <string name="pref_replay_onboarding">Setup Wizard</string>
     <string name="pref_replay_onboarding_desc">Re-run startup module, formats, and UI tier setup</string>
     <string name="lut_import_select_log_title">Select Base Log Curve</string>

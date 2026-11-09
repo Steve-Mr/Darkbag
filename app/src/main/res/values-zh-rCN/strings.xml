@@ -457,10 +457,14 @@
     <string name="onboarding_perm_camera_desc">开启 RAW 传感器数据流与多帧计算摄影</string>
     <string name="onboarding_perm_notif_title">后台冲印进度通知</string>
     <string name="onboarding_perm_notif_desc">显示后台照片合成与 DNG 冲印队列</string>
+    <string name="onboarding_badge_required">必选</string>
+    <string name="onboarding_badge_recommended">推荐</string>
+    <string name="onboarding_badge_optional">可选</string>
     <string name="onboarding_perm_audio_title">麦克风音频录制</string>
-    <string name="onboarding_perm_audio_desc">长按快门录制 MP4 / RAW 视频音轨（拍照免授）</string>
+    <string name="onboarding_perm_audio_desc">实况照片声音录制与长按快门视频（纯拍照免授）</string>
     <string name="onboarding_perm_granted">✓ 已授权</string>
     <string name="onboarding_perm_grant">授权</string>
+    <string name="onboarding_motion_photo_audio_hint">实况照片录音需要麦克风权限；未授权时实况将静音录制。</string>
     <string name="onboarding_format_dual_desc">✨ JPG + DNG 双修 (推荐)：直出调色 JPG 方便即时分享，同时保存无损压缩 DNG (~12MB)，供「暗房工作台」无损重调色彩与半格拼图。</string>
     <string name="onboarding_format_jpg_desc">⚡ 仅保存 JPG 照片：最节省存储空间，适合轻快记录（注：无 DNG 底片无法在暗房中二次无损调色）。</string>
     <string name="onboarding_format_raw_desc">🎞️ 纯 DNG 数字底片模式：仅保存无损压缩 DNG 母带，完全交由「暗房工作台」或外部专业后期软件冲印。</string>
@@ -472,6 +476,9 @@
     <string name="onboarding_tier_film_desc">🎞️ FILM 胶片创作层（推荐）：取景器常驻 Log/LUT 配方切换胶囊、半格胶片 / 多摄同开模式切换 与 HDR+ 动态欠曝 磁贴。</string>
     <string name="onboarding_tier_pro_desc">🎛️ PRO 专业手动层：全功能开启 手动 ISO / 快门速度 / 对焦拨盘 与 峰值对焦辅助高亮 (Focus Peaking)。</string>
     <string name="onboarding_ready_desc">已为您配置完成！随时可在设置菜单中调整。</string>
+    <string name="onboarding_viewer_title">相册与查看器</string>
+    <string name="onboarding_viewer_internal_desc">使用内置暗房查看器：直接浏览与缩放 DNG 底片、预览实况照片、一键调入暗房工作台冲印。</string>
+    <string name="onboarding_viewer_external_desc">使用第三方查看器：轻触相册缩略图时直接调用系统默认相册或外部图片应用。</string>
     <string name="pref_replay_onboarding">配置向导</string>
     <string name="pref_replay_onboarding_desc">重新配置初始模块、格式与操控层级</string>
     <string name="lut_import_select_log_title">选择基准 Log 曲线</string>

@@ -67,6 +67,9 @@ class OnboardingAndPermissionsTest {
         assertNotNull(binding.tileFocal28)
         assertNotNull(binding.tileFocal35)
         assertNotNull(binding.switchMotionPhoto)
+        assertNotNull(binding.switchMotionPhotoAudio)
+        assertNotNull(binding.cardMotionPhotoAudioHint)
+        assertNotNull(binding.tvMotionPhotoAudioHint)
         assertNotNull(binding.switchSaveLocation)
 
         // Step 3: Recipe & Log Pairing
@@ -83,7 +86,7 @@ class OnboardingAndPermissionsTest {
         assertNotNull(binding.tvPairingDesc)
         assertNotNull(binding.switchLivePreview)
 
-        // Step 4: UI Tier
+        // Step 4: UI Tier & Viewer Navigation
         assertNotNull(binding.containerStep4)
         assertNotNull(binding.cardTrayUiTier)
         assertNotNull(binding.tileTierPs)
@@ -92,6 +95,9 @@ class OnboardingAndPermissionsTest {
         assertNotNull(binding.tvTierDesc)
         assertNotNull(binding.tileShutterHoldAction)
         assertNotNull(binding.tvShutterHoldValue)
+        assertNotNull(binding.cardTrayViewer)
+        assertNotNull(binding.switchUseInternalViewer)
+        assertNotNull(binding.tvViewerDesc)
 
         // Bottom CTA
         assertNotNull(binding.layoutBottomDock)
@@ -204,5 +210,90 @@ class OnboardingAndPermissionsTest {
             val unselectedStroke = ((1f) * density).toInt()
             assertTrue("Selected squircle stroke ($selectedStroke) must be thicker than unselected ($unselectedStroke)", selectedStroke > unselectedStroke)
         }
+    }
+
+    @Test
+    fun testMotionPhotoAudioSwitchAndHint() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
+        val inflater = LayoutInflater.from(themedContext)
+        val binding = FragmentPermissionsBinding.inflate(inflater)
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+
+        // Verify keys and defaults
+        assertEquals("motion_photo_enabled", SettingsFragment.KEY_MOTION_PHOTO)
+        assertEquals("motion_photo_audio_enabled", SettingsFragment.KEY_MOTION_PHOTO_AUDIO)
+
+        // Initial default state
+        assertFalse(prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false))
+        assertTrue(prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true))
+
+        // Badge parity
+        assertEquals("LIVE", binding.switchMotionPhoto.badgeText)
+        assertEquals("AUDIO", binding.switchMotionPhotoAudio.badgeText)
+
+        // Verify hint card text
+        val enHint = context.getString(R.string.onboarding_motion_photo_audio_hint)
+        assertTrue(enHint.contains("microphone permission"))
+
+        // Chinese locale test
+        val config = android.content.res.Configuration(context.resources.configuration)
+        config.setLocale(java.util.Locale.SIMPLIFIED_CHINESE)
+        val zhContext = context.createConfigurationContext(config)
+        val zhHint = zhContext.getString(R.string.onboarding_motion_photo_audio_hint)
+        assertTrue(zhHint.contains("麦克风权限"))
+    }
+
+    @Test
+    fun testInternalViewerSwitchAndPreference() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
+        val inflater = LayoutInflater.from(themedContext)
+        val binding = FragmentPermissionsBinding.inflate(inflater)
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+
+        // Verify key and default
+        assertEquals("use_internal_viewer", SettingsFragment.KEY_USE_INTERNAL_VIEWER)
+        assertTrue(prefs.getBoolean(SettingsFragment.KEY_USE_INTERNAL_VIEWER, true))
+
+        // Badge parity
+        assertEquals("BUILT-IN", binding.switchUseInternalViewer.badgeText)
+
+        // Check descriptions
+        val enInternalDesc = context.getString(R.string.onboarding_viewer_internal_desc)
+        val enExternalDesc = context.getString(R.string.onboarding_viewer_external_desc)
+        assertTrue(enInternalDesc.contains("Built-in Darkroom Viewer"))
+        assertTrue(enExternalDesc.contains("External Viewer"))
+
+        // Chinese locale test
+        val config = android.content.res.Configuration(context.resources.configuration)
+        config.setLocale(java.util.Locale.SIMPLIFIED_CHINESE)
+        val zhContext = context.createConfigurationContext(config)
+        val zhInternalDesc = zhContext.getString(R.string.onboarding_viewer_internal_desc)
+        val zhExternalDesc = zhContext.getString(R.string.onboarding_viewer_external_desc)
+        assertTrue(zhInternalDesc.contains("内置暗房查看器"))
+        assertTrue(zhExternalDesc.contains("第三方查看器"))
+    }
+
+    @Test
+    fun testAudioPermissionDescriptionAndBadges() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+
+        // EN description & badges
+        val enAudioDesc = context.getString(R.string.onboarding_perm_audio_desc)
+        assertTrue("Audio permission description should mention Motion Photos", enAudioDesc.contains("Motion Photos"))
+        assertEquals("REQUIRED", context.getString(R.string.onboarding_badge_required))
+        assertEquals("RECOMMENDED", context.getString(R.string.onboarding_badge_recommended))
+        assertEquals("OPTIONAL", context.getString(R.string.onboarding_badge_optional))
+
+        // ZH description & badges
+        val config = android.content.res.Configuration(context.resources.configuration)
+        config.setLocale(java.util.Locale.SIMPLIFIED_CHINESE)
+        val zhContext = context.createConfigurationContext(config)
+        val zhAudioDesc = zhContext.getString(R.string.onboarding_perm_audio_desc)
+        assertTrue("Chinese audio permission description should mention 实况照片", zhAudioDesc.contains("实况照片"))
+        assertEquals("必选", zhContext.getString(R.string.onboarding_badge_required))
+        assertEquals("推荐", zhContext.getString(R.string.onboarding_badge_recommended))
+        assertEquals("可选", zhContext.getString(R.string.onboarding_badge_optional))
     }
 }

@@ -453,7 +453,7 @@
                                             android:background="@drawable/bg_bento_badge_primary"
                                             android:paddingHorizontal="6dp"
                                             android:paddingVertical="1dp"
-                                            android:text="必选"
+                                            android:text="@string/onboarding_badge_required"
                                             android:textSize="9.5sp"
                                             android:textStyle="bold"
                                             android:textColor="?attr/colorPrimary" />
@@ -530,7 +530,7 @@
                                             android:background="@drawable/bg_bento_badge_secondary"
                                             android:paddingHorizontal="6dp"
                                             android:paddingVertical="1dp"
-                                            android:text="推荐"
+                                            android:text="@string/onboarding_badge_recommended"
                                             android:textSize="9.5sp"
                                             android:textStyle="bold"
                                             android:textColor="?attr/colorSecondary" />
@@ -606,7 +606,7 @@
                                             android:background="@drawable/bg_bento_badge_tertiary"
                                             android:paddingHorizontal="6dp"
                                             android:paddingVertical="1dp"
-                                            android:text="视频可选"
+                                            android:text="@string/onboarding_badge_optional"
                                             android:textSize="9.5sp"
                                             android:textStyle="bold"
                                             android:textColor="?attr/colorTertiary" />
@@ -970,6 +970,37 @@
                             app:bentoSwitchTitle="@string/pref_motion_photo"
                             app:bentoSwitchBadge="LIVE"
                             app:bentoSwitchBadgeStyle="secondary" />
+
+                        <top.maary.darkbag.ui.bento.BentoSwitchTile
+                            android:id="@+id/switch_motion_photo_audio"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:layout_marginBottom="8dp"
+                            android:visibility="gone"
+                            app:bentoSwitchTitle="@string/pref_motion_photo_audio"
+                            app:bentoSwitchBadge="AUDIO"
+                            app:bentoSwitchBadgeStyle="secondary" />
+
+                        <com.google.android.material.card.MaterialCardView
+                            android:id="@+id/card_motion_photo_audio_hint"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:visibility="gone"
+                            app:cardCornerRadius="12dp"
+                            app:cardBackgroundColor="?attr/colorSurface"
+                            app:strokeWidth="0dp"
+                            app:contentPadding="10dp">
+
+                            <TextView
+                                android:id="@+id/tv_motion_photo_audio_hint"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/onboarding_motion_photo_audio_hint"
+                                android:textSize="10sp"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:lineSpacingExtra="2dp" />
+                        </com.google.android.material.card.MaterialCardView>
 
                         <top.maary.darkbag.ui.bento.BentoSwitchTile
                             android:id="@+id/switch_save_location"
@@ -1433,6 +1464,78 @@
                                     android:textStyle="bold"
                                     android:textColor="?attr/colorSecondary" />
                             </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+                    </LinearLayout>
+                </top.maary.darkbag.ui.bento.BentoTrayCard>
+
+                <!-- Tray 4B: Navigation & Gallery Viewer -->
+                <top.maary.darkbag.ui.bento.BentoTrayCard
+                    android:id="@+id/card_tray_viewer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:bentoContainerRole="surfaceContainerHigh"
+                    android:layout_marginBottom="12dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:paddingHorizontal="4dp"
+                            android:layout_marginBottom="6dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/onboarding_viewer_title"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:textColor="?attr/colorPrimary" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:background="@drawable/bg_bento_badge_primary"
+                                android:paddingHorizontal="8dp"
+                                android:paddingVertical="2dp"
+                                android:text="VIEWER"
+                                android:textSize="10sp"
+                                android:textStyle="bold"
+                                android:textColor="?attr/colorPrimary" />
+                        </LinearLayout>
+
+                        <top.maary.darkbag.ui.bento.BentoSwitchTile
+                            android:id="@+id/switch_use_internal_viewer"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:layout_marginBottom="8dp"
+                            app:bentoSwitchTitle="@string/settings_ui_internal_viewer"
+                            app:bentoSwitchBadge="BUILT-IN"
+                            app:bentoSwitchBadgeStyle="primary" />
+
+                        <!-- Dynamic Viewer Description Card -->
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            app:cardCornerRadius="12dp"
+                            app:cardBackgroundColor="?attr/colorSurface"
+                            app:strokeWidth="0dp"
+                            app:contentPadding="10dp">
+
+                            <TextView
+                                android:id="@+id/tv_viewer_desc"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/onboarding_viewer_internal_desc"
+                                android:textSize="10.5sp"
+                                android:textColor="?attr/colorOnSurface"
+                                android:lineSpacingExtra="2dp" />
                         </com.google.android.material.card.MaterialCardView>
                     </LinearLayout>
                 </top.maary.darkbag.ui.bento.BentoTrayCard>
