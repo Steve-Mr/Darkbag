@@ -3,16 +3,21 @@ package top.maary.darkbag.fragments
 import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.format.Formatter
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import top.maary.darkbag.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import top.maary.darkbag.databinding.SheetGalleryAlbumInfoBinding
 import top.maary.darkbag.models.ImageGroup
+import top.maary.darkbag.repository.AlbumStatsCache
 import top.maary.darkbag.utils.CameraRepository
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -22,6 +27,7 @@ import kotlin.math.sqrt
 
 /**
  * Bento Matrix BottomSheet presenting hardware capture device telemetry and album statistics.
+ * Supports 0ms instant T2 presentation with reactive in-memory caching and background fallback.
  */
 class GalleryAlbumInfoSheet : BottomSheetDialogFragment() {
 
@@ -33,6 +39,13 @@ class GalleryAlbumInfoSheet : BottomSheetDialogFragment() {
         private const val ARG_TOTAL_COUNT = "arg_total_count"
         private const val ARG_TOTAL_SIZE = "arg_total_size"
         private const val ARG_LAST_CAPTURE = "arg_last_capture"
+
+        @Volatile
+        private var cachedModelText: String? = null
+        @Volatile
+        private var cachedLensDesc: String? = null
+        @Volatile
+        private var cachedSensorDesc: String? = null
 
         fun newInstance(totalCount: Int, totalSizeBytes: Long, lastCaptureTime: Long): GalleryAlbumInfoSheet {
             return GalleryAlbumInfoSheet().apply {
@@ -61,12 +74,30 @@ class GalleryAlbumInfoSheet : BottomSheetDialogFragment() {
         val totalSizeBytes = arguments?.getLong(ARG_TOTAL_SIZE, 0L) ?: 0L
         val lastCaptureTime = arguments?.getLong(ARG_LAST_CAPTURE, 0L) ?: 0L
 
-        // 1. Populate Device Information
+        // 1. Populate Device Information (uses hardware telemetry cache if available)
         populateDeviceTelemetry()
 
         // 2. Populate Album Statistics
         binding.tvStatTotalCount.text = "$totalCount"
-        binding.tvStatTotalSize.text = Formatter.formatFileSize(requireContext(), totalSizeBytes)
+
+        if (totalSizeBytes > 0L) {
+            binding.tvStatTotalSize.text = Formatter.formatFileSize(requireContext(), totalSizeBytes)
+        } else {
+            binding.tvStatTotalSize.text = "--"
+            val parentViewer = parentFragment as? ImageViewerFragment
+            val items = parentViewer?.getGalleryItems() ?: emptyList()
+            if (items.isNotEmpty()) {
+                viewLifecycleOwner.lifecycleScope.launch {
+                    val computedSize = withContext(Dispatchers.IO) {
+                        calculateFallbackSize(items)
+                    }
+                    if (_binding != null && isAdded && computedSize > 0L) {
+                        binding.tvStatTotalSize.text = Formatter.formatFileSize(requireContext(), computedSize)
+                        AlbumStatsCache.updateCalculatedSize(computedSize, items)
+                    }
+                }
+            }
+        }
 
         if (lastCaptureTime > 0L) {
             val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
@@ -76,7 +107,48 @@ class GalleryAlbumInfoSheet : BottomSheetDialogFragment() {
         }
     }
 
+    private fun calculateFallbackSize(items: List<ImageGroup>): Long {
+        val ctx = context ?: return 0L
+        var sum = 0L
+        for (group in items) {
+            val uris = mutableListOf<Uri>()
+            group.jpgUri?.let { uris.add(it) }
+            group.dngUri?.let { uris.add(it) }
+            group.dngUri1?.let { uris.add(it) }
+            group.dngUri2?.let { uris.add(it) }
+            group.rawVideoUri?.let { uris.add(it) }
+            group.mp4VideoUri?.let { uris.add(it) }
+            group.derivativeJpgUris.forEach { uris.add(it) }
+            group.derivativeMp4Uris.forEach { uris.add(it) }
+            group.multiJpgUris.forEach { uris.add(it) }
+            group.multiDngUris.forEach { uris.add(it) }
+            group.cinemaDngFrameUris.forEach { uris.add(it) }
+            for (u in uris.distinct()) {
+                try {
+                    ctx.contentResolver.openFileDescriptor(u, "r")?.use { pfd ->
+                        val s = pfd.statSize
+                        if (s > 0) sum += s
+                    }
+                } catch (e: Exception) {
+                    // ignore
+                }
+            }
+        }
+        return sum
+    }
+
     private fun populateDeviceTelemetry() {
+        val cachedModel = cachedModelText
+        val cachedLens = cachedLensDesc
+        val cachedSensor = cachedSensorDesc
+
+        if (cachedModel != null && cachedLens != null && cachedSensor != null) {
+            binding.tvDeviceModel.text = cachedModel
+            binding.tvDeviceLens.text = cachedLens
+            binding.tvDeviceSensor.text = cachedSensor
+            return
+        }
+
         val manufacturer = Build.MANUFACTURER.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
         val model = Build.MODEL
         val modelText = if (model.startsWith(manufacturer, ignoreCase = true)) model else "$manufacturer $model"
@@ -119,7 +191,7 @@ class GalleryAlbumInfoSheet : BottomSheetDialogFragment() {
                     binding.tvDeviceLens.text = lensDesc
 
                     // Sensor resolution & optical size
-                    if (activeArray != null) {
+                    val sensorDesc = if (activeArray != null) {
                         val mp = (activeArray.width().toLong() * activeArray.height() / 1_000_000L).toInt()
                         val opticalFormat = if (sensorSize != null) {
                             val diag = sqrt(sensorSize.width * sensorSize.width + sensorSize.height * sensorSize.height)
@@ -133,10 +205,16 @@ class GalleryAlbumInfoSheet : BottomSheetDialogFragment() {
                             }
                         } else ""
 
-                        binding.tvDeviceSensor.text = if (opticalFormat.isNotEmpty()) "$mp MP · $opticalFormat" else "$mp MP"
+                        if (opticalFormat.isNotEmpty()) "$mp MP · $opticalFormat" else "$mp MP"
                     } else {
-                        binding.tvDeviceSensor.text = "--"
+                        "--"
                     }
+                    binding.tvDeviceSensor.text = sensorDesc
+
+                    // Cache resolved telemetry
+                    cachedModelText = modelText
+                    cachedLensDesc = lensDesc
+                    cachedSensorDesc = sensorDesc
                     return
                 }
             }
@@ -146,6 +224,9 @@ class GalleryAlbumInfoSheet : BottomSheetDialogFragment() {
 
         binding.tvDeviceLens.text = "Wide ƒ/1.8"
         binding.tvDeviceSensor.text = "--"
+        cachedModelText = modelText
+        cachedLensDesc = "Wide ƒ/1.8"
+        cachedSensorDesc = "--"
     }
 
     override fun onDestroyView() {

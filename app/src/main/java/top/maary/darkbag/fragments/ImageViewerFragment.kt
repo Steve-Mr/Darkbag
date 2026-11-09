@@ -3881,46 +3881,18 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun showAlbumInfoSheet() {
-        val items = if (::galleryAdapter.isInitialized) galleryAdapter.currentList else emptyList()
-        val totalCount = items.size
-        val lastCaptureTime = items.maxOfOrNull { it.captureTime.takeIf { t -> t > 0 } ?: it.lastModified } ?: 0L
+        if (!isAdded || isStateSaved) return
+        if (childFragmentManager.isStateSaved || childFragmentManager.findFragmentByTag(GalleryAlbumInfoSheet.TAG) != null) return
 
-        lifecycleScope.launch {
-            val totalSize = withContext(Dispatchers.IO) {
-                var sum = 0L
-                val ctx = context ?: return@withContext 0L
-                for (group in items) {
-                    val uris = mutableListOf<Uri>()
-                    group.jpgUri?.let { uris.add(it) }
-                    group.dngUri?.let { uris.add(it) }
-                    group.dngUri1?.let { uris.add(it) }
-                    group.dngUri2?.let { uris.add(it) }
-                    group.rawVideoUri?.let { uris.add(it) }
-                    group.mp4VideoUri?.let { uris.add(it) }
-                    group.derivativeJpgUris.forEach { uris.add(it) }
-                    group.derivativeMp4Uris.forEach { uris.add(it) }
-                    group.multiJpgUris.forEach { uris.add(it) }
-                    group.multiDngUris.forEach { uris.add(it) }
-                    group.cinemaDngFrameUris.forEach { uris.add(it) }
-                    for (u in uris.distinct()) {
-                        try {
-                            ctx.contentResolver.openFileDescriptor(u, "r")?.use { pfd ->
-                                val s = pfd.statSize
-                                if (s > 0) sum += s
-                            }
-                        } catch (e: Exception) {
-                            // ignore
-                        }
-                    }
-                }
-                sum
-            }
-            if (isAdded) {
-                GalleryAlbumInfoSheet.newInstance(totalCount, totalSize, lastCaptureTime)
-                    .show(childFragmentManager, GalleryAlbumInfoSheet.TAG)
-            }
-        }
+        val items = if (::galleryAdapter.isInitialized) galleryAdapter.currentList else emptyList()
+        val stats = top.maary.darkbag.repository.AlbumStatsCache.getOrCompute(items)
+
+        GalleryAlbumInfoSheet.newInstance(stats.totalCount, stats.totalSizeBytes, stats.lastCaptureTime)
+            .show(childFragmentManager, GalleryAlbumInfoSheet.TAG)
     }
+
+    internal fun getGalleryItems(): List<ImageGroup> =
+        if (::galleryAdapter.isInitialized) galleryAdapter.currentList else emptyList()
 
     internal fun checkHomogeneity(selected: List<GallerySelectedItem>): Boolean {
         if (selected.isEmpty()) return false
