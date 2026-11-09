@@ -160,6 +160,7 @@
     <string name="gallery_delete_summary">Selected %1$d item(s). Choose deletion scope:</string>
     <string name="gallery_deleting">Deleting…</string>
     <string name="gallery_deleting_count">Deleting %1$d item(s)…</string>
+    <string name="gallery_loading">Loading darkroom…</string>
     <string name="format_raw_jpg">RAW+JPG</string>
     <string name="format_jpg">JPG</string>
     <string name="format_half_frame">HF</string>
