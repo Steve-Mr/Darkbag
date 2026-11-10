@@ -98,6 +98,19 @@ class MultiCameraCaptureManager(
     private val lock = Mutex()
     private var isCapturing = false
 
+    @Volatile
+    private var lastPreviewResult: CaptureResult? = null
+
+    private val previewCaptureCallback = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(
+            session: CameraCaptureSession,
+            request: CaptureRequest,
+            result: TotalCaptureResult
+        ) {
+            lastPreviewResult = result
+        }
+    }
+
     var onSessionConfiguredListener: (() -> Unit)? = null
     var onSessionFailedListener: ((String) -> Unit)? = null
 
@@ -519,7 +532,7 @@ class MultiCameraCaptureManager(
 
                 applyPreviewZoomAndCrop(this, chars, dev.id, lens)
             }
-            session.setRepeatingRequest(requestBuilder.build(), null, cameraHandler)
+            session.setRepeatingRequest(requestBuilder.build(), previewCaptureCallback, cameraHandler)
             triggerFast3AWarmup(dev, session, surface, lens)
             Log.i(TAG, "Switched primary preview lens to: ${lens.name} (${lens.multiplier}x)")
         } catch (e: Exception) {
@@ -540,7 +553,7 @@ class MultiCameraCaptureManager(
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                 applyPreviewZoomAndCrop(this, chars, device.id, prim)
             }
-            session.setRepeatingRequest(requestBuilder.build(), null, cameraHandler)
+            session.setRepeatingRequest(requestBuilder.build(), previewCaptureCallback, cameraHandler)
             triggerFast3AWarmup(device, session, targetPreviewSurface, prim)
             Log.i(TAG, "Started repeating preview with lens: ${prim?.name}")
         } catch (e: Exception) {
@@ -707,18 +720,21 @@ class MultiCameraCaptureManager(
         val totalExpected = expectedLenses.size
 
         val collectedFrames = ConcurrentHashMap<String, PhysicalCapturedFrame>()
-        val physicalCaptureResults = ConcurrentHashMap<String, TotalCaptureResult>()
-        val resultDeferredMap = ConcurrentHashMap<String, CompletableDeferred<TotalCaptureResult>>()
+        val physicalCaptureResults = ConcurrentHashMap<String, CaptureResult>()
+        val resultDeferredMap = ConcurrentHashMap<String, CompletableDeferred<CaptureResult>>()
+        val targetExposureProductMap = ConcurrentHashMap<String, Double>()
         for (lens in expectedLenses) {
             resultDeferredMap[lens.physicalId] = CompletableDeferred()
         }
 
         val collectedJpegs = ConcurrentHashMap<String, Pair<ByteArray, Size>>()
         val collectedDngPaths = ConcurrentHashMap<String, String>()
+        val rawFailedPaths = ConcurrentHashMap<String, Boolean>()
 
+        val expectedRawCount = expectedLenses.count { rawImageReaders[it.physicalId] != null }
         val completionJob = scope.launch(Dispatchers.Default) {
             withTimeoutOrNull(CAPTURE_TIMEOUT_MS) {
-                while (collectedFrames.size < totalExpected && isActive) {
+                while ((collectedFrames.size < totalExpected || (expectedRawCount > 0 && (collectedDngPaths.size + rawFailedPaths.size) < expectedRawCount)) && isActive) {
                     delay(50)
                 }
             }
@@ -749,6 +765,57 @@ class MultiCameraCaptureManager(
                 }
                 set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
                 applyManualConfig(this, isPrimary = true, manualConfig)
+
+                // Photometric Exposure Transfer for non-primary physical streams
+                if (manualConfig == null || (!manualConfig.isManualIso && !manualConfig.isManualShutter)) {
+                    val primExpTime = lastPreviewResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 30_000_000L
+                    val primIso = lastPreviewResult?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 400
+                    val primChars = currentPrimaryLens?.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, device.id)
+                    val primApertures = primChars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
+                    val primAperture = lastPreviewResult?.get(CaptureResult.LENS_APERTURE)
+                        ?: primApertures?.firstOrNull() ?: 1.8f
+                    val primProduct = primExpTime.toDouble() * primIso.toDouble()
+
+                    for (lens in expectedLenses) {
+                        val isPrimary = lens.physicalId == (currentPrimaryLens?.physicalId ?: expectedLenses.first().physicalId)
+                        if (isPrimary) {
+                            targetExposureProductMap[lens.physicalId] = primProduct
+                        } else {
+                            val physChars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
+                            val physApertures = physChars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
+                            val physAperture = physApertures?.firstOrNull() ?: primAperture
+                            val apertureRatio = physAperture / primAperture
+                            val lightScale = (apertureRatio * apertureRatio).toDouble()
+                            val targetProduct = primProduct * lightScale
+                            targetExposureProductMap[lens.physicalId] = targetProduct
+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                val expRange = physChars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                                val isoRange = physChars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+
+                                val maxExpTime = (expRange?.upper ?: 1_000_000_000L).coerceAtMost(40_000_000L)
+                                val minExpTime = (expRange?.lower ?: 100_000L).coerceAtLeast(100_000L)
+                                val targetExpTime = primExpTime.coerceIn(minExpTime, maxExpTime)
+                                val calcIso = (targetProduct / targetExpTime.toDouble()).toInt()
+                                val minIso = isoRange?.lower ?: 100
+                                val maxIso = isoRange?.upper ?: 3200
+                                val targetIso = calcIso.coerceIn(minIso, maxIso)
+
+                                val finalExpTime = if (calcIso > maxIso && targetExpTime < maxExpTime) {
+                                    val extended = (targetProduct / maxIso.toDouble()).toLong()
+                                    extended.coerceIn(minExpTime, maxExpTime)
+                                } else {
+                                    targetExpTime
+                                }
+
+                                setPhysicalCameraKey(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF, lens.physicalId)
+                                setPhysicalCameraKey(CaptureRequest.SENSOR_EXPOSURE_TIME, finalExpTime, lens.physicalId)
+                                setPhysicalCameraKey(CaptureRequest.SENSOR_SENSITIVITY, targetIso, lens.physicalId)
+                                Log.i(TAG, "Native logical: transferred photometric exposure to ${lens.name} (${lens.physicalId}): time=${finalExpTime / 1_000_000.0}ms, ISO=$targetIso (ratio=$apertureRatio)")
+                            }
+                        }
+                    }
+                }
             }
 
             fun tryAssembleFrame(lens: PhysicalLensInfo) {
@@ -758,8 +825,9 @@ class MultiCameraCaptureManager(
 
                 val captureRes = physicalCaptureResults[lens.physicalId]
                 val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
+                val targetProduct = targetExposureProductMap[lens.physicalId] ?: 0.0
                 val metadata = createMetadataFromCaptureResult(captureRes, lens, captureTimestamp)
-                val digitalGain = calculateDigitalGain(captureRes, chars)
+                val digitalGain = calculateDigitalGain(captureRes, chars, targetProduct)
                 val lscTriple = top.maary.darkbag.processor.SensorCalibrationHelper.extractLensShading(captureRes)
                 val frame = PhysicalCapturedFrame(
                     lens = lens,
@@ -800,7 +868,8 @@ class MultiCameraCaptureManager(
                             val captureRes = withTimeoutOrNull(2500L) { resultDeferredMap[lens.physicalId]?.await() }
                             if (captureRes != null) {
                                 val isPrimary = lens.physicalId == (currentPrimaryLens?.physicalId ?: expectedLenses.first().physicalId)
-                                val digitalGain = calculateDigitalGain(captureRes, chars)
+                                val targetProduct = targetExposureProductMap[lens.physicalId] ?: 0.0
+                                val digitalGain = calculateDigitalGain(captureRes, chars, targetProduct)
                                 val metadata = createMetadataFromCaptureResult(captureRes, lens, captureTimestamp)
                                 val tempPath = writeDngToFile(
                                     rawImage = image,
@@ -814,9 +883,15 @@ class MultiCameraCaptureManager(
                                 )
                                 if (tempPath != null) {
                                     collectedDngPaths[lens.physicalId] = tempPath
+                                } else {
+                                    rawFailedPaths[lens.physicalId] = true
                                 }
+                            } else {
+                                rawFailedPaths[lens.physicalId] = true
                             }
                             tryAssembleFrame(lens)
+                        } catch (e: Exception) {
+                            rawFailedPaths[lens.physicalId] = true
                         } finally {
                             image.close()
                         }
@@ -832,10 +907,8 @@ class MultiCameraCaptureManager(
                 ) {
                     val physResults = result.physicalCameraResults
                     for ((pid, presult) in physResults) {
-                        if (presult is TotalCaptureResult) {
-                            physicalCaptureResults[pid] = presult
-                            resultDeferredMap[pid]?.complete(presult)
-                        }
+                        physicalCaptureResults[pid] = presult
+                        resultDeferredMap[pid]?.complete(presult)
                     }
                     for (lens in expectedLenses) {
                         if (!resultDeferredMap[lens.physicalId]!!.isCompleted) {
@@ -877,17 +950,19 @@ class MultiCameraCaptureManager(
         val totalExpected = expectedLenses.size
 
         val collectedFrames = ConcurrentHashMap<String, PhysicalCapturedFrame>()
-        val resultDeferredMap = ConcurrentHashMap<String, CompletableDeferred<TotalCaptureResult>>()
+        val resultDeferredMap = ConcurrentHashMap<String, CompletableDeferred<CaptureResult>>()
         for (lens in expectedLenses) {
             resultDeferredMap[lens.physicalId] = CompletableDeferred()
         }
 
         val collectedJpegs = ConcurrentHashMap<String, Pair<ByteArray, Size>>()
         val collectedDngPaths = ConcurrentHashMap<String, String>()
+        val rawFailedPaths = ConcurrentHashMap<String, Boolean>()
 
+        val expectedRawCount = expectedLenses.count { rawImageReaders[it.physicalId] != null }
         val completionJob = scope.launch(Dispatchers.Default) {
             withTimeoutOrNull(CAPTURE_TIMEOUT_MS) {
-                while (collectedFrames.size < totalExpected && isActive) {
+                while ((collectedFrames.size < totalExpected || (expectedRawCount > 0 && (collectedDngPaths.size + rawFailedPaths.size) < expectedRawCount)) && isActive) {
                     delay(50)
                 }
             }
@@ -977,9 +1052,15 @@ class MultiCameraCaptureManager(
                                 )
                                 if (tempPath != null) {
                                     collectedDngPaths[lens.physicalId] = tempPath
+                                } else {
+                                    rawFailedPaths[lens.physicalId] = true
                                 }
+                            } else {
+                                rawFailedPaths[lens.physicalId] = true
                             }
                             tryAssembleFrame(lens)
+                        } catch (e: Exception) {
+                            rawFailedPaths[lens.physicalId] = true
                         } finally {
                             image.close()
                         }
@@ -1397,23 +1478,42 @@ class MultiCameraCaptureManager(
         }
     }
 
-    private fun calculateDigitalGain(result: CaptureResult?, chars: CameraCharacteristics?): Float {
+    private fun calculateDigitalGain(
+        result: CaptureResult?,
+        chars: CameraCharacteristics?,
+        targetExposureProduct: Double = 0.0
+    ): Float {
         val postRawBoost = result?.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST)
         val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+        val curExpTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
         val validIsoRange = chars?.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE) ?: android.util.Range(100, 3200)
-        return if (postRawBoost != null && postRawBoost > 100) {
+        val baseGain = if (postRawBoost != null && postRawBoost > 100) {
             postRawBoost / 100.0f
         } else if (curIso > validIsoRange.upper && validIsoRange.upper > 0) {
             curIso.toFloat() / validIsoRange.upper.toFloat()
         } else {
             1.0f
         }
+
+        if (targetExposureProduct > 0.0 && curExpTime > 0L && curIso > 0) {
+            val actualProduct = curExpTime.toDouble() * curIso.toDouble()
+            if (actualProduct > 0.0) {
+                val deficit = (targetExposureProduct / actualProduct).toFloat()
+                if (deficit > 1.10f) {
+                    val compensated = (baseGain * deficit).coerceAtMost(64.0f)
+                    Log.i(TAG, "Applied exposure deficit compensation: deficit=${deficit}x, baseGain=$baseGain -> $compensated")
+                    return compensated
+                }
+            }
+        }
+
+        return baseGain
     }
 
     private fun writeDngToFile(
         rawImage: Image,
         chars: CameraCharacteristics,
-        captureResult: TotalCaptureResult?,
+        captureResult: CaptureResult?,
         orientationDegrees: Int,
         lens: PhysicalLensInfo,
         isHdrPlus: Boolean = false,
@@ -1505,6 +1605,7 @@ class MultiCameraCaptureManager(
 
     private fun closeInternal() {
         try {
+            lastPreviewResult = null
             captureSession?.close()
             captureSession = null
             cameraDevice?.close()
