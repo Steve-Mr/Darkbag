@@ -171,7 +171,7 @@ data class DarkroomRenderSpec(
             val repo = repository ?: ImageRepository(context)
 
             val source = when {
-                group.isMultiCamera -> {
+                group.isMultiCamera || group.multiCameraLenses.isNotEmpty() -> {
                     val lenses = if (group.multiCameraLenses.isNotEmpty()) {
                         group.multiCameraLenses
                     } else {

@@ -9,6 +9,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 import top.maary.darkbag.models.BasicAdjustments
 import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.models.ImageGroup
@@ -21,6 +22,7 @@ import top.maary.darkbag.pipeline.darkroom.model.toBasic
 import top.maary.darkbag.pipeline.darkroom.sink.BitmapPreviewSink
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class DarkroomRenderSpecTest {
 
     @Test
@@ -143,6 +145,7 @@ class DarkroomRenderSpecTest {
         val context = RuntimeEnvironment.getApplication()
         val group = ImageGroup(
             baseName = "MULTI_001",
+            isMultiCamera = true,
             multiCameraLenses = listOf(
                 MultiCameraLensItem("1x", 1.0f, dngUri = Uri.parse("content://lens1")),
                 MultiCameraLensItem("2x", 2.0f, dngUri = Uri.parse("content://lens2"))
