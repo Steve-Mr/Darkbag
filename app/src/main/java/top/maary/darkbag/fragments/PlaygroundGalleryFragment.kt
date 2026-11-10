@@ -622,16 +622,7 @@ class PlaygroundAdapter(
         val isMainSelected = selectedFiles().contains(item.mainFile)
 
         // Apply aspect ratio to pre-allocate exact height to prevent StaggeredGridLayoutManager jumping
-        val layoutParams = holder.binding.imageViewThumbnail.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-        if (item.aspectRatio != null) {
-            layoutParams.dimensionRatio = item.aspectRatio
-            layoutParams.height = 0 // 0dp means match_constraint in ConstraintLayout
-        } else {
-            // Fallback for extremely rare case where we couldn't parse bounds: allow it to wrap
-            layoutParams.dimensionRatio = null
-            layoutParams.height = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.WRAP_CONTENT
-        }
-        holder.binding.imageViewThumbnail.layoutParams = layoutParams
+        top.maary.darkbag.utils.GalleryAspectRatioHelper.applyAspectRatio(holder.binding.imageViewThumbnail, item.aspectRatio)
 
         val selectionMode = isSelectionMode()
         holder.binding.selectionOverlay.visibility = if (isMainSelected) View.VISIBLE else View.GONE
