@@ -68,7 +68,14 @@ class PlaygroundGalleryViewModel @JvmOverloads constructor(
     private val repository: PlaygroundRepository = PlaygroundRepository(application)
 ) : AndroidViewModel(application) {
 
-    private val _uiState = MutableStateFlow(PlaygroundGalleryUiState())
+    private val prefs = application.getSharedPreferences(
+        top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME,
+        android.content.Context.MODE_PRIVATE
+    )
+
+    private val initialCols = prefs.getInt(top.maary.darkbag.fragments.SettingsFragment.KEY_PLAYGROUND_COLUMNS, 2)
+
+    private val _uiState = MutableStateFlow(PlaygroundGalleryUiState(columnCount = initialCols))
     val uiState = _uiState.asStateFlow()
 
     private val _effects = Channel<PlaygroundEffect>(Channel.BUFFERED)
@@ -243,6 +250,7 @@ class PlaygroundGalleryViewModel @JvmOverloads constructor(
     fun toggleLayout() {
         _uiState.update { state ->
             val nextCols = if (state.columnCount == 2) 3 else 2
+            prefs.edit().putInt(top.maary.darkbag.fragments.SettingsFragment.KEY_PLAYGROUND_COLUMNS, nextCols).apply()
             state.copy(columnCount = nextCols)
         }
     }

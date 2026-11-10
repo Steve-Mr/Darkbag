@@ -162,6 +162,10 @@
     <string name="gallery_delete_desc_raw_only">释放海量存储空间，保留导出的 JPG/MP4 调色成品</string>
     <string name="gallery_delete_option_jpg_only">仅删除成品 (JPG/MP4)</string>
     <string name="gallery_delete_desc_jpg_only">删除 JPG/MP4 成片，保留原始 RAW/RAWVID 母带以供二次调色</string>
+    <string name="gallery_delete_option_current_derivative">仅删除当前版本 (%1$s)</string>
+    <string name="gallery_delete_desc_current_derivative">仅删除当前正在查看的成片版本，保留其他调色版本与 RAW 母带</string>
+    <string name="gallery_delete_option_all_derivatives">删除全部调色版本 (共 %1$d 个版本)</string>
+    <string name="gallery_delete_desc_all_derivatives">删除所有已渲染的 JPG/MP4 成片，保留原始 RAW 母带以供重新调色</string>
     <string name="batch_delete_cdng_only">仅清理 CinemaDNG 序列包</string>
     <string name="batch_delete_cdng_only_desc">释放数十 GB 序列帧文件夹，保留 RAWVID 录制源文件与调色成片</string>
     <string name="gallery_delete_confirm_format">删除 (共 %1$d 项)</string>

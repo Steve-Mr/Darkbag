@@ -17,10 +17,12 @@ class ZoomableImageView @JvmOverloads constructor(
 ) : AppCompatImageView(context, attrs, defStyleAttr) {
 
     override fun setImageBitmap(bm: android.graphics.Bitmap?) {
+        val oldW = drawable?.intrinsicWidth?.toFloat() ?: 0f
+        val oldH = drawable?.intrinsicHeight?.toFloat() ?: 0f
         if (maintainZoomOnNextImage && bm != null && origWidth > 0f) {
             super.setImageBitmap(bm)
             maintainZoomOnNextImage = false
-            applyMaintainZoom(bm.width.toFloat(), bm.height.toFloat())
+            applyMaintainZoom(bm.width.toFloat(), bm.height.toFloat(), oldW, oldH)
         } else {
             super.setImageBitmap(bm)
             resetZoom()
@@ -28,13 +30,15 @@ class ZoomableImageView @JvmOverloads constructor(
     }
 
     override fun setImageDrawable(drawable: android.graphics.drawable.Drawable?) {
+        val oldW = this.drawable?.intrinsicWidth?.toFloat() ?: 0f
+        val oldH = this.drawable?.intrinsicHeight?.toFloat() ?: 0f
         if (maintainZoomOnNextImage && drawable != null && origWidth > 0f) {
             val bmWidth = drawable.intrinsicWidth.toFloat()
             val bmHeight = drawable.intrinsicHeight.toFloat()
             super.setImageDrawable(drawable)
             maintainZoomOnNextImage = false
             if (bmWidth > 0 && bmHeight > 0) {
-                applyMaintainZoom(bmWidth, bmHeight)
+                applyMaintainZoom(bmWidth, bmHeight, oldW, oldH)
             } else {
                 resetZoom()
             }
@@ -369,7 +373,12 @@ class ZoomableImageView @JvmOverloads constructor(
         }
     }
 
-    private fun applyMaintainZoom(newBitmapWidth: Float = -1f, newBitmapHeight: Float = -1f) {
+    private fun applyMaintainZoom(
+        newBitmapWidth: Float = -1f,
+        newBitmapHeight: Float = -1f,
+        oldBitmapWidth: Float = -1f,
+        oldBitmapHeight: Float = -1f
+    ) {
         val drawable = drawable ?: return
         val bmWidth = if (newBitmapWidth > 0) newBitmapWidth else drawable.intrinsicWidth.toFloat()
         val bmHeight = if (newBitmapHeight > 0) newBitmapHeight else drawable.intrinsicHeight.toFloat()
@@ -377,7 +386,10 @@ class ZoomableImageView @JvmOverloads constructor(
 
         if (viewWidth == 0 || viewHeight == 0) return
 
-        // 1. Calculate current relative focus point in bitmap coordinates
+        val refOldW = if (oldBitmapWidth > 0) oldBitmapWidth else bmWidth
+        val refOldH = if (oldBitmapHeight > 0) oldBitmapHeight else bmHeight
+
+        // 1. Calculate current relative focus point in OLD bitmap coordinates
         val centerX = viewWidth / 2f
         val centerY = viewHeight / 2f
         matrixValue.getValues(m)
@@ -385,9 +397,16 @@ class ZoomableImageView @JvmOverloads constructor(
         val transY = m[Matrix.MTRANS_Y]
         val currentTotalScale = m[Matrix.MSCALE_X]
 
-        // If currentTotalScale is 0 (shouldn't happen if zoomed), fallback to center
-        val bitmapCenterX = if (currentTotalScale > 0) (centerX - transX) / currentTotalScale else bmWidth / 2f
-        val bitmapCenterY = if (currentTotalScale > 0) (centerY - transY) / currentTotalScale else bmHeight / 2f
+        val oldBitmapCenterX = if (currentTotalScale > 0) (centerX - transX) / currentTotalScale else refOldW / 2f
+        val oldBitmapCenterY = if (currentTotalScale > 0) (centerY - transY) / currentTotalScale else refOldH / 2f
+
+        // Normalize focus point to [0, 1] relative ratio
+        val normX = (oldBitmapCenterX / refOldW).coerceIn(0f, 1f)
+        val normY = (oldBitmapCenterY / refOldH).coerceIn(0f, 1f)
+
+        // Map normalized focus point to NEW bitmap coordinates
+        val bitmapCenterX = normX * bmWidth
+        val bitmapCenterY = normY * bmHeight
 
         // 2. Calculate new base scale for fit-center
         val availableWidth = viewWidth - 2 * visualMargin
@@ -402,7 +421,7 @@ class ZoomableImageView @JvmOverloads constructor(
         origWidth = newBaseScale * bmWidth
         origHeight = newBaseScale * bmHeight
 
-        // 4. Calculate new matrix to keep the same bitmap point at view center
+        // 4. Calculate new matrix to keep the exact same relative point at view center
         val newTotalScale = newBaseScale * saveScale
         val newTransX = centerX - bitmapCenterX * newTotalScale
         val newTransY = centerY - bitmapCenterY * newTotalScale

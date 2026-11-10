@@ -242,20 +242,100 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         else if (c00 == 2 && c01 == 1) cfaPattern = 3;
 
         uint16_t bl_array[4] = {64, 64, 64, 64};
-        if (RawProcessor.imgdata.color.dng_levels.dng_cblack[0] > 0 || RawProcessor.imgdata.color.dng_levels.dng_black > 0) {
-            for (int i = 0; i < 4; ++i) {
-                bl_array[i] = static_cast<uint16_t>(
-                    RawProcessor.imgdata.color.dng_levels.dng_cblack[i] > 0
-                        ? RawProcessor.imgdata.color.dng_levels.dng_cblack[i]
-                        : RawProcessor.imgdata.color.dng_levels.dng_black
-                );
+        bool blFound = false;
+
+        // 1. Check if 2x2 repeat dimension black levels exist in dng_cblack[6..9]
+        if (RawProcessor.imgdata.color.dng_levels.dng_cblack[4] == 2 &&
+            RawProcessor.imgdata.color.dng_levels.dng_cblack[5] == 2) {
+            for (int r = 0; r < 2; ++r) {
+                for (int c = 0; c < 2; ++c) {
+                    uint32_t val = RawProcessor.imgdata.color.dng_levels.dng_cblack[6 + r * 2 + c];
+                    int color = darkbag::demosaic::fc(cfaPattern, r, c);
+                    if (color == 0) {
+                        bl_array[0] = static_cast<uint16_t>(val);
+                    } else if (color == 1) {
+                        if (r % 2 == 0) bl_array[1] = static_cast<uint16_t>(val);
+                        else bl_array[2] = static_cast<uint16_t>(val);
+                    } else if (color == 2) {
+                        bl_array[3] = static_cast<uint16_t>(val);
+                    }
+                }
+            }
+            blFound = true;
+        } else if (RawProcessor.imgdata.color.cblack[4] == 2 &&
+                   RawProcessor.imgdata.color.cblack[5] == 2) {
+            for (int r = 0; r < 2; ++r) {
+                for (int c = 0; c < 2; ++c) {
+                    uint32_t val = RawProcessor.imgdata.color.cblack[6 + r * 2 + c];
+                    int color = darkbag::demosaic::fc(cfaPattern, r, c);
+                    if (color == 0) {
+                        bl_array[0] = static_cast<uint16_t>(val);
+                    } else if (color == 1) {
+                        if (r % 2 == 0) bl_array[1] = static_cast<uint16_t>(val);
+                        else bl_array[2] = static_cast<uint16_t>(val);
+                    } else if (color == 2) {
+                        bl_array[3] = static_cast<uint16_t>(val);
+                    }
+                }
+            }
+            blFound = true;
+        }
+
+        // 2. Check 4-channel dng_cblack or cblack if not found
+        if (!blFound) {
+            if (RawProcessor.imgdata.color.dng_levels.dng_cblack[0] > 0 ||
+                RawProcessor.imgdata.color.dng_levels.dng_cblack[1] > 0 ||
+                RawProcessor.imgdata.color.dng_levels.dng_cblack[2] > 0 ||
+                RawProcessor.imgdata.color.dng_levels.dng_cblack[3] > 0) {
+                for (int i = 0; i < 4; ++i) {
+                    bl_array[i] = static_cast<uint16_t>(
+                        RawProcessor.imgdata.color.dng_levels.dng_cblack[i] > 0
+                            ? RawProcessor.imgdata.color.dng_levels.dng_cblack[i]
+                            : RawProcessor.imgdata.color.dng_levels.dng_black
+                    );
+                }
+                blFound = true;
+            } else if (RawProcessor.imgdata.color.cblack[0] > 0 ||
+                       RawProcessor.imgdata.color.cblack[1] > 0 ||
+                       RawProcessor.imgdata.color.cblack[2] > 0 ||
+                       RawProcessor.imgdata.color.cblack[3] > 0) {
+                for (int i = 0; i < 4; ++i) {
+                    bl_array[i] = static_cast<uint16_t>(
+                        RawProcessor.imgdata.color.cblack[i] > 0
+                            ? RawProcessor.imgdata.color.cblack[i]
+                            : RawProcessor.imgdata.color.black
+                    );
+                }
+                blFound = true;
             }
         }
+
+        // 3. Fallback to scalar black
+        if (!blFound) {
+            uint32_t scalarBlack = 0;
+            if (RawProcessor.imgdata.color.dng_levels.dng_black > 0) {
+                scalarBlack = RawProcessor.imgdata.color.dng_levels.dng_black;
+            } else if (RawProcessor.imgdata.color.black > 0) {
+                scalarBlack = RawProcessor.imgdata.color.black;
+            }
+            if (scalarBlack > 0) {
+                for (int i = 0; i < 4; ++i) {
+                    bl_array[i] = static_cast<uint16_t>(scalarBlack);
+                }
+                blFound = true;
+            }
+        }
+
         uint16_t wl = static_cast<uint16_t>(
             RawProcessor.imgdata.color.dng_levels.dng_whitelevel[0] > 0
                 ? RawProcessor.imgdata.color.dng_levels.dng_whitelevel[0]
-                : 1023
+                : (RawProcessor.imgdata.color.maximum > 0
+                    ? RawProcessor.imgdata.color.maximum
+                    : 1023)
         );
+
+        LOGI("processRaw: CFA=%d, BlackLevel=[%u, %u, %u, %u], WhiteLevel=%u",
+             cfaPattern, bl_array[0], bl_array[1], bl_array[2], bl_array[3], wl);
 
         std::vector<float> wbVec(4, 1.0f);
         const float* asn = RawProcessor.imgdata.color.dng_levels.asshotneutral;

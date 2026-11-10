@@ -229,4 +229,48 @@ class BatchDeleteAndViewerDeleteTest {
         val deletingCountStr = context.getString(top.maary.darkbag.R.string.gallery_deleting_count, 3)
         assertTrue(deletingCountStr.contains("3"))
     }
+
+    @Test
+    fun testDarkbagBatchDeleteSheetMultipleDerivativesArgs() {
+        val sheet = DarkbagBatchDeleteSheet.newInstance(
+            selectedCount = 1,
+            hasRaw = true,
+            hasDerivatives = true,
+            hasCinemaDng = false,
+            currentVersionName = "V2",
+            derivativeCount = 3
+        )
+        val args = sheet.arguments
+        assertNotNull(args)
+        assertEquals(1, args?.getInt("selected_count"))
+        assertEquals("V2", args?.getString("current_version_name"))
+        assertEquals(3, args?.getInt("derivative_count"))
+        assertEquals(4, DarkbagBatchDeleteSheet.MODE_CURRENT_DERIVATIVE_ONLY)
+    }
+
+    @Test
+    fun testCurrentDerivativeOnlyDisentangledTarget() {
+        val dngUri = Uri.parse("content://media/external/images/media/300")
+        val v1Jpg = Uri.parse("content://media/external/images/media/301")
+        val v2Jpg = Uri.parse("content://media/external/images/media/302")
+        val group = ImageGroup(
+            baseName = "DARK_20261110_001",
+            dngUri = dngUri,
+            jpgUri = v1Jpg,
+            derivativeJpgUris = listOf(v1Jpg, v2Jpg)
+        )
+
+        val derivatives = listOf(v1Jpg, v2Jpg)
+        val activeIndex = 1 // V2
+        val activeUri = derivatives.getOrNull(activeIndex)
+        assertEquals(v2Jpg, activeUri)
+
+        // Deleting only active derivative leaves DNG and V1
+        val urisToDelete = listOfNotNull(activeUri)
+        val remainingUris = group.allUris.filter { !urisToDelete.contains(it) }
+        assertTrue(remainingUris.contains(dngUri))
+        assertTrue(remainingUris.contains(v1Jpg))
+        assertFalse(remainingUris.contains(v2Jpg))
+        assertFalse(remainingUris.isEmpty())
+    }
 }

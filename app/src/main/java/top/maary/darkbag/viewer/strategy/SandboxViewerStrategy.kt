@@ -45,13 +45,27 @@ class SandboxViewerStrategy : ViewerMediaStrategy {
             val firstPath = playgroundPaths[0]
             val baseName = File(firstPath).nameWithoutExtension
             val potentialJpg = File(playgroundDir, "$baseName.jpg")
-            val jpgUri = if (potentialJpg.exists()) Uri.fromFile(potentialJpg) else null
+            val baseJpgUri = if (potentialJpg.exists()) Uri.fromFile(potentialJpg) else null
             val dngUri = Uri.fromFile(File(firstPath))
+
+            val derivativeJpgs = playgroundDir.listFiles { f ->
+                f.extension.lowercase() == "jpg" && f.name.startsWith("${baseName}_edited_")
+            }?.sortedBy { it.lastModified() }?.map { Uri.fromFile(it) } ?: emptyList()
+
+            val primaryJpg = baseJpgUri ?: derivativeJpgs.lastOrNull()
+            val allDerivatives = if (baseJpgUri != null && derivativeJpgs.isNotEmpty()) {
+                listOf(baseJpgUri) + derivativeJpgs
+            } else if (derivativeJpgs.isNotEmpty()) {
+                derivativeJpgs
+            } else {
+                emptyList()
+            }
 
             ImageGroup(
                 baseName = baseName,
                 dngUri = dngUri,
-                jpgUri = jpgUri,
+                jpgUri = primaryJpg,
+                derivativeJpgUris = allDerivatives,
                 captureTime = System.currentTimeMillis(),
                 lastModified = System.currentTimeMillis()
             )
@@ -74,11 +88,25 @@ class SandboxViewerStrategy : ViewerMediaStrategy {
                 "SBS"
             }
 
+            val derivativeJpgs = playgroundDir.listFiles { f ->
+                f.extension.lowercase() == "jpg" && f.name.startsWith("${mergedBaseName}_edited_")
+            }?.sortedBy { it.lastModified() }?.map { Uri.fromFile(it) } ?: emptyList()
+
+            val primaryJpg = mergedJpgUri ?: derivativeJpgs.lastOrNull()
+            val allDerivatives = if (mergedJpgUri != null && derivativeJpgs.isNotEmpty()) {
+                listOf(mergedJpgUri) + derivativeJpgs
+            } else if (derivativeJpgs.isNotEmpty()) {
+                derivativeJpgs
+            } else {
+                emptyList()
+            }
+
             ImageGroup(
                 baseName = mergedBaseName,
                 dngUri1 = Uri.fromFile(File(path1)),
                 dngUri2 = Uri.fromFile(File(path2)),
-                jpgUri = mergedJpgUri,
+                jpgUri = primaryJpg,
+                derivativeJpgUris = allDerivatives,
                 hfLayout = layout,
                 captureTime = System.currentTimeMillis(),
                 lastModified = System.currentTimeMillis()
@@ -126,27 +154,10 @@ class SandboxViewerStrategy : ViewerMediaStrategy {
                 return@withContext false
             }
 
-            // Companion DNG handling
-            val dngUri1 = group.dngUri ?: group.dngUri1
-            if (!isReplacement && !group.isHalfFrame() && dngUri1 != null) {
-                val newDngFile = File(playgroundDir, "$newBaseName.dng")
-                context.contentResolver.openInputStream(dngUri1)?.use { input ->
-                    newDngFile.outputStream().use { output -> input.copyTo(output) }
-                }
-            } else if (!isReplacement && group.isHalfFrame()) {
-                dngUri1?.let { uri ->
-                    val newDngFile1 = File(playgroundDir, "${newBaseName}_1.dng")
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        newDngFile1.outputStream().use { output -> input.copyTo(output) }
-                    }
-                }
-                group.dngUri2?.let { uri ->
-                    val newDngFile2 = File(playgroundDir, "${newBaseName}_2.dng")
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        newDngFile2.outputStream().use { output -> input.copyTo(output) }
-                    }
-                }
-            } else if (isReplacement && group.isHalfFrame()) {
+            // Companion DNG handling:
+            // When saving as a new edit (!isReplacement), we do NOT duplicate the master 12MB+ DNG file.
+            // The master DNG remains intact, and the newly generated JPG is tracked as a derivative version.
+            if (isReplacement && group.isHalfFrame()) {
                 val isFirstSave = group.jpgUri == null
                 if (isFirstSave) {
                     group.dngUri1?.let { uri ->

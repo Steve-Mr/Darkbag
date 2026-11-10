@@ -124,11 +124,7 @@ class PlaygroundGalleryFragment : Fragment() {
         }
 
         val cameraMenu = binding.toolbar.menu.findItem(R.id.action_camera)
-        if (!showToolbar && defaultStartup == SettingsFragment.STARTUP_PLAYGROUND && enableCamera) {
-            cameraMenu?.isVisible = true
-        } else {
-            cameraMenu?.isVisible = false
-        }
+        cameraMenu?.isVisible = enableCamera
 
         binding.btnPlaygroundBack.visibility = if (enableCamera) View.VISIBLE else View.GONE
         binding.btnPlaygroundBack.setOnClickListener {
@@ -157,10 +153,6 @@ class PlaygroundGalleryFragment : Fragment() {
 
         binding.toolbar.setOnMenuItemClickListener { menuItem ->
             when (menuItem.itemId) {
-                R.id.action_select_all -> {
-                    viewModel.processIntent(PlaygroundUserIntent.ToggleSelectAll)
-                    true
-                }
                 R.id.action_settings -> {
                     if (findNavController().currentDestination?.id == R.id.playground_gallery_fragment) {
                         findNavController().navigate(R.id.action_playground_gallery_to_settings)
@@ -299,12 +291,6 @@ class PlaygroundGalleryFragment : Fragment() {
         val isAllSelected = state.isSelectionMode && state.selectedFiles.size >= allFilesCount && allFilesCount > 0
         binding.btnPlaygroundSelectAll.setText(if (isAllSelected) R.string.gallery_deselect_all else R.string.gallery_select_all)
 
-        val selectAllItem = binding.toolbar.menu.findItem(R.id.action_select_all)
-        selectAllItem?.let {
-            it.setIcon(if (isAllSelected) R.drawable.ic_deselect else R.drawable.ic_select_all)
-            it.title = getString(if (isAllSelected) R.string.gallery_deselect_all else R.string.gallery_select_all)
-        }
-
         binding.playgroundLoadingIndicator.visibility = if (state.isLoading && state.items.isEmpty()) View.VISIBLE else View.GONE
         binding.emptyStateText.visibility = if (state.items.isEmpty() && !state.isLoading) View.VISIBLE else View.GONE
 
@@ -349,8 +335,11 @@ class PlaygroundGalleryFragment : Fragment() {
         prevSelectionMode = state.isSelectionMode
 
         adapter.submitList(state.items) {
-            if (selectionChanged && _binding != null) {
-                adapter.notifyItemRangeChanged(0, adapter.itemCount, "SELECTION_CHANGED")
+            if (_binding != null) {
+                (binding.recyclerView.layoutManager as? StaggeredGridLayoutManager)?.invalidateSpanAssignments()
+                if (selectionChanged) {
+                    adapter.notifyItemRangeChanged(0, adapter.itemCount, "SELECTION_CHANGED")
+                }
             }
         }
     }
@@ -390,7 +379,7 @@ class PlaygroundGalleryFragment : Fragment() {
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
-        val spanCount = if (newConfig.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 3 else 2
+        val spanCount = viewModel.uiState.value.columnCount
         (binding.recyclerView.layoutManager as? StaggeredGridLayoutManager)?.spanCount = spanCount
     }
 
@@ -622,7 +611,7 @@ class PlaygroundAdapter(
         val isMainSelected = selectedFiles().contains(item.mainFile)
 
         // Apply aspect ratio to pre-allocate exact height to prevent StaggeredGridLayoutManager jumping
-        top.maary.darkbag.utils.GalleryAspectRatioHelper.applyAspectRatio(holder.binding.imageViewThumbnail, item.aspectRatio)
+        top.maary.darkbag.utils.GalleryAspectRatioHelper.applyAspectRatio(holder.binding.imageViewThumbnail, item.aspectRatio, fallbackRatio = "3:4")
 
         val selectionMode = isSelectionMode()
         holder.binding.selectionOverlay.visibility = if (isMainSelected) View.VISIBLE else View.GONE

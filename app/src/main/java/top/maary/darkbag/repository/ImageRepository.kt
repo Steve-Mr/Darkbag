@@ -84,8 +84,6 @@ class ImageRepository(private val context: Context) {
             groups[cached.baseName] = ImageGroupBuilder(cached.baseName).applyFrom(cached)
         }
 
-        var hasEmittedInitialChunk = false
-
         suspend fun emitCurrent() {
             val sorted = groups.values
                 .map { it.build() }
@@ -93,14 +91,6 @@ class ImageRepository(private val context: Context) {
                 .sortedByDescending { it.captureTime }
             cachedGroups = sorted
             staleCachedGroups = sorted
-
-            // Progressive chunk delivery for large datasets (500+ groups):
-            // Emit top 40 items first if not yet emitted, allowing instant T2 paint (<25ms)
-            if (sorted.size > 40 && !hasEmittedInitialChunk) {
-                hasEmittedInitialChunk = true
-                emit(sorted.take(40))
-                kotlinx.coroutines.delay(40)
-            }
             emit(sorted)
         }
 
@@ -116,25 +106,37 @@ class ImageRepository(private val context: Context) {
         coroutineScope {
             val jobMediaStore = async(Dispatchers.IO) {
                 val msGroups = mutableMapOf<String, ImageGroupBuilder>()
-                scanMediaStore(msGroups, fast = true)
+                try {
+                    scanMediaStore(msGroups, fast = true)
+                } catch (e: Throwable) {
+                    android.util.Log.e("ImageRepository", "Error scanning MediaStore", e)
+                }
                 msGroups
             }
             val jobSafJpg = async(Dispatchers.IO) {
                 val jpgGroups = mutableMapOf<String, ImageGroupBuilder>()
                 if (safJpgUri != null) {
-                    scanSafFolder(safJpgUri, jpgGroups, fast = true)
+                    try {
+                        scanSafFolder(safJpgUri, jpgGroups, fast = true)
+                    } catch (e: Throwable) {
+                        android.util.Log.e("ImageRepository", "Error scanning SAF JPG folder: $safJpgUri", e)
+                    }
                 }
                 jpgGroups
             }
             val jobSafRaw = async(Dispatchers.IO) {
                 val rawGroups = mutableMapOf<String, ImageGroupBuilder>()
                 if (safRawUri != null && safRawUri != safJpgUri) {
-                    scanSafFolder(safRawUri, rawGroups, fast = true)
+                    try {
+                        scanSafFolder(safRawUri, rawGroups, fast = true)
+                    } catch (e: Throwable) {
+                        android.util.Log.e("ImageRepository", "Error scanning SAF RAW folder: $safRawUri", e)
+                    }
                 }
                 rawGroups
             }
 
-            val msResults = jobMediaStore.await()
+            val msResults = try { jobMediaStore.await() } catch (e: Throwable) { emptyMap() }
             val hadCached = groups.isNotEmpty()
             mergeGroupMaps(groups, msResults)
 
@@ -143,8 +145,8 @@ class ImageRepository(private val context: Context) {
                 emitCurrent()
             }
 
-            val jpgResults = jobSafJpg.await()
-            val rawResults = jobSafRaw.await()
+            val jpgResults = try { jobSafJpg.await() } catch (e: Throwable) { emptyMap() }
+            val rawResults = try { jobSafRaw.await() } catch (e: Throwable) { emptyMap() }
 
             mergeGroupMaps(groups, jpgResults)
             mergeGroupMaps(groups, rawResults)

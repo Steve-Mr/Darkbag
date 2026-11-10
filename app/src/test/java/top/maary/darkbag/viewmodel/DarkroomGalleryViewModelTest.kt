@@ -177,4 +177,23 @@ class DarkroomGalleryViewModelTest {
         viewModel.processIntent(DarkroomGalleryUserIntent.SetLoading(false))
         assertFalse(viewModel.uiState.value.isLoading)
     }
+
+    @Test
+    fun testGalleryColumnPersistence() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val vm1 = DarkroomGalleryViewModel(app)
+
+        // Initial default portrait is 3
+        assertEquals(3, vm1.uiState.value.columnCount)
+        assertFalse(vm1.uiState.value.isWaterfallMode)
+
+        // Cycle layout in portrait to 2
+        vm1.processIntent(DarkroomGalleryUserIntent.CycleLayout(isLandscape = false))
+        assertEquals(2, vm1.uiState.value.columnCount)
+
+        // Construct a new ViewModel instance and verify it restores the saved column count
+        val vm2 = DarkroomGalleryViewModel(app)
+        assertEquals(2, vm2.uiState.value.columnCount)
+        assertFalse(vm2.uiState.value.isWaterfallMode)
+    }
 }
