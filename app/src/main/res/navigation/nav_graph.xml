@@ -35,6 +35,8 @@
     <fragment android:id="@+id/image_viewer_fragment" android:name="top.maary.darkbag.fragments.ImageViewerFragment" android:label="ImageViewerFragment">
         <argument android:name="initial_uri" app:argType="string" app:nullable="true" android:defaultValue="@null" />
         <argument android:name="start_in_gallery_mode" app:argType="boolean" android:defaultValue="false" />
+        <argument android:name="playground_dng_paths" app:argType="string[]" app:nullable="true" android:defaultValue="@null" />
+        <argument android:name="playground_hf_layout" app:argType="string" app:nullable="true" android:defaultValue="@null" />
     </fragment>
 
     <fragment android:id="@+id/settings_fragment" android:name="top.maary.darkbag.fragments.SettingsFragment" android:label="SettingsFragment">
@@ -45,4 +47,13 @@
 
     <fragment android:id="@+id/lut_management_fragment" android:name="top.maary.darkbag.fragments.LutManagementFragment" android:label="Manage LUTs" />
 
-<fragment android:id="@+id/playground_viewer_fragment" android:name="top.maary.darkbag.fragments.PlaygroundViewerFragment" android:label="PlaygroundViewerFragment"><argument android:name="playground_dng_paths" app:argType="string[]" app:nullable="true" android:defaultValue="@null" /><argument android:name="playground_hf_layout" app:argType="string" app:nullable="true" android:defaultValue="@null" /></fragment></navigation>
+    <fragment
+        android:id="@+id/playground_viewer_fragment"
+        android:name="top.maary.darkbag.fragments.ImageViewerFragment"
+        android:label="PlaygroundViewerFragment">
+        <argument android:name="initial_uri" app:argType="string" app:nullable="true" android:defaultValue="@null" />
+        <argument android:name="start_in_gallery_mode" app:argType="boolean" android:defaultValue="false" />
+        <argument android:name="playground_dng_paths" app:argType="string[]" app:nullable="true" android:defaultValue="@null" />
+        <argument android:name="playground_hf_layout" app:argType="string" app:nullable="true" android:defaultValue="@null" />
+    </fragment>
+</navigation>
