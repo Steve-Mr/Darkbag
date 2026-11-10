@@ -218,15 +218,28 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
             height = RawProcessor.imgdata.sizes.height;
         }
 
+        auto normCfaColor = [&](int idx) -> int {
+            if (idx >= 0 && idx < 4) {
+                char ch = RawProcessor.imgdata.idata.cdesc[idx];
+                if (ch == 'R' || ch == 'r') return 0;
+                if (ch == 'G' || ch == 'g') return 1;
+                if (ch == 'B' || ch == 'b') return 2;
+            }
+            return (idx == 3) ? 1 : idx;
+        };
         int cfaPattern = 0;
-        int c00 = RawProcessor.COLOR(0, 0);
-        int c01 = RawProcessor.COLOR(0, 1);
-        int c10 = RawProcessor.COLOR(1, 0);
-        int c11 = RawProcessor.COLOR(1, 1);
-        if (c00 == 0 && c01 == 1) cfaPattern = 0;      // RGGB
-        else if (c00 == 1 && c01 == 0) cfaPattern = 1; // GRBG
-        else if (c00 == 1 && c01 == 2) cfaPattern = 2; // GBRG
-        else if (c00 == 2 && c01 == 1) cfaPattern = 3; // BGGR
+        int c00 = normCfaColor(RawProcessor.COLOR(0, 0));
+        int c01 = normCfaColor(RawProcessor.COLOR(0, 1));
+        int c10 = normCfaColor(RawProcessor.COLOR(1, 0));
+        int c11 = normCfaColor(RawProcessor.COLOR(1, 1));
+        if (c00 == 0 && c01 == 1 && c10 == 1 && c11 == 2) cfaPattern = 0;      // RGGB
+        else if (c00 == 1 && c01 == 0 && c10 == 2 && c11 == 1) cfaPattern = 1; // GRBG
+        else if (c00 == 1 && c01 == 2 && c10 == 0 && c11 == 1) cfaPattern = 2; // GBRG
+        else if (c00 == 2 && c01 == 1 && c10 == 1 && c11 == 0) cfaPattern = 3; // BGGR
+        else if (c00 == 0 && c01 == 1) cfaPattern = 0;
+        else if (c00 == 1 && c01 == 0) cfaPattern = 1;
+        else if (c00 == 1 && c01 == 2) cfaPattern = 2;
+        else if (c00 == 2 && c01 == 1) cfaPattern = 3;
 
         uint16_t bl_array[4] = {64, 64, 64, 64};
         if (RawProcessor.imgdata.color.dng_levels.dng_cblack[0] > 0 || RawProcessor.imgdata.color.dng_levels.dng_black > 0) {
