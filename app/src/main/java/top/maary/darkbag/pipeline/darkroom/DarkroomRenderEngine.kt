@@ -184,8 +184,8 @@ object DarkroomRenderEngine {
         logIndex: Int,
         lutPath: String?
     ): DarkroomRenderResult {
-        val adj1 = spec.editConfig.adjustments?.getOrNull(0) ?: spec.editConfig.toBasic()
-        val adj2 = spec.editConfig.adjustments?.getOrNull(1) ?: spec.editConfig.toBasic()
+        val adj1 = spec.effectiveAdjustments(0)
+        val adj2 = spec.effectiveAdjustments(1)
 
         val isPreview = spec.outputFormat == RenderOutputFormat.BITMAP || spec.sink is BitmapPreviewSink
         val ds = if (isPreview) {

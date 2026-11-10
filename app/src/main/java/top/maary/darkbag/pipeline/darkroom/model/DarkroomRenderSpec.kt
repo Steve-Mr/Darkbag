@@ -142,11 +142,12 @@ data class DarkroomRenderSpec(
         }
 
     fun effectiveAdjustments(index: Int): BasicAdjustments {
-        return if (source is DarkroomSource.HalfFrame) {
+        val raw = if (source is DarkroomSource.HalfFrame) {
             editConfig.adjustments?.getOrNull(index) ?: editConfig.toBasic()
         } else {
             editConfig.toBasic()
         }
+        return raw.normalizedForRender()
     }
 
     companion object {
@@ -258,3 +259,44 @@ fun EditConfig.toBasic(): BasicAdjustments {
         digitalGain = digitalGain
     )
 }
+
+/**
+ * 归一化暗房渲染参数，消除 exposure (EV) 与 digitalGain (线性增益) 的双重叠加。
+ *
+ * 在拍摄阶段，相机欠曝补偿以 `digitalGain` (如 2.0x) 记录在 EXIF 中 (`exposure = 0f`)；
+ * 在暗房加载阶段 (`prepareEditConfig` 或 `readDngBaselineExposure`)，`digitalGain` 已被折算进
+ * `exposure = log2(digitalGain)` (如 +1.0 EV) 供曝光滑块展示。
+ * 若渲染时将折算后的 `exposure` 与原始 `digitalGain` 同时传给底层 `ColorPipe` (`gain * exp_gain`)，
+ * 会导致增益被重复乘算两次（例如 2.0 * 2.0 = 4.0x），造成切换 LUT A -> B -> A 后画面比原图过曝一倍。
+ */
+fun BasicAdjustments.normalizedForRender(): BasicAdjustments {
+    return if (digitalGain != 1.0f && digitalGain > 0f) {
+        val effectiveExposure = if (exposure == 0f) {
+            kotlin.math.log2(digitalGain)
+        } else {
+            exposure
+        }
+        copy(exposure = effectiveExposure, digitalGain = 1.0f)
+    } else {
+        copy(digitalGain = 1.0f)
+    }
+}
+
+/**
+ * 归一化 EditConfig 中的曝光与线性增益，保证暗房滑块与渲染引擎以单一 EV 曝光量为唯一真值源。
+ */
+fun EditConfig.normalizedForRender(): EditConfig {
+    return if (adjustments != null) {
+        copy(
+            digitalGain = 1.0f,
+            adjustments = adjustments.map { it.normalizedForRender() }
+        )
+    } else {
+        val norm = toBasic().normalizedForRender()
+        copy(
+            exposure = norm.exposure,
+            digitalGain = norm.digitalGain
+        )
+    }
+}
+

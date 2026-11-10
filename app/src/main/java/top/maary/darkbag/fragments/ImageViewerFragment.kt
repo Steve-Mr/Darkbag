@@ -68,6 +68,7 @@ import top.maary.darkbag.pipeline.darkroom.DarkroomRenderEngine
 import top.maary.darkbag.pipeline.darkroom.model.DarkroomRenderSpec
 import top.maary.darkbag.pipeline.darkroom.model.DarkroomSource
 import top.maary.darkbag.pipeline.darkroom.model.RenderOutputFormat
+import top.maary.darkbag.pipeline.darkroom.model.normalizedForRender
 import top.maary.darkbag.pipeline.darkroom.sink.BitmapPreviewSink
 import top.maary.darkbag.pipeline.darkroom.sink.MediaStoreExportSink
 import top.maary.darkbag.pipeline.darkroom.sink.ShareFileSink
@@ -153,6 +154,7 @@ open class ImageViewerFragment : Fragment() {
     private var bentoDeckHeight = 0
     private var configBeforeEditing: top.maary.darkbag.models.EditConfig? = null
     protected var currentEditConfig: top.maary.darkbag.models.EditConfig? = null
+    private var userExplicitlyChangedLog: Boolean = false
     protected var selectedDngIndex = 0 // 0 or 1 for half-frame
     protected var sourceDngBytes: ByteArray? = null
     protected var sourceDngBytes2: ByteArray? = null
@@ -1173,24 +1175,15 @@ open class ImageViewerFragment : Fragment() {
         cachedBitmap2 = null
         lastPreviewConfig = null
         selectedDngIndex = 0
+        userExplicitlyChangedLog = false
         previewJob?.cancel()
 
-        currentEditConfig = group.editConfig?.let {
-            if (it.exposure == 0f && it.adjustments == null) {
-                val baseEv = if (it.digitalGain > 0f) kotlin.math.log2(it.digitalGain) else 0f
-                it.copy(exposure = baseEv)
-            } else if (it.adjustments != null) {
-                val newAdjs = it.adjustments.map { adj ->
-                    if (adj.exposure == 0f) {
-                        val baseEv = if (adj.digitalGain > 0f) kotlin.math.log2(adj.digitalGain) else 0f
-                        adj.copy(exposure = baseEv)
-                    } else adj
-                }
-                it.copy(adjustments = newAdjs)
-            } else it
-        }?.copy() ?: top.maary.darkbag.models.EditConfig(
-            adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
-        )
+        currentEditConfig = group.editConfig
+            ?.normalizedForRender()
+            ?.copy()
+            ?: top.maary.darkbag.models.EditConfig(
+                adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
+            )
 
         // Solidify "Random" flare type to prevent jumping during edits
         currentEditConfig = currentEditConfig?.let { config ->
@@ -1232,15 +1225,16 @@ open class ImageViewerFragment : Fragment() {
 
                 // Fallback: Load digital gain from DNG EXIF only if missing from JPG
                 val currentConfig = currentEditConfig
-                if (currentConfig != null) {
+                if (currentConfig != null && group.editConfig == null) {
                     if (currentConfig.digitalGain == 1.0f && currentConfig.adjustments == null && currentConfig.exposure == 0f) {
                         val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext
                         repository.readDngBaselineExposure(primaryUri, false)?.let { configFromExif ->
+                            val normExif = configFromExif.normalizedForRender()
                             withContext(Dispatchers.Main) {
                                 if (currentEditConfig?.exposure == 0f) {
                                     currentEditConfig = currentEditConfig?.copy(
-                                        digitalGain = configFromExif.digitalGain,
-                                        exposure = if (configFromExif.digitalGain > 0f) kotlin.math.log2(configFromExif.digitalGain) else 0f
+                                        digitalGain = 1.0f,
+                                        exposure = normExif.exposure
                                     )
                                     updateEditUi()
                                     if (isEditingAdjustments) updateSlidersInPanel()
@@ -1252,13 +1246,13 @@ open class ImageViewerFragment : Fragment() {
                         var updated = false
                         if (dngUri1 != null && adjs.getOrNull(0)?.digitalGain == 1.0f && adjs.getOrNull(0)?.exposure == 0f) {
                             repository.readDngBaselineExposure(dngUri1, true, 0)?.adjustments?.get(0)?.let { adj ->
-                                adjs[0] = adj
+                                adjs[0] = adj.normalizedForRender()
                                 updated = true
                             }
                         }
                         if (dngUri2 != null && adjs.getOrNull(1)?.digitalGain == 1.0f && adjs.getOrNull(1)?.exposure == 0f) {
                             repository.readDngBaselineExposure(dngUri2, true, 1)?.adjustments?.get(1)?.let { adj ->
-                                adjs[1] = adj
+                                adjs[1] = adj.normalizedForRender()
                                 updated = true
                             }
                         }
@@ -2047,7 +2041,24 @@ open class ImageViewerFragment : Fragment() {
 
     private fun showLutMenu() {
         val lutManager = top.maary.darkbag.utils.LutManager(requireContext())
-        top.maary.darkbag.ui.ColorRecipeBottomSheet.show(requireContext(), lutManager) { selectedLog, selectedLut ->
+        val initialGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val activeConfig = currentEditConfig ?: initialGroup.editConfig
+        val initialLog = activeConfig?.log ?: "None"
+        val initialLut = activeConfig?.lut
+        val baselineLog = initialGroup.editConfig?.log ?: initialLog
+
+        top.maary.darkbag.ui.ColorRecipeBottomSheet.show(
+            context = requireContext(),
+            lutManager = lutManager,
+            initialLog = initialLog,
+            initialLut = initialLut,
+            baselineLog = baselineLog,
+            userExplicitlySelectedLog = userExplicitlyChangedLog,
+            persistToPrefs = false,
+            onLogExplicitlyChanged = { explicitlyChanged ->
+                userExplicitlyChangedLog = explicitlyChanged
+            }
+        ) { selectedLog, selectedLut ->
             val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
             val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
             if (isRawVideo) {
