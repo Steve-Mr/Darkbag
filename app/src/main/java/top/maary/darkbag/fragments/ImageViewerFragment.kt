@@ -4018,8 +4018,9 @@ open class ImageViewerFragment : Fragment() {
                     galleryViewModel.processIntent(DarkroomGalleryUserIntent.ClearSelection)
                     galleryAdapter.setSelectionMode(false)
                     updateGallerySelectionUI(0)
+                    Toast.makeText(ctx, R.string.gallery_merge_success, Toast.LENGTH_SHORT).show()
                 } else {
-                    Toast.makeText(ctx, R.string.gallery_collage_failed, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, R.string.gallery_collage_create_failed, Toast.LENGTH_SHORT).show()
                 }
             }
         }
