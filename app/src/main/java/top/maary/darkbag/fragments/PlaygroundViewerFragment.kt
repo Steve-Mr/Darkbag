@@ -10,7 +10,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 import top.maary.darkbag.models.ImageGroup
-import top.maary.darkbag.pipeline.composer.HalfFrameComposer
+import top.maary.darkbag.pipeline.darkroom.DarkroomRenderEngine
+import top.maary.darkbag.pipeline.darkroom.model.DarkroomRenderSpec
+import top.maary.darkbag.pipeline.darkroom.model.RenderOutputFormat
+import top.maary.darkbag.pipeline.darkroom.sink.MediaStoreExportSink
 import top.maary.darkbag.utils.ImageSaver
 import java.io.File
 import androidx.appcompat.widget.PopupMenu
@@ -428,181 +431,22 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
             try {
                 ensureDngBytesLoaded()
                 withContext(Dispatchers.IO) {
-                    val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
-                    val dngUri2 = currentGroup.dngUri2
-                    val logIndex = top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(config.log)
-                    val lutPath = if (config.lut != null && config.lut != "None") {
-                        File(lutManager.lutDir, config.lut).absolutePath
-                    } else null
-
-                    // If it is a single frame, we can use processRaw to directly output a full-resolution JPEG to a temp file,
-                    // bypassing Bitmap memory allocation entirely!
-                    if (!currentGroup.isHalfFrame()) {
-                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext
-                        val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
-                        val finalBytes = primaryBytes ?: run {
-                            appContext.contentResolver.openFileDescriptor(primaryUri, "r")?.use { pfd ->
-                                java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
-                            }
-                        } ?: return@withContext
-
-                        val orientation = try {
-                            appContext.contentResolver.openInputStream(primaryUri)?.use { input ->
-                                androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                            } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                        } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-
-                        val rotDegrees = when(orientation) {
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                            else -> 0
-                        }
-                        val adj = top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
-                        val meta = repository.getCaptureMetadata(primaryUri)
-
-                        val tempJpgFile = java.io.File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}.jpg")
-
-                        top.maary.darkbag.processor.ColorProcessor.processRaw(
-                            dngData = finalBytes,
-                            targetLog = logIndex,
-                            lutPath = lutPath,
-                            exposure = adj.exposure,
-                            contrast = adj.contrast,
-                            saturation = adj.saturation,
-                            highlights = adj.highlights,
-                            shadows = adj.shadows,
-                            whites = adj.whites,
-                            blacks = adj.blacks,
-                            digitalGain = adj.digitalGain,
-                            outputJpgPath = tempJpgFile.absolutePath,
-                            useGpu = false,
-                            orientation = rotDegrees,
-                            mirror = false,
-                            outputBitmap = null,
-                            downsampleFactor = 1,
-                            zoomFactor = config.zoomFactor,
-                            metadata = meta
-                        )
-
-                        if (tempJpgFile.exists()) {
-                            ImageSaver.saveProcessedImage(
-                                context = appContext,
-                                inputBitmap = null,
-                                bmpPath = tempJpgFile.absolutePath,
-                                rotationDegrees = 0,
-                                zoomFactor = 1.0f,
-                                baseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName),
-                                linearDngPath = null,
-                                saveJpg = true,
-                                saveRaw = false,
-                                editConfig = config,
-                                isAlreadyStitched = true,
-                                captureMetadata = meta
-                            )
-                            tempJpgFile.delete()
-                        }
-                    } else {
-                        // For half-frame, we MUST composite.
-                        // To prevent OOM with two full-res raw files, we use a safe downsampleFactor (e.g. 2 or 4)
-                        // by passing the calculated downsample factor to ColorProcessor to render a high-quality (but not 24MP) image
-                        fun processFullSafe(bytes: ByteArray?, uri: Uri, index: Int): android.graphics.Bitmap? {
-                            val finalBytes = bytes ?: run {
-                                appContext.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                                    java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
-                                }
-                            } ?: return null
-
-                            val orientation = try {
-                                appContext.contentResolver.openInputStream(uri)?.use { input ->
-                                    androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                                } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                            } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-
-                            val rotDegrees = when(orientation) {
-                                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                                else -> 0
-                            }
-
-                            val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
-                            val meta = repository.getCaptureMetadata(uri)
-
-                            val tempJpgFile = java.io.File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}_$index.jpg")
-
-                            top.maary.darkbag.processor.ColorProcessor.processRaw(
-                                dngData = finalBytes,
-                                targetLog = logIndex,
-                                lutPath = lutPath,
-                                exposure = adj.exposure,
-                                contrast = adj.contrast,
-                                saturation = adj.saturation,
-                                highlights = adj.highlights,
-                                shadows = adj.shadows,
-                                whites = adj.whites,
-                                blacks = adj.blacks,
-                                digitalGain = adj.digitalGain,
-                                outputJpgPath = tempJpgFile.absolutePath,
-                                useGpu = false,
-                                orientation = rotDegrees,
-                                mirror = false,
-                                outputBitmap = null,
-                                downsampleFactor = 1,
-                                zoomFactor = config.zoomFactor,
-                                metadata = meta
-                            )
-
-                            if (!tempJpgFile.exists()) return null
-
-                            val decodeOpts = android.graphics.BitmapFactory.Options().apply {
-                                inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
-                            }
-                            val bitmap = android.graphics.BitmapFactory.decodeFile(tempJpgFile.absolutePath, decodeOpts)
-                            tempJpgFile.delete()
-                            return bitmap
-                        }
-
-                        val f1 = dngUri1?.let { processFullSafe(sourceDngBytes, it, 0) }
-                        val f2 = dngUri2?.let { processFullSafe(sourceDngBytes2, it, 1) }
-
-                        val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-                        val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-
-                        val finalCompositeBitmap = HalfFrameComposer.compose(
-                            frame1 = f1,
-                            frame2 = f2,
-                            layout = currentGroup.hfLayout,
-                            isSwapped = config.isSwapped,
-                            showTimestamp = config.showTimestamp,
-                            flareType = config.flareType,
-                            time1 = time1,
-                            time2 = time2,
-                            downsample = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample
-                        )
-                        f1?.recycle()
-                        f2?.recycle()
-
-                        finalCompositeBitmap?.let { bitmap ->
-                            val captureMetadata = (currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1)?.let { repository.getCaptureMetadata(it) }
-
-                            ImageSaver.saveProcessedImage(
-                                context = appContext,
-                                inputBitmap = bitmap,
-                                bmpPath = null,
-                                rotationDegrees = 0,
-                                zoomFactor = 1.0f,
-                                baseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName),
-                                linearDngPath = null,
-                                saveJpg = true,
-                                saveRaw = false,
-                                editConfig = config,
-                                isAlreadyStitched = true,
-                                captureMetadata = captureMetadata
-                            )
-                            bitmap.recycle()
-                        }
-                    }
+                    val mediaStoreSink = MediaStoreExportSink(
+                        baseName = currentGroup.baseName,
+                        isReplacement = false
+                    )
+                    val spec = DarkroomRenderSpec.fromImageGroup(
+                        context = appContext,
+                        group = currentGroup,
+                        editConfig = config,
+                        sink = mediaStoreSink,
+                        outputFormat = RenderOutputFormat.JPEG,
+                        cachedBytes1 = sourceDngBytes,
+                        cachedBytes2 = sourceDngBytes2,
+                        downsampleHalfFrame = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample,
+                        repository = repository
+                    )
+                    DarkroomRenderEngine.render(appContext, spec)
                 }
                 withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(appContext, "Exported JPG to Pictures", android.widget.Toast.LENGTH_SHORT).show()
