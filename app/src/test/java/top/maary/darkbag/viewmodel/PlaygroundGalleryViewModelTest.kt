@@ -32,6 +32,15 @@ class PlaygroundGalleryViewModelTest {
     }
 
     @Test
+    fun testAndroidViewModelFactoryConstructorReflection() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val constructor = PlaygroundGalleryViewModel::class.java.getConstructor(android.app.Application::class.java)
+        org.junit.Assert.assertNotNull(constructor)
+        val vm = constructor.newInstance(app)
+        org.junit.Assert.assertNotNull(vm)
+    }
+
+    @Test
     fun testDefaultState() {
         val state = viewModel.uiState.value
         assertFalse(state.isSelectionMode)

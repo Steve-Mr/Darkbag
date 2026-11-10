@@ -63,7 +63,7 @@ sealed class PlaygroundUserIntent {
  * 工坊画廊视图模型 (MVI 状态机).
  * 严格遵从 Invariant 4，管理工坊画廊的单向数据流、选择集状态机与 IO 仓储交互。
  */
-class PlaygroundGalleryViewModel(
+class PlaygroundGalleryViewModel @JvmOverloads constructor(
     application: Application,
     private val repository: PlaygroundRepository = PlaygroundRepository(application)
 ) : AndroidViewModel(application) {
