@@ -221,8 +221,8 @@ object DarkroomRenderEngine {
             isSwapped = composeSpec.isSwapped,
             showTimestamp = composeSpec.showTimestamp,
             flareType = composeSpec.flareType,
-            time1 = composeSpec.time1,
-            time2 = composeSpec.time2,
+            time1 = composeSpec.time1 ?: System.currentTimeMillis(),
+            time2 = composeSpec.time2 ?: System.currentTimeMillis(),
             downsample = composeSpec.downsample
         )
 
