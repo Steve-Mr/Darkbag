@@ -181,7 +181,7 @@ class PlaygroundGalleryViewModelTest {
         assertTrue(vm.uiState.value.selectedFiles.contains(file1))
 
         vm.processIntent(PlaygroundUserIntent.DeleteSelected)
-        pumpMainLooper { !file1.exists() }
+        pumpMainLooper(timeoutMs = 5000) { !file1.exists() && !vm.uiState.value.isSelectionMode && !vm.uiState.value.isDeleting }
 
         assertFalse(vm.uiState.value.isSelectionMode)
         assertTrue(vm.uiState.value.selectedFiles.isEmpty())
@@ -199,13 +199,13 @@ class PlaygroundGalleryViewModelTest {
         val dng2 = File(pDir, "${base}_2.dng").apply { writeBytes(byteArrayOf(5, 6)) }
 
         val vm = PlaygroundGalleryViewModel(app, repo)
-        pumpMainLooper { vm.uiState.value.items.isNotEmpty() }
+        pumpMainLooper(timeoutMs = 5000) { vm.uiState.value.items.any { it is PlaygroundItem.Group && it.jpgFile == jpg } }
 
         vm.processIntent(PlaygroundUserIntent.ToggleSelection(jpg))
         assertTrue(vm.uiState.value.selectedFiles.contains(jpg))
 
         vm.processIntent(PlaygroundUserIntent.DisbandSelected)
-        pumpMainLooper { !jpg.exists() }
+        pumpMainLooper(timeoutMs = 5000) { !jpg.exists() && !vm.uiState.value.isSelectionMode }
 
         assertFalse(vm.uiState.value.isSelectionMode)
         assertTrue(vm.uiState.value.selectedFiles.isEmpty())
