@@ -1,7 +1,7 @@
 package top.maary.darkbag.pipeline.darkroom
 
 import android.graphics.Bitmap
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -11,6 +11,7 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.pipeline.darkroom.model.DarkroomRenderSpec
 import top.maary.darkbag.pipeline.darkroom.model.DarkroomSource
@@ -20,6 +21,7 @@ import top.maary.darkbag.pipeline.darkroom.sink.BitmapPreviewSink
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class DarkroomRenderEngineTest {
 
     @get:Rule
@@ -34,7 +36,7 @@ class DarkroomRenderEngineTest {
         val resolved = DarkroomRenderEngine.resolveDngBytes(context, single)
         assertNotNull(resolved)
         assertEquals(3, resolved?.size)
-        assertEquals(10, resolved?.get(0))
+        assertEquals(10.toByte(), resolved?.get(0))
     }
 
     @Test
@@ -74,7 +76,7 @@ class DarkroomRenderEngineTest {
     }
 
     @Test
-    fun testRenderHalfFrame_WithCachedBitmaps() = runTest {
+    fun testRenderHalfFrame_WithCachedBitmaps() = runBlocking {
         val context = RuntimeEnvironment.getApplication()
         val bmp1 = Bitmap.createBitmap(100, 150, Bitmap.Config.ARGB_8888)
         val bmp2 = Bitmap.createBitmap(100, 150, Bitmap.Config.ARGB_8888)

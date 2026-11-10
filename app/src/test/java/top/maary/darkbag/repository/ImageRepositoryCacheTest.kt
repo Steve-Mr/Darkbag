@@ -1,6 +1,7 @@
 package top.maary.darkbag.repository
 
 import android.content.Context
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -89,7 +90,12 @@ class ImageRepositoryCacheTest {
 
     @Test
     fun testGetGroupedImagesFlow_staleWhileRevalidateAndPrune() = runBlocking {
-        val staleGroup = ImageGroup(baseName = "stale_deleted_item", metadataLoaded = true, isInProgress = false)
+        val staleGroup = ImageGroup(
+            baseName = "stale_deleted_item",
+            dngUri = Uri.parse("content://media/external/images/media/99999"),
+            metadataLoaded = true,
+            isInProgress = false
+        )
         ImageRepository.cachedGroups = listOf(staleGroup)
 
         val emissions = mutableListOf<List<ImageGroup>>()

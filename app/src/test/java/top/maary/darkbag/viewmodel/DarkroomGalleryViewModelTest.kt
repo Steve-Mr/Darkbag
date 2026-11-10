@@ -74,8 +74,8 @@ class DarkroomGalleryViewModelTest {
             baseName = "DARK_20261109_MULTI",
             isMultiCamera = true,
             multiCameraLenses = listOf(
-                MultiCameraLensItem(lensTag = "WIDE", cameraId = "0"),
-                MultiCameraLensItem(lensTag = "ULTRA", cameraId = "1")
+                MultiCameraLensItem(lensTag = "WIDE", multiplier = 1.0f),
+                MultiCameraLensItem(lensTag = "ULTRA", multiplier = 0.6f)
             )
         )
         val lensWide = groupMulti.multiCameraLenses[0]
