@@ -87,6 +87,14 @@
     <string name="share_as_tiff_dialog_message">Would you like to save your current adjustments before sharing?</string>
     <string name="save_and_share">Save and Share</string>
     <string name="share_without_saving">Share without Saving</string>
+    <string name="save_replacement">Save edit (replace)</string>
+    <string name="save_as_new">Save as new file</string>
+    <string name="save_processed_jpg">Export to JPG (Pictures)</string>
+    <string name="export_to_jpg">Export to JPG</string>
+    <string name="export_jpg_dialog_message">Save adjustments and export to JPG?</string>
+    <string name="save_and_export">Save &amp; Export</string>
+    <string name="export_without_saving">Export without Saving</string>
+    <string name="toast_export_jpg_success">Exported JPG to Pictures</string>
     <string name="delete_image_title">Delete Image</string>
     <string name="delete_image_message">Are you sure you want to delete this image?</string>
     <string name="delete_entire_group">Delete entire group</string>
