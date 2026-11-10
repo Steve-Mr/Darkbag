@@ -72,6 +72,14 @@
     <string name="share_as_tiff_dialog_message">是否在分享前保存当前的参数调整？</string>
     <string name="save_and_share">保存并分享</string>
     <string name="share_without_saving">直接分享不保存</string>
+    <string name="save_replacement">保存修改（覆盖）</string>
+    <string name="save_as_new">另存为新文件</string>
+    <string name="save_processed_jpg">导出 JPG 到相册</string>
+    <string name="export_to_jpg">导出 JPG</string>
+    <string name="export_jpg_dialog_message">是否在导出前保存当前的参数调整？</string>
+    <string name="save_and_export">保存并导出</string>
+    <string name="export_without_saving">直接导出不保存</string>
+    <string name="toast_export_jpg_success">已导出 JPG 到相册</string>
     <string name="delete_image_title">删除图片</string>
     <string name="delete_image_message">确定要删除当前图片吗？</string>
     <string name="delete_entire_group">删除整组</string>

@@ -72,6 +72,13 @@ import top.maary.darkbag.pipeline.darkroom.model.normalizedForRender
 import top.maary.darkbag.pipeline.darkroom.sink.BitmapPreviewSink
 import top.maary.darkbag.pipeline.darkroom.sink.MediaStoreExportSink
 import top.maary.darkbag.pipeline.darkroom.sink.ShareFileSink
+import top.maary.darkbag.viewer.editor.DarkroomEditorController
+import top.maary.darkbag.viewer.editor.DarkroomEditorUiState
+import top.maary.darkbag.viewer.editor.DarkroomEditorUserIntent
+import top.maary.darkbag.viewer.editor.DarkroomEditorViewModel
+import top.maary.darkbag.viewer.strategy.ViewerMediaStrategy
+import top.maary.darkbag.viewer.strategy.ViewerMediaStrategyFactory
+import top.maary.darkbag.viewer.strategy.ViewerSaveAction
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -133,12 +140,15 @@ open class ImageViewerFragment : Fragment() {
     protected val binding get() = _binding!!
     protected val args: ImageViewerFragmentArgs by navArgs()
     protected val galleryViewModel: DarkroomGalleryViewModel by viewModels()
+    protected val editorViewModel: DarkroomEditorViewModel by viewModels()
+    protected lateinit var mediaStrategy: ViewerMediaStrategy
+    private var editorController: DarkroomEditorController? = null
     protected lateinit var repository: ImageRepository
     protected lateinit var adapter: ImageViewerAdapter
     protected lateinit var galleryAdapter: DarkbagGalleryGridAdapter
     protected var isGalleryMode = false
     protected var startedInGalleryMode = false
-    protected open val isGallerySupported: Boolean = true
+    protected open val isGallerySupported: Boolean get() = if (::mediaStrategy.isInitialized) mediaStrategy.isGallerySupported else true
     private var galleryCollectJob: Job? = null
 
     var isMotionPhotoAutoPlay = true
@@ -382,6 +392,57 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
+        mediaStrategy = ViewerMediaStrategyFactory.create(arguments)
+        val editor = DarkroomEditorController(
+            binding = binding,
+            viewModel = editorViewModel,
+            onViewportPaddingRequested = { updateViewportPadding() },
+            onEditStateChanged = { isEditing, isAdjusted ->
+                this.isEditingAdjustments = isEditing
+                this.isAdjusted = isAdjusted
+                if (::adapter.isInitialized) {
+                    binding.imagePager.isUserInputEnabled = !isEditing && !isAdjusted
+                    adapter.setFormatSwitcherPersistentHidden(isEditing || isAdjusted)
+                }
+                updateSplitButtons()
+                updateToolbarIcon()
+                updateBackPressedCallbackState()
+            }
+        )
+        editor.setup()
+        editorController = editor
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                editorViewModel.uiState.collect { state ->
+                    editorController?.render(state)
+                    if (state.activeConfig != null) {
+                        currentEditConfig = state.activeConfig
+                    }
+                    if (state.previewBitmap != null && state.previewBitmap != lastCompositeBitmap) {
+                        lastCompositeBitmap = state.previewBitmap
+                        if (!isLongPressing && ::adapter.isInitialized) {
+                            val currentIndex = binding.imagePager.currentItem
+                            if (currentIndex in 0 until adapter.itemCount) {
+                                adapter.setManualBitmap(currentIndex, state.previewBitmap)
+                            }
+                        }
+                    }
+                    if (state.activeConfig != null && ::adapter.isInitialized && adapter.itemCount > 0) {
+                        val currentIndex = binding.imagePager.currentItem
+                        if (currentIndex in 0 until adapter.itemCount) {
+                            val currentGroup = adapter.getGroup(currentIndex)
+                            if (currentGroup.isRawVideo || currentGroup.rawVideoUri != null) {
+                                adapter.updateRawVideoAdjustments(currentIndex, state.activeConfig)
+                            }
+                        }
+                    }
+                    updateEditUi()
+                    updateEffectsButtons()
+                }
+            }
+        }
+
         binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
         loadImages(forceRefresh = true)
 
@@ -394,6 +455,63 @@ open class ImageViewerFragment : Fragment() {
     }
 
     protected open fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {
+        if (::mediaStrategy.isInitialized && mediaStrategy.isSandbox) {
+            binding.initialLoadingIndicator.visibility = View.VISIBLE
+            binding.imagePager.visibility = View.INVISIBLE
+
+            viewLifecycleOwner.lifecycleScope.launch {
+                val groups = mediaStrategy.loadInitialGroups(requireContext(), arguments, repository)
+                if (!groups.isNullOrEmpty()) {
+                    if (binding.imagePager.adapter == null) {
+                        adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
+                            isMotionPhotoAutoPlay = this@ImageViewerFragment.isMotionPhotoAutoPlay
+                            onImageTapped = { toggleUi() }
+                            onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
+                            onLongPressStarted = { handleLongPressStarted(it) }
+                            onLongPressEnded = { handleLongPressEnded(it) }
+                            onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
+                            onFormatChanged = { _, _ -> updateControlsVisibility() }
+                            onDerivativeVersionChanged = { _, _ -> updateControlsVisibility() }
+                            setFormatSwitcherPersistentHidden(isAdjusted)
+                            onCurrentListChanged = { previousList, currentList ->
+                                val currentIndex = binding.imagePager.currentItem
+                                if (currentIndex in currentList.indices) {
+                                    val currentGroup = currentList[currentIndex]
+                                    val prevGroup = previousList.getOrNull(currentIndex)
+                                    if (prevGroup != null && !prevGroup.metadataLoaded && currentGroup.metadataLoaded) {
+                                        if (currentGroup.editConfig != null) {
+                                            prepareEditConfig(currentGroup)
+                                        }
+                                    }
+                                    updateControlsVisibility()
+                                }
+                            }
+                        }
+                        binding.imagePager.adapter = adapter
+                        binding.imagePager.isUserInputEnabled = !isAdjusted
+                        setupActionButtons()
+
+                        val initialGroup = groups[0]
+                        val playgroundPaths = arguments?.getStringArray("playground_dng_paths")
+                        if (groups.size == 1 && playgroundPaths != null && playgroundPaths.size == 2 && initialGroup.jpgUri == null) {
+                            isAdjusted = true
+                            adapter.setFormatSwitcherPersistentHidden(true)
+                            updateControlsVisibility()
+                        }
+
+                        binding.initialLoadingIndicator.visibility = View.GONE
+                        binding.imagePager.visibility = View.VISIBLE
+                        updateControlsVisibility()
+                    } else {
+                        adapter.updateGroups(groups)
+                        binding.initialLoadingIndicator.visibility = View.GONE
+                        binding.imagePager.visibility = View.VISIBLE
+                    }
+                }
+            }
+            return
+        }
+
         if (!isGalleryMode) {
             binding.initialLoadingIndicator.visibility = View.VISIBLE
             binding.imagePager.visibility = View.INVISIBLE
@@ -1195,6 +1313,7 @@ open class ImageViewerFragment : Fragment() {
 
         updateEditUi()
         updateEffectsButtons()
+        editorViewModel.processIntent(DarkroomEditorUserIntent.SetActiveGroup(group))
         // DNG bytes and deep EXIF will be loaded on-demand when entering edit flow
     }
 
@@ -1221,6 +1340,9 @@ open class ImageViewerFragment : Fragment() {
                     context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                         sourceDngBytes2 = java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
                     }
+                }
+                if (sourceDngBytes != null || sourceDngBytes2 != null) {
+                    editorViewModel.processIntent(DarkroomEditorUserIntent.SetDngBytes(sourceDngBytes, sourceDngBytes2))
                 }
 
                 // Fallback: Load digital gain from DNG EXIF only if missing from JPG
@@ -1459,23 +1581,6 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
-        binding.btnTabLight?.setOnClickListener {
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            selectAdjustmentTab(0)
-        }
-        binding.btnTabRange?.setOnClickListener {
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            selectAdjustmentTab(1)
-        }
-        binding.btnTabTone?.setOnClickListener {
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            selectAdjustmentTab(2)
-        }
-        binding.btnTabColor?.setOnClickListener {
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            selectAdjustmentTab(3)
-        }
-
         binding.btnDelete.setOnClickListener {
             if (::adapter.isInitialized && adapter.itemCount > 0) {
                 val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
@@ -1499,39 +1604,31 @@ open class ImageViewerFragment : Fragment() {
         binding.btnTimestamp.setOnClickListener {
             lifecycleScope.launch {
                 ensureDngBytesLoaded()
-                val current = currentEditConfig ?: return@launch
-                currentEditConfig = current.copy(showTimestamp = !current.showTimestamp)
+                editorViewModel.processIntent(DarkroomEditorUserIntent.ToggleTimestamp)
                 markAdjusted()
-                updateEffectsButtons()
-                applyEditPreview()
             }
         }
 
         binding.btnFlare.setOnClickListener {
             lifecycleScope.launch {
                 ensureDngBytesLoaded()
-                val current = currentEditConfig ?: return@launch
-                val nextFlare = when (current.flareType) {
+                val current = currentEditConfig
+                val nextFlare = when (current?.flareType) {
                     -1 -> 1
                     1 -> 2
                     2 -> -1
                     else -> 1
                 }
-                currentEditConfig = current.copy(flareType = nextFlare)
+                editorViewModel.processIntent(DarkroomEditorUserIntent.SetFlareType(nextFlare))
                 markAdjusted()
-                updateEffectsButtons()
-                applyEditPreview()
             }
         }
 
         binding.btnSwap.setOnClickListener {
             lifecycleScope.launch {
                 ensureDngBytesLoaded()
-                val current = currentEditConfig ?: return@launch
-                currentEditConfig = current.copy(isSwapped = !current.isSwapped)
+                editorViewModel.processIntent(DarkroomEditorUserIntent.ToggleSwap)
                 markAdjusted()
-                updateEffectsButtons()
-                applyEditPreview()
             }
         }
 
@@ -1541,134 +1638,84 @@ open class ImageViewerFragment : Fragment() {
                 ensureDngBytesLoaded()
             }
         }
+    }
 
-        binding.hfSelection1.setOnClickListener {
-            if (selectedDngIndex != 0) {
-                selectedDngIndex = 0
-                updateSelectionFeedback()
-                updateSlidersInPanel()
-                applyEditPreview()
-            }
+    protected open fun showSaveMenu(anchor: View) {
+        if (!::adapter.isInitialized || adapter.itemCount == 0) {
+            binding.btnActionMenu?.isChecked = false
+            return
         }
-
-        binding.hfSelection2.setOnClickListener {
-            if (selectedDngIndex != 1) {
-                selectedDngIndex = 1
-                updateSelectionFeedback()
-                updateSlidersInPanel()
-                applyEditPreview()
-            }
-        }
-
-        binding.btnEditDone.setOnClickListener {
-            exitEditMode(apply = true)
-        }
-
-        binding.btnEditCancel.setOnClickListener {
-            exitEditMode(apply = false)
-        }
-
-        binding.editTabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
-            override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab?) {
-                updateAdjustmentTabButtons(tab?.position ?: 0)
-                updateSlidersInPanel()
-            }
-            override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
-            override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
-        })
-
-        val sliderChangeListener = com.google.android.material.slider.Slider.OnChangeListener { slider, value, fromUser ->
-            if (fromUser) {
-                val config = currentEditConfig ?: return@OnChangeListener
-                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                val tabPos = binding.editTabs.selectedTabPosition
-
-                markAdjusted()
-
-                val updateConfig: (top.maary.darkbag.models.BasicAdjustments) -> top.maary.darkbag.models.BasicAdjustments = { old ->
-                    when (tabPos) {
-                        0 -> when (slider.id) { // Light
-                            R.id.slider_1 -> old.copy(exposure = value)
-                            R.id.slider_2 -> old.copy(contrast = value)
-                            else -> old
-                        }
-                        1 -> when (slider.id) { // Range
-                            R.id.slider_1 -> old.copy(highlights = value)
-                            R.id.slider_2 -> old.copy(shadows = value)
-                            else -> old
-                        }
-                        2 -> when (slider.id) { // Tone
-                            R.id.slider_1 -> old.copy(whites = value)
-                            R.id.slider_2 -> old.copy(blacks = value)
-                            else -> old
-                        }
-                        3 -> when (slider.id) { // Color
-                            R.id.slider_1 -> old.copy(saturation = value)
-                            else -> old
-                        }
-                        else -> old
-                    }
-                }
-
-                if (currentGroup.isHalfFrame()) {
-                    val adjs = config.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
-                    val adjIndex = if (config.isSwapped) 1 - selectedDngIndex else selectedDngIndex
-                    adjs[adjIndex] = updateConfig(adjs[adjIndex])
-                    currentEditConfig = config.copy(adjustments = adjs)
-                } else {
-                    val basic = updateConfig(config.toBasic())
-                    currentEditConfig = config.copy(
-                        exposure = basic.exposure,
-                        contrast = basic.contrast,
-                        highlights = basic.highlights,
-                        shadows = basic.shadows,
-                        whites = basic.whites,
-                        blacks = basic.blacks,
-                        saturation = basic.saturation
-                    )
-                }
-
-                if (slider.id == R.id.slider_1) {
-                    binding.tvValue1.text = if (tabPos == 0) String.format("%.2f EV", value) else String.format("%.2f", value)
-                } else {
-                    binding.tvValue2.text = String.format("%.2f", value)
-                }
-                applyEditPreview()
-            }
-        }
-        binding.slider1.addOnChangeListener(sliderChangeListener)
-        binding.slider2.addOnChangeListener(sliderChangeListener)
-
-        binding.groupFrameSelectionIntegrated.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (isChecked) {
-                selectedDngIndex = if (checkedId == R.id.btn_select_frame1_integrated) 0 else 1
-                updateSelectionFeedback()
-                updateSlidersInPanel()
-                applyEditPreview()
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        mediaStrategy.showSaveMenu(requireContext(), anchor, currentGroup) { action ->
+            when (action) {
+                ViewerSaveAction.SAVE_REPLACE -> saveEdit(isReplacement = true)
+                ViewerSaveAction.SAVE_AS_NEW -> saveEdit(isReplacement = false)
+                ViewerSaveAction.SHARE_TIFF -> performShareAsTiff()
+                ViewerSaveAction.EXPORT_JPG_TO_PICTURES -> exportToJpg()
             }
         }
     }
 
-    protected open fun showSaveMenu(anchor: View) {
-        val popup = PopupMenu(requireContext(), anchor)
-        popup.menu.add(0, MENU_SAVE_AS, 0, "Save as new file").apply {
-            setIcon(R.drawable.ic_save_as)
-        }
-        popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
-            setIcon(R.drawable.ic_photo)
-        }
+    private fun exportToJpg() {
+        val context = context ?: return
 
-        forceShowIcons(popup)
+        if (isEditingAdjustments) {
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(context)
+                .setTitle(R.string.export_to_jpg)
+                .setMessage(R.string.export_jpg_dialog_message)
+                .setPositiveButton(R.string.save_and_export) { _, _ ->
+                    saveEdit(isReplacement = true)
+                    processAndExportJpg()
+                }
+                .setNegativeButton(R.string.export_without_saving) { _, _ ->
+                    processAndExportJpg()
+                }
+                .setNeutralButton(R.string.cancel, null)
+                .show()
+        } else {
+            processAndExportJpg()
+        }
+    }
 
-        popup.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                MENU_SAVE_AS -> saveEdit(isReplacement = false)
-                MENU_SHARE_TIFF -> performShareAsTiff()
+    private fun processAndExportJpg() {
+        val context = context ?: return
+        val appContext = context.applicationContext
+        val config = currentEditConfig ?: return
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        binding.initialLoadingIndicator.visibility = View.VISIBLE
+        binding.interactionBlocker?.visibility = View.VISIBLE
+
+        lifecycleScope.launch {
+            try {
+                ensureDngBytesLoaded()
+                withContext(Dispatchers.IO) {
+                    val mediaStoreSink = top.maary.darkbag.pipeline.darkroom.sink.MediaStoreExportSink(
+                        baseName = currentGroup.baseName,
+                        isReplacement = false
+                    )
+                    val spec = top.maary.darkbag.pipeline.darkroom.model.DarkroomRenderSpec.fromImageGroup(
+                        context = appContext,
+                        group = currentGroup,
+                        editConfig = config,
+                        sink = mediaStoreSink,
+                        outputFormat = top.maary.darkbag.pipeline.darkroom.model.RenderOutputFormat.JPEG,
+                        cachedBytes1 = sourceDngBytes,
+                        cachedBytes2 = sourceDngBytes2,
+                        downsampleHalfFrame = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample,
+                        repository = repository
+                    )
+                    top.maary.darkbag.pipeline.darkroom.DarkroomRenderEngine.render(appContext, spec)
+                }
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(appContext, getString(R.string.toast_export_jpg_success), android.widget.Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ImageViewerFragment", "Failed to export JPG", e)
+            } finally {
+                binding.initialLoadingIndicator.visibility = View.GONE
+                binding.interactionBlocker?.visibility = View.GONE
             }
-            true
         }
-        popup.setOnDismissListener { binding.btnActionMenu?.isChecked = false }
-        popup.show()
     }
 
     protected open fun showViewMenu(anchor: View) {
@@ -1752,6 +1799,7 @@ open class ImageViewerFragment : Fragment() {
         lastCompositeBitmap = null
         previewJob?.cancel()
         currentEditConfig = null
+        editorViewModel.processIntent(DarkroomEditorUserIntent.ResetAdjustments)
 
         binding.lutListContainer?.visibility = View.GONE
 
@@ -2059,27 +2107,11 @@ open class ImageViewerFragment : Fragment() {
                 userExplicitlyChangedLog = explicitlyChanged
             }
         ) { selectedLog, selectedLut ->
-            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-            val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
-            if (isRawVideo) {
-                currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(
-                    log = selectedLog,
-                    lut = selectedLut ?: "None"
-                )
+            lifecycleScope.launch {
+                ensureDngBytesLoaded()
+                editorViewModel.processIntent(DarkroomEditorUserIntent.SetLog(selectedLog))
+                editorViewModel.processIntent(DarkroomEditorUserIntent.SetLut(selectedLut))
                 markAdjusted()
-                updateEditUi()
-                applyEditPreview()
-            } else {
-                lifecycleScope.launch {
-                    ensureDngBytesLoaded()
-                    currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(
-                        log = selectedLog,
-                        lut = selectedLut ?: "None"
-                    )
-                    markAdjusted()
-                    updateEditUi()
-                    applyEditPreview()
-                }
             }
         }
     }
@@ -2134,148 +2166,20 @@ open class ImageViewerFragment : Fragment() {
     protected fun enterEditMode() {
         if (!isUiVisible) showUi()
         if (isEditingAdjustments) return
-        isEditingAdjustments = true
-        configBeforeEditing = currentEditConfig?.copy()
-
-        binding.imagePager.isUserInputEnabled = false
-        adapter.setFormatSwitcherPersistentHidden(true)
-
-        updateSplitButtons()
-        updateToolbarIcon()
-        updateViewportPadding()
-
-        // Hide standard controls
-        binding.viewerBentoDeck.visibility = View.GONE
-
-        // Show edit panel with animation
-        binding.editAdjustmentPanel.visibility = View.VISIBLE
-        binding.editAdjustmentPanel.alpha = 0f
-
-        binding.editAdjustmentPanel.translationX = 0f
-        binding.editAdjustmentPanel.translationY = 100f
-
-        binding.editAdjustmentPanel.animate()
-            .alpha(1f)
-            .translationX(0f)
-            .translationY(0f)
-            .setDuration(300)
-            .start()
-
-        // Wait for layout to ensure height is calculated for viewport padding
-        binding.editAdjustmentPanel.post {
-            updateViewportPadding()
-        }
-
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        if (currentGroup.isHalfFrame()) {
-            binding.groupFrameSelectionIntegrated.visibility = View.VISIBLE
-            binding.groupFrameSelectionIntegrated.check(if (selectedDngIndex == 0) R.id.btn_select_frame1_integrated else R.id.btn_select_frame2_integrated)
-        } else {
-            binding.groupFrameSelectionIntegrated.visibility = View.GONE
+        lifecycleScope.launch {
+            ensureDngBytesLoaded()
+            binding.viewerBentoDeck.visibility = View.GONE
+            editorViewModel.processIntent(DarkroomEditorUserIntent.EnterEditMode(currentGroup, sourceDngBytes, sourceDngBytes2))
         }
-
-        updateAdjustmentTabButtons(binding.editTabs.selectedTabPosition.coerceAtLeast(0))
-        updateEditUi()
-        updateSlidersInPanel()
-        updateSelectionFeedback()
-        updateBackPressedCallbackState()
     }
 
     private fun exitEditMode(apply: Boolean) {
-        if (!isEditingAdjustments) return
-        isEditingAdjustments = false
-
-        if (!apply) {
-            isAdjusted = false
-            currentEditConfig = configBeforeEditing?.copy()
-            applyEditPreview()
-            updateSplitButtons()
-            updateToolbarIcon()
-        }
-
-        binding.imagePager.isUserInputEnabled = !isAdjusted
-
-        updateViewportPadding()
-
-        val anim = binding.editAdjustmentPanel.animate()
-            .alpha(0f)
-            .translationY(100f)
-            .setDuration(200)
-            .withEndAction {
-                binding.editAdjustmentPanel.visibility = View.GONE
-                updateControlsVisibility()
-            }
-        anim.start()
-
-        updateSelectionFeedback()
-        updateBackPressedCallbackState()
+        editorViewModel.processIntent(DarkroomEditorUserIntent.ExitEditMode(apply))
     }
 
     private fun updateSlidersInPanel() {
-        val config = currentEditConfig ?: return
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val tabPos = binding.editTabs.selectedTabPosition
-
-        val target = if (currentGroup.isHalfFrame()) {
-            val adjIndex = if (config.isSwapped) 1 - selectedDngIndex else selectedDngIndex
-            config.adjustments?.getOrNull(adjIndex) ?: top.maary.darkbag.models.BasicAdjustments()
-        } else {
-            config.toBasic()
-        }
-
-        when (tabPos) {
-            0 -> { // Light
-                binding.tvLabel1.text = "Exposure"
-                binding.slider1.valueFrom = EXPOSURE_MIN
-                binding.slider1.valueTo = EXPOSURE_MAX
-                binding.slider1.value = target.exposure.coerceIn(EXPOSURE_MIN, EXPOSURE_MAX)
-                binding.tvValue1.text = String.format("%.2f EV", target.exposure)
-
-                binding.layoutSlider2.visibility = View.VISIBLE
-                binding.tvLabel2.text = "Contrast"
-                binding.slider2.valueFrom = ADJUSTMENT_MIN
-                binding.slider2.valueTo = ADJUSTMENT_MAX
-                binding.slider2.value = target.contrast.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue2.text = String.format("%.2f", target.contrast)
-            }
-            1 -> { // Range
-                binding.tvLabel1.text = "Highlights"
-                binding.slider1.valueFrom = ADJUSTMENT_MIN
-                binding.slider1.valueTo = ADJUSTMENT_MAX
-                binding.slider1.value = target.highlights.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue1.text = String.format("%.2f", target.highlights)
-
-                binding.layoutSlider2.visibility = View.VISIBLE
-                binding.tvLabel2.text = "Shadows"
-                binding.slider2.valueFrom = ADJUSTMENT_MIN
-                binding.slider2.valueTo = ADJUSTMENT_MAX
-                binding.slider2.value = target.shadows.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue2.text = String.format("%.2f", target.shadows)
-            }
-            2 -> { // Tone
-                binding.tvLabel1.text = "Whites"
-                binding.slider1.valueFrom = ADJUSTMENT_MIN
-                binding.slider1.valueTo = ADJUSTMENT_MAX
-                binding.slider1.value = target.whites.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue1.text = String.format("%.2f", target.whites)
-
-                binding.layoutSlider2.visibility = View.VISIBLE
-                binding.tvLabel2.text = "Blacks"
-                binding.slider2.valueFrom = ADJUSTMENT_MIN
-                binding.slider2.valueTo = ADJUSTMENT_MAX
-                binding.slider2.value = target.blacks.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue2.text = String.format("%.2f", target.blacks)
-            }
-            3 -> { // Color
-                binding.tvLabel1.text = "Saturation"
-                binding.slider1.valueFrom = ADJUSTMENT_MIN
-                binding.slider1.valueTo = ADJUSTMENT_MAX
-                binding.slider1.value = target.saturation.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue1.text = String.format("%.2f", target.saturation)
-
-                binding.layoutSlider2.visibility = View.GONE
-            }
-        }
+        editorController?.render(editorViewModel.uiState.value)
     }
 
     private fun applyEditPreview() {
@@ -2476,280 +2380,43 @@ open class ImageViewerFragment : Fragment() {
         if (isSaving) return
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val finalConfig = config.copy(hfLayout = config.hfLayout ?: currentGroup.hfLayout)
+        val context = context ?: return
+        val appContext = context.applicationContext
         isSaving = true
 
-        if (currentGroup.isRawVideo || currentGroup.rawVideoUri != null) {
-            val rawVideoUri = currentGroup.rawVideoUri ?: run {
-                isSaving = false
-                return
-            }
-            val ctx = context ?: run {
-                isSaving = false
-                return
-            }
-            val appContext = ctx.applicationContext
-            previewJob?.cancel()
-            binding.initialLoadingIndicator.visibility = View.VISIBLE
-            binding.interactionBlocker?.visibility = View.VISIBLE
-
-            lifecycleScope.launch {
-                try {
-                    withContext(Dispatchers.IO) {
-                        // 1. In-place update .rawvid FileHeader with latest Log, LUT, and adjustments
-                        try {
-                            appContext.contentResolver.openFileDescriptor(rawVideoUri, "rw")?.use { rwFd ->
-                                top.maary.darkbag.rawvideo.RawVideoNative.nativeUpdateHeaderMetadata(
-                                    fd = rwFd.fd,
-                                    activeLog = finalConfig.log,
-                                    activeLut = finalConfig.lut,
-                                    exposure = finalConfig.exposure,
-                                    contrast = finalConfig.contrast,
-                                    saturation = finalConfig.saturation
-                                )
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("ImageViewerFragment", "Failed to in-place update rawvid header", e)
-                        }
-
-                        // 2. If companion JPG exists, re-render it with orientation and save
-                        if (currentGroup.jpgUri != null) {
-                            val pfd = appContext.contentResolver.openFileDescriptor(rawVideoUri, "r")
-                            pfd?.use { parcelFd ->
-                                val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReaderFd(parcelFd.fd)
-                                if (handle != 0L) {
-                                    try {
-                                        val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
-                                        if (header != null) {
-                                            val bayerBuf = java.nio.ByteBuffer.allocateDirect(header.width * header.height * 2)
-                                            val meta = LongArray(3)
-                                            val readBytes = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, bayerBuf)
-                                            if (readBytes > 0) {
-                                                val bmp = android.graphics.Bitmap.createBitmap(header.width, header.height, android.graphics.Bitmap.Config.ARGB_8888)
-                                                val targetLogIndex = if (finalConfig.log != null && finalConfig.log != "None") {
-                                                    SettingsFragment.LOG_CURVES.indexOf(finalConfig.log).takeIf { it >= 0 } ?: -1
-                                                } else -1
-                                                val lutPath = if (finalConfig.lut != null && finalConfig.lut != "None" && finalConfig.lut.isNotBlank()) {
-                                                    val f = java.io.File(lutManager.lutDir, finalConfig.lut)
-                                                    if (f.exists()) f.absolutePath else {
-                                                        val f2 = java.io.File(java.io.File(appContext.filesDir, "luts"), finalConfig.lut)
-                                                        if (f2.exists()) f2.absolutePath else null
-                                                    }
-                                                } else null
-
-                                                top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
-                                                    bayerBuffer = bayerBuf,
-                                                    width = header.width,
-                                                    height = header.height,
-                                                    orientation = header.orientation,
-                                                    cfaPattern = header.cfaPattern,
-                                                    whiteLevel = header.whiteLevel,
-                                                    blackLevel = header.blackLevel.firstOrNull() ?: 64f,
-                                                    neutralPoint = header.neutralPoint,
-                                                    targetLog = targetLogIndex,
-                                                    lutPath = lutPath,
-                                                    exposure = finalConfig.exposure,
-                                                    contrast = finalConfig.contrast,
-                                                    saturation = finalConfig.saturation,
-                                                    outBitmap = bmp
-                                                )
-
-                                                val orientation = try {
-                                                    appContext.contentResolver.openFileDescriptor(currentGroup.jpgUri, "r")?.use { jPfd ->
-                                                        androidx.exifinterface.media.ExifInterface(jPfd.fileDescriptor).getAttributeInt(
-                                                            androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
-                                                            androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                                                        )
-                                                    } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                                                } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-
-                                                val rotDegrees = when (orientation) {
-                                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                                                    else -> 0
-                                                }
-
-                                                val finalJpgBmp = if (rotDegrees != 0) {
-                                                    val m = android.graphics.Matrix().apply { postRotate(rotDegrees.toFloat()) }
-                                                    val r = android.graphics.Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
-                                                    if (r != bmp) bmp.recycle()
-                                                    r
-                                                } else bmp
-
-                                                val rootBaseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName)
-                                                val baseName = if (isReplacement) {
-                                                    rootBaseName
-                                                } else {
-                                                    val editTimestamp = java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", java.util.Locale.US).format(java.util.Date())
-                                                    "${rootBaseName}_edited_$editTimestamp"
-                                                }
-                                                val targetUri = if (isReplacement) currentGroup.jpgUri else null
-                                                val jpgFolderUri = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                                                    .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-
-                                                val captureMetadata = currentGroup.jpgUri?.let { repository.getCaptureMetadata(it) }
-
-                                                top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
-                                                    context = appContext,
-                                                    inputBitmap = finalJpgBmp,
-                                                    bmpPath = null,
-                                                    rotationDegrees = 0,
-                                                    zoomFactor = 1.0f,
-                                                    baseName = baseName,
-                                                    linearDngPath = null,
-                                                    saveJpg = true,
-                                                    saveRaw = false,
-                                                    targetUri = targetUri,
-                                                    jpgFolderUri = if (isReplacement) null else jpgFolderUri,
-                                                    editConfig = finalConfig,
-                                                    isAlreadyStitched = true,
-                                                    captureMetadata = captureMetadata
-                                                )
-                                                finalJpgBmp.recycle()
-                                            }
-                                        }
-                                    } finally {
-                                        top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    resetAdjustments()
-                    repository.invalidateCache()
-                    val updatedGroups = repository.getGroupedImages(forceRefresh = true)
-                    if (updatedGroups.isNotEmpty()) {
-                        val targetBaseName = currentGroup.baseName
-                        val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
-                        val rawTargetGroup = updatedGroups[newPos]
-                        val targetGroup = repository.loadMetadata(rawTargetGroup)
-                        val mutableList = updatedGroups.toMutableList()
-                        mutableList[newPos] = targetGroup
-                        adapter.updateGroups(mutableList)
-                        binding.imagePager.setCurrentItem(newPos, false)
-                        prepareEditConfig(targetGroup)
-                        updateControlsVisibility()
-                    }
-                    binding.root.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
-                    Toast.makeText(appContext, "Saved adjustments for RAW video", Toast.LENGTH_SHORT).show()
-                } catch (e: Exception) {
-                    android.util.Log.e("ImageViewerFragment", "Failed to save RAW video adjustments", e)
-                } finally {
-                    binding.initialLoadingIndicator.visibility = View.GONE
-                    binding.interactionBlocker?.visibility = View.GONE
-                    isSaving = false
-                }
-            }
-            return
-        }
-
-        val dngUri1 = if (currentGroup.isMultiCamera) {
-            val lenses = if (currentGroup.multiCameraLenses.isNotEmpty()) currentGroup.multiCameraLenses else adapter.getMultiCameraLenses(currentGroup)
-            val idx = adapter.getSelectedLensIndex(binding.imagePager.currentItem).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
-            lenses.getOrNull(idx)?.dngUri ?: currentGroup.multiDngUris.getOrNull(idx) ?: currentGroup.multiDngUris.firstOrNull()
-        } else {
-            currentGroup.dngUri ?: currentGroup.dngUri1
-        }
-        val dngUri2 = currentGroup.dngUri2
-
-        previewJob?.cancel()
         binding.initialLoadingIndicator.visibility = View.VISIBLE
         binding.interactionBlocker?.visibility = View.VISIBLE
 
-        val ctx = context ?: return
-        val appContext = ctx.applicationContext
         lifecycleScope.launch {
             try {
                 ensureDngBytesLoaded()
-                withContext(Dispatchers.IO) {
-                    try {
-                        val context = appContext
-                        val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-                        val mediaStoreSink = MediaStoreExportSink(
-                            baseName = currentGroup.baseName,
-                            targetUri = if (isReplacement) currentGroup.jpgUri else null,
-                            isReplacement = isReplacement,
-                            jpgFolderUri = if (isReplacement) null else jpgFolderUri
-                        )
-                        val spec = DarkroomRenderSpec.fromImageGroup(
-                            context = context,
-                            group = currentGroup,
-                            editConfig = finalConfig,
-                            sink = mediaStoreSink,
-                            outputFormat = RenderOutputFormat.JPEG,
-                            cachedBytes1 = sourceDngBytes,
-                            cachedBytes2 = sourceDngBytes2,
-                            downsampleHalfFrame = top.maary.darkbag.utils.HalfFrameManager(context).downsample,
-                            repository = repository
-                        )
-                        DarkroomRenderEngine.render(context, spec)
-                    } catch (e: Exception) {
-                        android.util.Log.e("ImageViewerFragment", "Failed to save edit", e)
+                val (cached1, cached2) = editorViewModel.getCachedDngBytes()
+                val success = mediaStrategy.saveEdit(
+                    context = appContext,
+                    group = currentGroup,
+                    config = config,
+                    isReplacement = isReplacement,
+                    repository = repository,
+                    cachedBytes1 = cached1 ?: sourceDngBytes,
+                    cachedBytes2 = cached2 ?: sourceDngBytes2
+                )
+
+                if (success) {
+                    resetAdjustments()
+                    if (mediaStrategy.isSandbox) {
+                        val updatedGroups = mediaStrategy.loadInitialGroups(appContext, arguments, repository)
+                        if (updatedGroups != null) {
+                            adapter.updateGroups(updatedGroups)
+                            binding.root.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
+                        }
+                    } else {
+                        val targetUriStr = if (isReplacement) currentGroup.jpgUri?.toString() else null
+                        galleryViewModel.processIntent(DarkroomGalleryUserIntent.LoadImages(targetUriStr))
+                        binding.root.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
                     }
                 }
-
-                resetAdjustments()
-                repository.invalidateCache()
-                val updatedGroups = repository.getGroupedImages(forceRefresh = true)
-                if (updatedGroups.isNotEmpty()) {
-                    val targetBaseName = currentGroup.baseName
-                    val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
-                    val rawTargetGroup = updatedGroups[newPos]
-                    val targetGroup = repository.loadMetadata(rawTargetGroup)
-                    val mutableList = updatedGroups.toMutableList()
-                    mutableList[newPos] = targetGroup
-                    adapter = ImageViewerAdapter(mutableList, lifecycleScope, requireContext()).apply {
-                        isMotionPhotoAutoPlay = this@ImageViewerFragment.isMotionPhotoAutoPlay
-                        onImageTapped = { toggleUi() }
-                        onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
-                        onLongPressStarted = { handleLongPressStarted(it) }
-                        onLongPressEnded = { handleLongPressEnded(it) }
-                        onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
-                        onFormatChanged = { _, _ -> updateControlsVisibility() }
-                        onDerivativeVersionChanged = { _, _ -> updateControlsVisibility() }
-                        onMultiCameraLensChanged = { _, _ ->
-                            updateSplitButtons()
-                            updateToolbarIcon()
-                            updateControlsVisibility()
-                        }
-                        onCinemaDngFrameSelected = { group, index, uri ->
-                            val currentPosition = binding.imagePager.currentItem
-                            if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
-                                currentCinemaDngFrame = Pair(index, uri)
-                                binding.filmstripBentoSeekbar?.setProgress(index, group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: 1)
-                            }
-                        }
-                        onVideoPlaybackStateChanged = { position, isPlaying, currentMs, totalMs ->
-                            if (_binding != null && ::adapter.isInitialized && position == binding.imagePager.currentItem) {
-                                updateVideoPlaybackButton(isPlaying, currentMs, totalMs)
-                            }
-                        }
-                        setFormatSwitcherPersistentHidden(isAdjusted)
-                        onCurrentListChanged = { previousList, currentList ->
-                            val currentIndex = binding.imagePager.currentItem
-                            if (currentIndex in currentList.indices) {
-                                val currentGroup = currentList[currentIndex]
-                                val prevGroup = previousList.getOrNull(currentIndex)
-
-                                if ((prevGroup == null || !prevGroup.metadataLoaded) && currentGroup.metadataLoaded) {
-                                    if (currentGroup.editConfig != null) {
-                                        prepareEditConfig(currentGroup)
-                                    }
-                                }
-
-                                updateControlsVisibility()
-                            }
-                        }
-                    }
-                    binding.imagePager.adapter = adapter
-                    binding.imagePager.setCurrentItem(newPos, false)
-                    prepareEditConfig(targetGroup)
-                    updateControlsVisibility()
-                    binding.root.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
-                }
+            } catch (e: Throwable) {
+                Log.e("ImageViewerFragment", "Failed to save edit", e)
             } finally {
                 binding.initialLoadingIndicator.visibility = View.GONE
                 binding.interactionBlocker?.visibility = View.GONE
@@ -3186,6 +2853,22 @@ open class ImageViewerFragment : Fragment() {
 
     protected open fun deleteImage(group: ImageGroup, targetUris: List<Uri>?, deleteGroup: Boolean) {
         val context = context ?: return
+        if (mediaStrategy.isSandbox) {
+            lifecycleScope.launch {
+                val success = mediaStrategy.deleteImage(context, group, targetUris, deleteGroup, repository)
+                if (success) {
+                    val currentList = adapter.getGroups().toMutableList()
+                    currentList.removeAll { it.baseName == group.baseName }
+                    if (currentList.isEmpty()) {
+                        findNavController().navigateUp()
+                    } else {
+                        adapter.updateGroups(currentList.toList())
+                        updateControlsVisibility()
+                    }
+                }
+            }
+            return
+        }
         lifecycleScope.launch {
             var nextTargetUri: String? = null
             val currentIndex = binding.imagePager.currentItem
@@ -4240,6 +3923,13 @@ open class ImageViewerFragment : Fragment() {
             exitEditMode(apply = false)
             return
         }
+        if (::adapter.isInitialized && adapter.itemCount > 0) {
+            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+            if (mediaStrategy.handleDiscard(currentGroup, adapter.getGroups(), arguments)) {
+                findNavController().navigateUp()
+                return
+            }
+        }
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.discard_changes_title)
             .setMessage(R.string.discard_changes_message)
@@ -4286,6 +3976,7 @@ open class ImageViewerFragment : Fragment() {
             }
         }
         activeExportDialog = null
+        editorController = null
         if (::adapter.isInitialized) {
             adapter.stopAllMotionVideos()
         }
