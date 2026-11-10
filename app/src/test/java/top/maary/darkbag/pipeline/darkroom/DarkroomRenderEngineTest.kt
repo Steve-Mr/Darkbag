@@ -105,4 +105,53 @@ class DarkroomRenderEngineTest {
         assertNotNull(previewSink.deliveredBitmap)
         assertEquals(result.bitmap, previewSink.deliveredBitmap)
     }
+
+    @Test
+    fun testLibRawCfaNormalization_AllFourBayerPatterns() {
+        // LibRaw encodes the 4 Bayer subpixels using cdesc = "RGBG" (0='R', 1='G', 2='B', 3='G').
+        // Ensure that normalizing index 3 ('G') to canonical 1 ('G') accurately identifies all 4 CFA patterns
+        // and prevents BGGR (2, 3, 1, 0) or GBRG (3, 2, 0, 1) from falling back to RGGB (0).
+        val cdesc = "RGBG"
+        fun normCfaColor(idx: Int): Int {
+            if (idx in 0..3) {
+                return when (cdesc[idx]) {
+                    'R', 'r' -> 0
+                    'G', 'g' -> 1
+                    'B', 'b' -> 2
+                    else -> if (idx == 3) 1 else idx
+                }
+            }
+            return if (idx == 3) 1 else idx
+        }
+
+        fun resolveCfaPattern(raw00: Int, raw01: Int, raw10: Int, raw11: Int): Int {
+            val c00 = normCfaColor(raw00)
+            val c01 = normCfaColor(raw01)
+            val c10 = normCfaColor(raw10)
+            val c11 = normCfaColor(raw11)
+            return when {
+                c00 == 0 && c01 == 1 && c10 == 1 && c11 == 2 -> 0 // RGGB
+                c00 == 1 && c01 == 0 && c10 == 2 && c11 == 1 -> 1 // GRBG
+                c00 == 1 && c01 == 2 && c10 == 0 && c11 == 1 -> 2 // GBRG
+                c00 == 2 && c01 == 1 && c10 == 1 && c11 == 0 -> 3 // BGGR
+                else -> -1
+            }
+        }
+
+        // RGGB: LibRaw filters produce (0, 1, 3, 2) or (0, 3, 1, 2)
+        assertEquals(0, resolveCfaPattern(0, 1, 3, 2))
+        assertEquals(0, resolveCfaPattern(0, 3, 1, 2))
+
+        // GRBG: LibRaw filters produce (1, 0, 2, 3) or (3, 0, 2, 1)
+        assertEquals(1, resolveCfaPattern(1, 0, 2, 3))
+        assertEquals(1, resolveCfaPattern(3, 0, 2, 1))
+
+        // GBRG: LibRaw filters produce (3, 2, 0, 1) or (1, 2, 0, 3)
+        assertEquals(2, resolveCfaPattern(3, 2, 0, 1))
+        assertEquals(2, resolveCfaPattern(1, 2, 0, 3))
+
+        // BGGR: LibRaw filters produce (2, 3, 1, 0) or (2, 1, 3, 0)
+        assertEquals(3, resolveCfaPattern(2, 3, 1, 0))
+        assertEquals(3, resolveCfaPattern(2, 1, 3, 0))
+    }
 }
