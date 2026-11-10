@@ -119,33 +119,11 @@ class PlaygroundRepository(private val context: Context) {
         val cached = aspectRatioCache[file.absolutePath]
         if (cached != null) return cached
 
-        try {
-            val exifInterface = ExifInterface(file.absolutePath)
-            var width = exifInterface.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
-            var height = exifInterface.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
-
-            if (width == 0 || height == 0) {
-                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeFile(file.absolutePath, options)
-                width = options.outWidth
-                height = options.outHeight
-            }
-
-            if (width > 0 && height > 0) {
-                val orientation = exifInterface.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-                val swapDims = orientation == ExifInterface.ORIENTATION_ROTATE_90 ||
-                               orientation == ExifInterface.ORIENTATION_ROTATE_270 ||
-                               orientation == ExifInterface.ORIENTATION_TRANSPOSE ||
-                               orientation == ExifInterface.ORIENTATION_TRANSVERSE
-
-                val ratio = if (swapDims) "$height:$width" else "$width:$height"
-                aspectRatioCache[file.absolutePath] = ratio
-                return ratio
-            }
-        } catch (e: Exception) {
-            Log.w("PlaygroundRepository", "Failed to calculate aspect ratio for ${file.name}", e)
+        val ratio = top.maary.darkbag.utils.GalleryAspectRatioHelper.getOrCalculateAspectRatio(file)
+        if (ratio != null) {
+            aspectRatioCache[file.absolutePath] = ratio
         }
-        return null
+        return ratio
     }
 
     suspend fun importDngs(uris: List<Uri>, contentResolver: ContentResolver): Int = withContext(Dispatchers.IO) {
@@ -229,6 +207,7 @@ class PlaygroundRepository(private val context: Context) {
         for (f in distinctFiles) {
             if (f.delete()) {
                 aspectRatioCache.remove(f.absolutePath)
+                top.maary.darkbag.utils.GalleryAspectRatioHelper.evict(f.absolutePath)
                 deletedCount++
             }
         }
@@ -241,6 +220,7 @@ class PlaygroundRepository(private val context: Context) {
         for (jpg in groupJpgFiles) {
             if (jpg.delete()) {
                 aspectRatioCache.remove(jpg.absolutePath)
+                top.maary.darkbag.utils.GalleryAspectRatioHelper.evict(jpg.absolutePath)
                 disbandedCount++
             }
         }
