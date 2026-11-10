@@ -11,9 +11,12 @@
 #include <android/bitmap.h>
 #include <libraw/libraw.h>
 #include "ColorPipe.h"
+#include "demosaic/RcdDemosaic.h"
+#include "gpu/GpuColorPipeEngine.h"
 
 #define TAG "ColorProcessorNative"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 namespace {
@@ -202,7 +205,212 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         return -1;
     }
 
-    // Configure params
+    const bool isDng = (RawProcessor.imgdata.idata.dng_version > 0);
+    const bool isBayer = (RawProcessor.imgdata.idata.filters != 0);
+    const bool hasRawImage = (RawProcessor.imgdata.rawdata.raw_image != nullptr);
+
+    if (isDng && isBayer && hasRawImage) {
+        LOGD("processRaw: Fast-path unified capture pipeline for Bayer DNG.");
+        int width = RawProcessor.imgdata.sizes.raw_width;
+        int height = RawProcessor.imgdata.sizes.raw_height;
+        if (width <= 0 || height <= 0) {
+            width = RawProcessor.imgdata.sizes.width;
+            height = RawProcessor.imgdata.sizes.height;
+        }
+
+        auto normCfaColor = [&](int idx) -> int {
+            if (idx >= 0 && idx < 4) {
+                char ch = RawProcessor.imgdata.idata.cdesc[idx];
+                if (ch == 'R' || ch == 'r') return 0;
+                if (ch == 'G' || ch == 'g') return 1;
+                if (ch == 'B' || ch == 'b') return 2;
+            }
+            return (idx == 3) ? 1 : idx;
+        };
+        int cfaPattern = 0;
+        int c00 = normCfaColor(RawProcessor.COLOR(0, 0));
+        int c01 = normCfaColor(RawProcessor.COLOR(0, 1));
+        int c10 = normCfaColor(RawProcessor.COLOR(1, 0));
+        int c11 = normCfaColor(RawProcessor.COLOR(1, 1));
+        if (c00 == 0 && c01 == 1 && c10 == 1 && c11 == 2) cfaPattern = 0;      // RGGB
+        else if (c00 == 1 && c01 == 0 && c10 == 2 && c11 == 1) cfaPattern = 1; // GRBG
+        else if (c00 == 1 && c01 == 2 && c10 == 0 && c11 == 1) cfaPattern = 2; // GBRG
+        else if (c00 == 2 && c01 == 1 && c10 == 1 && c11 == 0) cfaPattern = 3; // BGGR
+        else if (c00 == 0 && c01 == 1) cfaPattern = 0;
+        else if (c00 == 1 && c01 == 0) cfaPattern = 1;
+        else if (c00 == 1 && c01 == 2) cfaPattern = 2;
+        else if (c00 == 2 && c01 == 1) cfaPattern = 3;
+
+        uint16_t bl_array[4] = {64, 64, 64, 64};
+        if (RawProcessor.imgdata.color.dng_levels.dng_cblack[0] > 0 || RawProcessor.imgdata.color.dng_levels.dng_black > 0) {
+            for (int i = 0; i < 4; ++i) {
+                bl_array[i] = static_cast<uint16_t>(
+                    RawProcessor.imgdata.color.dng_levels.dng_cblack[i] > 0
+                        ? RawProcessor.imgdata.color.dng_levels.dng_cblack[i]
+                        : RawProcessor.imgdata.color.dng_levels.dng_black
+                );
+            }
+        }
+        uint16_t wl = static_cast<uint16_t>(
+            RawProcessor.imgdata.color.dng_levels.dng_whitelevel[0] > 0
+                ? RawProcessor.imgdata.color.dng_levels.dng_whitelevel[0]
+                : 1023
+        );
+
+        std::vector<float> wbVec(4, 1.0f);
+        const float* asn = RawProcessor.imgdata.color.dng_levels.asshotneutral;
+        if (asn[0] > 1e-4f && asn[1] > 1e-4f && asn[2] > 1e-4f) {
+            wbVec[0] = 1.0f / asn[0];
+            wbVec[1] = 1.0f / asn[1];
+            wbVec[2] = 1.0f / asn[1];
+            wbVec[3] = 1.0f / asn[2];
+        } else if (RawProcessor.imgdata.color.cam_mul[0] > 1e-4f) {
+            wbVec[0] = RawProcessor.imgdata.color.cam_mul[0];
+            wbVec[1] = RawProcessor.imgdata.color.cam_mul[1];
+            wbVec[2] = RawProcessor.imgdata.color.cam_mul[1];
+            wbVec[3] = RawProcessor.imgdata.color.cam_mul[2];
+        }
+
+        std::vector<float> lensShadingVec;
+        const float* lens_shading_ptr = nullptr;
+        int lsRows = lensShadingRows;
+        int lsCols = lensShadingCols;
+        if (lensShadingMap && lensShadingRows > 1 && lensShadingCols > 1) {
+            int lsSize = env->GetArrayLength(lensShadingMap);
+            int expected = 4 * lensShadingRows * lensShadingCols;
+            if (lsSize >= expected) {
+                lensShadingVec.resize(expected);
+                env->GetFloatArrayRegion(lensShadingMap, 0, expected, lensShadingVec.data());
+                lens_shading_ptr = lensShadingVec.data();
+            }
+        }
+        if (!lens_shading_ptr && RawProcessor.imgdata.color.dng_levels.rawopcodes[1].data != nullptr) {
+            if (parse_dng_gainmap_opcodes(
+                    static_cast<const uint8_t*>(RawProcessor.imgdata.color.dng_levels.rawopcodes[1].data),
+                    RawProcessor.imgdata.color.dng_levels.rawopcodes[1].len,
+                    lensShadingVec, lsRows, lsCols, cfaPattern)) {
+                lens_shading_ptr = lensShadingVec.data();
+                LOGI("processRaw: successfully extracted OpcodeList2 GainMap (%dx%d, %zu elements)", lsCols, lsRows, lensShadingVec.size());
+            }
+        }
+
+        std::vector<float> ccmVec(9, 0.0f);
+        float fm1[9] = {0}, fm2[9] = {0}, cm1[9] = {0}, cm2[9] = {0};
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) {
+                fm1[r * 3 + c] = RawProcessor.imgdata.color.dng_color[0].forwardmatrix[r][c];
+                fm2[r * 3 + c] = RawProcessor.imgdata.color.dng_color[1].forwardmatrix[r][c];
+                cm1[r * 3 + c] = RawProcessor.imgdata.color.dng_color[0].colormatrix[r][c];
+                cm2[r * 3 + c] = RawProcessor.imgdata.color.dng_color[1].colormatrix[r][c];
+            }
+        }
+        int illum1 = RawProcessor.imgdata.color.dng_color[0].illuminant;
+        int illum2 = RawProcessor.imgdata.color.dng_color[1].illuminant;
+        compute_render_ccm(
+            fm1, fm2, cm1, cm2,
+            illum1 ? illum1 : 21, illum2 ? illum2 : 17,
+            asn, wbVec.data(), ccmVec.data()
+        );
+
+        std::vector<uint16_t> planarRgb(static_cast<size_t>(width) * height * 3);
+        darkbag::demosaic::rcd_demosaic(
+            RawProcessor.imgdata.rawdata.raw_image,
+            width,
+            height,
+            cfaPattern,
+            bl_array,
+            wl,
+            nullptr, // apply WB in ColorPipe after LSC
+            planarRgb.data()
+        );
+
+        float effGain = digitalGain;
+        if (effGain <= 0.0f) {
+            float baselineExp = RawProcessor.imgdata.color.dng_levels.baseline_exposure;
+            effGain = (baselineExp != 0.0f) ? std::pow(2.0f, baselineExp) : 1.0f;
+        }
+
+        std::string lutPathStr;
+        const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+        LUT3D lut;
+        if (lut_path_cstr) {
+            lutPathStr = lut_path_cstr;
+            auto cached = get_cached_lut(lut_path_cstr);
+            if (cached) lut = *cached;
+            env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+        }
+
+        const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
+        const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
+
+        AndroidBitmapInfo info;
+        int out_w = 0, out_h = 0;
+        unsigned char* bitmapPixels = nullptr;
+        if (outputBitmap) {
+            AndroidBitmap_getInfo(env, outputBitmap, &info);
+            out_w = info.width;
+            out_h = info.height;
+            if (AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels) != ANDROID_BITMAP_RESULT_SUCCESS) {
+                bitmapPixels = nullptr;
+            }
+        }
+
+        ImageMetadata meta;
+        if (metadataObj) {
+            meta = metadataFromJava(env, metadataObj);
+        }
+
+        bool saveOk = false;
+        int64_t measuredColorPipe = 0;
+        int64_t measuredJpegEncode = 0;
+
+        if (useGpu && !outputBitmap && !tiff_path_cstr && jpg_path_cstr &&
+            darkbag::gpu::GpuColorPipeEngine::instance().isAvailable()) {
+            saveOk = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImage(
+                planarRgb.data(),
+                width, height,
+                1, width, width * height,
+                effGain, targetLog,
+                lutPathStr, &lut,
+                exposure, contrast, saturation,
+                highlights, shadows, whites, blacks,
+                jpg_path_cstr, -1,
+                ccmVec.data(), wbVec.data(),
+                (int)orientation, (bool)mirror, (float)zoomFactor,
+                (int)colorEngineMode, false,
+                &measuredColorPipe, &measuredJpegEncode,
+                lens_shading_ptr, lsRows, lsCols,
+                1.0f, 0, nullptr, nullptr, 0.0f
+            );
+        }
+
+        if (!saveOk) {
+            saveOk = process_and_save_image(
+                planarRgb.data(), 1, width, width * height,
+                lens_shading_ptr, lsRows, lsCols,
+                width, height,
+                effGain,
+                targetLog, lut,
+                exposure, contrast, saturation, highlights, shadows, whites, blacks,
+                jpg_path_cstr, tiff_path_cstr, metadataObj ? &meta : nullptr,
+                1, // sourceColorSpace = 1 (Sensor Linear RGB)
+                ccmVec.data(), wbVec.data(), (int)orientation,
+                bitmapPixels, out_w, out_h,
+                outputBitmap != nullptr, (int)downsampleFactor, (float)zoomFactor, (bool)mirror,
+                (bool)enableMemoryColor, (int)colorEngineMode
+            );
+        }
+
+        if (bitmapPixels) AndroidBitmap_unlockPixels(env, outputBitmap);
+        if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
+        if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
+
+        RawProcessor.recycle();
+        delete[] buf;
+        return saveOk ? 0 : -1;
+    }
+
+    // Configure params (fallback for non-Bayer / non-DNG RAW files)
     RawProcessor.imgdata.params.output_bps = 16;
     RawProcessor.imgdata.params.gamm[0] = 1.0;
     RawProcessor.imgdata.params.gamm[1] = 1.0;

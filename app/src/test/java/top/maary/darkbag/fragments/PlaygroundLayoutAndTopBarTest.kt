@@ -153,7 +153,7 @@ class PlaygroundLayoutAndTopBarTest {
             binding.playgroundBentoDock is BentoTrayCard
         )
         val dockTray = binding.playgroundBentoDock as BentoTrayCard
-        assertEquals(BentoContainerRole.SURFACE_CONTAINER_LOW, dockTray.containerRole)
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER, dockTray.containerRole)
 
         // Test dynamic mode reactivity
         dockTray.setContainerRole(BentoContainerRole.SECONDARY_CONTAINER, animated = false)

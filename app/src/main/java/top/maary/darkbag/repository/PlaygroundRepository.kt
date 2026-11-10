@@ -13,16 +13,18 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.BasicAdjustments
 import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.models.PlaygroundItem
+import top.maary.darkbag.pipeline.darkroom.DarkroomRenderEngine
+import top.maary.darkbag.pipeline.darkroom.model.DarkroomRenderSpec
+import top.maary.darkbag.pipeline.darkroom.model.DarkroomSource
+import top.maary.darkbag.pipeline.darkroom.model.RenderOutputFormat
+import top.maary.darkbag.pipeline.darkroom.sink.MediaStoreExportSink
 import top.maary.darkbag.processor.ColorProcessor
-import top.maary.darkbag.pipeline.composer.HalfFrameComposer
 import top.maary.darkbag.utils.HalfFrameManager
 import top.maary.darkbag.utils.ImageSaver
-import top.maary.darkbag.utils.LutManager
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -280,12 +282,6 @@ class PlaygroundRepository(private val context: Context) {
         val loadedGroup = imageRepo.loadMetadata(group)
         val config = loadedGroup.editConfig ?: EditConfig()
 
-        val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
-        val lutManager = LutManager(appContext)
-        val lutPath = if (config.lut != null && config.lut != "None") {
-            File(lutManager.lutDir, config.lut).absolutePath
-        } else null
-
         if (item.file.extension.lowercase() == "jpg") {
             val decodeOpts = BitmapFactory.Options().apply {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -309,70 +305,24 @@ class PlaygroundRepository(private val context: Context) {
             inputBitmap.recycle()
             return uri != null
         } else {
-            val finalBytes = FileInputStream(item.file).use { it.readBytes() }
-            val orientation = try {
-                appContext.contentResolver.openInputStream(dngUri)?.use { input ->
-                    ExifInterface(input).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-                } ?: ExifInterface.ORIENTATION_NORMAL
-            } catch (e: Exception) {
-                ExifInterface.ORIENTATION_NORMAL
-            }
-
-            val rotDegrees = when (orientation) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                else -> 0
-            }
-
-            val adj = config.adjustments?.getOrNull(0) ?: BasicAdjustments(
-                config.exposure, config.contrast, config.saturation,
-                config.highlights, config.shadows, config.whites,
-                config.blacks, config.digitalGain
-            )
-            val meta = imageRepo.getCaptureMetadata(dngUri)
-            val tempJpgFile = File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}.jpg")
-
-            ColorProcessor.processRaw(
-                dngData = finalBytes,
-                targetLog = logIndex,
-                lutPath = lutPath,
-                exposure = adj.exposure,
-                contrast = adj.contrast,
-                saturation = adj.saturation,
-                highlights = adj.highlights,
-                shadows = adj.shadows,
-                whites = adj.whites,
-                blacks = adj.blacks,
-                digitalGain = adj.digitalGain,
-                outputJpgPath = tempJpgFile.absolutePath,
-                useGpu = false,
-                orientation = rotDegrees,
-                mirror = false,
-                outputBitmap = null,
-                downsampleFactor = 1,
-                zoomFactor = config.zoomFactor,
-                metadata = meta
-            )
-
-            if (!tempJpgFile.exists()) return false
-
-            val uri = ImageSaver.saveProcessedImage(
-                context = appContext,
-                inputBitmap = null,
-                bmpPath = tempJpgFile.absolutePath,
-                rotationDegrees = 0,
-                zoomFactor = 1.0f,
+            val single = DarkroomSource.Single(
+                dngFile = item.file,
+                dngUri = dngUri,
                 baseName = baseName,
-                linearDngPath = null,
-                saveJpg = true,
-                saveRaw = false,
-                editConfig = config,
-                isAlreadyStitched = true,
-                captureMetadata = meta
+                captureMetadata = imageRepo.getCaptureMetadata(dngUri)
             )
-            tempJpgFile.delete()
-            return uri != null
+            val mediaStoreSink = MediaStoreExportSink(
+                baseName = baseName,
+                isReplacement = false
+            )
+            val spec = DarkroomRenderSpec(
+                source = single,
+                editConfig = config,
+                sink = mediaStoreSink,
+                outputFormat = RenderOutputFormat.JPEG
+            )
+            val result = DarkroomRenderEngine.render(appContext, spec)
+            return result.success && result.uri != null
         }
     }
 
@@ -401,111 +351,21 @@ class PlaygroundRepository(private val context: Context) {
 
         val loadedGroup = imageRepo.loadMetadata(group)
         val config = loadedGroup.editConfig ?: EditConfig()
-        val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
-        val lutManager = LutManager(appContext)
-        val lutPath = if (config.lut != null && config.lut != "None") {
-            File(lutManager.lutDir, config.lut).absolutePath
-        } else null
-
-        fun processFullSafe(targetFile: File?, uri: Uri?, index: Int): Bitmap? {
-            if (targetFile == null || !targetFile.exists() || uri == null) return null
-            val finalBytes = FileInputStream(targetFile).use { it.readBytes() }
-
-            val orientation = try {
-                appContext.contentResolver.openInputStream(uri)?.use { input ->
-                    ExifInterface(input).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-                } ?: ExifInterface.ORIENTATION_NORMAL
-            } catch (e: Exception) {
-                ExifInterface.ORIENTATION_NORMAL
-            }
-
-            val rotDegrees = when (orientation) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                else -> 0
-            }
-
-            val adj = config.adjustments?.getOrNull(index) ?: BasicAdjustments(
-                config.exposure, config.contrast, config.saturation,
-                config.highlights, config.shadows, config.whites,
-                config.blacks, config.digitalGain
-            )
-            val meta = imageRepo.getCaptureMetadata(uri)
-            val tempJpgFile = File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}_$index.jpg")
-
-            ColorProcessor.processRaw(
-                dngData = finalBytes,
-                targetLog = logIndex,
-                lutPath = lutPath,
-                exposure = adj.exposure,
-                contrast = adj.contrast,
-                saturation = adj.saturation,
-                highlights = adj.highlights,
-                shadows = adj.shadows,
-                whites = adj.whites,
-                blacks = adj.blacks,
-                digitalGain = adj.digitalGain,
-                outputJpgPath = tempJpgFile.absolutePath,
-                useGpu = false,
-                orientation = rotDegrees,
-                mirror = false,
-                outputBitmap = null,
-                downsampleFactor = 1,
-                zoomFactor = config.zoomFactor,
-                metadata = meta
-            )
-
-            if (!tempJpgFile.exists()) return null
-
-            val decodeOpts = BitmapFactory.Options().apply {
-                inPreferredConfig = Bitmap.Config.ARGB_8888
-            }
-            val bitmap = BitmapFactory.decodeFile(tempJpgFile.absolutePath, decodeOpts)
-            tempJpgFile.delete()
-            return bitmap
-        }
-
-        val f1 = processFullSafe(item.dng1, dngUri1, 0)
-        val f2 = processFullSafe(item.dng2, dngUri2, 1)
-
-        val time1 = imageRepo.getCaptureMetadata(dngUri1)?.dateTimeOriginal ?: item.dng1.lastModified()
-        val time2 = imageRepo.getCaptureMetadata(dngUri2)?.dateTimeOriginal ?: item.dng2.lastModified()
-
-        val finalCompositeBitmap = HalfFrameComposer.compose(
-            frame1 = f1,
-            frame2 = f2,
-            layout = config.hfLayout,
-            isSwapped = config.isSwapped,
-            showTimestamp = config.showTimestamp,
-            flareType = config.flareType,
-            time1 = time1,
-            time2 = time2,
-            downsample = HalfFrameManager(appContext).downsample
-        )
-        f1?.recycle()
-        f2?.recycle()
-
-        if (finalCompositeBitmap == null) return false
-
-        val captureMetadata = imageRepo.getCaptureMetadata(dngUri1) ?: imageRepo.getCaptureMetadata(jpgUri)
-
-        val uri = ImageSaver.saveProcessedImage(
-            context = appContext,
-            inputBitmap = finalCompositeBitmap,
-            bmpPath = null,
-            rotationDegrees = 0,
-            zoomFactor = 1.0f,
+        val mediaStoreSink = MediaStoreExportSink(
             baseName = baseName,
-            linearDngPath = null,
-            saveJpg = true,
-            saveRaw = false,
-            editConfig = config,
-            isAlreadyStitched = true,
-            captureMetadata = captureMetadata
+            isReplacement = false
         )
-        finalCompositeBitmap.recycle()
-        return uri != null
+        val spec = DarkroomRenderSpec.fromImageGroup(
+            context = appContext,
+            group = loadedGroup,
+            editConfig = config,
+            sink = mediaStoreSink,
+            outputFormat = RenderOutputFormat.JPEG,
+            downsampleHalfFrame = HalfFrameManager(appContext).downsample,
+            repository = imageRepo
+        )
+        val result = DarkroomRenderEngine.render(appContext, spec)
+        return result.success && result.uri != null
     }
 
     fun clearCache() {

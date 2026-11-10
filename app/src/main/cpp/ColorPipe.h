@@ -205,4 +205,26 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
 
 int compute_preview_downsample_factor(int width, int height, int targetLongEdge);
 
+// --- DNG Calibration & Opcode Extraction ---
+bool parse_dng_gainmap_opcodes(
+    const uint8_t* data,
+    size_t len,
+    std::vector<float>& outMap,
+    int& outRows,
+    int& outCols,
+    int cfaPattern = 0
+);
+
+bool compute_render_ccm(
+    const float* forwardMatrix1,
+    const float* forwardMatrix2,
+    const float* colorMatrix1,
+    const float* colorMatrix2,
+    int calibIllum1,
+    int calibIllum2,
+    const float* neutralColorPoint,
+    const float* wb,
+    float* outCcm
+);
+
 #endif // COLOR_PIPE_H

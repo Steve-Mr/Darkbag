@@ -13,6 +13,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLooper
 import top.maary.darkbag.R
 import top.maary.darkbag.models.PlaygroundItem
 import top.maary.darkbag.repository.PlaygroundRepository
@@ -25,10 +26,20 @@ class PlaygroundGalleryViewModelTest {
 
     private lateinit var viewModel: PlaygroundGalleryViewModel
 
+    private fun pumpMainLooper(timeoutMs: Long = 2000, condition: () -> Boolean) {
+        val start = System.currentTimeMillis()
+        while (!condition() && System.currentTimeMillis() - start < timeoutMs) {
+            ShadowLooper.idleMainLooper()
+            Thread.sleep(20)
+        }
+        ShadowLooper.idleMainLooper()
+    }
+
     @Before
     fun setUp() {
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()
         viewModel = PlaygroundGalleryViewModel(app)
+        ShadowLooper.idleMainLooper()
     }
 
     @Test
@@ -124,10 +135,7 @@ class PlaygroundGalleryViewModelTest {
         val file2 = File(pDir, "test2.dng").apply { writeBytes(byteArrayOf(4, 5, 6)) }
 
         val vm = PlaygroundGalleryViewModel(app, repo)
-        runBlocking {
-            vm.loadFiles(forceRefresh = true)
-            delay(200)
-        }
+        pumpMainLooper { vm.uiState.value.items.isNotEmpty() }
 
         assertTrue(vm.uiState.value.items.isNotEmpty())
 
@@ -160,21 +168,20 @@ class PlaygroundGalleryViewModelTest {
     }
 
     @Test
-    fun testDeleteSelected() = runBlocking {
+    fun testDeleteSelected() {
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()
         val repo = PlaygroundRepository(app)
         val pDir = repo.playgroundDir
         val file1 = File(pDir, "to_delete.dng").apply { writeBytes(byteArrayOf(1, 2, 3)) }
 
         val vm = PlaygroundGalleryViewModel(app, repo)
-        vm.loadFiles(forceRefresh = true)
-        delay(200)
+        pumpMainLooper { vm.uiState.value.items.isNotEmpty() }
 
         vm.processIntent(PlaygroundUserIntent.ToggleSelection(file1))
         assertTrue(vm.uiState.value.selectedFiles.contains(file1))
 
         vm.processIntent(PlaygroundUserIntent.DeleteSelected)
-        delay(200)
+        pumpMainLooper(timeoutMs = 5000) { !file1.exists() && !vm.uiState.value.isSelectionMode && !vm.uiState.value.isDeleting }
 
         assertFalse(vm.uiState.value.isSelectionMode)
         assertTrue(vm.uiState.value.selectedFiles.isEmpty())
@@ -182,7 +189,7 @@ class PlaygroundGalleryViewModelTest {
     }
 
     @Test
-    fun testDisbandSelected() = runBlocking {
+    fun testDisbandSelected() {
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()
         val repo = PlaygroundRepository(app)
         val pDir = repo.playgroundDir
@@ -192,14 +199,13 @@ class PlaygroundGalleryViewModelTest {
         val dng2 = File(pDir, "${base}_2.dng").apply { writeBytes(byteArrayOf(5, 6)) }
 
         val vm = PlaygroundGalleryViewModel(app, repo)
-        vm.loadFiles(forceRefresh = true)
-        delay(200)
+        pumpMainLooper(timeoutMs = 5000) { vm.uiState.value.items.any { it is PlaygroundItem.Group && it.jpgFile == jpg } }
 
         vm.processIntent(PlaygroundUserIntent.ToggleSelection(jpg))
         assertTrue(vm.uiState.value.selectedFiles.contains(jpg))
 
         vm.processIntent(PlaygroundUserIntent.DisbandSelected)
-        delay(200)
+        pumpMainLooper(timeoutMs = 5000) { !jpg.exists() && !vm.uiState.value.isSelectionMode }
 
         assertFalse(vm.uiState.value.isSelectionMode)
         assertTrue(vm.uiState.value.selectedFiles.isEmpty())
@@ -212,14 +218,16 @@ class PlaygroundGalleryViewModelTest {
     }
 
     @Test
-    fun testEmitEffect() = runBlocking {
-        val job = async {
-            viewModel.effects.first()
+    fun testEmitEffect() {
+        runBlocking {
+            val job = async {
+                viewModel.effects.first()
+            }
+            viewModel.emitEffect(PlaygroundEffect.OpenViewer(listOf("/path/1.dng"), "SBS"))
+            val effect = job.await()
+            assertTrue(effect is PlaygroundEffect.OpenViewer)
+            assertEquals(listOf("/path/1.dng"), (effect as PlaygroundEffect.OpenViewer).paths)
+            assertEquals("SBS", effect.hfLayout)
         }
-        viewModel.emitEffect(PlaygroundEffect.OpenViewer(listOf("/path/1.dng"), "SBS"))
-        val effect = job.await()
-        assertTrue(effect is PlaygroundEffect.OpenViewer)
-        assertEquals(listOf("/path/1.dng"), (effect as PlaygroundEffect.OpenViewer).paths)
-        assertEquals("SBS", effect.hfLayout)
     }
 }
