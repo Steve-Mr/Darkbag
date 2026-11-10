@@ -58,6 +58,12 @@ import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.pipeline.composer.HalfFrameComposer
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.repository.ImageRepository
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.Lifecycle
+import top.maary.darkbag.viewmodel.DarkroomGalleryViewModel
+import top.maary.darkbag.viewmodel.DarkroomGalleryUserIntent
+import top.maary.darkbag.viewmodel.DarkroomGalleryUiState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -118,12 +124,14 @@ open class ImageViewerFragment : Fragment() {
     private var isUiVisible = true
     protected val binding get() = _binding!!
     protected val args: ImageViewerFragmentArgs by navArgs()
+    protected val galleryViewModel: DarkroomGalleryViewModel by viewModels()
     protected lateinit var repository: ImageRepository
     protected lateinit var adapter: ImageViewerAdapter
     protected lateinit var galleryAdapter: DarkbagGalleryGridAdapter
     protected var isGalleryMode = false
     protected var startedInGalleryMode = false
     protected open val isGallerySupported: Boolean = true
+    private var galleryCollectJob: Job? = null
 
     var isMotionPhotoAutoPlay = true
     protected var hasAutoPlayedPosition = -1
@@ -386,45 +394,54 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
+        if (forceRefresh) {
+            repository.invalidateCache(clearStale = true)
+        }
+        galleryViewModel.processIntent(DarkroomGalleryUserIntent.LoadImages(targetUri))
+
         var hasNavigatedToTargetUri = false
 
-        lifecycleScope.launch {
-            repository.getGroupedImagesFlow(targetUri).collect { groups ->
-                if (groups.isEmpty()) {
-                    hideGalleryLoadingIndicator()
-                    hideGalleryDeletingIndicator()
-                    if (isGalleryMode) {
-                        exitGalleryMode()
+        galleryCollectJob?.cancel()
+        galleryCollectJob = lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                galleryViewModel.uiState.collect { state ->
+                    val groups = state.items
+                    if (state.isLoading && groups.isEmpty()) {
+                        return@collect
                     }
-                    findNavController().navigateUp()
-                    return@collect
-                }
+                    if (groups.isEmpty() && !state.isLoading) {
+                        hideGalleryLoadingIndicator()
+                        hideGalleryDeletingIndicator()
+                        if (isGalleryMode) {
+                            exitGalleryMode()
+                        }
+                        findNavController().navigateUp()
+                        return@collect
+                    }
 
-                if (::galleryAdapter.isInitialized) {
-                    galleryAdapter.submitList(groups) {
-                        if (_binding != null) {
-                            hideGalleryLoadingIndicator()
-                            val animator = binding.galleryRecyclerView.itemAnimator
-                            if (animator != null && animator.isRunning) {
-                                animator.isRunning {
+                    if (::galleryAdapter.isInitialized) {
+                        galleryAdapter.submitList(groups) {
+                            if (_binding != null) {
+                                hideGalleryLoadingIndicator()
+                                val animator = binding.galleryRecyclerView.itemAnimator
+                                if (animator != null && animator.isRunning) {
+                                    animator.isRunning {
+                                        hideGalleryDeletingIndicator()
+                                        if (_binding != null) {
+                                            binding.galleryRecyclerView.isEnabled = true
+                                        }
+                                    }
+                                } else {
                                     hideGalleryDeletingIndicator()
                                     if (_binding != null) {
                                         binding.galleryRecyclerView.isEnabled = true
                                     }
                                 }
-                            } else {
-                                hideGalleryDeletingIndicator()
-                                if (_binding != null) {
-                                    binding.galleryRecyclerView.isEnabled = true
-                                }
                             }
                         }
+                        galleryAdapter.syncSelection(state.selectedKeys, state.isSelectionMode)
+                        updateGallerySelectionUI(state)
                     }
-                    if (isGalleryMode && !galleryAdapter.isSelectionMode) {
-                        binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
-                        binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_groups_count, groups.size)
-                    }
-                }
 
                 val isFirstLoad = !::adapter.isInitialized
 
@@ -593,6 +610,7 @@ open class ImageViewerFragment : Fragment() {
             }
         }
     }
+}
 
     private fun handleBackgroundSaveEvent(event: ColorProcessor.BackgroundSaveEvent) {
         // Trigger a full repository refresh to include the new item
@@ -3622,11 +3640,29 @@ open class ImageViewerFragment : Fragment() {
         galleryAdapter = DarkbagGalleryGridAdapter(requireContext(), repository).apply {
             columnCount = initialCols
             onItemClick = { group, pos, lensTag ->
-                startedInGalleryMode = false
-                exitGalleryMode(pos, lensTag)
+                if (galleryViewModel.uiState.value.isSelectionMode) {
+                    if (lensTag != null) {
+                        val lens = group.multiCameraLenses.find { it.lensTag == lensTag }
+                        if (lens != null) {
+                            galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleLensSelection(group, lens))
+                        }
+                    } else {
+                        galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSingleSelection(group))
+                    }
+                } else {
+                    startedInGalleryMode = false
+                    exitGalleryMode(pos, lensTag)
+                }
             }
-            onItemLongClick = { _, _, _ ->
-                updateGallerySelectionUI(getSelectedCount())
+            onItemLongClick = { group, _, lensTag ->
+                if (lensTag != null) {
+                    val lens = group.multiCameraLenses.find { it.lensTag == lensTag }
+                    if (lens != null) {
+                        galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleLensSelection(group, lens))
+                    }
+                } else {
+                    galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSingleSelection(group))
+                }
             }
             onSelectionChanged = { count ->
                 updateGallerySelectionUI(count)
@@ -3636,6 +3672,8 @@ open class ImageViewerFragment : Fragment() {
         val layoutManager = createGridLayoutManager(initialCols)
         binding.galleryRecyclerView.layoutManager = layoutManager
         binding.galleryRecyclerView.adapter = galleryAdapter
+        binding.galleryRecyclerView.setHasFixedSize(true)
+        binding.galleryRecyclerView.setItemViewCacheSize(20)
         (binding.galleryRecyclerView.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)?.apply {
             removeDuration = 250
             moveDuration = 250
@@ -3647,9 +3685,8 @@ open class ImageViewerFragment : Fragment() {
 
         // Header Action: Back (Normal) / Close Selection (Selection)
         binding.btnGalleryHeaderAction.setOnClickListener {
-            if (galleryAdapter.isSelectionMode) {
-                galleryAdapter.setSelectionMode(false)
-                updateGallerySelectionUI(0)
+            if (galleryViewModel.uiState.value.isSelectionMode) {
+                galleryViewModel.processIntent(DarkroomGalleryUserIntent.ClearSelection)
             } else if (startedInGalleryMode) {
                 findNavController().navigateUp()
             } else {
@@ -3664,18 +3701,13 @@ open class ImageViewerFragment : Fragment() {
 
         // Header Select All / Deselect All Toggle (Selection Mode)
         binding.btnGalleryHeaderSelectAll.setOnClickListener {
-            val totalSelectable = galleryAdapter.currentList.sumOf { if (it.isMultiCamera && it.multiCameraLenses.isNotEmpty()) it.multiCameraLenses.size else 1 }
-            if (galleryAdapter.getSelectedCount() >= totalSelectable && totalSelectable > 0) {
-                galleryAdapter.deselectAll()
-            } else {
-                galleryAdapter.selectAll()
-            }
+            galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSelectAll)
         }
 
         // Normal Dock Actions
         binding.btnGalleryDockSelectAll.setOnClickListener {
-            galleryAdapter.setSelectionMode(true)
-            galleryAdapter.selectAll()
+            galleryViewModel.processIntent(DarkroomGalleryUserIntent.SetSelectionMode(true))
+            galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSelectAll)
         }
 
         binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_cols, initialCols)
@@ -3689,7 +3721,7 @@ open class ImageViewerFragment : Fragment() {
 
         // Selection Dock Actions
         binding.btnGalleryDockMerge.setOnClickListener {
-            val selected = galleryAdapter.getSelectedItems()
+            val selected = galleryViewModel.uiState.value.getSelectedItems()
             if (selected.size == 2) {
                 performMergeCollage(selected)
             } else {
@@ -3698,7 +3730,7 @@ open class ImageViewerFragment : Fragment() {
         }
 
         binding.btnGalleryDockBatchGrade.setOnClickListener {
-            val selected = galleryAdapter.getSelectedItems()
+            val selected = galleryViewModel.uiState.value.getSelectedItems()
             if (selected.isEmpty()) return@setOnClickListener
             if (checkHomogeneity(selected)) {
                 performBatchGrade(selected)
@@ -3708,7 +3740,7 @@ open class ImageViewerFragment : Fragment() {
         }
 
         binding.btnGalleryDockShare.setOnClickListener {
-            val selected = galleryAdapter.getSelectedItems()
+            val selected = galleryViewModel.uiState.value.getSelectedItems()
             val uris = selected.mapNotNull { item ->
                 if (item.specificLens != null) {
                     item.specificLens.jpgUri ?: item.specificLens.dngUri
@@ -3723,7 +3755,7 @@ open class ImageViewerFragment : Fragment() {
         }
 
         binding.btnGalleryDockDelete.setOnClickListener {
-            val selected = galleryAdapter.getSelectedItems()
+            val selected = galleryViewModel.uiState.value.getSelectedItems()
             if (selected.isNotEmpty()) {
                 showBatchDeleteDialog(selected)
             }
@@ -3746,46 +3778,33 @@ open class ImageViewerFragment : Fragment() {
         return lm
     }
 
-    private fun cycleGalleryLayout() {
+    private fun applyGalleryLayout(columnCount: Int, isWaterfallMode: Boolean) {
         if (!::galleryAdapter.isInitialized) return
-        if (galleryAdapter.isWaterfallMode) {
-            // Waterfall -> 3 Columns Square
-            galleryAdapter.isWaterfallMode = false
-            galleryAdapter.columnCount = 3
-            binding.galleryRecyclerView.layoutManager = createGridLayoutManager(3)
-            binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_cols, 3)
+        galleryAdapter.columnCount = columnCount
+        galleryAdapter.isWaterfallMode = isWaterfallMode
+        if (isWaterfallMode) {
+            val spanCount = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 3 else 2
+            val staggeredLm = androidx.recyclerview.widget.StaggeredGridLayoutManager(spanCount, androidx.recyclerview.widget.StaggeredGridLayoutManager.VERTICAL).apply {
+                gapStrategy = androidx.recyclerview.widget.StaggeredGridLayoutManager.GAP_HANDLING_NONE
+            }
+            binding.galleryRecyclerView.layoutManager = staggeredLm
+            binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_waterfall)
         } else {
-            when (galleryAdapter.columnCount) {
-                3 -> {
-                    // 3 -> 2 Columns Square
-                    galleryAdapter.columnCount = 2
-                    (binding.galleryRecyclerView.layoutManager as? GridLayoutManager)?.spanCount = 2
-                    binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_cols, 2)
-                }
-                2 -> {
-                    // 2 -> 1 Column Details
-                    galleryAdapter.columnCount = 1
-                    (binding.galleryRecyclerView.layoutManager as? GridLayoutManager)?.spanCount = 1
-                    binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_1_col)
-                }
-                1 -> {
-                    // 1 -> Waterfall Aspect Ratio (2 cols)
-                    galleryAdapter.isWaterfallMode = true
-                    galleryAdapter.columnCount = 2
-                    val spanCount = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 3 else 2
-                    val staggeredLm = androidx.recyclerview.widget.StaggeredGridLayoutManager(spanCount, androidx.recyclerview.widget.StaggeredGridLayoutManager.VERTICAL).apply {
-                        gapStrategy = androidx.recyclerview.widget.StaggeredGridLayoutManager.GAP_HANDLING_NONE
-                    }
-                    binding.galleryRecyclerView.layoutManager = staggeredLm
-                    binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_waterfall)
-                }
-                else -> {
-                    galleryAdapter.columnCount = 3
-                    binding.galleryRecyclerView.layoutManager = createGridLayoutManager(3)
-                    binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_cols, 3)
-                }
+            binding.galleryRecyclerView.layoutManager = createGridLayoutManager(columnCount)
+            binding.btnGalleryDockLayout.text = if (columnCount == 1) {
+                getString(R.string.gallery_layout_1_col)
+            } else {
+                getString(R.string.gallery_layout_cols, columnCount)
             }
         }
+    }
+
+    private fun cycleGalleryLayout() {
+        if (!::galleryAdapter.isInitialized) return
+        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        galleryViewModel.processIntent(DarkroomGalleryUserIntent.CycleLayout(isLandscape))
+        val next = galleryViewModel.uiState.value
+        applyGalleryLayout(next.columnCount, next.isWaterfallMode)
     }
 
     protected fun updateGalleryPill(position: Int, totalCount: Int) {
@@ -3835,7 +3854,11 @@ open class ImageViewerFragment : Fragment() {
         }
 
         if (targetPosition in 0 until (if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0)) {
-            binding.galleryRecyclerView.scrollToPosition(targetPosition)
+            binding.galleryRecyclerView.post {
+                if (_binding != null) {
+                    binding.galleryRecyclerView.scrollToPosition(targetPosition)
+                }
+            }
         }
 
         updateBackPressedCallbackState()
@@ -3849,6 +3872,7 @@ open class ImageViewerFragment : Fragment() {
         hideGalleryLoadingIndicator()
         binding.galleryRecyclerView.isEnabled = true
 
+        galleryViewModel.processIntent(DarkroomGalleryUserIntent.ClearSelection)
         if (::galleryAdapter.isInitialized) {
             galleryAdapter.setSelectionMode(false)
         }
@@ -3876,54 +3900,57 @@ open class ImageViewerFragment : Fragment() {
         updateBackPressedCallbackState()
     }
 
-    private fun updateGallerySelectionUI(selectedCount: Int) {
+    protected fun updateGallerySelectionUI(state: DarkroomGalleryUiState) {
         if (!::galleryAdapter.isInitialized) return
-        if (galleryAdapter.isSelectionMode) {
-            binding.galleryHeaderCard.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.PRIMARY_CONTAINER, animated = true)
+        if (state.isSelectionMode) {
+            binding.galleryHeaderCard.setContainerRole(state.containerRole, animated = true)
             binding.btnGalleryHeaderAction.setIconResource(R.drawable.ic_close)
             binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
-            binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_selected_count, selectedCount)
+            binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_selected_count, state.selectedCount)
             binding.btnGalleryHeaderInfo.visibility = View.GONE
             binding.btnGalleryHeaderSelectAll.visibility = View.VISIBLE
 
-            val totalSelectable = galleryAdapter.currentList.sumOf { if (it.isMultiCamera && it.multiCameraLenses.isNotEmpty()) it.multiCameraLenses.size else 1 }
-            val allSelected = selectedCount > 0 && selectedCount >= totalSelectable
-            binding.btnGalleryHeaderSelectAll.setText(if (allSelected) R.string.gallery_deselect_all else R.string.gallery_select_all)
+            binding.btnGalleryHeaderSelectAll.setText(if (state.isAllSelected) R.string.gallery_deselect_all else R.string.gallery_select_all)
 
             binding.galleryBottomBar.visibility = View.VISIBLE
-            binding.galleryBottomBar.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.PRIMARY_CONTAINER, animated = true)
+            binding.galleryBottomBar.setContainerRole(state.containerRole, animated = true)
             binding.layoutGalleryNormalActions.visibility = View.GONE
             binding.layoutGallerySelectionActions.visibility = View.VISIBLE
 
-            val canMerge = selectedCount == 2
+            val canMerge = state.selectedCount == 2
             binding.btnGalleryDockMerge.isEnabled = canMerge
             binding.btnGalleryDockMerge.alpha = if (canMerge) 1.0f else 0.4f
 
-            val selected = galleryAdapter.getSelectedItems()
+            val selected = state.getSelectedItems()
             val canGrade = selected.isNotEmpty() && checkHomogeneity(selected)
             binding.btnGalleryDockBatchGrade.isEnabled = canGrade
             binding.btnGalleryDockBatchGrade.alpha = if (canGrade) 1.0f else 0.4f
 
-            val hasSelection = selectedCount > 0
+            val hasSelection = state.selectedCount > 0
             binding.btnGalleryDockShare.isEnabled = hasSelection
             binding.btnGalleryDockShare.alpha = if (hasSelection) 1.0f else 0.4f
 
             binding.btnGalleryDockDelete.isEnabled = hasSelection
             binding.btnGalleryDockDelete.alpha = if (hasSelection) 1.0f else 0.4f
         } else {
-            binding.galleryHeaderCard.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.SURFACE_CONTAINER, animated = true)
+            binding.galleryHeaderCard.setContainerRole(state.containerRole, animated = true)
             binding.btnGalleryHeaderAction.setIconResource(R.drawable.ic_back)
-            val count = galleryAdapter.itemCount
+            val count = state.items.size
             binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
             binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_groups_count, count)
             binding.btnGalleryHeaderInfo.visibility = View.VISIBLE
             binding.btnGalleryHeaderSelectAll.visibility = View.GONE
 
             binding.galleryBottomBar.visibility = View.VISIBLE
-            binding.galleryBottomBar.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.SURFACE_CONTAINER, animated = true)
+            binding.galleryBottomBar.setContainerRole(state.containerRole, animated = true)
             binding.layoutGalleryNormalActions.visibility = View.VISIBLE
             binding.layoutGallerySelectionActions.visibility = View.GONE
         }
+    }
+
+    protected fun updateGallerySelectionUI(selectedCount: Int) {
+        if (!::galleryAdapter.isInitialized) return
+        updateGallerySelectionUI(galleryViewModel.uiState.value)
     }
 
     private fun showAlbumInfoSheet() {
@@ -3940,22 +3967,8 @@ open class ImageViewerFragment : Fragment() {
     internal fun getGalleryItems(): List<ImageGroup> =
         if (::galleryAdapter.isInitialized) galleryAdapter.currentList else emptyList()
 
-    internal fun checkHomogeneity(selected: List<GallerySelectedItem>): Boolean {
-        if (selected.isEmpty()) return false
-        val isStaticPhoto: (GallerySelectedItem) -> Boolean = { item ->
-            val g = item.group
-            !g.isMotionPhoto && !g.isRawVideo && g.rawVideoUri == null && g.mp4VideoUri == null && !g.isCinemaDng && g.cinemaDngFolderUri == null && g.cinemaDngFrameUris.isEmpty()
-        }
-        val isMotionPhoto: (GallerySelectedItem) -> Boolean = { item ->
-            item.group.isMotionPhoto
-        }
-        val isVideo: (GallerySelectedItem) -> Boolean = { item ->
-            val g = item.group
-            g.isRawVideo || g.rawVideoUri != null || g.mp4VideoUri != null || g.isCinemaDng || g.cinemaDngFolderUri != null || g.cinemaDngFrameUris.isNotEmpty()
-        }
-
-        return selected.all(isStaticPhoto) || selected.all(isMotionPhoto) || selected.all(isVideo)
-    }
+    internal fun checkHomogeneity(selected: List<GallerySelectedItem>): Boolean =
+        top.maary.darkbag.utils.GalleryHomogeneityChecker.isHomogeneous(selected)
 
     private fun performMergeCollage(selected: List<GallerySelectedItem>) {
         if (selected.size != 2) return
@@ -3972,7 +3985,6 @@ open class ImageViewerFragment : Fragment() {
         ) { which ->
             val isSideBySide = (which == 0)
             val ctx = context ?: return@show
-            val appContext = ctx.applicationContext
 
             val item1 = selected[0]
             val item2 = selected[1]
@@ -3988,68 +4000,27 @@ open class ImageViewerFragment : Fragment() {
             binding.galleryRecyclerView.isEnabled = false
 
             lifecycleScope.launch {
-                val success = withContext(Dispatchers.IO) {
-                    try {
-                        val bmp1Raw = appContext.contentResolver.openInputStream(uri1)?.use { android.graphics.BitmapFactory.decodeStream(it) }
-                        val bmp2Raw = appContext.contentResolver.openInputStream(uri2)?.use { android.graphics.BitmapFactory.decodeStream(it) }
-                        if (bmp1Raw == null || bmp2Raw == null) {
-                            bmp1Raw?.recycle()
-                            bmp2Raw?.recycle()
-                            return@withContext false
-                        }
-                        val bmp1 = top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(bmp1Raw, isSideBySide)
-                        val bmp2 = top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(bmp2Raw, isSideBySide)
-                        val stitched = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(bmp1, bmp2, isSideBySide)
-
-                        val timeStamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
-                        val fileName = "${top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX}${timeStamp}_COLLAGE.jpg"
-                        val values = android.content.ContentValues().apply {
-                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                            put(android.provider.MediaStore.MediaColumns.DATE_ADDED, System.currentTimeMillis() / 1000)
-                            put(android.provider.MediaStore.MediaColumns.DATE_MODIFIED, System.currentTimeMillis() / 1000)
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                                put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
-                            }
-                        }
-                        val insertedUri = appContext.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                        if (insertedUri != null) {
-                            appContext.contentResolver.openOutputStream(insertedUri, "wt")?.use { out ->
-                                stitched.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, out)
-                                out.flush()
-                            }
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                values.clear()
-                                values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
-                                appContext.contentResolver.update(insertedUri, values, null, null)
-                            }
-                        }
-
-                        stitched.recycle()
-                        if (bmp1 != bmp1Raw) bmp1.recycle()
-                        if (bmp2 != bmp2Raw) bmp2.recycle()
-                        bmp1Raw.recycle()
-                        bmp2Raw.recycle()
-                        insertedUri != null
-                    } catch (e: Exception) {
-                        android.util.Log.e("ImageViewerFragment", "Collage stitching failed", e)
-                        false
-                    }
-                }
+                val insertedUri = top.maary.darkbag.utils.GalleryCollageHelper.createAndSaveCollage(
+                    context = ctx,
+                    uri1 = uri1,
+                    uri2 = uri2,
+                    isSideBySide = isSideBySide
+                )
 
                 hideGalleryDeletingIndicator()
                 if (_binding != null) {
                     binding.galleryRecyclerView.isEnabled = true
                 }
-                if (success) {
+
+                if (insertedUri != null) {
                     repository.invalidateCache()
                     loadImages(forceRefresh = true)
+                    galleryViewModel.processIntent(DarkroomGalleryUserIntent.ClearSelection)
                     galleryAdapter.setSelectionMode(false)
                     updateGallerySelectionUI(0)
-                    Toast.makeText(requireContext(), R.string.gallery_merge_success, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, R.string.gallery_merge_success, Toast.LENGTH_SHORT).show()
                 } else {
-                    Toast.makeText(requireContext(), R.string.gallery_collage_create_failed, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, R.string.gallery_collage_create_failed, Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -4377,6 +4348,7 @@ open class ImageViewerFragment : Fragment() {
                 }
             }
 
+            galleryViewModel.processIntent(DarkroomGalleryUserIntent.ClearSelection)
             galleryAdapter.setSelectionMode(false)
             updateGallerySelectionUI(0)
 

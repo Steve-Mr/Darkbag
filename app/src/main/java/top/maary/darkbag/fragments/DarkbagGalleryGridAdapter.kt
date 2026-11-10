@@ -108,6 +108,29 @@ class DarkbagGalleryGridAdapter(
         notifyDataSetChanged()
     }
 
+    fun syncSelection(keys: Set<String>, selectionMode: Boolean) {
+        val oldKeys = selectedItemKeys.toSet()
+        val oldSelectionMode = isSelectionMode
+        if (oldKeys == keys && oldSelectionMode == selectionMode) return
+
+        selectedItemKeys.clear()
+        selectedItemKeys.addAll(keys)
+        isSelectionMode = selectionMode
+
+        if (oldSelectionMode != selectionMode) {
+            notifyItemRangeChanged(0, itemCount, "SELECTION_CHANGED")
+        } else {
+            val changedKeys = (oldKeys - keys) + (keys - oldKeys)
+            for (key in changedKeys) {
+                val base = if (key.contains('#')) key.substringBefore('#') else key
+                val pos = differ.currentList.indexOfFirst { it.baseName == base }
+                if (pos != -1) {
+                    notifyItemChanged(pos, "SELECTION_CHANGED")
+                }
+            }
+        }
+    }
+
     fun toggleSingleSelection(group: ImageGroup) {
         val key = group.baseName
         if (selectedItemKeys.contains(key)) {
@@ -368,18 +391,15 @@ class DarkbagGalleryGridAdapter(
     }
 
     private fun bindSingleColumnMode(holder: SingleViewHolder, group: ImageGroup, targetUri: Uri?) {
-        val lp = holder.binding.thumbnailView.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
         if (isWaterfallMode) {
-            lp.dimensionRatio = group.aspectRatio ?: "4:3"
-            holder.binding.thumbnailView.layoutParams = lp
+            top.maary.darkbag.utils.GalleryAspectRatioHelper.applyAspectRatio(holder.binding.thumbnailView, group.aspectRatio, "4:3")
             holder.binding.thumbnailView.scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             holder.binding.thumbnailView.adjustViewBounds = true
 
             holder.binding.layoutSingleColInfo.visibility = View.GONE
             holder.binding.badgesContainer.visibility = View.VISIBLE
         } else if (columnCount == 1) {
-            lp.dimensionRatio = "4:3"
-            holder.binding.thumbnailView.layoutParams = lp
+            top.maary.darkbag.utils.GalleryAspectRatioHelper.applyAspectRatio(holder.binding.thumbnailView, "4:3")
             holder.binding.thumbnailView.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
             holder.binding.thumbnailView.adjustViewBounds = false
 
@@ -399,8 +419,7 @@ class DarkbagGalleryGridAdapter(
 
             bindSingleExifParams(holder, group, targetUri)
         } else {
-            lp.dimensionRatio = "1:1"
-            holder.binding.thumbnailView.layoutParams = lp
+            top.maary.darkbag.utils.GalleryAspectRatioHelper.applyAspectRatio(holder.binding.thumbnailView, "1:1")
             holder.binding.thumbnailView.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
             holder.binding.thumbnailView.adjustViewBounds = false
 
