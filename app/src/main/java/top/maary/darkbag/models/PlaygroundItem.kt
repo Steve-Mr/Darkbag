@@ -11,6 +11,7 @@ sealed class PlaygroundItem {
 
     data class Single(
         val file: File,
+        val derivativeFiles: List<File> = emptyList(),
         override val aspectRatio: String? = null
     ) : PlaygroundItem() {
         override val mainFile: File = file
@@ -20,6 +21,7 @@ sealed class PlaygroundItem {
         val jpgFile: File,
         val dng1: File,
         val dng2: File,
+        val derivativeFiles: List<File> = emptyList(),
         var isExpanded: Boolean = false,
         override val aspectRatio: String? = null
     ) : PlaygroundItem() {

@@ -2199,11 +2199,7 @@ open class ImageViewerFragment : Fragment() {
 
             isLongPressing = true
 
-            // Save current zoom state
-            savedMatrix.set(imageView.imageMatrix)
-            savedScale = imageView.saveScale
-
-            imageView.resetZoom()
+            imageView.setMaintainZoomOnNextImage(true)
             adapter.cancelLoadJob(currentIndex, clearView = false)
             com.bumptech.glide.Glide.with(imageView)
                 .asBitmap()
@@ -2235,6 +2231,7 @@ open class ImageViewerFragment : Fragment() {
             isLongPressing = false
             val currentIndex = binding.imagePager.currentItem
 
+            imageView.setMaintainZoomOnNextImage(true)
             com.bumptech.glide.Glide.with(imageView).clear(imageView)
             if (lastCompositeBitmap != null) {
                 imageView.setImageBitmap(lastCompositeBitmap)
@@ -2242,9 +2239,6 @@ open class ImageViewerFragment : Fragment() {
                 val format = adapter.getSelectedFormat(currentIndex)
                 adapter.setFormat(currentIndex, format)
             }
-
-            // Restore zoom state
-            imageView.restoreZoomState(savedMatrix, savedScale)
             return
         }
 
@@ -2505,10 +2499,28 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
+    private fun toShareableUri(uri: Uri): Uri {
+        if (uri.scheme == "file") {
+            val file = java.io.File(uri.path ?: return uri)
+            return try {
+                androidx.core.content.FileProvider.getUriForFile(
+                    requireContext().applicationContext,
+                    "${requireContext().packageName}.fileprovider",
+                    file
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("ImageViewerFragment", "Failed to convert file URI to content URI: $uri", e)
+                uri
+            }
+        }
+        return uri
+    }
+
     private fun shareTiff(uri: Uri) {
+        val shareUri = toShareableUri(uri)
         val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
             type = "image/tiff"
-            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            putExtra(android.content.Intent.EXTRA_STREAM, shareUri)
             addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         try {
@@ -2520,8 +2532,9 @@ open class ImageViewerFragment : Fragment() {
 
     private fun shareImages(uris: List<android.net.Uri>) {
         if (uris.isEmpty()) return
-        val mimeType = if (uris.size == 1) {
-            val u = uris[0]
+        val shareableUris = uris.map { toShareableUri(it) }
+        val mimeType = if (shareableUris.size == 1) {
+            val u = shareableUris[0]
             val type = context?.contentResolver?.getType(u)
             type ?: when {
                 u.toString().endsWith(".dng", true) -> "image/x-adobe-dng"
@@ -2530,18 +2543,18 @@ open class ImageViewerFragment : Fragment() {
                 else -> "image/jpeg"
             }
         } else {
-            val types = uris.mapNotNull { context?.contentResolver?.getType(it) ?: (if (it.toString().endsWith(".dng", true)) "image/x-adobe-dng" else "image/jpeg") }
+            val types = shareableUris.mapNotNull { context?.contentResolver?.getType(it) ?: (if (it.toString().endsWith(".dng", true)) "image/x-adobe-dng" else "image/jpeg") }
             if (types.all { it.startsWith("image/") }) "image/*" else "*/*"
         }
-        val intent = if (uris.size == 1) {
+        val intent = if (shareableUris.size == 1) {
             android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                 type = mimeType
-                putExtra(android.content.Intent.EXTRA_STREAM, uris[0])
+                putExtra(android.content.Intent.EXTRA_STREAM, shareableUris[0])
             }
         } else {
             android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
                 type = mimeType
-                putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(uris))
+                putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(shareableUris))
             }
         }
         intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -2788,12 +2801,17 @@ open class ImageViewerFragment : Fragment() {
     private fun showDeleteDialog(group: ImageGroup) {
         val hasCdng = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
         val hasRawVid = group.isRawVideo || group.rawVideoUri != null
-        val hasDerivatives = group.allDerivativeUris.isNotEmpty()
+        val derivatives = adapter.getDerivativeUris(group)
+        val hasDerivatives = derivatives.isNotEmpty()
         val hasPhotoDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null || group.multiDngUris.isNotEmpty()
         val hasRaw = hasPhotoDng || hasRawVid
 
+        val activeDerivIdx = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
+        val currentVersionName = if (derivatives.size >= 2) "V${activeDerivIdx + 1}" else null
+        val derivativeCount = derivatives.size
+
         val componentCount = (if (hasRaw) 1 else 0) + (if (hasDerivatives) 1 else 0) + (if (hasCdng) 1 else 0)
-        val hasMultipleComponents = componentCount > 1
+        val hasMultipleComponents = componentCount > 1 || (derivatives.size >= 2)
 
         if (hasMultipleComponents) {
             pendingSingleDeleteGroup = group
@@ -2801,7 +2819,9 @@ open class ImageViewerFragment : Fragment() {
                 selectedCount = 1,
                 hasRaw = hasRaw,
                 hasDerivatives = hasDerivatives,
-                hasCinemaDng = hasCdng
+                hasCinemaDng = hasCdng,
+                currentVersionName = currentVersionName,
+                derivativeCount = derivativeCount
             ).show(childFragmentManager, DarkbagBatchDeleteSheet.TAG)
         } else {
             com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
@@ -2819,6 +2839,14 @@ open class ImageViewerFragment : Fragment() {
         val urisToDelete = mutableListOf<Uri>()
         var isEntireGroup = false
         when (deleteMode) {
+            DarkbagBatchDeleteSheet.MODE_CURRENT_DERIVATIVE_ONLY -> {
+                val derivatives = adapter.getDerivativeUris(group)
+                val activeDerivIdx = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
+                val activeUri = derivatives.getOrNull(activeDerivIdx) ?: group.jpgUri ?: group.mp4VideoUri
+                activeUri?.let { urisToDelete.add(it) }
+                val remainingUris = group.allUris.filter { !urisToDelete.contains(it) }
+                isEntireGroup = remainingUris.isEmpty()
+            }
             DarkbagBatchDeleteSheet.MODE_ENTIRE_GROUP -> {
                 group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
                 urisToDelete.addAll(group.allUris)
@@ -2857,13 +2885,21 @@ open class ImageViewerFragment : Fragment() {
             lifecycleScope.launch {
                 val success = mediaStrategy.deleteImage(context, group, targetUris, deleteGroup, repository)
                 if (success) {
-                    val currentList = adapter.getGroups().toMutableList()
-                    currentList.removeAll { it.baseName == group.baseName }
-                    if (currentList.isEmpty()) {
-                        findNavController().navigateUp()
+                    if (deleteGroup) {
+                        val currentList = adapter.getGroups().toMutableList()
+                        currentList.removeAll { it.baseName == group.baseName }
+                        if (currentList.isEmpty()) {
+                            findNavController().navigateUp()
+                        } else {
+                            adapter.updateGroups(currentList.toList())
+                            updateControlsVisibility()
+                        }
                     } else {
-                        adapter.updateGroups(currentList.toList())
-                        updateControlsVisibility()
+                        val updatedGroups = mediaStrategy.loadInitialGroups(context.applicationContext, arguments, repository)
+                        if (updatedGroups != null) {
+                            adapter.updateGroups(updatedGroups)
+                            updateControlsVisibility()
+                        }
                     }
                 }
             }
@@ -2993,10 +3029,12 @@ open class ImageViewerFragment : Fragment() {
     protected fun setupGalleryView() {
         if (!isGallerySupported) return
         val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        val initialCols = if (isLandscape) 4 else 3
+        galleryViewModel.processIntent(DarkroomGalleryUserIntent.SyncOrientation(isLandscape))
+        val currentLayout = galleryViewModel.uiState.value
 
         galleryAdapter = DarkbagGalleryGridAdapter(requireContext(), repository).apply {
-            columnCount = initialCols
+            columnCount = currentLayout.columnCount
+            isWaterfallMode = currentLayout.isWaterfallMode
             onItemClick = { group, pos, lensTag ->
                 if (galleryViewModel.uiState.value.isSelectionMode) {
                     if (lensTag != null) {
@@ -3027,8 +3065,6 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
-        val layoutManager = createGridLayoutManager(initialCols)
-        binding.galleryRecyclerView.layoutManager = layoutManager
         binding.galleryRecyclerView.adapter = galleryAdapter
         binding.galleryRecyclerView.setHasFixedSize(true)
         binding.galleryRecyclerView.setItemViewCacheSize(20)
@@ -3036,6 +3072,7 @@ open class ImageViewerFragment : Fragment() {
             removeDuration = 250
             moveDuration = 250
         }
+        applyGalleryLayout(currentLayout.columnCount, currentLayout.isWaterfallMode)
 
         binding.btnGalleryPill.setOnClickListener {
             enterGalleryMode()
@@ -3068,7 +3105,7 @@ open class ImageViewerFragment : Fragment() {
             galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSelectAll)
         }
 
-        binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_cols, initialCols)
+        binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_cols, currentLayout.columnCount)
         binding.btnGalleryDockLayout.setOnClickListener {
             cycleGalleryLayout()
         }
@@ -3163,6 +3200,16 @@ open class ImageViewerFragment : Fragment() {
         galleryViewModel.processIntent(DarkroomGalleryUserIntent.CycleLayout(isLandscape))
         val next = galleryViewModel.uiState.value
         applyGalleryLayout(next.columnCount, next.isWaterfallMode)
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (isGallerySupported && ::galleryAdapter.isInitialized) {
+            val isLandscape = newConfig.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            galleryViewModel.processIntent(DarkroomGalleryUserIntent.SyncOrientation(isLandscape))
+            val currentLayout = galleryViewModel.uiState.value
+            applyGalleryLayout(currentLayout.columnCount, currentLayout.isWaterfallMode)
+        }
     }
 
     protected fun updateGalleryPill(position: Int, totalCount: Int) {

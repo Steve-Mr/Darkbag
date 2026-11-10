@@ -1662,6 +1662,10 @@ class SettingsFragment : Fragment() {
         const val KEY_EXP_FOCUS_PEAKING = "exp_focus_peaking"
         const val KEY_FOCUS_PEAKING_ACTIVE = "pref_focus_peaking_active"
         const val KEY_COLOR_ENGINE_MODE = "color_engine_mode"
+        const val KEY_GALLERY_COLUMNS_PORTRAIT = "gallery_columns_portrait"
+        const val KEY_GALLERY_COLUMNS_LANDSCAPE = "gallery_columns_landscape"
+        const val KEY_GALLERY_WATERFALL = "gallery_waterfall"
+        const val KEY_PLAYGROUND_COLUMNS = "playground_columns"
 
         const val KEY_SHUTTER_LONG_PRESS_ACTION = "shutter_long_press_action"
         const val SHUTTER_LONG_PRESS_MP4 = "Standard MP4 (Default)"
