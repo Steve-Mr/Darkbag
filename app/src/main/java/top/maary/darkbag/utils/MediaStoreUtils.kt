@@ -23,6 +23,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.DocumentsContract
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -268,6 +269,29 @@ class MediaStoreUtils(private val context: Context) {
                 }
             }
             return uri.path ?: "Unknown"
+        }
+
+        suspend fun deleteUriSafe(context: Context, uri: Uri): Boolean {
+            return withContext(Dispatchers.IO) {
+                try {
+                    if (uri.scheme == "content" && DocumentsContract.isDocumentUri(context, uri)) {
+                        DocumentsContract.deleteDocument(context.contentResolver, uri)
+                    } else if (uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) {
+                        val docUri = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
+                        DocumentsContract.deleteDocument(context.contentResolver, docUri)
+                    } else {
+                        context.contentResolver.delete(uri, null, null) > 0
+                    }
+                } catch (e: Exception) {
+                    try {
+                        val docFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)
+                            ?: androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)
+                        docFile?.delete() ?: false
+                    } catch (e2: Exception) {
+                        throw e
+                    }
+                }
+            }
         }
     }
 }

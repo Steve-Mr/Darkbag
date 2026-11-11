@@ -1853,9 +1853,8 @@ class CameraFragment : Fragment() {
                 // if null, gallery mode will load asynchronously and scroll to latest photo upon completion.
                 val uri = currentThumbnailUri
                 navController.navigate(
-                    CameraFragmentDirections.actionCameraToImageViewer(
-                        initialUri = uri?.toString(),
-                        startInGalleryMode = true
+                    CameraFragmentDirections.actionCameraToDarkroomGallery(
+                        initialUri = uri?.toString()
                     )
                 )
             }

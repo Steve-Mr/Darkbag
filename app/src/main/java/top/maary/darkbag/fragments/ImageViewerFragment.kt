@@ -61,9 +61,6 @@ import top.maary.darkbag.repository.ImageRepository
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.Lifecycle
-import top.maary.darkbag.viewmodel.DarkroomGalleryViewModel
-import top.maary.darkbag.viewmodel.DarkroomGalleryUserIntent
-import top.maary.darkbag.viewmodel.DarkroomGalleryUiState
 import top.maary.darkbag.pipeline.darkroom.DarkroomRenderEngine
 import top.maary.darkbag.pipeline.darkroom.model.DarkroomRenderSpec
 import top.maary.darkbag.pipeline.darkroom.model.DarkroomSource
@@ -116,11 +113,6 @@ open class ImageViewerFragment : Fragment() {
     private val deleteLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (result.resultCode != Activity.RESULT_OK) {
             context?.let { Toast.makeText(it, "Failed to delete image", Toast.LENGTH_SHORT).show() }
-            hideGalleryDeletingIndicator()
-            if (_binding != null) {
-                binding.galleryRecyclerView.isEnabled = true
-                updateGallerySelectionUI(0)
-            }
         }
         lifecycleScope.launch {
             repository.invalidateCache(clearStale = true)
@@ -129,27 +121,17 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
-    private val importGalleryMediaLauncher = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
-        if (!uris.isNullOrEmpty()) {
-            importMediaFiles(uris)
-        }
-    }
-
     protected var _binding: FragmentImageViewerBinding? = null
     private var isUiVisible = true
     protected val binding get() = _binding!!
     protected val args: ImageViewerFragmentArgs by navArgs()
-    protected val galleryViewModel: DarkroomGalleryViewModel by viewModels()
     protected val editorViewModel: DarkroomEditorViewModel by viewModels()
     protected lateinit var mediaStrategy: ViewerMediaStrategy
     private var editorController: DarkroomEditorController? = null
     protected lateinit var repository: ImageRepository
     protected lateinit var adapter: ImageViewerAdapter
-    protected lateinit var galleryAdapter: DarkbagGalleryGridAdapter
-    protected var isGalleryMode = false
-    protected var startedInGalleryMode = false
     protected open val isGallerySupported: Boolean get() = if (::mediaStrategy.isInitialized) mediaStrategy.isGallerySupported else true
-    private var galleryCollectJob: Job? = null
+    private var imagesCollectJob: Job? = null
 
     var isMotionPhotoAutoPlay = true
     protected var hasAutoPlayedPosition = -1
@@ -256,16 +238,7 @@ open class ImageViewerFragment : Fragment() {
 
     private val backPressedCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
-            if (isGalleryMode) {
-                if (::galleryAdapter.isInitialized && galleryAdapter.isSelectionMode) {
-                    galleryAdapter.setSelectionMode(false)
-                    updateGallerySelectionUI(0)
-                } else if (startedInGalleryMode) {
-                    findNavController().navigateUp()
-                } else {
-                    exitGalleryMode()
-                }
-            } else if (binding.lutListContainer?.visibility == View.VISIBLE) {
+            if (binding.lutListContainer?.visibility == View.VISIBLE) {
                 binding.lutListContainer?.visibility = View.GONE
                 binding.touchOverlay.visibility = View.GONE
                 updateBackPressedCallbackState()
@@ -273,6 +246,9 @@ open class ImageViewerFragment : Fragment() {
                 exitEditMode(apply = false)
             } else if (isAdjusted) {
                 showDiscardChangesDialog()
+            } else {
+                isEnabled = false
+                findNavController().navigateUp()
             }
         }
     }
@@ -297,13 +273,13 @@ open class ImageViewerFragment : Fragment() {
         lutManager = top.maary.darkbag.utils.LutManager(requireContext())
         setupEdgeToEdge()
         setupToolbar()
-        setupGalleryView()
+        binding.btnGalleryPill.setOnClickListener {
+            openDarkroomGallery()
+        }
 
         if (savedInstanceState == null && args.startInGalleryMode) {
-            startedInGalleryMode = true
-            enterGalleryMode(targetPosition = -1, animated = false)
-        } else if (savedInstanceState != null) {
-            startedInGalleryMode = savedInstanceState.getBoolean("startedInGalleryMode", false)
+            openDarkroomGallery()
+            return
         }
 
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, backPressedCallback)
@@ -317,14 +293,9 @@ open class ImageViewerFragment : Fragment() {
 
         childFragmentManager.setFragmentResultListener(DarkbagBatchDeleteSheet.REQUEST_KEY, viewLifecycleOwner) { _, bundle ->
             val mode = bundle.getInt(DarkbagBatchDeleteSheet.BUNDLE_KEY_DELETE_MODE, 0)
-            val selectedItems = if (::galleryAdapter.isInitialized) galleryAdapter.getSelectedItems() else emptyList()
-            if (selectedItems.isNotEmpty()) {
-                deleteBatchImages(selectedItems, mode)
-            } else {
-                pendingSingleDeleteGroup?.let { group ->
-                    executeSingleGroupDelete(group, mode)
-                    pendingSingleDeleteGroup = null
-                }
+            pendingSingleDeleteGroup?.let { group ->
+                executeSingleGroupDelete(group, mode)
+                pendingSingleDeleteGroup = null
             }
         }
 
@@ -515,222 +486,177 @@ open class ImageViewerFragment : Fragment() {
             return
         }
 
-        if (!isGalleryMode) {
-            binding.initialLoadingIndicator.visibility = View.VISIBLE
-            binding.imagePager.visibility = View.INVISIBLE
-        } else {
-            if (::galleryAdapter.isInitialized && galleryAdapter.itemCount == 0) {
-                showGalleryLoadingIndicator()
-            }
-        }
+        binding.initialLoadingIndicator.visibility = View.VISIBLE
+        binding.imagePager.visibility = View.INVISIBLE
 
         if (forceRefresh) {
             repository.invalidateCache(clearStale = true)
         }
-        galleryViewModel.processIntent(DarkroomGalleryUserIntent.LoadImages(targetUri))
 
         var hasNavigatedToTargetUri = false
 
-        galleryCollectJob?.cancel()
-        galleryCollectJob = lifecycleScope.launch {
+        imagesCollectJob?.cancel()
+        imagesCollectJob = lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                galleryViewModel.uiState.collect { state ->
-                    val groups = state.items
-                    if (state.isLoading && groups.isEmpty()) {
-                        return@collect
-                    }
-                    if (groups.isEmpty() && !state.isLoading) {
-                        hideGalleryLoadingIndicator()
-                        hideGalleryDeletingIndicator()
-                        if (isGalleryMode) {
-                            exitGalleryMode()
-                        }
+                repository.getGroupedImagesFlow(targetUri).collect { groups ->
+                    if (groups.isEmpty()) {
                         findNavController().navigateUp()
                         return@collect
                     }
 
-                    if (groups.isNotEmpty() || !state.isLoading) {
-                        hideGalleryLoadingIndicator()
-                    }
+                    val isFirstLoad = !::adapter.isInitialized
 
-                    if (::galleryAdapter.isInitialized) {
-                        galleryAdapter.submitList(groups) {
-                            if (_binding != null) {
-                                hideGalleryLoadingIndicator()
-                                val animator = binding.galleryRecyclerView.itemAnimator
-                                if (animator != null && animator.isRunning) {
-                                    animator.isRunning {
-                                        hideGalleryDeletingIndicator()
-                                        if (_binding != null) {
-                                            binding.galleryRecyclerView.isEnabled = true
-                                        }
-                                    }
-                                } else {
-                                    hideGalleryDeletingIndicator()
-                                    if (_binding != null) {
-                                        binding.galleryRecyclerView.isEnabled = true
-                                    }
-                                }
-                            }
+                    val targetBaseName = targetUri?.let { top.maary.darkbag.utils.ImageUtils.getBaseName(it) }
+                    val targetPos = if (args.targetPosition >= 0 && isFirstLoad) {
+                        args.targetPosition
+                    } else if (targetUri != null) {
+                        val pos = groups.indexOfFirst {
+                            (targetBaseName != null && it.baseName == targetBaseName) ||
+                                    it.rawVideoUri?.toString() == targetUri ||
+                                    it.mp4VideoUri?.toString() == targetUri ||
+                                    it.jpgUri?.toString() == targetUri ||
+                                    it.dngUri?.toString() == targetUri ||
+                                    it.dngUri1?.toString() == targetUri ||
+                                    it.dngUri2?.toString() == targetUri ||
+                                    it.derivativeJpgUris.any { u -> u.toString() == targetUri } ||
+                                    it.derivativeMp4Uris.any { u -> u.toString() == targetUri } ||
+                                    it.multiJpgUris.any { u -> u.toString() == targetUri } ||
+                                    it.multiDngUris.any { u -> u.toString() == targetUri }
                         }
-                        galleryAdapter.syncSelection(state.selectedKeys, state.isSelectionMode)
-                        updateGallerySelectionUI(state)
-                    }
-
-                val isFirstLoad = !::adapter.isInitialized
-
-                val targetBaseName = targetUri?.let { top.maary.darkbag.utils.ImageUtils.getBaseName(it) }
-                val targetPos = if (targetUri != null) {
-                    val pos = groups.indexOfFirst {
-                        (targetBaseName != null && it.baseName == targetBaseName) ||
-                                it.rawVideoUri?.toString() == targetUri ||
-                                it.mp4VideoUri?.toString() == targetUri ||
-                                it.jpgUri?.toString() == targetUri ||
-                                it.dngUri?.toString() == targetUri ||
-                                it.dngUri1?.toString() == targetUri ||
-                                it.dngUri2?.toString() == targetUri ||
-                                it.derivativeJpgUris.any { u -> u.toString() == targetUri } ||
-                                it.derivativeMp4Uris.any { u -> u.toString() == targetUri } ||
-                                it.multiJpgUris.any { u -> u.toString() == targetUri } ||
-                                it.multiDngUris.any { u -> u.toString() == targetUri }
-                    }
-                    if (pos != -1) pos else {
-                        groups.indexOfFirst { it.baseName.isNotEmpty() && targetUri.contains(it.baseName) }
-                    }
-                } else -1
-
-                if (isGalleryMode && isFirstLoad) {
-                    val scrollPos = if (targetPos != -1) targetPos else 0
-                    if (scrollPos in groups.indices) {
-                        binding.galleryRecyclerView.scrollToPosition(scrollPos)
-                    }
-                }
-
-                if (isFirstLoad) {
-                    adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
-                        isMotionPhotoAutoPlay = this@ImageViewerFragment.isMotionPhotoAutoPlay
-                        onImageTapped = { toggleUi() }
-                        onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
-                        onLongPressStarted = { handleLongPressStarted(it) }
-                        onLongPressEnded = { handleLongPressEnded(it) }
-                        onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
-                        onPinchToOverview = { enterGalleryMode() }
-                        onMultiCameraLensChanged = { _, _ ->
-                            updateSplitButtons()
-                            updateToolbarIcon()
-                            updateControlsVisibility()
+                        if (pos != -1) pos else {
+                            groups.indexOfFirst { it.baseName.isNotEmpty() && targetUri.contains(it.baseName) }
                         }
-                        onFormatChanged = { _, _ ->
-                            updateControlsVisibility()
-                        }
-                        onDerivativeVersionChanged = { _, _ ->
-                            updateControlsVisibility()
-                        }
-                        onCinemaDngFrameSelected = { group, index, uri ->
-                            val currentPosition = binding.imagePager.currentItem
-                            if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
-                                currentCinemaDngFrame = Pair(index, uri)
-                                binding.filmstripBentoSeekbar?.setProgress(index, group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: 1)
-                            }
-                        }
-                        onVideoPlaybackStateChanged = { position, isPlaying, currentMs, totalMs ->
-                            if (_binding != null && ::adapter.isInitialized && position == binding.imagePager.currentItem) {
-                                updateVideoPlaybackButton(isPlaying, currentMs, totalMs)
-                            }
-                        }
-                        setFormatSwitcherPersistentHidden(isAdjusted)
-                        onCurrentListChanged = { previousList, currentList ->
-                            val currentIndex = binding.imagePager.currentItem
-                            updateGalleryPill(currentIndex, currentList.size)
-                            if (currentIndex in currentList.indices) {
-                                val currentGroup = currentList[currentIndex]
-                                val prevGroup = previousList.getOrNull(currentIndex)
+                    } else -1
 
-                                if ((prevGroup == null || !prevGroup.metadataLoaded) && currentGroup.metadataLoaded) {
-                                    if (currentGroup.editConfig != null) {
-                                        prepareEditConfig(currentGroup)
-                                    }
-                                }
-
+                    if (isFirstLoad) {
+                        adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
+                            isMotionPhotoAutoPlay = this@ImageViewerFragment.isMotionPhotoAutoPlay
+                            onImageTapped = { toggleUi() }
+                            onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
+                            onLongPressStarted = { handleLongPressStarted(it) }
+                            onLongPressEnded = { handleLongPressEnded(it) }
+                            onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
+                            onPinchToOverview = { openDarkroomGallery() }
+                            onMultiCameraLensChanged = { _, _ ->
+                                updateSplitButtons()
+                                updateToolbarIcon()
                                 updateControlsVisibility()
                             }
-                        }
-                    }
-                    binding.imagePager.adapter = adapter
-
-                    val initialIndex = if (targetPos != -1) targetPos else 0
-                    if (targetPos != -1) {
-                        hasNavigatedToTargetUri = true
-                    }
-                    binding.imagePager.setCurrentItem(initialIndex, false)
-
-                    // Load metadata for the initial image asynchronously without blocking collector
-                    val initialGroup = groups.getOrNull(initialIndex)
-                    if (initialGroup != null) {
-                        if (!initialGroup.metadataLoaded) {
-                            lifecycleScope.launch(Dispatchers.IO) {
-                                val updatedGroup = repository.loadMetadata(initialGroup)
-                                withContext(Dispatchers.Main) {
-                                    if (_binding == null || !isAdded || !::adapter.isInitialized) return@withContext
-                                    prepareEditConfig(updatedGroup)
-                                    safeUpdateSingleGroup(updatedGroup)
-                                    if (binding.imagePager.currentItem == initialIndex && !isAdjusted) {
-                                        updateControlsVisibility()
-                                    }
-                                    if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex && binding.imagePager.currentItem == initialIndex) {
-                                        hasAutoPlayedPosition = initialIndex
-                                        adapter.playMotionVideoForPosition(initialIndex)
-                                    }
+                            onFormatChanged = { _, _ ->
+                                updateControlsVisibility()
+                            }
+                            onDerivativeVersionChanged = { _, _ ->
+                                updateControlsVisibility()
+                            }
+                            onCinemaDngFrameSelected = { group, index, uri ->
+                                val currentPosition = binding.imagePager.currentItem
+                                if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
+                                    currentCinemaDngFrame = Pair(index, uri)
+                                    binding.filmstripBentoSeekbar?.setProgress(index, group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: 1)
                                 }
                             }
-                        } else {
-                            prepareEditConfig(initialGroup)
-                            if (!isAdjusted && isMotionPhotoAutoPlay && initialGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex) {
-                                hasAutoPlayedPosition = initialIndex
-                                adapter.playMotionVideoForPosition(initialIndex)
+                            onVideoPlaybackStateChanged = { position, isPlaying, currentMs, totalMs ->
+                                if (_binding != null && ::adapter.isInitialized && position == binding.imagePager.currentItem) {
+                                    updateVideoPlaybackButton(isPlaying, currentMs, totalMs)
+                                }
+                            }
+                            setFormatSwitcherPersistentHidden(isAdjusted)
+                            onCurrentListChanged = { previousList, currentList ->
+                                val currentIndex = binding.imagePager.currentItem
+                                updateGalleryPill(currentIndex, currentList.size)
+                                if (currentIndex in currentList.indices) {
+                                    val currentGroup = currentList[currentIndex]
+                                    val prevGroup = previousList.getOrNull(currentIndex)
+
+                                    if ((prevGroup == null || !prevGroup.metadataLoaded) && currentGroup.metadataLoaded) {
+                                        if (currentGroup.editConfig != null) {
+                                            prepareEditConfig(currentGroup)
+                                        }
+                                    }
+
+                                    updateControlsVisibility()
+                                }
                             }
                         }
-                    }
+                        binding.imagePager.adapter = adapter
 
-                    binding.imagePager.isUserInputEnabled = !isAdjusted
-                    setupActionButtons()
-                    updateControlsVisibility()
-                    updateGalleryPill(binding.imagePager.currentItem, groups.size)
-                    preloadAdjacentMetadata(binding.imagePager.currentItem)
+                        val initialIndex = if (targetPos != -1) targetPos else 0
+                        if (targetPos != -1) {
+                            hasNavigatedToTargetUri = true
+                        }
+                        binding.imagePager.setCurrentItem(initialIndex, false)
+                        if (args.targetLensTag != null && initialIndex in groups.indices) {
+                            val lenses = adapter.getMultiCameraLenses(groups[initialIndex])
+                            val lensIndex = lenses.indexOfFirst { it.lensTag == args.targetLensTag }
+                            if (lensIndex != -1) {
+                                adapter.setSelectedLensIndex(initialIndex, lensIndex)
+                            }
+                        }
 
-                    if (!isGalleryMode) {
-                        binding.imagePager.visibility = View.VISIBLE
-                        binding.initialLoadingIndicator.visibility = View.GONE
-                    }
-                } else {
-                    adapter.updateGroups(groups)
-                    if (targetUri != null && !hasNavigatedToTargetUri && targetPos != -1) {
-                        hasNavigatedToTargetUri = true
-                        binding.imagePager.setCurrentItem(targetPos, false)
-                    }
-                    updateGalleryPill(binding.imagePager.currentItem, groups.size)
-                    preloadAdjacentMetadata(binding.imagePager.currentItem)
-                    if (!isGalleryMode) {
-                        binding.imagePager.visibility = View.VISIBLE
-                        binding.initialLoadingIndicator.visibility = View.GONE
-                    }
-
-                    val currentIndex = binding.imagePager.currentItem
-                    if (currentIndex in groups.indices) {
-                        val currentGroup = groups[currentIndex]
-                        if (!currentGroup.metadataLoaded) {
-                            lifecycleScope.launch(Dispatchers.IO) {
-                                val updatedGroup = repository.loadMetadata(currentGroup)
-                                withContext(Dispatchers.Main) {
-                                    if (_binding == null || !isAdded || !::adapter.isInitialized) return@withContext
-                                    safeUpdateSingleGroup(updatedGroup)
-                                    val index = adapter.getGroups().indexOfFirst { it.baseName == updatedGroup.baseName }
-                                    if (index == binding.imagePager.currentItem && !isAdjusted) {
-                                        updateControlsVisibility()
+                        // Load metadata for the initial image asynchronously without blocking collector
+                        val initialGroup = groups.getOrNull(initialIndex)
+                        if (initialGroup != null) {
+                            if (!initialGroup.metadataLoaded) {
+                                lifecycleScope.launch(Dispatchers.IO) {
+                                    val updatedGroup = repository.loadMetadata(initialGroup)
+                                    withContext(Dispatchers.Main) {
+                                        if (_binding == null || !isAdded || !::adapter.isInitialized) return@withContext
+                                        prepareEditConfig(updatedGroup)
+                                        safeUpdateSingleGroup(updatedGroup)
+                                        if (binding.imagePager.currentItem == initialIndex && !isAdjusted) {
+                                            updateControlsVisibility()
+                                        }
+                                        if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex && binding.imagePager.currentItem == initialIndex) {
+                                            hasAutoPlayedPosition = initialIndex
+                                            adapter.playMotionVideoForPosition(initialIndex)
+                                        }
                                     }
-                                    if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != index && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == index) {
-                                        hasAutoPlayedPosition = index
-                                        adapter.playMotionVideoForPosition(index)
+                                }
+                            } else {
+                                prepareEditConfig(initialGroup)
+                                if (!isAdjusted && isMotionPhotoAutoPlay && initialGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex) {
+                                    hasAutoPlayedPosition = initialIndex
+                                    adapter.playMotionVideoForPosition(initialIndex)
+                                }
+                            }
+                        }
+
+                        binding.imagePager.isUserInputEnabled = !isAdjusted
+                        setupActionButtons()
+                        updateControlsVisibility()
+                        updateGalleryPill(binding.imagePager.currentItem, groups.size)
+                        preloadAdjacentMetadata(binding.imagePager.currentItem)
+
+                        binding.imagePager.visibility = View.VISIBLE
+                        binding.initialLoadingIndicator.visibility = View.GONE
+                    } else {
+                        adapter.updateGroups(groups)
+                        if (targetUri != null && !hasNavigatedToTargetUri && targetPos != -1) {
+                            hasNavigatedToTargetUri = true
+                            binding.imagePager.setCurrentItem(targetPos, false)
+                        }
+                        updateGalleryPill(binding.imagePager.currentItem, groups.size)
+                        preloadAdjacentMetadata(binding.imagePager.currentItem)
+                        binding.imagePager.visibility = View.VISIBLE
+                        binding.initialLoadingIndicator.visibility = View.GONE
+
+                        val currentIndex = binding.imagePager.currentItem
+                        if (currentIndex in groups.indices) {
+                            val currentGroup = groups[currentIndex]
+                            if (!currentGroup.metadataLoaded) {
+                                lifecycleScope.launch(Dispatchers.IO) {
+                                    val updatedGroup = repository.loadMetadata(currentGroup)
+                                    withContext(Dispatchers.Main) {
+                                        if (_binding == null || !isAdded || !::adapter.isInitialized) return@withContext
+                                        safeUpdateSingleGroup(updatedGroup)
+                                        val index = adapter.getGroups().indexOfFirst { it.baseName == updatedGroup.baseName }
+                                        if (index == binding.imagePager.currentItem && !isAdjusted) {
+                                            updateControlsVisibility()
+                                        }
+                                        if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != index && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == index) {
+                                            hasAutoPlayedPosition = index
+                                            adapter.playMotionVideoForPosition(index)
+                                        }
                                     }
                                 }
                             }
@@ -762,7 +688,7 @@ open class ImageViewerFragment : Fragment() {
         val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
         val canEdit = ((currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial) || isRawVideo
 
-        val showDeck = isUiVisible && !isEditingAdjustments && !isGalleryMode
+        val showDeck = isUiVisible && !isEditingAdjustments
         binding.viewerBentoDeck.visibility = if (showDeck) View.VISIBLE else View.GONE
         binding.btnLogCurve.isEnabled = canEdit
         binding.btnLogCurve.isClickable = canEdit
@@ -2405,7 +2331,8 @@ open class ImageViewerFragment : Fragment() {
                         }
                     } else {
                         val targetUriStr = if (isReplacement) currentGroup.jpgUri?.toString() else null
-                        galleryViewModel.processIntent(DarkroomGalleryUserIntent.LoadImages(targetUriStr))
+                        repository.invalidateCache(clearStale = true)
+                        loadImages(targetUriStr, forceRefresh = true)
                         binding.root.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
                     }
                 }
@@ -3005,14 +2932,7 @@ open class ImageViewerFragment : Fragment() {
         updateSplitButtons()
         updateToolbarIcon()
         binding.btnBack.setOnClickListener {
-            if (isGalleryMode) {
-                if (::galleryAdapter.isInitialized && galleryAdapter.isSelectionMode) {
-                    galleryAdapter.setSelectionMode(false)
-                    updateGallerySelectionUI(0)
-                } else {
-                    exitGalleryMode()
-                }
-            } else if (binding.lutListContainer?.visibility == View.VISIBLE) {
+            if (binding.lutListContainer?.visibility == View.VISIBLE) {
                 binding.lutListContainer?.visibility = View.GONE
                 binding.touchOverlay.visibility = View.GONE
                 updateBackPressedCallbackState()
@@ -3026,190 +2946,17 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
-    protected fun setupGalleryView() {
+    private fun openDarkroomGallery() {
         if (!isGallerySupported) return
-        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        galleryViewModel.processIntent(DarkroomGalleryUserIntent.SyncOrientation(isLandscape))
-        val currentLayout = galleryViewModel.uiState.value
-
-        galleryAdapter = DarkbagGalleryGridAdapter(requireContext(), repository).apply {
-            columnCount = currentLayout.columnCount
-            isWaterfallMode = currentLayout.isWaterfallMode
-            onItemClick = { group, pos, lensTag ->
-                if (galleryViewModel.uiState.value.isSelectionMode) {
-                    if (lensTag != null) {
-                        val lens = group.multiCameraLenses.find { it.lensTag == lensTag }
-                        if (lens != null) {
-                            galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleLensSelection(group, lens))
-                        }
-                    } else {
-                        galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSingleSelection(group))
-                    }
-                } else {
-                    startedInGalleryMode = false
-                    exitGalleryMode(pos, lensTag)
-                }
-            }
-            onItemLongClick = { group, _, lensTag ->
-                if (lensTag != null) {
-                    val lens = group.multiCameraLenses.find { it.lensTag == lensTag }
-                    if (lens != null) {
-                        galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleLensSelection(group, lens))
-                    }
-                } else {
-                    galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSingleSelection(group))
-                }
-            }
-            onSelectionChanged = { count ->
-                updateGallerySelectionUI(count)
-            }
-        }
-
-        binding.galleryRecyclerView.adapter = galleryAdapter
-        binding.galleryRecyclerView.setHasFixedSize(true)
-        binding.galleryRecyclerView.setItemViewCacheSize(20)
-        (binding.galleryRecyclerView.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)?.apply {
-            removeDuration = 250
-            moveDuration = 250
-        }
-        applyGalleryLayout(currentLayout.columnCount, currentLayout.isWaterfallMode)
-
-        binding.btnGalleryPill.setOnClickListener {
-            enterGalleryMode()
-        }
-
-        // Header Action: Back (Normal) / Close Selection (Selection)
-        binding.btnGalleryHeaderAction.setOnClickListener {
-            if (galleryViewModel.uiState.value.isSelectionMode) {
-                galleryViewModel.processIntent(DarkroomGalleryUserIntent.ClearSelection)
-            } else if (startedInGalleryMode) {
-                findNavController().navigateUp()
-            } else {
-                exitGalleryMode()
-            }
-        }
-
-        // Header Info
-        binding.btnGalleryHeaderInfo.setOnClickListener {
-            showAlbumInfoSheet()
-        }
-
-        // Header Select All / Deselect All Toggle (Selection Mode)
-        binding.btnGalleryHeaderSelectAll.setOnClickListener {
-            galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSelectAll)
-        }
-
-        // Normal Dock Actions
-        binding.btnGalleryDockSelectAll.setOnClickListener {
-            galleryViewModel.processIntent(DarkroomGalleryUserIntent.SetSelectionMode(true))
-            galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSelectAll)
-        }
-
-        binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_cols, currentLayout.columnCount)
-        binding.btnGalleryDockLayout.setOnClickListener {
-            cycleGalleryLayout()
-        }
-
-        binding.btnGalleryDockImport.setOnClickListener {
-            importGalleryMediaLauncher.launch("*/*")
-        }
-
-        // Selection Dock Actions
-        binding.btnGalleryDockMerge.setOnClickListener {
-            val selected = galleryViewModel.uiState.value.getSelectedItems()
-            if (selected.size == 2) {
-                performMergeCollage(selected)
-            } else {
-                Toast.makeText(requireContext(), R.string.gallery_merge_need_two, Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        binding.btnGalleryDockBatchGrade.setOnClickListener {
-            val selected = galleryViewModel.uiState.value.getSelectedItems()
-            if (selected.isEmpty()) return@setOnClickListener
-            if (checkHomogeneity(selected)) {
-                performBatchGrade(selected)
-            } else {
-                Toast.makeText(requireContext(), R.string.gallery_batch_grade_mismatch, Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        binding.btnGalleryDockShare.setOnClickListener {
-            val selected = galleryViewModel.uiState.value.getSelectedItems()
-            val uris = selected.mapNotNull { item ->
-                if (item.specificLens != null) {
-                    item.specificLens.jpgUri ?: item.specificLens.dngUri
-                } else {
-                    val g = item.group
-                    g.firstAvailableUri ?: g.jpgUri ?: g.mp4VideoUri ?: g.cinemaDngFirstFrameUri ?: g.dngUri
-                }
-            }
-            if (uris.isNotEmpty()) {
-                shareImages(uris)
-            }
-        }
-
-        binding.btnGalleryDockDelete.setOnClickListener {
-            val selected = galleryViewModel.uiState.value.getSelectedItems()
-            if (selected.isNotEmpty()) {
-                showBatchDeleteDialog(selected)
-            }
-        }
-    }
-
-    private fun createGridLayoutManager(cols: Int): GridLayoutManager {
-        val lm = GridLayoutManager(requireContext(), cols)
-        lm.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
-            override fun getSpanSize(position: Int): Int {
-                if (position in 0 until galleryAdapter.itemCount) {
-                    val item = galleryAdapter.getItem(position)
-                    if (item.isMultiCamera && item.multiCameraLenses.isNotEmpty()) {
-                        return lm.spanCount
-                    }
-                }
-                return 1
-            }
-        }
-        return lm
-    }
-
-    private fun applyGalleryLayout(columnCount: Int, isWaterfallMode: Boolean) {
-        if (!::galleryAdapter.isInitialized) return
-        galleryAdapter.columnCount = columnCount
-        galleryAdapter.isWaterfallMode = isWaterfallMode
-        if (isWaterfallMode) {
-            val spanCount = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 3 else 2
-            val staggeredLm = androidx.recyclerview.widget.StaggeredGridLayoutManager(spanCount, androidx.recyclerview.widget.StaggeredGridLayoutManager.VERTICAL).apply {
-                gapStrategy = androidx.recyclerview.widget.StaggeredGridLayoutManager.GAP_HANDLING_NONE
-            }
-            binding.galleryRecyclerView.layoutManager = staggeredLm
-            binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_waterfall)
-        } else {
-            binding.galleryRecyclerView.layoutManager = createGridLayoutManager(columnCount)
-            binding.btnGalleryDockLayout.text = if (columnCount == 1) {
-                getString(R.string.gallery_layout_1_col)
-            } else {
-                getString(R.string.gallery_layout_cols, columnCount)
-            }
-        }
-    }
-
-    private fun cycleGalleryLayout() {
-        if (!::galleryAdapter.isInitialized) return
-        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        galleryViewModel.processIntent(DarkroomGalleryUserIntent.CycleLayout(isLandscape))
-        val next = galleryViewModel.uiState.value
-        applyGalleryLayout(next.columnCount, next.isWaterfallMode)
-    }
-
-    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
-        super.onConfigurationChanged(newConfig)
-        if (isGallerySupported && ::galleryAdapter.isInitialized) {
-            val isLandscape = newConfig.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-            galleryViewModel.processIntent(DarkroomGalleryUserIntent.SyncOrientation(isLandscape))
-            val currentLayout = galleryViewModel.uiState.value
-            applyGalleryLayout(currentLayout.columnCount, currentLayout.isWaterfallMode)
-        }
+        val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0) {
+            val pos = binding.imagePager.currentItem
+            if (pos in adapter.getGroups().indices) adapter.getGroup(pos) else null
+        } else null
+        val uri = currentGroup?.firstAvailableUri ?: currentGroup?.jpgUri ?: currentGroup?.dngUri
+        val action = ImageViewerFragmentDirections.actionImageViewerToDarkroomGallery(
+            initialUri = uri?.toString()
+        )
+        findNavController().navigate(action)
     }
 
     protected fun updateGalleryPill(position: Int, totalCount: Int) {
@@ -3220,571 +2967,16 @@ open class ImageViewerFragment : Fragment() {
             val posStr = if (totalCount >= 10) String.format("%02d", currentPos) else "$currentPos"
             val countStr = if (totalCount >= 10) String.format("%02d", totalCount) else "$totalCount"
             binding.btnGalleryPill.text = "▦ $posStr / $countStr"
-            binding.btnGalleryPill.visibility = if (isUiVisible && !isEditingAdjustments && !isGalleryMode) View.VISIBLE else View.GONE
-        }
-    }
-
-    fun enterGalleryMode(targetPosition: Int = binding.imagePager.currentItem, animated: Boolean = true) {
-        if (!isGallerySupported) return
-        if (isEditingAdjustments || isAdjusted) return
-        if (isGalleryMode) return
-        isGalleryMode = true
-        isUiVisible = false
-
-        if (::adapter.isInitialized) {
-            adapter.stopAllMotionVideos()
-        }
-
-        binding.galleryContainer.visibility = View.VISIBLE
-        if (animated) {
-            binding.galleryContainer.alpha = 0f
-            binding.galleryContainer.animate().alpha(1f).setDuration(200).start()
-        } else {
-            binding.galleryContainer.alpha = 1f
-        }
-
-        binding.topBarContainer.visibility = View.GONE
-        binding.viewerBentoDeck.visibility = View.GONE
-        binding.imagePager.visibility = View.INVISIBLE
-
-        val currentCount = if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0
-        binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
-        binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_groups_count, currentCount)
-        updateGallerySelectionUI(0)
-
-        if (currentCount == 0) {
-            showGalleryLoadingIndicator()
-        } else {
-            hideGalleryLoadingIndicator()
-        }
-
-        if (targetPosition in 0 until (if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0)) {
-            binding.galleryRecyclerView.post {
-                if (_binding != null) {
-                    binding.galleryRecyclerView.scrollToPosition(targetPosition)
-                }
-            }
-        }
-
-        updateBackPressedCallbackState()
-    }
-
-    fun exitGalleryMode(targetPosition: Int = -1, targetLensTag: String? = null) {
-        if (!isGalleryMode) return
-        isGalleryMode = false
-        startedInGalleryMode = false
-        hideGalleryDeletingIndicator()
-        hideGalleryLoadingIndicator()
-        binding.galleryRecyclerView.isEnabled = true
-
-        galleryViewModel.processIntent(DarkroomGalleryUserIntent.ClearSelection)
-        if (::galleryAdapter.isInitialized) {
-            galleryAdapter.setSelectionMode(false)
-        }
-
-        binding.galleryContainer.animate().alpha(0f).setDuration(150).withEndAction {
-            binding.galleryContainer.visibility = View.GONE
-        }.start()
-
-        binding.imagePager.visibility = View.VISIBLE
-        isUiVisible = false
-        showUi()
-
-        if (targetPosition in 0 until (if (::adapter.isInitialized) adapter.itemCount else 0)) {
-            binding.imagePager.setCurrentItem(targetPosition, false)
-            if (targetLensTag != null) {
-                val group = adapter.getGroup(targetPosition)
-                val lenses = adapter.getMultiCameraLenses(group)
-                val lensIndex = lenses.indexOfFirst { it.lensTag == targetLensTag }
-                if (lensIndex != -1) {
-                    adapter.setSelectedLensIndex(targetPosition, lensIndex)
-                }
-            }
-        }
-
-        updateBackPressedCallbackState()
-    }
-
-    protected fun updateGallerySelectionUI(state: DarkroomGalleryUiState) {
-        if (!::galleryAdapter.isInitialized) return
-        if (state.isSelectionMode) {
-            binding.galleryHeaderCard.setContainerRole(state.containerRole, animated = true)
-            binding.btnGalleryHeaderAction.setIconResource(R.drawable.ic_close)
-            binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
-            binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_selected_count, state.selectedCount)
-            binding.btnGalleryHeaderInfo.visibility = View.GONE
-            binding.btnGalleryHeaderSelectAll.visibility = View.VISIBLE
-
-            binding.btnGalleryHeaderSelectAll.setText(if (state.isAllSelected) R.string.gallery_deselect_all else R.string.gallery_select_all)
-
-            binding.galleryBottomBar.visibility = View.VISIBLE
-            binding.galleryBottomBar.setContainerRole(state.containerRole, animated = true)
-            binding.layoutGalleryNormalActions.visibility = View.GONE
-            binding.layoutGallerySelectionActions.visibility = View.VISIBLE
-
-            val canMerge = state.selectedCount == 2
-            binding.btnGalleryDockMerge.isEnabled = canMerge
-            binding.btnGalleryDockMerge.alpha = if (canMerge) 1.0f else 0.4f
-
-            val selected = state.getSelectedItems()
-            val canGrade = selected.isNotEmpty() && checkHomogeneity(selected)
-            binding.btnGalleryDockBatchGrade.isEnabled = canGrade
-            binding.btnGalleryDockBatchGrade.alpha = if (canGrade) 1.0f else 0.4f
-
-            val hasSelection = state.selectedCount > 0
-            binding.btnGalleryDockShare.isEnabled = hasSelection
-            binding.btnGalleryDockShare.alpha = if (hasSelection) 1.0f else 0.4f
-
-            binding.btnGalleryDockDelete.isEnabled = hasSelection
-            binding.btnGalleryDockDelete.alpha = if (hasSelection) 1.0f else 0.4f
-        } else {
-            binding.galleryHeaderCard.setContainerRole(state.containerRole, animated = true)
-            binding.btnGalleryHeaderAction.setIconResource(R.drawable.ic_back)
-            val count = state.items.size
-            binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
-            binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_groups_count, count)
-            binding.btnGalleryHeaderInfo.visibility = View.VISIBLE
-            binding.btnGalleryHeaderSelectAll.visibility = View.GONE
-
-            binding.galleryBottomBar.visibility = View.VISIBLE
-            binding.galleryBottomBar.setContainerRole(state.containerRole, animated = true)
-            binding.layoutGalleryNormalActions.visibility = View.VISIBLE
-            binding.layoutGallerySelectionActions.visibility = View.GONE
-        }
-    }
-
-    protected fun updateGallerySelectionUI(selectedCount: Int) {
-        if (!::galleryAdapter.isInitialized) return
-        updateGallerySelectionUI(galleryViewModel.uiState.value)
-    }
-
-    private fun showAlbumInfoSheet() {
-        if (!isAdded || isStateSaved) return
-        if (childFragmentManager.isStateSaved || childFragmentManager.findFragmentByTag(GalleryAlbumInfoSheet.TAG) != null) return
-
-        val items = if (::galleryAdapter.isInitialized) galleryAdapter.currentList else emptyList()
-        val stats = top.maary.darkbag.repository.AlbumStatsCache.getOrCompute(items)
-
-        GalleryAlbumInfoSheet.newInstance(stats.totalCount, stats.totalSizeBytes, stats.lastCaptureTime)
-            .show(childFragmentManager, GalleryAlbumInfoSheet.TAG)
-    }
-
-    internal fun getGalleryItems(): List<ImageGroup> =
-        if (::galleryAdapter.isInitialized) galleryAdapter.currentList else emptyList()
-
-    internal fun checkHomogeneity(selected: List<GallerySelectedItem>): Boolean =
-        top.maary.darkbag.utils.GalleryHomogeneityChecker.isHomogeneous(selected)
-
-    private fun performMergeCollage(selected: List<GallerySelectedItem>) {
-        if (selected.size != 2) return
-        val options = listOf(
-            getString(R.string.collage_layout_sbs),
-            getString(R.string.collage_layout_tb)
-        )
-        top.maary.darkbag.ui.BentoSelectionBottomSheet.show(
-            fragmentManager = childFragmentManager,
-            title = getString(R.string.gallery_action_merge),
-            options = options,
-            selectedIndex = 0,
-            badge = "COLLAGE"
-        ) { which ->
-            val isSideBySide = (which == 0)
-            val ctx = context ?: return@show
-
-            val item1 = selected[0]
-            val item2 = selected[1]
-            val uri1 = item1.specificLens?.jpgUri ?: item1.group.firstAvailableUri ?: item1.group.jpgUri
-            val uri2 = item2.specificLens?.jpgUri ?: item2.group.firstAvailableUri ?: item2.group.jpgUri
-
-            if (uri1 == null || uri2 == null) {
-                Toast.makeText(ctx, R.string.gallery_collage_resolve_failed, Toast.LENGTH_SHORT).show()
-                return@show
-            }
-
-            showGalleryDeletingIndicator(2)
-            binding.galleryRecyclerView.isEnabled = false
-
-            lifecycleScope.launch {
-                val insertedUri = top.maary.darkbag.utils.GalleryCollageHelper.createAndSaveCollage(
-                    context = ctx,
-                    uri1 = uri1,
-                    uri2 = uri2,
-                    isSideBySide = isSideBySide
-                )
-
-                hideGalleryDeletingIndicator()
-                if (_binding != null) {
-                    binding.galleryRecyclerView.isEnabled = true
-                }
-
-                if (insertedUri != null) {
-                    repository.invalidateCache()
-                    loadImages(forceRefresh = true)
-                    galleryViewModel.processIntent(DarkroomGalleryUserIntent.ClearSelection)
-                    galleryAdapter.setSelectionMode(false)
-                    updateGallerySelectionUI(0)
-                    Toast.makeText(ctx, R.string.gallery_merge_success, Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(ctx, R.string.gallery_collage_create_failed, Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-    }
-
-    private fun performBatchGrade(selected: List<GallerySelectedItem>) {
-        val lutManager = top.maary.darkbag.utils.LutManager(requireContext())
-        top.maary.darkbag.ui.ColorRecipeBottomSheet.show(requireContext(), lutManager) { selectedLog, selectedLut ->
-            val ctx = context ?: return@show
-            val appContext = ctx.applicationContext
-            showGalleryDeletingIndicator(selected.size)
-            binding.galleryRecyclerView.isEnabled = false
-
-            lifecycleScope.launch {
-                val gradedCount = withContext(Dispatchers.IO) {
-                    var count = 0
-                    for (item in selected) {
-                        val group = item.group
-                        val targetConfig = (group.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(
-                            log = selectedLog,
-                            lut = selectedLut ?: "None"
-                        )
-                        if (group.isRawVideo || group.rawVideoUri != null) {
-                            group.rawVideoUri?.let { rawVideoUri ->
-                                try {
-                                    appContext.contentResolver.openFileDescriptor(rawVideoUri, "rw")?.use { rwFd ->
-                                        top.maary.darkbag.rawvideo.RawVideoNative.nativeUpdateHeaderMetadata(
-                                            fd = rwFd.fd,
-                                            activeLog = targetConfig.log,
-                                            activeLut = targetConfig.lut,
-                                            exposure = targetConfig.exposure,
-                                            contrast = targetConfig.contrast,
-                                            saturation = targetConfig.saturation
-                                        )
-                                        count++
-                                    }
-                                } catch (e: Exception) {
-                                    android.util.Log.w("ImageViewerFragment", "Failed to update rawvid header for $rawVideoUri", e)
-                                }
-                            }
-                        } else {
-                            val targetUris = mutableListOf<android.net.Uri>()
-                            if (item.specificLens != null) {
-                                item.specificLens.jpgUri?.let { targetUris.add(it) }
-                            } else {
-                                group.jpgUri?.let { targetUris.add(it) }
-                                group.derivativeJpgUris.forEach { targetUris.add(it) }
-                            }
-                            for (u in targetUris.distinct()) {
-                                try {
-                                    top.maary.darkbag.utils.ImageSaver.writeMetadataToExif(appContext, u, targetConfig, null)
-                                    count++
-                                } catch (e: Exception) {
-                                    android.util.Log.w("ImageViewerFragment", "Failed to write EXIF for $u", e)
-                                }
-                            }
-                        }
-                    }
-                    count
-                }
-
-                hideGalleryDeletingIndicator()
-                if (_binding != null) {
-                    binding.galleryRecyclerView.isEnabled = true
-                }
-                repository.invalidateCache()
-                loadImages(forceRefresh = true)
-                galleryAdapter.setSelectionMode(false)
-                updateGallerySelectionUI(0)
-                Toast.makeText(requireContext(), getString(R.string.gallery_batch_grade_success, selected.size), Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun importMediaFiles(uris: List<Uri>) {
-        val ctx = context ?: return
-        val appContext = ctx.applicationContext
-        showGalleryDeletingIndicator(uris.size)
-        binding.galleryRecyclerView.isEnabled = false
-
-        lifecycleScope.launch {
-            val importedCount = withContext(Dispatchers.IO) {
-                var count = 0
-                for (uri in uris) {
-                    try {
-                        val mime = appContext.contentResolver.getType(uri) ?: ""
-                        var originalName: String? = null
-                        appContext.contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                            if (cursor.moveToFirst()) {
-                                originalName = cursor.getString(0)
-                            }
-                        }
-                        val isVideo = mime.startsWith("video/") || originalName?.endsWith(".mp4", ignoreCase = true) == true
-                        val isDng = mime == "image/x-adobe-dng" || originalName?.endsWith(".dng", ignoreCase = true) == true
-
-                        if (originalName.isNullOrBlank()) {
-                            originalName = when {
-                                isVideo -> "imported_${System.currentTimeMillis()}.mp4"
-                                isDng -> "imported_${System.currentTimeMillis()}.dng"
-                                else -> "imported_${System.currentTimeMillis()}.jpg"
-                            }
-                        }
-                        val cleanName = java.io.File(originalName!!).name
-                        val targetFileName = if (cleanName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) {
-                            cleanName
-                        } else {
-                            "${top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX}${cleanName}"
-                        }
-
-                        val collection = if (isVideo) {
-                            android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                        } else {
-                            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                        }
-                        val relativePath = if (isVideo) "Movies/Darkbag" else "Pictures/Darkbag"
-                        val targetMime = when {
-                            isVideo -> if (mime.startsWith("video/")) mime else "video/mp4"
-                            isDng -> "image/x-adobe-dng"
-                            mime.startsWith("image/") -> mime
-                            else -> "image/jpeg"
-                        }
-
-                        val values = android.content.ContentValues().apply {
-                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, targetFileName)
-                            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, targetMime)
-                            put(android.provider.MediaStore.MediaColumns.DATE_ADDED, System.currentTimeMillis() / 1000)
-                            put(android.provider.MediaStore.MediaColumns.DATE_MODIFIED, System.currentTimeMillis() / 1000)
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-                                put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
-                            }
-                        }
-
-                        val destUri = appContext.contentResolver.insert(collection, values)
-                        if (destUri != null) {
-                            appContext.contentResolver.openInputStream(uri)?.use { inStream ->
-                                appContext.contentResolver.openOutputStream(destUri, "wt")?.use { outStream ->
-                                    inStream.copyTo(outStream)
-                                    outStream.flush()
-                                }
-                            }
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                values.clear()
-                                values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
-                                appContext.contentResolver.update(destUri, values, null, null)
-                            }
-                            count++
-                        }
-                    } catch (e: Exception) {
-                        android.util.Log.e("ImageViewerFragment", "Failed to import file $uri", e)
-                    }
-                }
-                count
-            }
-
-            hideGalleryDeletingIndicator()
-            if (_binding != null) {
-                binding.galleryRecyclerView.isEnabled = true
-            }
-            if (importedCount > 0) {
-                repository.invalidateCache()
-                loadImages(forceRefresh = true)
-                Toast.makeText(requireContext(), getString(R.string.gallery_import_success, importedCount), Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun showBatchDeleteDialog(selectedItems: List<GallerySelectedItem>) {
-        if (selectedItems.isEmpty()) return
-        val hasAnyRaw = selectedItems.any { item ->
-            if (item.specificLens != null) {
-                item.specificLens.dngUri != null
-            } else {
-                item.group.hasMasterRaw
-            }
-        }
-        val hasAnyDerivatives = selectedItems.any { item ->
-            if (item.specificLens != null) {
-                item.specificLens.jpgUri != null
-            } else {
-                item.group.hasDerivatives
-            }
-        }
-
-        val hasAnyCinemaDng = selectedItems.any { item ->
-            val g = item.group
-            g.isCinemaDng || g.cinemaDngFolderUri != null || g.cinemaDngFirstFrameUri != null || g.cinemaDngFrameUris.isNotEmpty()
-        }
-
-        DarkbagBatchDeleteSheet.newInstance(selectedItems.size, hasAnyRaw, hasAnyDerivatives, hasAnyCinemaDng)
-            .show(childFragmentManager, DarkbagBatchDeleteSheet.TAG)
-    }
-
-    protected fun showGalleryDeletingIndicator(count: Int) {
-        if (_binding == null) return
-        binding.tvGalleryDeletingStatus?.text = if (count > 0) {
-            getString(R.string.gallery_deleting_count, count)
-        } else {
-            getString(R.string.gallery_deleting)
-        }
-        binding.galleryDeletingIndicator?.apply {
-            animate().cancel()
-            visibility = View.VISIBLE
-            alpha = 0f
-            translationY = -40f
-            animate()
-                .alpha(1f)
-                .translationY(0f)
-                .setDuration(200)
-                .start()
-        }
-    }
-
-    protected fun hideGalleryDeletingIndicator() {
-        if (_binding == null) return
-        binding.galleryDeletingIndicator?.apply {
-            animate().cancel()
-            animate()
-                .alpha(0f)
-                .translationY(-40f)
-                .setDuration(200)
-                .withEndAction {
-                    visibility = View.GONE
-                }
-                .start()
-        }
-    }
-
-    protected fun showGalleryLoadingIndicator() {
-        if (_binding == null) return
-        binding.galleryLoadingIndicator?.apply {
-            animate().cancel()
-            visibility = View.VISIBLE
-            alpha = 0f
-            scaleX = 0.9f
-            scaleY = 0.9f
-            animate()
-                .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .setDuration(180)
-                .start()
-        }
-    }
-
-    protected fun hideGalleryLoadingIndicator() {
-        if (_binding == null) return
-        binding.galleryLoadingIndicator?.apply {
-            if (visibility == View.VISIBLE) {
-                animate().cancel()
-                animate()
-                    .alpha(0f)
-                    .scaleX(0.9f)
-                    .scaleY(0.9f)
-                    .setDuration(150)
-                    .withEndAction {
-                        visibility = View.GONE
-                    }
-                    .start()
-            }
-        }
-    }
-
-    private fun deleteBatchImages(selectedItems: List<GallerySelectedItem>, deleteMode: Int) {
-        val context = context ?: return
-        showGalleryDeletingIndicator(selectedItems.size)
-        binding.galleryRecyclerView.isEnabled = false
-        binding.galleryBottomBar.visibility = View.GONE
-
-        lifecycleScope.launch {
-            val urisToDelete = mutableListOf<Uri>()
-
-            for (item in selectedItems) {
-                val group = item.group
-                val lens = item.specificLens
-                if (lens != null) {
-                    when (deleteMode) {
-                        DarkbagBatchDeleteSheet.MODE_ENTIRE_GROUP -> { // Entire group / lens
-                            lens.jpgUri?.let { urisToDelete.add(it) }
-                            lens.dngUri?.let { urisToDelete.add(it) }
-                        }
-                        DarkbagBatchDeleteSheet.MODE_RAW_ONLY -> { // RAW only
-                            lens.dngUri?.let { urisToDelete.add(it) }
-                        }
-                        DarkbagBatchDeleteSheet.MODE_DERIVATIVES_ONLY -> { // Derivatives only
-                            lens.jpgUri?.let { urisToDelete.add(it) }
-                        }
-                        DarkbagBatchDeleteSheet.MODE_CINEMADNG_ONLY -> {
-                            // Lens is photo, no CDNG sequence
-                        }
-                    }
-                } else {
-                    when (deleteMode) {
-                        DarkbagBatchDeleteSheet.MODE_ENTIRE_GROUP -> {
-                            group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
-                            urisToDelete.addAll(group.allUris)
-                        }
-                        DarkbagBatchDeleteSheet.MODE_RAW_ONLY -> {
-                            group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
-                            urisToDelete.addAll(group.allMasterRawUris)
-                        }
-                        DarkbagBatchDeleteSheet.MODE_DERIVATIVES_ONLY -> {
-                            urisToDelete.addAll(group.allDerivativeUris)
-                        }
-                        DarkbagBatchDeleteSheet.MODE_CINEMADNG_ONLY -> {
-                            group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
-                            urisToDelete.addAll(group.allCinemaDngUris)
-                        }
-                    }
-                }
-            }
-
-            val securityExceptionUris = mutableListOf<Uri>()
-            withContext(Dispatchers.IO) {
-                for (uri in urisToDelete.distinct()) {
-                    try {
-                        deleteUriSafe(context, uri)
-                    } catch (e: SecurityException) {
-                        if (uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
-                            securityExceptionUris.add(uri)
-                        }
-                    } catch (e: Exception) {
-                        Log.e("ImageViewerFragment", "Failed to delete $uri", e)
-                    }
-                }
-            }
-
-            galleryViewModel.processIntent(DarkroomGalleryUserIntent.ClearSelection)
-            galleryAdapter.setSelectionMode(false)
-            updateGallerySelectionUI(0)
-
-            if (securityExceptionUris.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                try {
-                    val deleteRequest = MediaStore.createDeleteRequest(context.contentResolver, securityExceptionUris)
-                    deleteLauncher.launch(IntentSenderRequest.Builder(deleteRequest.intentSender).build())
-                } catch (e: Exception) {
-                    context.let { Toast.makeText(it, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show() }
-                    repository.invalidateCache(clearStale = true)
-                    loadImages(forceRefresh = true)
-                    hideGalleryDeletingIndicator()
-                    if (_binding != null) {
-                        binding.galleryRecyclerView.isEnabled = true
-                        updateGallerySelectionUI(0)
-                    }
-                }
-            } else {
-                repository.invalidateCache(clearStale = true)
-                loadImages(forceRefresh = true)
-            }
+            binding.btnGalleryPill.visibility = if (isUiVisible && !isEditingAdjustments) View.VISIBLE else View.GONE
         }
     }
 
     protected fun toggleUi() {
-        if (isEditingAdjustments || isGalleryMode) return
+        if (isEditingAdjustments) return
         if (isUiVisible) hideUi() else showUi()
     }
 
     protected fun showUi() {
-        if (isGalleryMode) return
         if (isUiVisible) return
         isUiVisible = true
 
@@ -3804,7 +2996,6 @@ open class ImageViewerFragment : Fragment() {
     }
 
     protected fun hideUi() {
-        if (isGalleryMode) return
         if (!isUiVisible) return
         isUiVisible = false
 
@@ -3868,24 +3059,7 @@ open class ImageViewerFragment : Fragment() {
                 rightMargin = systemBars.right + bentoMarginH
             }
 
-            binding.galleryHeaderCard.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                topMargin = systemBars.top + bentoMarginTop
-                leftMargin = systemBars.left + bentoMarginH
-                rightMargin = systemBars.right + bentoMarginH
-            }
-            binding.galleryBottomBar.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + bentoMarginH
-                leftMargin = systemBars.left + bentoMarginH
-                rightMargin = systemBars.right + bentoMarginH
-            }
-            val headerOffset = (70 * density).toInt()
-            val bottomOffset = (84 * density).toInt()
-            binding.galleryRecyclerView.setPadding(
-                systemBars.left + (8 * density).toInt(),
-                systemBars.top + headerOffset,
-                systemBars.right + (8 * density).toInt(),
-                systemBars.bottom + bottomOffset
-            )
+
 
             val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
             binding.editAdjustmentPanel.setPadding(
@@ -3962,7 +3136,7 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun updateBackPressedCallbackState() {
-        backPressedCallback.isEnabled = isGalleryMode || isAdjusted || isEditingAdjustments || (binding.lutListContainer?.visibility == View.VISIBLE)
+        backPressedCallback.isEnabled = isAdjusted || isEditingAdjustments || (binding.lutListContainer?.visibility == View.VISIBLE)
     }
 
     protected open fun showDiscardChangesDialog() {
@@ -4053,9 +3227,7 @@ open class ImageViewerFragment : Fragment() {
                 }
             }
         }
-        if (::galleryAdapter.isInitialized) {
-            galleryAdapter.submitList(newGroups)
-        }
+
     }
 
     private fun showExportProgressDialog(
