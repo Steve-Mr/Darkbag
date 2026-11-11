@@ -666,7 +666,6 @@ open class ImageViewerFragment : Fragment() {
             }
         }
     }
-}
 
     private fun handleBackgroundSaveEvent(event: ColorProcessor.BackgroundSaveEvent) {
         // Trigger a full repository refresh to include the new item
