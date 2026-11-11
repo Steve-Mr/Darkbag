@@ -23,6 +23,9 @@ import top.maary.darkbag.pipeline.sink.DirectMediaStoreSink
 import top.maary.darkbag.pipeline.sink.HalfFrameCacheSink
 import top.maary.darkbag.utils.HalfFrameManager
 import top.maary.darkbag.utils.HalfFrameSessionStore
+import top.maary.darkbag.utils.LensInfo
+import top.maary.darkbag.utils.LensType
+import top.maary.darkbag.utils.CameraRepository
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
@@ -395,6 +398,47 @@ class CaptureModeCoordinatorTest {
         assertTrue(half.shouldHideGalleryThumbnail())
         assertTrue(half.shouldClearThumbnailOnCapture())
         assertTrue(half.keepsProcessingAnimationActive())
+    }
+
+    @Test
+    fun testFilterAvailableLenses_Normal_HalfFrame_MultiCamera() {
+        val host = MockModeExecutionContext(context, prefs)
+        val normal = NormalModeCoordinator(host)
+        val half = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+        val multi = MultiCameraModeCoordinator(host)
+
+        val wideBack = LensInfo(
+            id = "0", physicalId = null, sensorId = "wide-0", name = "1x Wide",
+            focalLength = 4.38f, equivalentFocalLength = 26f, multiplier = 1.0f,
+            type = LensType.WIDE, facing = 0, isLogicalAuto = false, isZoomPreset = false
+        )
+        val teleVirtual = LensInfo(
+            id = "0", physicalId = null, sensorId = "wide-0${CameraRepository.VIRTUAL_TELE_2X_SUFFIX}", name = "2x Crop",
+            focalLength = 4.38f, equivalentFocalLength = 52f, multiplier = 2.0f,
+            type = LensType.TELE, facing = 0, isLogicalAuto = false, isZoomPreset = true
+        )
+        val frontLens = LensInfo(
+            id = "1", physicalId = null, sensorId = "front-1", name = "Front",
+            focalLength = 3.5f, equivalentFocalLength = 24f, multiplier = 1.0f,
+            type = LensType.WIDE, facing = 1, isLogicalAuto = false, isZoomPreset = false
+        )
+
+        val allLenses = listOf(wideBack, teleVirtual, frontLens)
+
+        val normalFiltered = normal.filterAvailableLenses(allLenses, repoFacing = 0)
+        assertEquals(1, normalFiltered.size)
+        assertEquals("wide-0", normalFiltered[0].sensorId)
+
+        val halfFiltered = half.filterAvailableLenses(allLenses, repoFacing = 0)
+        assertEquals(1, halfFiltered.size)
+        assertEquals("wide-0", halfFiltered[0].sensorId)
+
+        val multiFiltered = multi.filterAvailableLenses(allLenses, repoFacing = 0)
+        assertEquals(1, multiFiltered.size)
+        assertEquals("wide-0", multiFiltered[0].sensorId)
+
+        assertTrue(multi.onLensSelected(wideBack))
+        assertEquals(1.0f, host.lastSwitchedMultiplier)
     }
 }
 
