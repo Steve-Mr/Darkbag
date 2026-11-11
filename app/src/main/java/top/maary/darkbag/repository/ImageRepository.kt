@@ -982,16 +982,8 @@ class ImageRepository(
 
     fun readDngBaselineExposure(uri: Uri, isHalfFrame: Boolean, index: Int = 0): EditConfig? {
         return try {
-            val exif = if (uri.scheme == "file") {
-                androidx.exifinterface.media.ExifInterface(uri.path ?: return null)
-            } else {
-                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                    androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                } ?: return null
-            }
-            // TAG_BASELINE_EXPOSURE is 50730
-            val baselineExposure = exif.getAttributeDouble("BaselineExposure", 0.0).toFloat()
-            val digitalGain = Math.pow(2.0, baselineExposure.toDouble()).toFloat()
+            val baselineExposure = readBaselineExposureFromUri(uri) ?: 0.0
+            val digitalGain = Math.pow(2.0, baselineExposure).toFloat()
 
             if (isHalfFrame) {
                 val adjs = mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
@@ -1004,6 +996,98 @@ class ImageRepository(
             android.util.Log.e("ImageRepository", "Failed to read baseline exposure from $uri", e)
             null
         }
+    }
+
+    private fun readBaselineExposureFromUri(uri: Uri): Double? {
+        val bytes = try {
+            if (uri.scheme == "file") {
+                val file = File(uri.path ?: return null)
+                if (!file.exists()) return null
+                file.inputStream().use { stream ->
+                    val header = ByteArray(minOf(file.length().toInt(), 65536))
+                    var totalRead = 0
+                    while (totalRead < header.size) {
+                        val read = stream.read(header, totalRead, header.size - totalRead)
+                        if (read <= 0) break
+                        totalRead += read
+                    }
+                    if (totalRead == header.size) header else header.copyOf(totalRead)
+                }
+            } else {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val buf = ByteArray(65536)
+                    var totalRead = 0
+                    while (totalRead < buf.size) {
+                        val read = stream.read(buf, totalRead, buf.size - totalRead)
+                        if (read <= 0) break
+                        totalRead += read
+                    }
+                    if (totalRead > 0) buf.copyOf(totalRead) else null
+                }
+            }
+        } catch (e: Exception) {
+            null
+        }
+
+        if (bytes != null) {
+            val parsed = extractBaselineExposure(bytes)
+            if (parsed != null) return parsed
+        }
+
+        return try {
+            val exif = if (uri.scheme == "file") {
+                androidx.exifinterface.media.ExifInterface(uri.path ?: return null)
+            } else {
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                } ?: return null
+            }
+            if (exif.hasAttribute("BaselineExposure")) {
+                exif.getAttributeDouble("BaselineExposure", 0.0)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun extractBaselineExposure(bytes: ByteArray): Double? {
+        if (bytes.size < 8) return null
+        val order = when {
+            bytes[0] == 'I'.code.toByte() && bytes[1] == 'I'.code.toByte() -> java.nio.ByteOrder.LITTLE_ENDIAN
+            bytes[0] == 'M'.code.toByte() && bytes[1] == 'M'.code.toByte() -> java.nio.ByteOrder.BIG_ENDIAN
+            else -> return null
+        }
+        val buf = java.nio.ByteBuffer.wrap(bytes).order(order)
+        if (buf.short != 42.toShort()) return null
+        var ifdOffset = buf.int
+        while (ifdOffset > 0 && ifdOffset + 2 <= bytes.size) {
+            buf.position(ifdOffset)
+            val numEntries = buf.short.toInt() and 0xFFFF
+            if (ifdOffset + 2 + numEntries * 12 > bytes.size) break
+            for (i in 0 until numEntries) {
+                val tag = buf.short.toInt() and 0xFFFF
+                buf.short // type
+                buf.int   // count
+                val valueOrOffset = buf.int
+                if (tag == 50730) { // BaselineExposure (0xC62A)
+                    if (valueOrOffset + 8 <= bytes.size) {
+                        buf.position(valueOrOffset)
+                        val num = buf.int
+                        val den = buf.int
+                        if (den != 0) {
+                            return num.toDouble() / den.toDouble()
+                        }
+                    }
+                    return null
+                }
+            }
+            val nextIfdOffset = buf.int
+            if (nextIfdOffset <= 0 || nextIfdOffset == ifdOffset) break
+            ifdOffset = nextIfdOffset
+        }
+        return null
     }
 
     fun saveEditConfig(uri: Uri, editConfig: EditConfig) {
