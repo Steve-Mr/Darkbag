@@ -507,8 +507,9 @@ open class ImageViewerFragment : Fragment() {
                     val isFirstLoad = !::adapter.isInitialized
 
                     val targetBaseName = targetUri?.let { top.maary.darkbag.utils.ImageUtils.getBaseName(it) }
-                    val targetPos = if (args.targetPosition >= 0 && isFirstLoad) {
-                        args.targetPosition
+                    val targetPosArg = arguments?.getInt("target_position", -1) ?: -1
+                    val targetPos = if (targetPosArg >= 0 && isFirstLoad) {
+                        targetPosArg
                     } else if (targetUri != null) {
                         val pos = groups.indexOfFirst {
                             (targetBaseName != null && it.baseName == targetBaseName) ||
@@ -585,9 +586,10 @@ open class ImageViewerFragment : Fragment() {
                             hasNavigatedToTargetUri = true
                         }
                         binding.imagePager.setCurrentItem(initialIndex, false)
-                        if (args.targetLensTag != null && initialIndex in groups.indices) {
+                        val targetLensTag = arguments?.getString("target_lens_tag")
+                        if (targetLensTag != null && initialIndex in groups.indices) {
                             val lenses = adapter.getMultiCameraLenses(groups[initialIndex])
-                            val lensIndex = lenses.indexOfFirst { it.lensTag == args.targetLensTag }
+                            val lensIndex = lenses.indexOfFirst { it.lensTag == targetLensTag }
                             if (lensIndex != -1) {
                                 adapter.setSelectedLensIndex(initialIndex, lensIndex)
                             }
@@ -3541,7 +3543,6 @@ open class ImageViewerFragment : Fragment() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         pendingDeleteNextTargetUri?.let { outState.putString("pendingDeleteNextTargetUri", it) }
-        outState.putBoolean("startedInGalleryMode", startedInGalleryMode)
     }
 
     protected suspend fun generateProcessedBitmap(config: top.maary.darkbag.models.EditConfig, currentGroup: ImageGroup): android.graphics.Bitmap? {

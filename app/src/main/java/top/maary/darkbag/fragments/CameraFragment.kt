@@ -372,7 +372,7 @@ class CameraFragment : Fragment() {
         override val rootViewGroup: ViewGroup? get() = _fragmentCameraBinding?.root as? ViewGroup
         override val activeCoordinator: CaptureModeCoordinator? get() = this@CameraFragment.activeCoordinator
         override val cameraViewModel: CameraViewModel get() = this@CameraFragment.cameraViewModel
-        override val lutProcessor: top.maary.darkbag.processor.lut.LutProcessor? get() = this@CameraFragment.lutProcessor
+        override val lutProcessor: top.maary.darkbag.processor.LutSurfaceProcessor? get() = this@CameraFragment.lutProcessor
         override val isFrontPipActive: Boolean get() = this@CameraFragment.isFrontPipActive
         override val hasMultipleAvailableLenses: Boolean get() = availableLenses.size > 1
         override val hasMultiCameraManager: Boolean get() = multiCameraManager != null
@@ -1466,7 +1466,9 @@ class CameraFragment : Fragment() {
         val logicalInfo = top.maary.darkbag.utils.MultiCameraHelper.getLogicalMultiCameraInfo(requireContext())
         if (logicalInfo != null) {
             Log.d(TAG, "Binding Multi-Camera Session with logical camera: ${logicalInfo.logicalCameraId}")
-            closeCamera2()
+            lifecycleScope.launch(Dispatchers.Main) {
+                closeCamera2()
+            }
 
             val countPref = top.maary.darkbag.utils.MultiCameraCountPreference.fromKey(
                 prefs.getString(SettingsFragment.KEY_MULTI_CAMERA_COUNT_PREF, null)
@@ -2073,21 +2075,6 @@ class CameraFragment : Fragment() {
         vfBinding.viewFinderStage.clipToOutline = true
     }
 
-    private fun updateTierUi(tier: CameraUiTier = cameraViewModel.uiState.value.uiTier) {
-        val binding = cameraUiContainerBinding ?: return
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, tier)
-        val isAnyManual = isManualFocus || isManualIso || isManualShutter || currentEvIndex != 0
-        CameraBentoDeckView.bindTierState(
-            binding = binding,
-            tier = tier,
-            isAnyManual = isAnyManual,
-            hasActiveManualTab = activeManualTab != null,
-            visibilitySpec = spec
-        )
-        CameraBentoDeckView.applyDynamicRowHeights(binding)
-    }
-
     /** Enabled or disabled a button to switch cameras depending on the available cameras */
     private fun updateCameraSwitchButton() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -2667,6 +2654,24 @@ class CameraFragment : Fragment() {
 
     private fun updateFocusPeakingState() {
         tierController.updateFocusPeakingState()
+    }
+
+    private fun updateDialPanel() {
+        tierController.updateDialPanel()
+    }
+
+    private fun updateBentoFolding(isDialOpen: Boolean) {
+        tierController.updateBentoFolding(isDialOpen)
+    }
+
+    private fun formatFocusDist(dist: Float): String = tierController.formatFocusDist(dist)
+
+    private fun formatShutterTime(nanos: Long): String = tierController.formatShutterTime(nanos)
+
+    private fun updateLensControlRowPosition(animate: Boolean = true) {
+        val uiBinding = cameraUiContainerBinding ?: return
+        val lensRow = uiBinding.lensControlRow ?: return
+        lensRow.translationY = 0f
     }
 
     private fun initLensControls() {

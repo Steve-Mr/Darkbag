@@ -77,7 +77,7 @@ class DarkroomGalleryFragment : Fragment() {
 
     private val deleteLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (result.resultCode != Activity.RESULT_OK) {
-            context?.let { Toast.makeText(it, R.string.failed_to_delete_image, Toast.LENGTH_SHORT).show() }
+            context?.let { Toast.makeText(it, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show() }
             hideGalleryDeletingIndicator()
             if (_binding != null) {
                 binding.galleryRecyclerView.isEnabled = true
@@ -756,6 +756,10 @@ class DarkroomGalleryFragment : Fragment() {
                     .start()
             }
         }
+    }
+
+    fun getGalleryItems(): List<top.maary.darkbag.models.ImageGroup> {
+        return if (::galleryAdapter.isInitialized) galleryAdapter.currentList else emptyList()
     }
 
     override fun onDestroyView() {

@@ -84,8 +84,8 @@ class GalleryAlbumInfoSheet : BottomSheetDialogFragment() {
             binding.tvStatTotalSize.text = Formatter.formatFileSize(requireContext(), totalSizeBytes)
         } else {
             binding.tvStatTotalSize.text = "--"
-            val parentViewer = parentFragment as? ImageViewerFragment
-            val items = parentViewer?.getGalleryItems() ?: emptyList()
+            val parentGallery = parentFragment as? DarkroomGalleryFragment
+            val items: List<ImageGroup> = parentGallery?.getGalleryItems() ?: emptyList()
             if (items.isNotEmpty()) {
                 viewLifecycleOwner.lifecycleScope.launch {
                     val computedSize = withContext(Dispatchers.IO) {

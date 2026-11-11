@@ -65,6 +65,8 @@
         android:label="PlaygroundViewerFragment">
         <argument android:name="initial_uri" app:argType="string" app:nullable="true" android:defaultValue="@null" />
         <argument android:name="start_in_gallery_mode" app:argType="boolean" android:defaultValue="false" />
+        <argument android:name="target_position" app:argType="integer" android:defaultValue="-1" />
+        <argument android:name="target_lens_tag" app:argType="string" app:nullable="true" android:defaultValue="@null" />
         <argument android:name="playground_dng_paths" app:argType="string[]" app:nullable="true" android:defaultValue="@null" />
         <argument android:name="playground_hf_layout" app:argType="string" app:nullable="true" android:defaultValue="@null" />
     </fragment>
