@@ -20,7 +20,7 @@ import org.robolectric.annotation.Config
 import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.modes.CaptureModeCoordinator
-import top.maary.darkbag.processor.lut.LutProcessor
+import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.ui.ProDialWheelView
 import top.maary.darkbag.viewmodel.CameraUiTier
 import top.maary.darkbag.viewmodel.CameraViewModel
@@ -61,7 +61,7 @@ class CameraDelegatesTest {
         override val rootViewGroup: ViewGroup? = null
         override val activeCoordinator: CaptureModeCoordinator? = null
         override val cameraViewModel = CameraViewModel()
-        override val lutProcessor: LutProcessor? = null
+        override val lutProcessor: LutSurfaceProcessor? = null
         override val isFrontPipActive = false
         override val hasMultipleAvailableLenses = true
         override val hasMultiCameraManager = false
