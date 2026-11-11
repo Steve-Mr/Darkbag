@@ -974,13 +974,14 @@ class ImageRepository(private val context: Context) {
                 val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
                 // TAG_BASELINE_EXPOSURE is 50730
                 val baselineExposure = exif.getAttributeDouble("BaselineExposure", 0.0).toFloat()
+                val digitalGain = kotlin.math.pow(2.0, baselineExposure.toDouble()).toFloat()
 
                 if (isHalfFrame) {
                     val adjs = mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
-                    adjs[index] = top.maary.darkbag.models.BasicAdjustments(exposure = baselineExposure, digitalGain = 1.0f)
+                    adjs[index] = top.maary.darkbag.models.BasicAdjustments(exposure = 0.0f, digitalGain = digitalGain)
                     EditConfig(adjustments = adjs)
                 } else {
-                    EditConfig(exposure = baselineExposure, digitalGain = 1.0f)
+                    EditConfig(exposure = 0.0f, digitalGain = digitalGain)
                 }
             }
         } catch (e: Exception) {
