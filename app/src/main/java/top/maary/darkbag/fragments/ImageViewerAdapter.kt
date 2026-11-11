@@ -380,7 +380,7 @@ class ImageViewerAdapter(
                 holder.binding.videoDurationGroup.translationX = -rightMargin
                 holder.binding.videoDurationGroup.translationY = -bottomMargin
 
-                updateVideoViewBounds(holder, rect)
+                playbackController.updateVideoViewBounds(holder, rect)
             }
         }
 
@@ -977,6 +977,10 @@ class ImageViewerAdapter(
         val index = holder?.activeCinemaDngFrameIndex ?: 0
         val uri = holder?.activeCinemaDngFrameUri ?: group.cinemaDngFrameUris.getOrNull(index) ?: group.cinemaDngFirstFrameUri
         return Pair(index, uri)
+    }
+
+    fun updateVideoViewBounds(holder: ViewHolder, rect: RectF) {
+        playbackController.updateVideoViewBounds(holder, rect)
     }
 
     fun getCurrentUri(position: Int): Uri? {
