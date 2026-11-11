@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import top.maary.darkbag.fragments.CameraFragment
 import top.maary.darkbag.fragments.SettingsFragment
 
 /**
@@ -42,10 +43,23 @@ class SettingsRepository(context: Context) {
             enableManualControls = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, true),
             enableLutPreview = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, true),
             defaultLensId = prefs.getString(SettingsFragment.KEY_DEFAULT_LENS_ID, null),
-            defaultFocal1x = prefs.getFloat(SettingsFragment.KEY_DEFAULT_FOCAL_1X, 0f),
+            defaultFocal1x = try {
+                prefs.getFloat(SettingsFragment.KEY_DEFAULT_FOCAL_1X, 0f)
+            } catch (_: Exception) {
+                0f
+            },
+            defaultFocal1xName = try {
+                prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, null)
+            } catch (_: Exception) {
+                null
+            },
             antibandingMode = prefs.getString(SettingsFragment.KEY_ANTIBANDING, "Auto") ?: "Auto",
             flashMode = prefs.getString(SettingsFragment.KEY_FLASH_MODE, "off") ?: "off",
-            hdrBurstCount = prefs.getInt(SettingsFragment.KEY_HDR_BURST_COUNT, 5),
+            hdrBurstCount = try {
+                prefs.getInt(SettingsFragment.KEY_HDR_BURST_COUNT, 5)
+            } catch (_: Exception) {
+                prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5")?.toIntOrNull() ?: 5
+            },
             hdrFusionMode = prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_AUTO) ?: SettingsFragment.HDR_FUSION_AUTO,
             burstProcessingStrategy = prefs.getString(SettingsFragment.KEY_BURST_PROCESSING_STRATEGY, SettingsFragment.BURST_STRATEGY_BALANCED) ?: SettingsFragment.BURST_STRATEGY_BALANCED,
             showHdrUnderexposureButton = prefs.getBoolean(SettingsFragment.KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, true),
@@ -79,7 +93,26 @@ class SettingsRepository(context: Context) {
             colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0),
             shutterLongPressAction = prefs.getString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, SettingsFragment.SHUTTER_LONG_PRESS_MP4) ?: SettingsFragment.SHUTTER_LONG_PRESS_MP4,
             rawVideoFps = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_FPS, "24") ?: "24",
-            rawVideoResolution = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_RESOLUTION, SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION) ?: SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION
+            rawVideoResolution = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_RESOLUTION, SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION) ?: SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION,
+            hdrUnderexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic") ?: "Dynamic",
+            enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true),
+            enablePlayground = prefs.getBoolean(SettingsFragment.KEY_ENABLE_PLAYGROUND, true),
+            halfFrameMode = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false),
+            halfFrameDownsample = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, true),
+            halfFrameDateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false),
+            halfFrameLightLeak = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false),
+            halfFrameSaveRaw = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_SAVE_RAW, false),
+            externalViewerName = prefs.getString(SettingsFragment.KEY_EXTERNAL_VIEWER_NAME, null),
+            jpgStorageUriName = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI_NAME, null),
+            rawStorageUriName = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI_NAME, null),
+            multiCameraCountPref = prefs.getString(SettingsFragment.KEY_MULTI_CAMERA_COUNT_PREF, "auto_max") ?: "auto_max",
+            multiCameraDualPair = prefs.getString(SettingsFragment.KEY_MULTI_CAMERA_DUAL_PAIR, "wide_ultrawide") ?: "wide_ultrawide",
+            uiTier = prefs.getString(top.maary.darkbag.ui.CameraBentoDeckView.PREF_KEY_UI_TIER, "film") ?: "film",
+            rawOutputFormatIndex = try {
+                prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
+            } catch (_: Exception) {
+                0
+            }
         )
     }
 
@@ -140,6 +173,146 @@ class SettingsRepository(context: Context) {
 
     fun setFocusPeakingActive(active: Boolean) {
         prefs.edit().putBoolean(SettingsFragment.KEY_FOCUS_PEAKING_ACTIVE, active).apply()
+    }
+
+    fun edit(action: SharedPreferences.Editor.() -> Unit) {
+        prefs.edit().apply(action).apply()
+    }
+
+    fun setDefaultLensId(lensId: String?) {
+        val editor = prefs.edit()
+        if (lensId != null) {
+            editor.putString(SettingsFragment.KEY_DEFAULT_LENS_ID, lensId)
+        } else {
+            editor.remove(SettingsFragment.KEY_DEFAULT_LENS_ID)
+        }
+        editor.remove(CameraFragment.KEY_SELECTED_LENS_ID)
+        editor.apply()
+    }
+
+    fun setDefaultFocal1x(focalName: String) {
+        prefs.edit().putString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, focalName).apply()
+    }
+
+    fun setHdrUnderexposureMode(mode: String) {
+        prefs.edit().putString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, mode).apply()
+    }
+
+    fun setBurstProcessingStrategy(strategy: String) {
+        prefs.edit().putString(SettingsFragment.KEY_BURST_PROCESSING_STRATEGY, strategy).apply()
+    }
+
+    fun setShutterLongPressAction(action: String) {
+        prefs.edit().putString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, action).apply()
+    }
+
+    fun setRawOutputFormatIndex(index: Int) {
+        prefs.edit().putInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, index).apply()
+    }
+
+    fun setMultiCameraModeEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, enabled).apply()
+    }
+
+    fun setMultiCameraForceEnable(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, enabled).apply()
+    }
+
+    fun setMultiCameraCountPref(pref: String) {
+        prefs.edit().putString(SettingsFragment.KEY_MULTI_CAMERA_COUNT_PREF, pref).apply()
+    }
+
+    fun setMultiCameraDualPair(pair: String) {
+        prefs.edit().putString(SettingsFragment.KEY_MULTI_CAMERA_DUAL_PAIR, pair).apply()
+    }
+
+    fun setMultiCameraSaveRaw(saveRaw: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_MULTI_CAMERA_SAVE_RAW, saveRaw).apply()
+    }
+
+    fun setHalfFrameMode(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, enabled).apply()
+    }
+
+    fun setHalfFrameDownsample(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, enabled).apply()
+    }
+
+    fun setHalfFrameDateStamp(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, enabled).apply()
+    }
+
+    fun setHalfFrameLightLeak(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, enabled).apply()
+    }
+
+    fun setHalfFrameSaveRaw(saveRaw: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_HALF_FRAME_SAVE_RAW, saveRaw).apply()
+    }
+
+    fun setDefaultStartupPage(page: String) {
+        prefs.edit().putString(SettingsFragment.KEY_DEFAULT_STARTUP, page).apply()
+    }
+
+    fun setEnableCamera(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_ENABLE_CAMERA, enabled).apply()
+    }
+
+    fun setEnablePlayground(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_ENABLE_PLAYGROUND, enabled).apply()
+    }
+
+    fun setUseInternalViewer(useInternal: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_USE_INTERNAL_VIEWER, useInternal).apply()
+    }
+
+    fun setExternalViewer(name: String, packageName: String) {
+        prefs.edit()
+            .putString(SettingsFragment.KEY_EXTERNAL_VIEWER_NAME, name)
+            .putString(SettingsFragment.KEY_EXTERNAL_VIEWER_PACKAGE, packageName)
+            .apply()
+    }
+
+    fun setMirrorFrontCamera(mirror: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, mirror).apply()
+    }
+
+    fun setHdrPlusOis(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_HDR_PLUS_OIS, enabled).apply()
+    }
+
+    fun setForce60Fps(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_FORCE_60FPS, enabled).apply()
+    }
+
+    fun setDebugEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_DEBUG_ENABLED, enabled).apply()
+    }
+
+    fun setSaveLocationEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_SAVE_LOCATION, enabled).apply()
+    }
+
+    fun setStorageUri(isJpg: Boolean, uri: String?, name: String?) {
+        val uriKey = if (isJpg) SettingsFragment.KEY_JPG_STORAGE_URI else SettingsFragment.KEY_RAW_STORAGE_URI
+        val nameKey = if (isJpg) SettingsFragment.KEY_JPG_STORAGE_URI_NAME else SettingsFragment.KEY_RAW_STORAGE_URI_NAME
+        val editor = prefs.edit()
+        if (uri != null) {
+            editor.putString(uriKey, uri)
+            editor.putString(nameKey, name)
+        } else {
+            editor.remove(uriKey)
+            editor.remove(nameKey)
+        }
+        editor.apply()
+    }
+
+    fun setUiTier(tierKey: String) {
+        prefs.edit().putString(top.maary.darkbag.ui.CameraBentoDeckView.PREF_KEY_UI_TIER, tierKey).apply()
+    }
+
+    fun setLivePreview(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, enabled).apply()
     }
 
     companion object {

@@ -52,4 +52,16 @@ interface ExportSink {
         spec: DarkroomRenderSpec,
         error: Throwable
     ) {}
+
+    /**
+     * 为多机位或子流派生子 Sink，保持与主 Sink 相同的存储隔离语义。
+     * @param childBaseName 子流的基础文件名
+     * @param childTargetUri 覆写模式下的目标 Uri，若为 null 则自动生成或由子 Sink 决定
+     * @param isReplacement 是否为覆写原文件模式
+     */
+    fun createChildSink(
+        childBaseName: String,
+        childTargetUri: Uri? = null,
+        isReplacement: Boolean = false
+    ): ExportSink
 }

@@ -120,4 +120,17 @@ class MediaStoreExportSink(
     ) {
         savedUri = null
     }
+
+    override fun createChildSink(
+        childBaseName: String,
+        childTargetUri: Uri?,
+        isReplacement: Boolean
+    ): ExportSink = MediaStoreExportSink(
+        baseName = childBaseName,
+        targetUri = childTargetUri,
+        isReplacement = isReplacement,
+        jpgFolderUri = jpgFolderUri,
+        saveRaw = saveRaw,
+        onSaved = onSaved
+    )
 }

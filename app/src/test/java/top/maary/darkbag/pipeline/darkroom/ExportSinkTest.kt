@@ -87,4 +87,22 @@ class ExportSinkTest {
         assertEquals(5, targetFile.length())
         assertEquals(targetFile, sink.deliveredFile)
     }
+
+    @Test
+    fun testSandboxExportSink_CreateChildSinkPreservesDirectory() {
+        val sandboxDir = tempFolder.newFolder("sandbox")
+        val parentSink = SandboxExportSink(targetDirectory = sandboxDir, baseName = "parent_spec")
+        val childSink = parentSink.createChildSink(childBaseName = "child_lens_0")
+
+        assertTrue(childSink is SandboxExportSink)
+        val casted = childSink as SandboxExportSink
+        assertEquals(sandboxDir, casted.targetDirectory)
+        assertEquals("child_lens_0", casted.baseName)
+
+        val targetFile = File(sandboxDir, "custom_parent.jpg")
+        val parentWithFile = SandboxExportSink(targetFile = targetFile)
+        val childFromFile = parentWithFile.createChildSink(childBaseName = "child_lens_1") as SandboxExportSink
+        assertEquals(sandboxDir, childFromFile.targetDirectory)
+        assertEquals("child_lens_1", childFromFile.baseName)
+    }
 }

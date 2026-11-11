@@ -1,35 +1,15 @@
 package top.maary.darkbag.fragments
 
-import top.maary.darkbag.utils.MediaStoreUtils
-import top.maary.darkbag.utils.DebugLogManager
-import top.maary.darkbag.utils.CameraRepository
-import top.maary.darkbag.utils.CacheManager
-import top.maary.darkbag.utils.MultiCameraHelper
-import top.maary.darkbag.utils.MultiCameraCountPreference
-import top.maary.darkbag.utils.DualLensPairPreference
-import top.maary.darkbag.utils.LutManager
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.shape.ShapeAppearanceModel
-import top.maary.darkbag.ui.BentoSelectionBottomSheet
-import top.maary.darkbag.ui.RawVideoSettingsBottomSheet
-import top.maary.darkbag.ui.ViewfinderDeckCustomizerSheet
-import top.maary.darkbag.viewmodel.CameraUiTier
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.util.Size
 import android.util.TypedValue
-import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -39,19 +19,43 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.Navigation
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentSettingsBinding
+import top.maary.darkbag.fragments.settings.SettingsBentoDelegate
+import top.maary.darkbag.fragments.settings.SettingsSheetDispatcher
 import top.maary.darkbag.ui.CameraBentoDeckView
-import com.google.android.material.color.MaterialColors
-import java.io.File
+import top.maary.darkbag.ui.ViewfinderDeckCustomizerSheet
+import top.maary.darkbag.utils.CacheManager
+import top.maary.darkbag.utils.CameraRepository
+import top.maary.darkbag.utils.DebugLogManager
+import top.maary.darkbag.utils.LocationHelper
+import top.maary.darkbag.utils.MediaStoreUtils
+import top.maary.darkbag.utils.MultiCameraHelper
+import top.maary.darkbag.viewmodel.CameraUiTier
+import top.maary.darkbag.viewmodel.SettingsViewModel
 
 class SettingsFragment : Fragment() {
 
     private var _binding: FragmentSettingsBinding? = null
     private val binding get() = _binding!!
-    private lateinit var prefs: SharedPreferences
+    private val settingsViewModel: SettingsViewModel by viewModels()
     private lateinit var cameraRepository: CameraRepository
+    private lateinit var prefs: SharedPreferences
+
+    private lateinit var bentoDelegate: SettingsBentoDelegate
+    private lateinit var sheetDispatcher: SettingsSheetDispatcher
+
+    private var isAdvancedExpanded = false
+    private var aboutClickCount = 0
 
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -59,11 +63,9 @@ class SettingsFragment : Fragment() {
         val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
         val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (fineGranted || coarseGranted) {
-            prefs.edit().putBoolean(KEY_SAVE_LOCATION, true).apply()
-            syncLocationSettingState()
+            settingsViewModel.updateSaveLocationEnabled(true)
         } else {
-            prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()
-            syncLocationSettingState()
+            settingsViewModel.updateSaveLocationEnabled(false)
             Toast.makeText(context, R.string.location_permission_denied, Toast.LENGTH_LONG).show()
         }
     }
@@ -75,10 +77,25 @@ class SettingsFragment : Fragment() {
             Toast.makeText(context, R.string.toast_audio_permission_granted, Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(context, R.string.error_mic_permission_silent_video, Toast.LENGTH_SHORT).show()
-            if (_binding != null && binding.switchMotionPhotoAudio.isChecked) {
-                binding.switchMotionPhotoAudio.isChecked = false
-                prefs.edit().putBoolean(KEY_MOTION_PHOTO_AUDIO, false).apply()
-            }
+            settingsViewModel.updateMotionPhotoAudio(false)
+        }
+    }
+
+    private val jpgPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            requireContext().contentResolver.takePersistableUriPermission(it, takeFlags)
+            val folderName = MediaStoreUtils.getFolderNameFromUri(requireContext(), it)
+            settingsViewModel.updateStorageUri(isJpg = true, uri = it.toString(), name = folderName)
+        }
+    }
+
+    private val rawPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            requireContext().contentResolver.takePersistableUriPermission(it, takeFlags)
+            val folderName = MediaStoreUtils.getFolderNameFromUri(requireContext(), it)
+            settingsViewModel.updateStorageUri(isJpg = false, uri = it.toString(), name = folderName)
         }
     }
 
@@ -89,8 +106,11 @@ class SettingsFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        cameraRepository = CameraRepository(requireContext())
+        val ctx = requireContext()
+        prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        cameraRepository = CameraRepository(ctx)
+        bentoDelegate = SettingsBentoDelegate(ctx, cameraRepository)
+        sheetDispatcher = SettingsSheetDispatcher(childFragmentManager, ctx, cameraRepository, settingsViewModel)
 
         // Apply Edge-to-Edge Insets
         ViewCompat.setOnApplyWindowInsetsListener(binding.cardSettingsHeader) { v, insets ->
@@ -116,15 +136,51 @@ class SettingsFragment : Fragment() {
         setupStartupSettings()
         setupCheckboxes()
         setupStoragePickers()
-        setupStorageSettings()
         setupCacheManagement()
         setupNavigation()
+        setupMultiCameraSettings()
         updateDebugStats()
-        updateDebugVisibility()
-        updateAllBentoTiles()
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                settingsViewModel.preferences.collect { prefsState ->
+                    bentoDelegate.renderPreferences(binding, prefsState)
+                }
+            }
+        }
     }
 
-    private var isAdvancedExpanded = false
+    override fun onResume() {
+        super.onResume()
+        updateDebugStats()
+        syncLocationSettingState()
+        updateCacheSize()
+    }
+
+    private fun syncLocationSettingState() {
+        val hasLocPerm = LocationHelper.hasPermission(requireContext())
+        if (!hasLocPerm && settingsViewModel.preferences.value.saveLocationEnabled) {
+            settingsViewModel.updateSaveLocationEnabled(false)
+        }
+        val isEnabled = settingsViewModel.preferences.value.saveLocationEnabled && hasLocPerm
+        if (binding.switchSaveLocation.isChecked != isEnabled) {
+            binding.switchSaveLocation.isChecked = isEnabled
+        }
+    }
+
+    private fun setupToolbar() {
+        binding.btnSettingsBack.setOnClickListener {
+            Navigation.findNavController(requireActivity(), R.id.fragment_container).navigateUp()
+        }
+    }
+
+    private fun setupNavigation() {
+        binding.btnManageLuts.setOnClickListener {
+            Navigation.findNavController(requireActivity(), R.id.fragment_container)
+                .navigate(SettingsFragmentDirections.actionSettingsToLutManagement())
+        }
+    }
+
     private fun setupAdvancedSection() {
         binding.headerAdvancedToggle.setOnClickListener {
             isAdvancedExpanded = !isAdvancedExpanded
@@ -136,18 +192,6 @@ class SettingsFragment : Fragment() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        updateDebugStats()
-        updateAllBentoTiles()
-        updateCheckboxStates()
-        syncLocationSettingState()
-        updateStorageVisibility()
-        updateMotionPhotoVisibility()
-        updateCacheSize()
-    }
-
-    private var aboutClickCount = 0
     private fun setupAboutSection() {
         val versionName = try {
             val packageInfo = requireContext().packageManager.getPackageInfo(requireContext().packageName, 0)
@@ -163,9 +207,8 @@ class SettingsFragment : Fragment() {
         binding.cardAbout.setOnClickListener {
             aboutClickCount++
             if (aboutClickCount >= 5) {
-                if (!prefs.getBoolean(KEY_DEBUG_ENABLED, false)) {
-                    prefs.edit().putBoolean(KEY_DEBUG_ENABLED, true).apply()
-                    updateDebugVisibility()
+                if (!settingsViewModel.preferences.value.debugEnabled) {
+                    settingsViewModel.updateDebugEnabled(true)
                     Toast.makeText(requireContext(), R.string.experimental_unlocked_toast, Toast.LENGTH_SHORT).show()
                 }
                 aboutClickCount = 0
@@ -187,836 +230,28 @@ class SettingsFragment : Fragment() {
         }
     }
 
-    private fun updateDebugVisibility() {
-        val isDebug = prefs.getBoolean(KEY_DEBUG_ENABLED, false)
-        binding.sectionDebug.visibility = if (isDebug) View.VISIBLE else View.GONE
-    }
-
     private fun updateDebugStats() {
         val logs = DebugLogManager.getLogs()
         binding.tvDebugStats.text = if (logs.isNotBlank()) logs else "No timing stats logged yet."
     }
 
-    private fun setupToolbar() {
-        binding.btnSettingsBack.setOnClickListener {
-            Navigation.findNavController(requireActivity(), R.id.fragment_container).navigateUp()
-        }
-    }
-
-    private fun setupNavigation() {
-        binding.btnManageLuts.setOnClickListener {
-            Navigation.findNavController(requireActivity(), R.id.fragment_container)
-                .navigate(SettingsFragmentDirections.actionSettingsToLutManagement())
-        }
-    }
-
-    private fun isLutActive(): Boolean {
-        val log = prefs.getString(KEY_TARGET_LOG, "None")
-        val lut = prefs.getString(KEY_ACTIVE_LUT, null)
-        return (log != null && log != "None") || lut != null
-    }
-
-    // =========================================================================
-    // Bento Tile Telemetry Updaters
-    // =========================================================================
-
-    private fun updateDefaultLensTile() {
-        val ctx = context ?: return
-        val lenses = cameraRepository.getAllFocalLengthPresets()
-        val savedLensId = prefs.getString(KEY_DEFAULT_LENS_ID, null)
-        val currentLens = lenses.find { it.sensorId == savedLensId }
-            ?: lenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
-            ?: lenses.firstOrNull()
-        val lensName = currentLens?.name ?: "Wide (1.0x)"
-        binding.btnMenuDefaultLens.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_default_lens_label),
-            value = lensName,
-            isTabActive = false,
-            isValueManual = true,
-            context = ctx
-        )
-    }
-
-    private fun updateDefaultFocal1xTile() {
-        val ctx = context ?: return
-        val mainWide = cameraRepository.getMainWideLens()
-        val presets1x = if (mainWide != null) cameraRepository.get1xPresets(mainWide) else emptyList()
-        val baseFocalName = presets1x.firstOrNull()?.name ?: "24mm"
-        val savedFocal = prefs.getString(KEY_DEFAULT_FOCAL_1X, baseFocalName) ?: baseFocalName
-        binding.btnMenuDefaultFocal1x.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_default_focal_1x_label),
-            value = savedFocal,
-            isTabActive = false,
-            isValueManual = true,
-            context = ctx
-        )
-    }
-
-    private fun updateTargetLogTile() {
-        val ctx = context ?: return
-        val savedLog = prefs.getString(KEY_TARGET_LOG, "None") ?: "None"
-        val isLogActive = savedLog != "None"
-        val rawLog = savedLog.replace(" (Rec.709)", "").replace(" (BT.709)", "")
-        val localizedLog = if (!isLogActive) getString(R.string.pref_option_none) else rawLog
-        val displayLog = if (localizedLog.length > 14) {
-            localizedLog.take(13) + "…"
-        } else {
-            localizedLog
-        }
-        binding.btnMenuTargetLog.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_target_log_label),
-            value = displayLog,
-            isTabActive = isLogActive,
-            isValueManual = isLogActive,
-            context = ctx
-        )
-    }
-
-    private fun updateLutsTile() {
-        val ctx = context ?: return
-        val activeLut = prefs.getString(KEY_ACTIVE_LUT, null)
-        val rawName = activeLut?.removeSuffix(".cube")?.removeSuffix(".CUBE") ?: "None"
-        val assocLog = activeLut?.let { LutManager(ctx).getAssociatedLog(it) }
-        val displayLut = if (activeLut != null) {
-            val label = if (!assocLog.isNullOrEmpty() && assocLog != LutManager.LOG_UNIVERSAL) {
-                "$rawName ($assocLog)"
-            } else if (assocLog == LutManager.LOG_UNIVERSAL) {
-                "$rawName (Universal)"
-            } else {
-                rawName
-            }
-            if (label.length > 18) label.take(17) + "…" else label
-        } else {
-            "None"
-        }
-        binding.btnManageLuts.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_manage_luts_label),
-            value = displayLut,
-            isTabActive = activeLut != null,
-            isValueManual = true,
-            context = ctx
-        )
-    }
-
-    private fun updateHdrFusionTile() {
-        val ctx = context ?: return
-        val savedFusion = prefs.getString(KEY_HDR_FUSION_MODE, HDR_FUSION_SABRE) ?: HDR_FUSION_SABRE
-        val displayLabel = when (savedFusion) {
-            HDR_FUSION_SABRE -> getString(R.string.pref_fusion_sabre)
-            HDR_FUSION_SPATIAL_RCD -> getString(R.string.pref_fusion_spatial)
-            HDR_FUSION_CLASSIC -> getString(R.string.pref_fusion_classic)
-            HDR_FUSION_AUTO -> getString(R.string.pref_fusion_auto)
-            else -> savedFusion
-        }
-        binding.btnMenuHdrFusionMode.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_hdr_fusion_label),
-            value = displayLabel,
-            isTabActive = true,
-            isValueManual = true,
-            context = ctx
-        )
-    }
-
-    private fun updateHdrBurstTile() {
-        val ctx = context ?: return
-        val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "5") ?: "5"
-        binding.btnMenuHdrBurstMode.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_burst_frames_label),
-            value = getString(R.string.pref_burst_frames_count_format, savedBurst),
-            isTabActive = false,
-            isValueManual = true,
-            context = ctx
-        )
-    }
-
-    private fun updateUnderexposureTile() {
-        val ctx = context ?: return
-        val saved = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic") ?: "Dynamic"
-        val displayValue = when {
-            saved.endsWith("EV") -> saved
-            saved == "Off" || saved.startsWith("Off") -> getString(R.string.pref_option_off)
-            saved.startsWith("Dynamic") -> getString(R.string.pref_option_dynamic)
-            else -> "$saved EV"
-        }
-        binding.btnMenuUnderexposureMode.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_underexposure_label),
-            value = displayValue,
-            isTabActive = false,
-            isValueManual = saved != "Off",
-            context = ctx
-        )
-    }
-
-    private fun updateColorEngineTile() {
-        val ctx = context ?: return
-        val savedIndex = prefs.getInt(KEY_COLOR_ENGINE_MODE, 2).coerceIn(0, COLOR_ENGINE_MODES.size - 1)
-        val name = when (savedIndex) {
-            0 -> "Khronos Neutral"
-            1 -> "Natural Filmic"
-            2 -> "Sony Uchimura"
-            3 -> "Legacy ACES"
-            else -> COLOR_ENGINE_MODES[savedIndex]
-        }
-        binding.btnMenuColorEngine.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_color_engine_label),
-            value = name,
-            isTabActive = false,
-            isValueManual = true,
-            context = ctx
-        )
-    }
-
-    private fun updateAntibandingTile() {
-        val ctx = context ?: return
-        val saved = prefs.getString(KEY_ANTIBANDING, "Auto") ?: "Auto"
-        val display = when (saved) {
-            "Auto" -> getString(R.string.pref_option_auto)
-            "Off" -> getString(R.string.pref_option_off)
-            else -> saved
-        }
-        binding.btnMenuAntibanding.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_antibanding_label),
-            value = display,
-            isTabActive = false,
-            isValueManual = saved != "Off",
-            context = ctx
-        )
-    }
-
-    private fun updateBurstStrategyTile() {
-        val ctx = context ?: return
-        val saved = prefs.getString(KEY_BURST_PROCESSING_STRATEGY, BURST_STRATEGY_BALANCED) ?: BURST_STRATEGY_BALANCED
-        val display = if (saved == BURST_STRATEGY_BALANCED) {
-            getString(R.string.pref_burst_strategy_balanced)
-        } else {
-            getString(R.string.pref_burst_strategy_rapid)
-        }
-        binding.btnMenuBurstProcessingStrategy.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_burst_strategy_label),
-            value = display,
-            isTabActive = false,
-            isValueManual = true,
-            context = ctx
-        )
-    }
-
-    private fun updateShutterLongPressTile() {
-        val ctx = context ?: return
-        val saved = prefs.getString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_MP4) ?: SHUTTER_LONG_PRESS_MP4
-        val display = when (saved) {
-            SHUTTER_LONG_PRESS_MP4 -> getString(R.string.pref_shutter_action_mp4)
-            SHUTTER_LONG_PRESS_RAW_VIDEO -> getString(R.string.pref_shutter_action_raw_video)
-            else -> getString(R.string.pref_option_disabled)
-        }
-        binding.btnMenuShutterLongPress.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_shutter_hold_label),
-            value = display,
-            isTabActive = false,
-            isValueManual = saved != SHUTTER_LONG_PRESS_DISABLED,
-            context = ctx
-        )
-    }
-
-    private fun updateRawVideoTile() {
-        val ctx = context ?: return
-        val savedFps = prefs.getString(KEY_RAW_VIDEO_FPS, "24") ?: "24"
-        val savedRes = prefs.getString(KEY_RAW_VIDEO_RESOLUTION, DEFAULT_RAW_VIDEO_RESOLUTION) ?: DEFAULT_RAW_VIDEO_RESOLUTION
-        val shortRes = when {
-            savedRes.contains("4K") -> "4K UHD"
-            savedRes.contains("2K") -> "2K Open Gate"
-            savedRes.contains("1080p") -> "1080p"
-            else -> "Max Native"
-        }
-        binding.btnMenuRawVideo.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_raw_video_label),
-            value = "$savedFps FPS · $shortRes",
-            isTabActive = false,
-            isValueManual = true,
-            context = ctx
-        )
-    }
-
-    private fun updateExternalViewerTile() {
-        val ctx = context ?: return
-        val defaultName = getString(R.string.pref_external_viewer_default)
-        val savedName = prefs.getString(KEY_EXTERNAL_VIEWER_NAME, defaultName) ?: defaultName
-        binding.btnMenuExternalViewer.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_external_viewer_label),
-            value = savedName,
-            isTabActive = false,
-            isValueManual = savedName != defaultName,
-            context = ctx
-        )
-    }
-
-    private fun updateDngCompressionTile() {
-        val ctx = context ?: return
-        val savedDngIndex = prefs.getInt(KEY_DNG_COMPRESSION_MODE, 0).coerceIn(0, DNG_COMPRESSION_MODES.size - 1)
-        val modeName = when (savedDngIndex) {
-            0 -> getString(R.string.pref_dng_compress_lossless)
-            else -> getString(R.string.pref_dng_compress_uncompressed)
-        }
-        binding.btnMenuDngCompression.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_dng_compression_label),
-            value = modeName,
-            isTabActive = true,
-            isValueManual = true,
-            context = ctx
-        )
-    }
-
-    private fun updateDngFormatTile() {
-        val ctx = context ?: return
-        val savedFormatIndex = prefs.getInt(KEY_RAW_OUTPUT_TYPE, 0).coerceIn(0, RAW_OUTPUT_TYPES.size - 1)
-        val formatName = when (savedFormatIndex) {
-            0 -> getString(R.string.pref_cfa_bayer)
-            else -> getString(R.string.pref_cfa_linear)
-        }
-        binding.btnMenuDngFormat.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_dng_format_label),
-            value = formatName,
-            isTabActive = false,
-            isValueManual = true,
-            context = ctx
-        )
-    }
-
-    private fun updateMultiCameraCountTile() {
-        val ctx = context ?: return
-        val savedCountKey = prefs.getString(KEY_MULTI_CAMERA_COUNT_PREF, MultiCameraCountPreference.AUTO_MAX.key)
-        val pref = MultiCameraCountPreference.fromKey(savedCountKey)
-        binding.btnMenuMultiCameraCount.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_multi_camera_count_label),
-            value = pref.getDisplayName(ctx),
-            isTabActive = false,
-            isValueManual = true,
-            context = ctx
-        )
-    }
-
-    private fun updateMultiCameraDualPairTile() {
-        val ctx = context ?: return
-        val savedPairKey = prefs.getString(KEY_MULTI_CAMERA_DUAL_PAIR, DualLensPairPreference.WIDE_ULTRAWIDE.key)
-        val pref = DualLensPairPreference.fromKey(savedPairKey)
-        binding.btnMenuMultiCameraDualPair.text = CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.pref_multi_camera_dual_pair_label),
-            value = pref.getDisplayName(ctx),
-            isTabActive = false,
-            isValueManual = true,
-            context = ctx
-        )
-    }
-
-    private fun updateAllBentoTiles() {
-        updateDefaultLensTile()
-        updateDefaultFocal1xTile()
-        updateTargetLogTile()
-        updateLutsTile()
-        updateHdrFusionTile()
-        updateHdrBurstTile()
-        updateUnderexposureTile()
-        updateColorEngineTile()
-        updateAntibandingTile()
-        updateBurstStrategyTile()
-        updateShutterLongPressTile()
-        updateRawVideoTile()
-        updateExternalViewerTile()
-        updateDngCompressionTile()
-        updateDngFormatTile()
-        updateMultiCameraCountTile()
-        updateMultiCameraDualPairTile()
-    }
-
-    // =========================================================================
-    // Click Listeners Setup
-    // =========================================================================
-
     private fun setupMenus() {
-        // 1. Default Lens
-        binding.btnMenuDefaultLens.setOnClickListener {
-            val lenses = cameraRepository.getAllFocalLengthPresets()
-            val names = lenses.map { it.name }
-            val savedLensId = prefs.getString(KEY_DEFAULT_LENS_ID, null)
-            val selectedIndex = lenses.indexOfFirst { it.sensorId == savedLensId }.coerceAtLeast(0)
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.pref_default_lens),
-                options = names,
-                selectedIndex = selectedIndex,
-                badge = "LENS"
-            ) { which ->
-                prefs.edit()
-                    .putString(KEY_DEFAULT_LENS_ID, lenses[which].sensorId)
-                    .remove(CameraFragment.KEY_SELECTED_LENS_ID)
-                    .apply()
-                updateDefaultLensTile()
-            }
-        }
-
-        // 2. 1.0x Focal Base
-        binding.btnMenuDefaultFocal1x.setOnClickListener {
-            val mainWide = cameraRepository.getMainWideLens()
-            val presets1x = if (mainWide != null) cameraRepository.get1xPresets(mainWide) else emptyList()
-            val names1x = presets1x.map { it.name }
-            if (names1x.isNotEmpty()) {
-                val savedFocal = prefs.getString(KEY_DEFAULT_FOCAL_1X, names1x.first())
-                val selectedIndex = names1x.indexOf(savedFocal).coerceAtLeast(0)
-                BentoSelectionBottomSheet.show(
-                    fragmentManager = childFragmentManager,
-                    title = getString(R.string.pref_default_focal_1x),
-                    options = names1x,
-                    selectedIndex = selectedIndex,
-                    badge = "1.0X"
-                ) { which ->
-                    prefs.edit().putString(KEY_DEFAULT_FOCAL_1X, names1x[which]).apply()
-                    updateDefaultFocal1xTile()
-                }
-            }
-        }
-
-        // 3. Target Log Curve
+        binding.btnMenuDefaultLens.setOnClickListener { sheetDispatcher.showDefaultLensSheet() }
+        binding.btnMenuDefaultFocal1x.setOnClickListener { sheetDispatcher.showDefaultFocal1xSheet() }
         binding.btnMenuTargetLog.setOnClickListener {
-            val currentLog = prefs.getString(KEY_TARGET_LOG, "None") ?: "None"
-            val selectedIndex = LOG_CURVES.indexOf(currentLog).coerceAtLeast(0)
-            val logOptions = LOG_CURVES.map { curve ->
-                if (curve == "None") getString(R.string.pref_option_none) else curve
-            }
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.target_log_hint),
-                options = logOptions,
-                selectedIndex = selectedIndex,
-                badge = "LOG"
-            ) { which ->
-                val selected = LOG_CURVES[which]
-                val editor = prefs.edit().putString(KEY_TARGET_LOG, selected)
-                val activeLut = prefs.getString(KEY_ACTIVE_LUT, null)
-                val lutMgr = LutManager(requireContext())
-                if (!lutMgr.isLutCompatibleWithLog(activeLut, selected)) {
-                    editor.remove(KEY_ACTIVE_LUT)
-                    val msg = getString(R.string.lut_reset_incompatible_toast, selected)
-                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                }
-                editor.apply()
-                updateTargetLogTile()
-                updateLutsTile()
-                updateCheckboxStates()
-                updateStorageVisibility()
+            sheetDispatcher.showTargetLogSheet { incompatibleLog ->
+                Toast.makeText(context, getString(R.string.lut_reset_incompatible_toast, incompatibleLog), Toast.LENGTH_SHORT).show()
             }
         }
-
-        // 4. HDR+ Fusion Engine
-        binding.btnMenuHdrFusionMode.setOnClickListener {
-            val savedFusion = prefs.getString(KEY_HDR_FUSION_MODE, HDR_FUSION_SABRE) ?: HDR_FUSION_SABRE
-            val selectedIndex = HDR_FUSION_MODES.indexOf(savedFusion).coerceAtLeast(0)
-            val fusionOptions = listOf(
-                getString(R.string.pref_fusion_auto),
-                getString(R.string.pref_fusion_spatial),
-                getString(R.string.pref_fusion_sabre),
-                getString(R.string.pref_fusion_classic)
-            )
-            val descriptions = listOf(
-                getString(R.string.pref_fusion_auto_desc),
-                getString(R.string.pref_fusion_spatial_desc),
-                getString(R.string.pref_fusion_sabre_desc),
-                getString(R.string.pref_fusion_classic_desc)
-            )
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.pref_hdr_fusion_mode_title),
-                options = fusionOptions,
-                selectedIndex = selectedIndex,
-                badge = "COMPUTE",
-                descriptions = descriptions
-            ) { which ->
-                prefs.edit().putString(KEY_HDR_FUSION_MODE, HDR_FUSION_MODES[which]).apply()
-                updateHdrFusionTile()
-            }
-        }
-
-        // 5. HDR+ Burst Frames
-        binding.btnMenuHdrBurstMode.setOnClickListener {
-            val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "5") ?: "5"
-            val selectedIndex = BURST_SIZES.indexOf(savedBurst).coerceAtLeast(0)
-            val options = BURST_SIZES.map { getString(R.string.pref_burst_frames_count_format, it) }
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.pref_burst_frames),
-                options = options,
-                selectedIndex = selectedIndex,
-                badge = "BURST"
-            ) { which ->
-                prefs.edit().putString(KEY_HDR_BURST_COUNT, BURST_SIZES[which]).apply()
-                updateHdrBurstTile()
-            }
-        }
-
-        // 6. HDR+ Underexposure
-        binding.btnMenuUnderexposureMode.setOnClickListener {
-            val saved = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic") ?: "Dynamic"
-            val selectedIndex = HDR_UNDEREXPOSURE_MODES.indexOf(saved).coerceAtLeast(0)
-            val underexposureOptions = HDR_UNDEREXPOSURE_MODES.map { mode ->
-                when {
-                    mode == "Off" -> getString(R.string.pref_option_off)
-                    mode.startsWith("Dynamic") -> getString(R.string.pref_option_dynamic)
-                    else -> mode
-                }
-            }
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.pref_hdr_underexposure),
-                options = underexposureOptions,
-                selectedIndex = selectedIndex,
-                badge = "EXPOSURE"
-            ) { which ->
-                prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[which]).apply()
-                updateUnderexposureTile()
-            }
-        }
-
-        // 7. Color Engine Mode
-        binding.btnMenuColorEngine.setOnClickListener {
-            val savedIndex = prefs.getInt(KEY_COLOR_ENGINE_MODE, 2).coerceIn(0, COLOR_ENGINE_MODES.size - 1)
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.pref_color_engine_mode),
-                options = COLOR_ENGINE_MODES,
-                selectedIndex = savedIndex,
-                badge = "MATRIX"
-            ) { which ->
-                prefs.edit().putInt(KEY_COLOR_ENGINE_MODE, which).apply()
-                updateColorEngineTile()
-            }
-        }
-
-        // 8. Antibanding
-        binding.btnMenuAntibanding.setOnClickListener {
-            val saved = prefs.getString(KEY_ANTIBANDING, "Auto") ?: "Auto"
-            val selectedIndex = ANTIBANDING_MODES.indexOf(saved).coerceAtLeast(0)
-            val antibandingOptions = ANTIBANDING_MODES.map { mode ->
-                when (mode) {
-                    "Auto" -> getString(R.string.pref_option_auto)
-                    "Off" -> getString(R.string.pref_option_off)
-                    else -> mode
-                }
-            }
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.pref_antibanding),
-                options = antibandingOptions,
-                selectedIndex = selectedIndex,
-                badge = "FLICKER"
-            ) { which ->
-                prefs.edit().putString(KEY_ANTIBANDING, ANTIBANDING_MODES[which]).apply()
-                updateAntibandingTile()
-            }
-        }
-
-        // 9. Burst Processing Strategy
-        binding.btnMenuBurstProcessingStrategy.setOnClickListener {
-            val saved = prefs.getString(KEY_BURST_PROCESSING_STRATEGY, BURST_STRATEGY_BALANCED) ?: BURST_STRATEGY_BALANCED
-            val selectedIndex = BURST_PROCESSING_STRATEGIES.indexOf(saved).coerceAtLeast(0)
-            val burstStrategyOptions = listOf(
-                getString(R.string.pref_burst_strategy_balanced),
-                getString(R.string.pref_burst_strategy_rapid)
-            )
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.pref_burst_processing_strategy),
-                options = burstStrategyOptions,
-                selectedIndex = selectedIndex,
-                badge = "QUEUE"
-            ) { which ->
-                prefs.edit().putString(KEY_BURST_PROCESSING_STRATEGY, BURST_PROCESSING_STRATEGIES[which]).apply()
-                updateBurstStrategyTile()
-            }
-        }
-
-        // 10. Shutter Long-Press Action
+        binding.btnMenuHdrFusionMode.setOnClickListener { sheetDispatcher.showHdrFusionSheet() }
+        binding.btnMenuHdrBurstMode.setOnClickListener { sheetDispatcher.showHdrBurstSheet() }
+        binding.btnMenuUnderexposureMode.setOnClickListener { sheetDispatcher.showUnderexposureSheet() }
+        binding.btnMenuColorEngine.setOnClickListener { sheetDispatcher.showColorEngineSheet() }
+        binding.btnMenuAntibanding.setOnClickListener { sheetDispatcher.showAntibandingSheet() }
+        binding.btnMenuBurstProcessingStrategy.setOnClickListener { sheetDispatcher.showBurstStrategySheet() }
         binding.btnMenuShutterLongPress.setOnClickListener {
-            val saved = prefs.getString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_MP4) ?: SHUTTER_LONG_PRESS_MP4
-            val selectedIndex = SHUTTER_LONG_PRESS_OPTIONS.indexOf(saved).coerceAtLeast(0)
-            val shutterActionOptions = listOf(
-                getString(R.string.pref_shutter_action_mp4),
-                getString(R.string.pref_shutter_action_raw_video),
-                getString(R.string.pref_option_disabled)
-            )
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.pref_shutter_long_press_action),
-                options = shutterActionOptions,
-                selectedIndex = selectedIndex,
-                badge = "SHUTTER"
-            ) { which ->
-                val selectedAction = SHUTTER_LONG_PRESS_OPTIONS[which]
-                prefs.edit().putString(KEY_SHUTTER_LONG_PRESS_ACTION, selectedAction).apply()
-                updateShutterLongPressTile()
-                if (selectedAction == SHUTTER_LONG_PRESS_MP4 || selectedAction == SHUTTER_LONG_PRESS_RAW_VIDEO) {
-                    if (ContextCompat.checkSelfPermission(
-                            requireContext(),
-                            android.Manifest.permission.RECORD_AUDIO
-                        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-                    ) {
-                        audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                    }
-                }
-            }
-        }
-
-        setupRawVideoSettings()
-        setupExternalViewerMenu()
-    }
-
-    private fun setupRawVideoSettings() {
-        binding.btnMenuRawVideo.setOnClickListener {
-            RawVideoSettingsBottomSheet.show(childFragmentManager) {
-                updateRawVideoTile()
-            }
-        }
-    }
-
-    private fun setupExternalViewerMenu() {
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(Uri.parse("content://dummy/image.jpg"), "image/*")
-        }
-        val resolveInfos = requireContext().packageManager.queryIntentActivities(intent, 0)
-        val defaultName = getString(R.string.pref_external_viewer_default)
-        val appNames = mutableListOf(defaultName)
-        val packageNames = mutableListOf("")
-
-        for (resolveInfo in resolveInfos) {
-            val appName = resolveInfo.loadLabel(requireContext().packageManager).toString()
-            val packageName = resolveInfo.activityInfo.packageName
-            appNames.add(appName)
-            packageNames.add(packageName)
-        }
-
-        binding.btnMenuExternalViewer.setOnClickListener {
-            val savedName = prefs.getString(KEY_EXTERNAL_VIEWER_NAME, defaultName) ?: defaultName
-            val selectedIndex = appNames.indexOf(savedName).coerceAtLeast(0)
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.settings_ui_external_viewer),
-                options = appNames,
-                selectedIndex = selectedIndex,
-                badge = "VIEWER"
-            ) { which ->
-                prefs.edit()
-                    .putString(KEY_EXTERNAL_VIEWER_NAME, appNames[which])
-                    .putString(KEY_EXTERNAL_VIEWER_PACKAGE, packageNames[which])
-                    .apply()
-                updateExternalViewerTile()
-            }
-        }
-
-        binding.btnMenuExternalViewer.visibility = if (prefs.getBoolean(KEY_USE_INTERNAL_VIEWER, true)) View.GONE else View.VISIBLE
-    }
-
-    private fun updateCheckboxStates() {
-        val isLut = isLutActive()
-        var isJpg = binding.cbSaveJpg.isChecked
-        var isRaw = binding.cbSaveRaw.isChecked
-
-        if (isLut) {
-            if (!isJpg) {
-                isJpg = true
-                binding.cbSaveJpg.isChecked = true
-                prefs.edit().putBoolean(KEY_SAVE_JPG, true).apply()
-            }
-            binding.cbSaveJpg.isEnabled = false
-            binding.cbSaveRaw.isEnabled = true
-        } else {
-            val count = (if (isJpg) 1 else 0) + (if (isRaw) 1 else 0)
-            binding.cbSaveJpg.isEnabled = !(isJpg && count == 1)
-            binding.cbSaveRaw.isEnabled = !(isRaw && count == 1)
-        }
-
-        val colorPrimary = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
-        val colorPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
-        val colorSecondary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondary, colorPrimary)
-        val colorSecondaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondaryContainer, colorPrimaryContainer)
-        val colorSurfaceContainerHigh = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.DKGRAY)
-        val colorOutlineVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
-        val density = resources.displayMetrics.density
-        val stroke1_5dp = (1.5f * density).toInt()
-        val stroke1dp = (1f * density).toInt()
-
-        // JPG Card dynamic expressive morphing (SecondaryContainer when selected)
-        binding.tileFormatJpg.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (isJpg) colorSecondaryContainer else colorSurfaceContainerHigh))
-        binding.tileFormatJpg.strokeColor = if (isJpg) colorSecondary else colorOutlineVariant
-        binding.tileFormatJpg.strokeWidth = if (isJpg) stroke1_5dp else stroke1dp
-        binding.tileFormatJpg.radius = (if (isJpg) 10f else 14f) * density
-
-        // DNG Card dynamic expressive morphing (PrimaryContainer when selected)
-        binding.tileFormatRaw.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (isRaw) colorPrimaryContainer else colorSurfaceContainerHigh))
-        binding.tileFormatRaw.strokeColor = if (isRaw) colorPrimary else colorOutlineVariant
-        binding.tileFormatRaw.strokeWidth = if (isRaw) stroke1_5dp else stroke1dp
-        binding.tileFormatRaw.radius = (if (isRaw) 10f else 14f) * density
-    }
-
-    private fun updateHalfFrameCardStyling(enabled: Boolean, animated: Boolean = true) {
-        val colorOnTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnTertiaryContainer, android.graphics.Color.WHITE)
-        val colorTertiary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiary, android.graphics.Color.WHITE)
-        val colorOnSurfaceVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, android.graphics.Color.GRAY)
-
-        if (enabled) {
-            binding.cardTrayHalfFrame.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.TERTIARY_CONTAINER, animated)
-            binding.txtTitleHalfFrame.setTextColor(colorOnTertiaryContainer)
-            binding.txtSubHalfFrame.setTextColor(colorOnTertiaryContainer)
-        } else {
-            binding.cardTrayHalfFrame.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.SURFACE_CONTAINER_LOW, animated)
-            binding.txtTitleHalfFrame.setTextColor(colorTertiary)
-            binding.txtSubHalfFrame.setTextColor(colorOnSurfaceVariant)
-        }
-        binding.cardTrayHalfFrame.strokeWidth = 0
-    }
-
-    private fun syncLocationSettingState() {
-        val hasLocPerm = top.maary.darkbag.utils.LocationHelper.hasPermission(requireContext())
-        if (!hasLocPerm && prefs.getBoolean(KEY_SAVE_LOCATION, false)) {
-            prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()
-        }
-        val isEnabled = prefs.getBoolean(KEY_SAVE_LOCATION, false) && hasLocPerm
-        if (binding.switchSaveLocation.isChecked != isEnabled) {
-            binding.switchSaveLocation.isChecked = isEnabled
-        }
-    }
-
-    private fun setupStartupSettings() {
-        var defaultStartup = prefs.getString(KEY_DEFAULT_STARTUP, STARTUP_CAMERA) ?: STARTUP_CAMERA
-        var enableCamera = prefs.getBoolean(KEY_ENABLE_CAMERA, true)
-        var enablePlayground = prefs.getBoolean(KEY_ENABLE_PLAYGROUND, true)
-
-        fun updateStartupCards() {
-            val colorPrimary = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
-            val colorPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
-            val colorTertiary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiary, colorPrimary)
-            val colorTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiaryContainer, colorPrimaryContainer)
-            val colorSurface = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurface, android.graphics.Color.WHITE)
-            val colorOutlineVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
-            val colorOnSurface = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface, android.graphics.Color.WHITE)
-            val colorOnPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimaryContainer, colorPrimary)
-            val colorOnTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnTertiaryContainer, colorTertiary)
-            val density = resources.displayMetrics.density
-            val stroke1dp = (1f * density).toInt()
-            val stroke2dp = (2f * density).toInt()
-            val radius10dp = (10f * density).toInt()
-            val radius14dp = (14f * density).toInt()
-
-            val isCameraActive = defaultStartup == STARTUP_CAMERA
-
-            binding.cardStartupCamera.radius = (if (isCameraActive) radius10dp else radius14dp).toFloat()
-            binding.cardStartupCamera.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (isCameraActive) colorPrimaryContainer else colorSurface))
-            binding.cardStartupCamera.strokeColor = if (isCameraActive) colorPrimary else colorOutlineVariant
-            binding.cardStartupCamera.strokeWidth = if (isCameraActive) stroke2dp else stroke1dp
-            binding.txtStartupCameraTitle.setTextColor(if (isCameraActive) colorOnPrimaryContainer else colorOnSurface)
-
-            binding.cardStartupPlayground.radius = (if (!isCameraActive) radius10dp else radius14dp).toFloat()
-            binding.cardStartupPlayground.setCardBackgroundColor(android.content.res.ColorStateList.valueOf(if (!isCameraActive) colorTertiaryContainer else colorSurface))
-            binding.cardStartupPlayground.strokeColor = if (!isCameraActive) colorTertiary else colorOutlineVariant
-            binding.cardStartupPlayground.strokeWidth = if (!isCameraActive) stroke2dp else stroke1dp
-            binding.txtStartupPlaygroundTitle.setTextColor(if (!isCameraActive) colorOnTertiaryContainer else colorOnSurface)
-        }
-
-        fun updateSwitchStates() {
-            binding.switchEnableCamera.isChecked = enableCamera
-            binding.switchEnablePlayground.isChecked = enablePlayground
-
-            if (enableCamera && !enablePlayground) {
-                binding.switchEnableCamera.isEnabled = false
-                binding.switchEnablePlayground.isEnabled = true
-            } else if (!enableCamera && enablePlayground) {
-                binding.switchEnableCamera.isEnabled = true
-                binding.switchEnablePlayground.isEnabled = false
-            } else {
-                binding.switchEnableCamera.isEnabled = true
-                binding.switchEnablePlayground.isEnabled = true
-            }
-
-            updateStartupCards()
-        }
-
-        updateSwitchStates()
-
-        binding.cardStartupCamera.setOnClickListener {
-            if (enableCamera) {
-                defaultStartup = STARTUP_CAMERA
-                prefs.edit().putString(KEY_DEFAULT_STARTUP, defaultStartup).apply()
-                updateStartupCards()
-            }
-        }
-
-        binding.cardStartupPlayground.setOnClickListener {
-            if (enablePlayground) {
-                defaultStartup = STARTUP_PLAYGROUND
-                prefs.edit().putString(KEY_DEFAULT_STARTUP, defaultStartup).apply()
-                updateStartupCards()
-            }
-        }
-
-        binding.switchEnableCamera.setOnCheckedChangeListener { _, isChecked ->
-            enableCamera = isChecked
-            prefs.edit().putBoolean(KEY_ENABLE_CAMERA, isChecked).apply()
-            if (!isChecked && defaultStartup == STARTUP_CAMERA) {
-                defaultStartup = STARTUP_PLAYGROUND
-                prefs.edit().putString(KEY_DEFAULT_STARTUP, defaultStartup).apply()
-            }
-            updateSwitchStates()
-        }
-
-        binding.switchEnablePlayground.setOnCheckedChangeListener { _, isChecked ->
-            enablePlayground = isChecked
-            prefs.edit().putBoolean(KEY_ENABLE_PLAYGROUND, isChecked).apply()
-            if (!isChecked && defaultStartup == STARTUP_PLAYGROUND) {
-                defaultStartup = STARTUP_CAMERA
-                prefs.edit().putString(KEY_DEFAULT_STARTUP, defaultStartup).apply()
-            }
-            updateSwitchStates()
-        }
-    }
-
-    private fun setupCheckboxes() {
-        setupSwitch(binding.switchLivePreview, KEY_ENABLE_LUT_PREVIEW)
-
-        binding.cbSaveJpg.isChecked = prefs.getBoolean(KEY_SAVE_JPG, true)
-        binding.cbSaveRaw.isChecked = prefs.getBoolean(KEY_SAVE_RAW, true)
-
-        binding.tileFormatJpg.setOnClickListener {
-            if (binding.cbSaveJpg.isEnabled) {
-                binding.cbSaveJpg.toggle()
-            }
-        }
-        binding.tileFormatRaw.setOnClickListener {
-            if (binding.cbSaveRaw.isEnabled) {
-                binding.cbSaveRaw.toggle()
-            }
-        }
-
-        binding.cbSaveJpg.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_SAVE_JPG, isChecked).apply()
-            updateCheckboxStates()
-            updateStorageVisibility()
-        }
-
-        binding.cbSaveRaw.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_SAVE_RAW, isChecked).apply()
-            updateCheckboxStates()
-            updateStorageVisibility()
-        }
-
-        updateCheckboxStates()
-        updateStorageVisibility()
-
-        setupSwitch(binding.switchMotionPhoto, KEY_MOTION_PHOTO, false)
-        binding.switchMotionPhoto.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_MOTION_PHOTO, isChecked).apply()
-            updateMotionPhotoVisibility()
-        }
-
-        setupSwitch(binding.switchMotionPhotoAudio, KEY_MOTION_PHOTO_AUDIO, true)
-        binding.switchMotionPhotoAudio.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                if (androidx.core.content.ContextCompat.checkSelfPermission(
+            sheetDispatcher.showShutterLongPressSheet {
+                if (ContextCompat.checkSelfPermission(
                         requireContext(),
                         android.Manifest.permission.RECORD_AUDIO
                     ) != android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -1024,15 +259,91 @@ class SettingsFragment : Fragment() {
                     audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                 }
             }
-            prefs.edit().putBoolean(KEY_MOTION_PHOTO_AUDIO, isChecked).apply()
         }
-        updateMotionPhotoVisibility()
+        binding.btnMenuRawVideo.setOnClickListener { sheetDispatcher.showRawVideoSettingsSheet() }
+        binding.btnMenuExternalViewer.setOnClickListener { sheetDispatcher.showExternalViewerSheet() }
+        binding.btnMenuDngCompression.setOnClickListener { sheetDispatcher.showDngCompressionSheet() }
+        binding.btnMenuDngFormat.setOnClickListener { sheetDispatcher.showDngFormatSheet() }
+        binding.btnMenuMultiCameraCount.setOnClickListener { sheetDispatcher.showMultiCameraCountSheet() }
+        binding.btnMenuMultiCameraDualPair.setOnClickListener { sheetDispatcher.showMultiCameraDualPairSheet() }
+    }
 
-        syncLocationSettingState()
+    private fun setupStartupSettings() {
+        binding.cardStartupCamera.setOnClickListener {
+            if (settingsViewModel.preferences.value.enableCamera) {
+                settingsViewModel.updateDefaultStartupPage(STARTUP_CAMERA)
+            }
+        }
+
+        binding.cardStartupPlayground.setOnClickListener {
+            if (settingsViewModel.preferences.value.enablePlayground) {
+                settingsViewModel.updateDefaultStartupPage(STARTUP_PLAYGROUND)
+            }
+        }
+
+        binding.switchEnableCamera.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateEnableCamera(isChecked)
+            if (!isChecked && settingsViewModel.preferences.value.defaultStartupPage == STARTUP_CAMERA) {
+                settingsViewModel.updateDefaultStartupPage(STARTUP_PLAYGROUND)
+            }
+        }
+
+        binding.switchEnablePlayground.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateEnablePlayground(isChecked)
+            if (!isChecked && settingsViewModel.preferences.value.defaultStartupPage == STARTUP_PLAYGROUND) {
+                settingsViewModel.updateDefaultStartupPage(STARTUP_CAMERA)
+            }
+        }
+    }
+
+    private fun setupCheckboxes() {
+        binding.switchLivePreview.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateLivePreview(isChecked)
+        }
+
+        binding.tileFormatJpg.setOnClickListener {
+            if (binding.cbSaveJpg.isEnabled) {
+                settingsViewModel.updateSaveJpg(!binding.cbSaveJpg.isChecked)
+            }
+        }
+        binding.tileFormatRaw.setOnClickListener {
+            if (binding.cbSaveRaw.isEnabled) {
+                settingsViewModel.updateSaveRaw(!binding.cbSaveRaw.isChecked)
+            }
+        }
+        binding.cbSaveJpg.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateSaveJpg(isChecked)
+        }
+        binding.cbSaveRaw.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateSaveRaw(isChecked)
+        }
+
+        binding.switchMotionPhoto.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateMotionPhoto(isChecked)
+        }
+        binding.switchMotionPhotoAudio.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            if (isChecked && ContextCompat.checkSelfPermission(
+                    requireContext(),
+                    android.Manifest.permission.RECORD_AUDIO
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
+            settingsViewModel.updateMotionPhotoAudio(isChecked)
+        }
+
         binding.switchSaveLocation.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
             if (isChecked) {
-                if (top.maary.darkbag.utils.LocationHelper.hasPermission(requireContext())) {
-                    prefs.edit().putBoolean(KEY_SAVE_LOCATION, true).apply()
+                if (LocationHelper.hasPermission(requireContext())) {
+                    settingsViewModel.updateSaveLocationEnabled(true)
                 } else {
                     val perms = mutableListOf(
                         android.Manifest.permission.ACCESS_FINE_LOCATION,
@@ -1044,138 +355,55 @@ class SettingsFragment : Fragment() {
                     locationPermissionLauncher.launch(perms.toTypedArray())
                 }
             } else {
-                prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()
+                settingsViewModel.updateSaveLocationEnabled(false)
             }
         }
 
-        val isHf = prefs.getBoolean(KEY_HALF_FRAME_MODE, false)
-        setupSwitch(binding.switchHalfFrameMode, KEY_HALF_FRAME_MODE, false)
-        binding.layoutHalfFrameOptions.visibility = if (isHf) View.VISIBLE else View.GONE
-        updateHalfFrameCardStyling(isHf, animated = false)
         binding.switchHalfFrameMode.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_HALF_FRAME_MODE, isChecked).apply()
-            binding.layoutHalfFrameOptions.visibility = if (isChecked) View.VISIBLE else View.GONE
-            updateHalfFrameCardStyling(isChecked)
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateHalfFrameMode(isChecked)
         }
-        setupSwitch(binding.switchHalfFrameDownsample, KEY_HALF_FRAME_DOWNSAMPLE)
-        setupSwitch(binding.switchHalfFrameDateStamp, KEY_HALF_FRAME_DATE_STAMP, false)
-        setupSwitch(binding.switchHalfFrameLightLeak, KEY_HALF_FRAME_LIGHT_LEAK, false)
-
-        binding.cbHfSaveRaw.isChecked = prefs.getBoolean(KEY_HALF_FRAME_SAVE_RAW, false)
+        binding.switchHalfFrameDownsample.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateHalfFrameDownsample(isChecked)
+        }
+        binding.switchHalfFrameDateStamp.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateHalfFrameDateStamp(isChecked)
+        }
+        binding.switchHalfFrameLightLeak.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateHalfFrameLightLeak(isChecked)
+        }
         binding.cbHfSaveRaw.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_HALF_FRAME_SAVE_RAW, isChecked).apply()
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateHalfFrameSaveRaw(isChecked)
         }
         binding.tileHfSaveRaw.setOnClickListener {
             if (binding.cbHfSaveRaw.isEnabled) {
-                binding.cbHfSaveRaw.toggle()
+                settingsViewModel.updateHalfFrameSaveRaw(!binding.cbHfSaveRaw.isChecked)
             }
         }
 
-        setupMultiCameraSettings()
-
-        setupSwitch(binding.switchMirrorFront, KEY_MIRROR_FRONT_CAMERA)
-        setupSwitch(binding.switchHdrPlusOis, KEY_HDR_PLUS_OIS)
-
-        binding.switchUseInternalViewer.isChecked = prefs.getBoolean(KEY_USE_INTERNAL_VIEWER, true)
+        binding.switchMirrorFront.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateMirrorFrontCamera(isChecked)
+        }
+        binding.switchHdrPlusOis.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateHdrPlusOis(isChecked)
+        }
         binding.switchUseInternalViewer.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_USE_INTERNAL_VIEWER, isChecked).apply()
-            binding.btnMenuExternalViewer.visibility = if (isChecked) View.GONE else View.VISIBLE
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateUseInternalViewer(isChecked)
         }
-
-        fun styleTierButton(btn: com.google.android.material.button.MaterialButton, title: String, subtitle: String, isActive: Boolean) {
-            val ctx = requireContext()
-            btn.setPadding(0, 0, 0, 0)
-            btn.insetTop = 0
-            btn.insetBottom = 0
-            btn.iconPadding = 0
-            btn.minWidth = 0
-            btn.minimumWidth = 0
-            btn.isSingleLine = false
-            btn.maxLines = 2
-            btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatCompactTierLabel(
-                context = ctx,
-                title = title,
-                subtitle = subtitle,
-                isActive = isActive
-            )
-            val density = resources.displayMetrics.density
-            val stroke1dp = (1f * density).toInt()
-            val stroke1_5dp = (1.5f * density).toInt()
-
-            val colorPrimary = MaterialColors.getColor(btn, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
-            val colorPrimaryContainer = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
-            val colorSurfaceContainerHigh = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.GRAY)
-            val colorOutlineVariant = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.DKGRAY)
-            val targetRadius = if (isActive) 10f * density else 14f * density
-            btn.shapeAppearanceModel = ShapeAppearanceModel.builder()
-                .setAllCornerSizes(targetRadius)
-                .build()
-
-            if (isActive) {
-                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
-                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
-                btn.strokeWidth = stroke1_5dp
-                btn.cornerRadius = targetRadius.toInt()
-            } else {
-                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
-                btn.strokeWidth = stroke1dp
-                btn.cornerRadius = targetRadius.toInt()
-            }
+        binding.switchForce60fps.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateForce60Fps(isChecked)
         }
-
-        fun updateUiTierButtons(checkedId: Int) {
-            styleTierButton(
-                binding.btnTierPs,
-                getString(R.string.settings_tier_ps_tag),
-                getString(R.string.settings_tier_ps_sub),
-                checkedId == R.id.btn_tier_ps
-            )
-            styleTierButton(
-                binding.btnTierFilm,
-                getString(R.string.settings_tier_film_tag),
-                getString(R.string.settings_tier_film_sub),
-                checkedId == R.id.btn_tier_film
-            )
-            styleTierButton(
-                binding.btnTierPro,
-                getString(R.string.settings_tier_pro_tag),
-                getString(R.string.settings_tier_pro_sub),
-                checkedId == R.id.btn_tier_pro
-            )
-            styleTierButton(
-                binding.btnTierCustom,
-                getString(R.string.settings_tier_custom_tag),
-                getString(R.string.settings_tier_custom_sub),
-                checkedId == R.id.btn_tier_custom
-            )
-        }
-
-        var isSyncingTierSelection = false
-
-        fun syncTierSelectionFromPrefs() {
-            isSyncingTierSelection = true
-            try {
-                val currentTierKey = prefs.getString(CameraBentoDeckView.PREF_KEY_UI_TIER, CameraUiTier.FILM.key)
-                val tier = CameraUiTier.fromKey(currentTierKey)
-                val checkId = when (tier) {
-                    CameraUiTier.POINT_AND_SHOOT -> R.id.btn_tier_ps
-                    CameraUiTier.FILM -> R.id.btn_tier_film
-                    CameraUiTier.PRO -> R.id.btn_tier_pro
-                    CameraUiTier.CUSTOM -> R.id.btn_tier_custom
-                }
-                binding.toggleUiTiers.check(checkId)
-                updateUiTierButtons(checkId)
-                binding.toggleUiTiers.enforceConcentricShapes()
-            } finally {
-                isSyncingTierSelection = false
-            }
-        }
-
-        syncTierSelectionFromPrefs()
 
         binding.toggleUiTiers.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (isSyncingTierSelection) return@addOnButtonCheckedListener
+            if (bentoDelegate.isRendering) return@addOnButtonCheckedListener
             if (isChecked) {
                 val tier = when (checkedId) {
                     R.id.btn_tier_ps -> CameraUiTier.POINT_AND_SHOOT
@@ -1183,9 +411,7 @@ class SettingsFragment : Fragment() {
                     R.id.btn_tier_pro -> CameraUiTier.PRO
                     else -> CameraUiTier.CUSTOM
                 }
-                prefs.edit().putString(CameraBentoDeckView.PREF_KEY_UI_TIER, tier.key).apply()
-                updateUiTierButtons(checkedId)
-                binding.toggleUiTiers.enforceConcentricShapes()
+                settingsViewModel.updateUiTier(tier.key)
             }
         }
 
@@ -1195,20 +421,15 @@ class SettingsFragment : Fragment() {
             context = requireContext()
         )
         binding.btnOpenDeckCustomizer.setOnClickListener {
-            ViewfinderDeckCustomizerSheet.show(requireContext()) {
-                syncTierSelectionFromPrefs()
-            }
+            ViewfinderDeckCustomizerSheet.show(requireContext()) {}
         }
-
-        setupSwitch(binding.switchForce60fps, KEY_FORCE_60FPS, false)
 
         binding.btnOpenLensCalibration.setOnClickListener {
             top.maary.darkbag.ui.LensCalibrationBottomSheet.show(childFragmentManager)
         }
 
         binding.btnCloseExperimental.setOnClickListener {
-            prefs.edit().putBoolean(KEY_DEBUG_ENABLED, false).apply()
-            updateDebugVisibility()
+            settingsViewModel.updateDebugEnabled(false)
             aboutClickCount = 0
             Toast.makeText(requireContext(), R.string.experimental_locked_toast, Toast.LENGTH_SHORT).show()
         }
@@ -1223,8 +444,7 @@ class SettingsFragment : Fragment() {
             val logs = DebugLogManager.getLogs()
             if (logs.isNotBlank() && logs != "No logs yet.") {
                 val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                val clip = android.content.ClipData.newPlainText("Darkbag Timing Logs", logs)
-                clipboard.setPrimaryClip(clip)
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Darkbag Timing Logs", logs))
                 Toast.makeText(requireContext(), "Logs copied to clipboard", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(requireContext(), "No logs to copy", Toast.LENGTH_SHORT).show()
@@ -1232,59 +452,15 @@ class SettingsFragment : Fragment() {
         }
     }
 
-    private fun updateStorageVisibility() {
-        binding.layoutJpgStorage.visibility = if (binding.cbSaveJpg.isChecked) View.VISIBLE else View.GONE
-        binding.layoutRawStorage.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
-        binding.btnMenuDngCompression.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
-        binding.btnMenuDngFormat.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
-
-        binding.tvJpgPath.text = prefs.getString(KEY_JPG_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
-        binding.tvRawPath.text = prefs.getString(KEY_RAW_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
-    }
-
-    private fun updateMotionPhotoVisibility() {
-        if (_binding == null) return
-        val motionEnabled = binding.switchMotionPhoto.isChecked
-        binding.switchMotionPhotoAudio.visibility = if (motionEnabled) View.VISIBLE else View.GONE
-    }
-
-    private val jpgPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        uri?.let {
-            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            requireContext().contentResolver.takePersistableUriPermission(it, takeFlags)
-
-            val folderName = MediaStoreUtils.getFolderNameFromUri(requireContext(), it)
-            prefs.edit()
-                .putString(KEY_JPG_STORAGE_URI, it.toString())
-                .putString(KEY_JPG_STORAGE_URI_NAME, folderName)
-                .apply()
-            updateStorageVisibility()
-        }
-    }
-
-    private val rawPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        uri?.let {
-            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            requireContext().contentResolver.takePersistableUriPermission(it, takeFlags)
-
-            val folderName = MediaStoreUtils.getFolderNameFromUri(requireContext(), it)
-            prefs.edit()
-                .putString(KEY_RAW_STORAGE_URI, it.toString())
-                .putString(KEY_RAW_STORAGE_URI_NAME, folderName)
-                .apply()
-            updateStorageVisibility()
-        }
-    }
-
     private fun setupMultiCameraSettings() {
-        val forceEnable = prefs.getBoolean(KEY_MULTI_CAMERA_FORCE_ENABLE, false)
+        val forceEnable = settingsViewModel.preferences.value.multiCameraForceEnable
         val isSupported = MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable)
         val multiCamInfo = MultiCameraHelper.getLogicalMultiCameraInfo(requireContext())
         val hwDesc = MultiCameraHelper.getHardwareTypeDescription(requireContext())
 
-        setupSwitch(binding.switchMultiCameraForceEnable, KEY_MULTI_CAMERA_FORCE_ENABLE, false)
         binding.switchMultiCameraForceEnable.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_MULTI_CAMERA_FORCE_ENABLE, isChecked).apply()
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateMultiCameraForceEnable(isChecked)
             setupMultiCameraSettings()
         }
 
@@ -1305,97 +481,19 @@ class SettingsFragment : Fragment() {
         binding.cbMultiCameraSaveRaw.isEnabled = true
         binding.tileMultiCameraSaveRaw.isEnabled = true
 
-        setupSwitch(binding.switchMultiCameraMode, KEY_MULTI_CAMERA_MODE, false)
         binding.switchMultiCameraMode.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_MULTI_CAMERA_MODE, isChecked).apply()
-            updateMultiCameraVisibility()
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateMultiCameraModeEnabled(isChecked)
         }
 
-        val countOptions = listOf(
-            MultiCameraCountPreference.AUTO_MAX.getDisplayName(requireContext()),
-            MultiCameraCountPreference.DUAL.getDisplayName(requireContext()),
-            MultiCameraCountPreference.TRIPLE.getDisplayName(requireContext())
-        )
-        val countKeys = listOf(
-            MultiCameraCountPreference.AUTO_MAX.key,
-            MultiCameraCountPreference.DUAL.key,
-            MultiCameraCountPreference.TRIPLE.key
-        )
-
-        binding.btnMenuMultiCameraCount.setOnClickListener {
-            val savedCountKey = prefs.getString(KEY_MULTI_CAMERA_COUNT_PREF, MultiCameraCountPreference.AUTO_MAX.key)
-            val currentCountIndex = countKeys.indexOf(savedCountKey).coerceAtLeast(0)
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.pref_multi_camera_count),
-                options = countOptions,
-                selectedIndex = currentCountIndex,
-                badge = "MULTI-CAM"
-            ) { which ->
-                prefs.edit().putString(KEY_MULTI_CAMERA_COUNT_PREF, countKeys[which]).apply()
-                updateMultiCameraCountTile()
-                updateMultiCameraVisibility()
-            }
-        }
-
-        val pairOptions = listOf(
-            DualLensPairPreference.WIDE_ULTRAWIDE.getDisplayName(requireContext()),
-            DualLensPairPreference.WIDE_TELE.getDisplayName(requireContext()),
-            DualLensPairPreference.ULTRAWIDE_TELE.getDisplayName(requireContext())
-        )
-        val pairKeys = listOf(
-            DualLensPairPreference.WIDE_ULTRAWIDE.key,
-            DualLensPairPreference.WIDE_TELE.key,
-            DualLensPairPreference.ULTRAWIDE_TELE.key
-        )
-
-        binding.btnMenuMultiCameraDualPair.setOnClickListener {
-            val savedPairKey = prefs.getString(KEY_MULTI_CAMERA_DUAL_PAIR, DualLensPairPreference.WIDE_ULTRAWIDE.key)
-            val currentPairIndex = pairKeys.indexOf(savedPairKey).coerceAtLeast(0)
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.pref_multi_camera_dual_pair),
-                options = pairOptions,
-                selectedIndex = currentPairIndex,
-                badge = "DUAL"
-            ) { which ->
-                prefs.edit().putString(KEY_MULTI_CAMERA_DUAL_PAIR, pairKeys[which]).apply()
-                updateMultiCameraDualPairTile()
-            }
-        }
-
-        binding.cbMultiCameraSaveRaw.isChecked = prefs.getBoolean(KEY_MULTI_CAMERA_SAVE_RAW, false)
         binding.cbMultiCameraSaveRaw.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_MULTI_CAMERA_SAVE_RAW, isChecked).apply()
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateMultiCameraSaveRaw(isChecked)
         }
         binding.tileMultiCameraSaveRaw.setOnClickListener {
             if (binding.cbMultiCameraSaveRaw.isEnabled) {
-                binding.cbMultiCameraSaveRaw.toggle()
+                settingsViewModel.updateMultiCameraSaveRaw(!binding.cbMultiCameraSaveRaw.isChecked)
             }
-        }
-
-        updateMultiCameraVisibility()
-    }
-
-    private fun updateMultiCameraVisibility() {
-        val isEnabled = prefs.getBoolean(KEY_MULTI_CAMERA_MODE, false)
-        val countKey = prefs.getString(KEY_MULTI_CAMERA_COUNT_PREF, MultiCameraCountPreference.AUTO_MAX.key)
-        binding.btnMenuMultiCameraCount.visibility = if (isEnabled) View.VISIBLE else View.GONE
-        binding.btnMenuMultiCameraDualPair.visibility = if (isEnabled && countKey == MultiCameraCountPreference.DUAL.key) View.VISIBLE else View.GONE
-        binding.tileMultiCameraSaveRaw.visibility = if (isEnabled) View.VISIBLE else View.GONE
-    }
-
-    private fun setupSwitch(switch: com.google.android.material.materialswitch.MaterialSwitch, key: String, defaultValue: Boolean = true) {
-        switch.isChecked = prefs.getBoolean(key, defaultValue)
-        switch.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(key, isChecked).apply()
-        }
-    }
-
-    private fun setupSwitch(switch: top.maary.darkbag.ui.bento.BentoSwitchTile, key: String, defaultValue: Boolean = true) {
-        switch.isChecked = prefs.getBoolean(key, defaultValue)
-        switch.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(key, isChecked).apply()
         }
     }
 
@@ -1404,18 +502,14 @@ class SettingsFragment : Fragment() {
             jpgPicker.launch(null)
         }
         binding.layoutJpgStorage.setOnLongClickListener {
-            val currentUri = prefs.getString(KEY_JPG_STORAGE_URI, null)
+            val currentUri = settingsViewModel.preferences.value.jpgStorageUri
             if (currentUri != null) {
                 MaterialAlertDialogBuilder(requireContext())
                     .setTitle(R.string.dialog_reset_storage_title)
                     .setMessage(R.string.dialog_reset_storage_jpg_message)
                     .setNegativeButton(R.string.cancel, null)
                     .setPositiveButton(R.string.btn_reset) { _, _ ->
-                        prefs.edit()
-                            .remove(KEY_JPG_STORAGE_URI)
-                            .remove(KEY_JPG_STORAGE_URI_NAME)
-                            .apply()
-                        updateStorageVisibility()
+                        settingsViewModel.updateStorageUri(isJpg = true, uri = null, name = null)
                         Toast.makeText(requireContext(), R.string.toast_storage_reset_default, Toast.LENGTH_SHORT).show()
                     }
                     .show()
@@ -1429,18 +523,14 @@ class SettingsFragment : Fragment() {
             rawPicker.launch(null)
         }
         binding.layoutRawStorage.setOnLongClickListener {
-            val currentUri = prefs.getString(KEY_RAW_STORAGE_URI, null)
+            val currentUri = settingsViewModel.preferences.value.rawStorageUri
             if (currentUri != null) {
                 MaterialAlertDialogBuilder(requireContext())
                     .setTitle(R.string.dialog_reset_storage_title)
                     .setMessage(R.string.dialog_reset_storage_raw_message)
                     .setNegativeButton(R.string.cancel, null)
                     .setPositiveButton(R.string.btn_reset) { _, _ ->
-                        prefs.edit()
-                            .remove(KEY_RAW_STORAGE_URI)
-                            .remove(KEY_RAW_STORAGE_URI_NAME)
-                            .apply()
-                        updateStorageVisibility()
+                        settingsViewModel.updateStorageUri(isJpg = false, uri = null, name = null)
                         Toast.makeText(requireContext(), R.string.toast_storage_reset_default, Toast.LENGTH_SHORT).show()
                     }
                     .show()
@@ -1448,44 +538,6 @@ class SettingsFragment : Fragment() {
                 Toast.makeText(requireContext(), R.string.toast_storage_already_default, Toast.LENGTH_SHORT).show()
             }
             true
-        }
-    }
-
-    private fun setupStorageSettings() {
-        binding.btnMenuDngCompression.setOnClickListener {
-            val savedIndex = prefs.getInt(KEY_DNG_COMPRESSION_MODE, 0).coerceIn(0, DNG_COMPRESSION_MODES.size - 1)
-            val dngCompressionOptions = listOf(
-                getString(R.string.pref_dng_compress_lossless),
-                getString(R.string.pref_dng_compress_uncompressed)
-            )
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.pref_dng_compression),
-                options = dngCompressionOptions,
-                selectedIndex = savedIndex,
-                badge = "CODEC"
-            ) { which ->
-                prefs.edit().putInt(KEY_DNG_COMPRESSION_MODE, which).apply()
-                updateDngCompressionTile()
-            }
-        }
-
-        binding.btnMenuDngFormat.setOnClickListener {
-            val rawOutputOptions = listOf(
-                getString(R.string.raw_output_type_bayer),
-                getString(R.string.raw_output_type_linear)
-            )
-            val savedFormatIndex = prefs.getInt(KEY_RAW_OUTPUT_TYPE, 0).coerceIn(0, rawOutputOptions.size - 1)
-            BentoSelectionBottomSheet.show(
-                fragmentManager = childFragmentManager,
-                title = getString(R.string.setting_raw_format_hint),
-                options = rawOutputOptions,
-                selectedIndex = savedFormatIndex,
-                badge = "CFA"
-            ) { which ->
-                prefs.edit().putInt(KEY_RAW_OUTPUT_TYPE, which).apply()
-                updateDngFormatTile()
-            }
         }
     }
 
