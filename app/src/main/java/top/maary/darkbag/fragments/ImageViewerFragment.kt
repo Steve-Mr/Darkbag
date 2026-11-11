@@ -180,6 +180,22 @@ open class ImageViewerFragment : Fragment() {
     protected lateinit var lutManager: top.maary.darkbag.utils.LutManager
     protected var previewJob: Job? = null
     private val adapterUpdateMutex = kotlinx.coroutines.sync.Mutex()
+
+    private suspend fun safeUpdateSingleGroup(updatedGroup: ImageGroup) {
+        withContext(Dispatchers.Main) {
+            if (_binding == null || !isAdded || !::adapter.isInitialized) return@withContext
+            kotlinx.coroutines.withTimeoutOrNull(300L) {
+                adapterUpdateMutex.withLock {
+                    suspendCancellableCoroutine<Unit> { continuation ->
+                        adapter.updateSingleGroup(updatedGroup) {
+                            if (continuation.isActive) continuation.resume(Unit)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     protected val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
             updateGalleryPill(position, if (::adapter.isInitialized) adapter.itemCount else 0)
@@ -197,14 +213,11 @@ open class ImageViewerFragment : Fragment() {
             }
 
             if (!group.metadataLoaded) {
-                lifecycleScope.launch {
+                lifecycleScope.launch(Dispatchers.IO) {
                     val updatedGroup = repository.loadMetadata(group)
-                    adapterUpdateMutex.withLock {
-                        suspendCancellableCoroutine<Unit> { continuation ->
-                            adapter.updateSingleGroup(updatedGroup) {
-                                if (continuation.isActive) continuation.resume(Unit)
-                            }
-                        }
+                    withContext(Dispatchers.Main) {
+                        if (_binding == null || !isAdded || !::adapter.isInitialized) return@withContext
+                        safeUpdateSingleGroup(updatedGroup)
 
                         if (binding.imagePager.currentItem == position && !isAdjusted) {
                             prepareEditConfig(updatedGroup)
@@ -546,6 +559,10 @@ open class ImageViewerFragment : Fragment() {
                         return@collect
                     }
 
+                    if (groups.isNotEmpty() || !state.isLoading) {
+                        hideGalleryLoadingIndicator()
+                    }
+
                     if (::galleryAdapter.isInitialized) {
                         galleryAdapter.submitList(groups) {
                             if (_binding != null) {
@@ -657,24 +674,23 @@ open class ImageViewerFragment : Fragment() {
                     }
                     binding.imagePager.setCurrentItem(initialIndex, false)
 
-                    // Load metadata for the initial image immediately
+                    // Load metadata for the initial image asynchronously without blocking collector
                     val initialGroup = groups.getOrNull(initialIndex)
                     if (initialGroup != null) {
                         if (!initialGroup.metadataLoaded) {
-                            val updatedGroup = repository.loadMetadata(initialGroup)
-                            prepareEditConfig(updatedGroup)
-                            adapterUpdateMutex.withLock {
-                                suspendCancellableCoroutine<Unit> { continuation ->
-                                    adapter.updateSingleGroup(updatedGroup) {
-                                        if (continuation.isActive) continuation.resume(Unit)
+                            lifecycleScope.launch(Dispatchers.IO) {
+                                val updatedGroup = repository.loadMetadata(initialGroup)
+                                withContext(Dispatchers.Main) {
+                                    if (_binding == null || !isAdded || !::adapter.isInitialized) return@withContext
+                                    prepareEditConfig(updatedGroup)
+                                    safeUpdateSingleGroup(updatedGroup)
+                                    if (binding.imagePager.currentItem == initialIndex && !isAdjusted) {
+                                        updateControlsVisibility()
                                     }
-                                }
-                                if (binding.imagePager.currentItem == initialIndex && !isAdjusted) {
-                                    updateControlsVisibility()
-                                }
-                                if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex && binding.imagePager.currentItem == initialIndex) {
-                                    hasAutoPlayedPosition = initialIndex
-                                    adapter.playMotionVideoForPosition(initialIndex)
+                                    if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex && binding.imagePager.currentItem == initialIndex) {
+                                        hasAutoPlayedPosition = initialIndex
+                                        adapter.playMotionVideoForPosition(initialIndex)
+                                    }
                                 }
                             }
                         } else {
@@ -704,7 +720,7 @@ open class ImageViewerFragment : Fragment() {
                     }
                     updateGalleryPill(binding.imagePager.currentItem, groups.size)
                     preloadAdjacentMetadata(binding.imagePager.currentItem)
-                    if (!isGalleryMode && (targetUri == null || hasNavigatedToTargetUri)) {
+                    if (!isGalleryMode) {
                         binding.imagePager.visibility = View.VISIBLE
                         binding.initialLoadingIndicator.visibility = View.GONE
                     }
@@ -713,14 +729,11 @@ open class ImageViewerFragment : Fragment() {
                     if (currentIndex in groups.indices) {
                         val currentGroup = groups[currentIndex]
                         if (!currentGroup.metadataLoaded) {
-                            lifecycleScope.launch {
+                            lifecycleScope.launch(Dispatchers.IO) {
                                 val updatedGroup = repository.loadMetadata(currentGroup)
-                                adapterUpdateMutex.withLock {
-                                    suspendCancellableCoroutine<Unit> { continuation ->
-                                        adapter.updateSingleGroup(updatedGroup) {
-                                            if (continuation.isActive) continuation.resume(Unit)
-                                        }
-                                    }
+                                withContext(Dispatchers.Main) {
+                                    if (_binding == null || !isAdded || !::adapter.isInitialized) return@withContext
+                                    safeUpdateSingleGroup(updatedGroup)
                                     val index = adapter.getGroups().indexOfFirst { it.baseName == updatedGroup.baseName }
                                     if (index == binding.imagePager.currentItem && !isAdjusted) {
                                         updateControlsVisibility()
@@ -1883,18 +1896,15 @@ open class ImageViewerFragment : Fragment() {
         preloadJob = lifecycleScope.launch(Dispatchers.IO) {
             for (index in indicesToPreload) {
                 if (!currentCoroutineContext().isActive) break
-                val groups = adapter.getGroups()
+                val groups = withContext(Dispatchers.Main) {
+                    if (::adapter.isInitialized) adapter.getGroups() else emptyList()
+                }
                 if (index !in groups.indices) continue
                 val g = groups[index]
                 if (!g.metadataLoaded) {
                     val updated = repository.loadMetadata(g)
-                    adapterUpdateMutex.withLock {
-                        suspendCancellableCoroutine<Unit> { cont ->
-                            adapter.updateSingleGroup(updated) {
-                                if (cont.isActive) cont.resume(Unit)
-                            }
-                        }
-                    }
+                    if (!currentCoroutineContext().isActive) break
+                    safeUpdateSingleGroup(updated)
                 }
             }
         }

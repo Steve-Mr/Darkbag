@@ -160,4 +160,15 @@ class ImageRepositoryCacheTest {
         assertEquals("content", cacheItem!!.jpgUri?.scheme)
         assertFalse("cachedGroups must NOT be overwritten by file:// sandbox group", cacheItem.metadataLoaded)
     }
+
+    @Test
+    fun testIsDarkbagFileName_matchesAllDarkbagPrefixes() {
+        assertTrue(ImageRepository.isDarkbagFileName("DBAG_20261111_120000.jpg"))
+        assertTrue(ImageRepository.isDarkbagFileName("Darkbag_20261111_120000.jpg"))
+        assertTrue(ImageRepository.isDarkbagFileName("RAWVID_20261111_120000.rawvid"))
+        assertTrue(ImageRepository.isDarkbagFileName("CDNG_20261111_120000_000000.dng"))
+        assertTrue(ImageRepository.isDarkbagFileName("dbag_lowercase.jpg"))
+        assertFalse(ImageRepository.isDarkbagFileName("IMG_20261111_120000.jpg"))
+        assertFalse(ImageRepository.isDarkbagFileName("PXL_20261111_120000.jpg"))
+    }
 }
