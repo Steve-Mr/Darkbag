@@ -58,4 +58,13 @@ interface ModeExecutionContext {
 
     /** 触发多摄同拍抓拍 */
     fun triggerMultiCameraPicture(timing: StandardTimingTracker)
+
+    /** 多摄模式切换前置画中画 */
+    fun toggleFrontPipInMultiCameraMode() {}
+
+    /** 多摄模式切换主摄物理预览镜头 */
+    fun switchMultiCameraPrimaryLens(multiplier: Float) {}
+
+    /** 绑定多摄 Camera2 Session */
+    fun bindMultiCameraSession(): Boolean = false
 }

@@ -108,9 +108,26 @@ class CaptureModeCoordinatorTest {
             lastTiming = timing
         }
 
+        var frontPipToggled = false
+        var lastSwitchedMultiplier: Float? = null
+        var multiCamSessionBound = false
+
         override fun triggerMultiCameraPicture(timing: StandardTimingTracker) {
             multiCamTriggered = true
             lastTiming = timing
+        }
+
+        override fun toggleFrontPipInMultiCameraMode() {
+            frontPipToggled = true
+        }
+
+        override fun switchMultiCameraPrimaryLens(multiplier: Float) {
+            lastSwitchedMultiplier = multiplier
+        }
+
+        override fun bindMultiCameraSession(): Boolean {
+            multiCamSessionBound = true
+            return true
         }
     }
 
@@ -337,6 +354,47 @@ class CaptureModeCoordinatorTest {
 
         assertFalse(multi.onShutterLongPressed())
         assertEquals(180, multi.getEffectiveOrientation(180))
+    }
+
+    @Test
+    fun testModeSpecificSwitchCameraAndSessionBinding() {
+        val host = MockModeExecutionContext(context, prefs)
+        val normal = NormalModeCoordinator(host)
+        val half = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+        val multi = MultiCameraModeCoordinator(host)
+
+        assertFalse(normal.onSwitchCameraClicked())
+        assertFalse(half.onSwitchCameraClicked())
+        assertTrue(multi.onSwitchCameraClicked())
+        assertTrue(host.frontPipToggled)
+
+        assertFalse(normal.bindCameraSession())
+        assertFalse(half.bindCameraSession())
+        assertTrue(multi.bindCameraSession())
+        assertTrue(host.multiCamSessionBound)
+
+        assertFalse(normal.supportsProLink())
+        assertFalse(half.supportsProLink())
+        assertTrue(multi.supportsProLink())
+    }
+
+    @Test
+    fun testHalfFrameModeCoordinator_ThumbnailAndProgressHoldInStep1() {
+        val sessionStore = HalfFrameSessionStore(context)
+        sessionStore.clearProfile(HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        val host = MockModeExecutionContext(context, prefs)
+        val half = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+
+        // In step 0
+        assertFalse(half.shouldHideGalleryThumbnail())
+        assertFalse(half.shouldClearThumbnailOnCapture())
+        assertFalse(half.keepsProcessingAnimationActive())
+
+        // In step 1
+        sessionStore.markStep(1, System.currentTimeMillis(), profile = HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        assertTrue(half.shouldHideGalleryThumbnail())
+        assertTrue(half.shouldClearThumbnailOnCapture())
+        assertTrue(half.keepsProcessingAnimationActive())
     }
 }
 

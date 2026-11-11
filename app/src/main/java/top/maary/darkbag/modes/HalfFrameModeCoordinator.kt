@@ -171,4 +171,27 @@ class HalfFrameModeCoordinator(
             0f
         }
     }
+
+    override fun filterAvailableLenses(
+        lenses: List<top.maary.darkbag.models.Lens>,
+        repoFacing: Int
+    ): List<top.maary.darkbag.models.Lens> {
+        return lenses.filter { it.facing == repoFacing }.filter {
+            !it.isZoomPreset || it.sensorId.contains("virtual-2x")
+        }.filter {
+            !it.sensorId.contains(top.maary.darkbag.repository.CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
+        }
+    }
+
+    override fun shouldHideGalleryThumbnail(): Boolean {
+        return sessionStore.readSession(profile = profile).step == 1
+    }
+
+    override fun shouldClearThumbnailOnCapture(): Boolean {
+        return sessionStore.readSession(profile = profile).step == 1
+    }
+
+    override fun keepsProcessingAnimationActive(): Boolean {
+        return sessionStore.readSession(profile = profile).step == 1
+    }
 }
