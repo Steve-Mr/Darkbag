@@ -929,27 +929,60 @@
                     android:insetRight="0dp"
                     android:insetBottom="0dp"
                     android:padding="0dp"
-                    app:cornerRadius="14dp"
+                    app:cornerRadius="18dp"
                     app:icon="@drawable/ic_back"
                     app:iconGravity="textStart"
                     app:iconPadding="0dp"
                     app:iconTint="?attr/colorOnSurface"
-                    app:backgroundTint="?attr/colorSurface"
+                    app:backgroundTint="?attr/colorSurfaceContainerHigh"
                     android:contentDescription="@string/back_button_alt" />
 
-                <!-- Center Title: Album Name in Normal Mode / Selected Count in Selection Mode -->
-                <TextView
-                    android:id="@+id/tv_gallery_header_title"
+                <!-- Center Title Card: Micro-telemetry Bento Tile -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/gallery_title_card"
+                    style="@style/Widget.Material3.CardView.Filled"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="42dp"
                     android:layout_weight="1"
-                    android:gravity="center"
-                    android:text="@string/gallery_album_darkroom"
-                    android:textColor="?attr/colorOnSurface"
-                    android:textSize="15sp"
-                    android:textStyle="bold"
-                    android:singleLine="true"
-                    android:ellipsize="end" />
+                    android:layout_marginStart="6dp"
+                    android:layout_marginEnd="6dp"
+                    app:cardCornerRadius="14dp"
+                    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                    app:cardElevation="0dp"
+                    app:strokeWidth="1dp"
+                    app:strokeColor="?attr/colorOutlineVariant">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical"
+                        android:gravity="center"
+                        android:paddingHorizontal="8dp">
+
+                        <TextView
+                            android:id="@+id/tv_gallery_header_title"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/gallery_album_darkroom"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            android:textColor="?attr/colorOnSurface"
+                            android:singleLine="true"
+                            android:ellipsize="end" />
+
+                        <TextView
+                            android:id="@+id/tv_gallery_header_subtitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            tools:text="518 组照片"
+                            android:textSize="9.5sp"
+                            android:textColor="?attr/colorTertiary"
+                            android:singleLine="true"
+                            android:ellipsize="end" />
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
 
                 <!-- Right Action Button: Info in Normal Mode -->
                 <com.google.android.material.button.MaterialButton
@@ -962,12 +995,12 @@
                     android:insetRight="0dp"
                     android:insetBottom="0dp"
                     android:padding="0dp"
-                    app:cornerRadius="14dp"
+                    app:cornerRadius="18dp"
                     app:icon="@drawable/ic_info"
                     app:iconGravity="textStart"
                     app:iconPadding="0dp"
                     app:iconTint="?attr/colorOnSurface"
-                    app:backgroundTint="?attr/colorSurface"
+                    app:backgroundTint="?attr/colorSurfaceContainerHigh"
                     android:contentDescription="@string/gallery_info_title" />
 
                 <!-- Right Action Button: Select All / Deselect All Toggle in Selection Mode -->
@@ -976,20 +1009,20 @@
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="wrap_content"
                     android:layout_height="42dp"
-                    android:minWidth="54dp"
+                    android:minWidth="56dp"
                     android:insetLeft="0dp"
                     android:insetTop="0dp"
                     android:insetRight="0dp"
                     android:insetBottom="0dp"
-                    android:paddingStart="12dp"
-                    android:paddingEnd="12dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
                     android:visibility="gone"
                     app:cornerRadius="14dp"
                     android:text="@string/gallery_select_all"
-                    android:textColor="?attr/colorOnSurface"
-                    android:textSize="12sp"
+                    android:textColor="?attr/colorOnSecondaryContainer"
+                    android:textSize="11sp"
                     android:textStyle="bold"
-                    app:backgroundTint="?attr/colorSurface" />
+                    app:backgroundTint="?attr/colorSecondaryContainer" />
 
             </LinearLayout>
         </top.maary.darkbag.ui.bento.BentoTrayCard>
@@ -1246,6 +1279,51 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="10dp"
                     android:text="@string/gallery_deleting"
+                    android:textAppearance="?attr/textAppearanceLabelLarge"
+                    android:textColor="?attr/colorOnSurface" />
+            </LinearLayout>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
+
+        <!-- Loading Status Indicator Capsule (shown during initial gallery loading) -->
+        <top.maary.darkbag.ui.bento.BentoTrayCard
+            android:id="@+id/gallery_loading_indicator"
+            style="@style/Widget.Darkbag.BentoTray"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            app:cardCornerRadius="22dp"
+            app:bentoContainerRole="surfaceContainerHigh"
+            app:contentPadding="10dp"
+            app:cardElevation="10dp"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="6dp"
+                android:paddingEnd="12dp">
+
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/gallery_loading_progress"
+                    style="@style/Widget.Material3Expressive.CircularProgressIndicator.Wavy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:indeterminate="true"
+                    app:indicatorSize="22dp"
+                    app:trackThickness="3dp"
+                    app:indicatorColor="?attr/colorPrimary" />
+
+                <TextView
+                    android:id="@+id/tv_gallery_loading_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:text="@string/gallery_loading"
                     android:textAppearance="?attr/textAppearanceLabelLarge"
                     android:textColor="?attr/colorOnSurface" />
             </LinearLayout>

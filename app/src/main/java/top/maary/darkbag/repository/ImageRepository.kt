@@ -26,6 +26,10 @@ class ImageRepository(private val context: Context) {
         @VisibleForTesting
         internal var cachedGroups: List<ImageGroup>? = null
 
+        @Volatile
+        @VisibleForTesting
+        internal var staleCachedGroups: List<ImageGroup>? = null
+
         private val CINEMADNG_FRAME_REGEX = Regex("^(?:DBAG_)?((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)_([0-9]{6})\\.dng$", RegexOption.IGNORE_CASE)
         private val CINEMADNG_AUDIO_REGEX = Regex("^(?:DBAG_)?((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)\\.wav$", RegexOption.IGNORE_CASE)
 
@@ -74,8 +78,9 @@ class ImageRepository(private val context: Context) {
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val groups = mutableMapOf<String, ImageGroupBuilder>()
 
-        // Pre-populate with cached metadata if available
-        cachedGroups?.forEach { cached ->
+        // Pre-populate with cached metadata if available (Stale-While-Revalidate)
+        val initialCache = cachedGroups ?: staleCachedGroups
+        initialCache?.forEach { cached ->
             groups[cached.baseName] = ImageGroupBuilder(cached.baseName).applyFrom(cached)
         }
 
@@ -85,7 +90,13 @@ class ImageRepository(private val context: Context) {
                 .filter { it.hasAny() && !it.isInProgress }
                 .sortedByDescending { it.captureTime }
             cachedGroups = sorted
+            staleCachedGroups = sorted
             emit(sorted)
+        }
+
+        // Stage 0: Stale-While-Revalidate instant T2 delivery (0ms)
+        if (groups.isNotEmpty()) {
+            emitCurrent()
         }
 
         val safJpgUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
@@ -114,10 +125,17 @@ class ImageRepository(private val context: Context) {
             }
 
             val msResults = jobMediaStore.await()
+            val hadCached = groups.isNotEmpty()
+            mergeGroupMaps(groups, msResults)
+
+            // If starting from completely cold cache, emit early progressive milestone from MediaStore
+            if (!hadCached && msResults.isNotEmpty()) {
+                emitCurrent()
+            }
+
             val jpgResults = jobSafJpg.await()
             val rawResults = jobSafRaw.await()
 
-            mergeGroupMaps(groups, msResults)
             mergeGroupMaps(groups, jpgResults)
             mergeGroupMaps(groups, rawResults)
 
@@ -126,7 +144,9 @@ class ImageRepository(private val context: Context) {
                 baseName in validBaseNames || groups[baseName]?.isInProgress == true
             }
 
-            preloadInitialMetadata(groups, initialUri)
+            withContext(Dispatchers.IO) {
+                preloadInitialMetadata(groups, initialUri)
+            }
         }
 
         emitCurrent()
@@ -346,7 +366,12 @@ class ImageRepository(private val context: Context) {
         updated
     }
 
-    fun invalidateCache() {
+    fun invalidateCache(clearStale: Boolean = false) {
+        if (!clearStale && cachedGroups != null) {
+            staleCachedGroups = cachedGroups
+        } else if (clearStale) {
+            staleCachedGroups = null
+        }
         cachedGroups = null
     }
 
@@ -367,7 +392,8 @@ class ImageRepository(private val context: Context) {
                 DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                 DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                 DocumentsContract.Document.COLUMN_MIME_TYPE,
-                DocumentsContract.Document.COLUMN_LAST_MODIFIED
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+                DocumentsContract.Document.COLUMN_SIZE
             )
 
             var scannedWithDirectQuery = false
@@ -378,6 +404,7 @@ class ImageRepository(private val context: Context) {
                     val nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                     val mimeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
                     val modifiedColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                    val sizeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
 
                     while (cursor.moveToNext()) {
                         if (idColumn == -1 || nameColumn == -1) continue
@@ -385,6 +412,7 @@ class ImageRepository(private val context: Context) {
                         val name = cursor.getString(nameColumn) ?: continue
                         val mime = if (mimeColumn != -1) cursor.getString(mimeColumn) else null
                         val lastModified = if (modifiedColumn != -1) cursor.getLong(modifiedColumn) else 0L
+                        val size = if (sizeColumn != -1) cursor.getLong(sizeColumn) else 0L
 
                         if (mime == DocumentsContract.Document.MIME_TYPE_DIR || mime == "vnd.android.document/directory") {
                             if (isCinemaDngDirectoryName(name)) {
@@ -403,6 +431,7 @@ class ImageRepository(private val context: Context) {
                                         val subIdCol = subCursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
                                         val subNameCol = subCursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                                         val subModCol = subCursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                                        val subSizeCol = subCursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
 
                                         val subFrames = mutableListOf<Pair<String, Uri>>()
 
@@ -411,8 +440,10 @@ class ImageRepository(private val context: Context) {
                                             val subDocId = subCursor.getString(subIdCol) ?: continue
                                             val subName = subCursor.getString(subNameCol) ?: continue
                                             val subMod = if (subModCol != -1) subCursor.getLong(subModCol) else 0L
+                                            val subSize = if (subSizeCol != -1) subCursor.getLong(subSizeCol) else 0L
                                             val subDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, subDocId)
                                             if (subMod > folderLastModified) folderLastModified = subMod
+                                            builder.addSize(subSize)
 
                                             if (subName.endsWith(".dng", ignoreCase = true)) {
                                                 subFrames.add(subName to subDocUri)
@@ -456,7 +487,7 @@ class ImageRepository(private val context: Context) {
                         val cdngFrameMatch = CINEMADNG_FRAME_REGEX.find(name)
                         val cdngAudioMatch = CINEMADNG_AUDIO_REGEX.find(name)
 
-                        when {
+                        val matchedBuilder = when {
                             cdngFrameMatch != null -> {
                                 val clipBaseName = cdngFrameMatch.groupValues[1]
                                 val frameIndex = cdngFrameMatch.groupValues[2].toIntOrNull() ?: 0
@@ -465,11 +496,13 @@ class ImageRepository(private val context: Context) {
                                 if (!fast && frameIndex == 0) {
                                     readExifForScanning(docUri, builder)
                                 }
+                                builder
                             }
                             cdngAudioMatch != null -> {
                                 val clipBaseName = cdngAudioMatch.groupValues[1]
                                 val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
                                 builder.setCinemaDngAudio(docUri, lastModified)
+                                builder
                             }
                             name.contains("_MULTI_") && (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)) -> {
                                 val baseName = getBaseName(name)
@@ -478,11 +511,13 @@ class ImageRepository(private val context: Context) {
                                 if (!fast) {
                                     readExifForScanning(docUri, builder)
                                 }
+                                builder
                             }
                             name.contains("_MULTI_") && name.endsWith(".dng", ignoreCase = true) -> {
                                 val baseName = getBaseName(name)
                                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.addMultiDng(docUri, name, lastModified)
+                                builder
                             }
                             name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
                                 val baseName = getBaseName(name)
@@ -491,33 +526,41 @@ class ImageRepository(private val context: Context) {
                                 if (!fast) {
                                     readExifForScanning(docUri, builder)
                                 }
+                                builder
                             }
                             name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
                                 val baseName = getBaseName(name)
                                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setDng2(docUri, lastModified)
+                                builder
                             }
                             name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
                                 val baseName = getBaseName(name)
                                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setDng1(docUri, lastModified)
+                                builder
                             }
                             name.endsWith(".dng", ignoreCase = true) -> {
                                 val baseName = getBaseName(name)
                                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setDng(docUri, lastModified)
+                                builder
                             }
                             name.endsWith(".rawvid", ignoreCase = true) -> {
                                 val baseName = getBaseName(name)
                                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setRawVideo(docUri, lastModified)
+                                builder
                             }
                             name.endsWith(".mp4", ignoreCase = true) -> {
                                 val baseName = getBaseName(name)
                                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setMp4Video(docUri, lastModified)
+                                builder
                             }
+                            else -> null
                         }
+                        matchedBuilder?.addSize(size)
                     }
                 }
             } catch (e: Exception) {
@@ -684,7 +727,8 @@ class ImageRepository(private val context: Context) {
             MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.MIME_TYPE,
             MediaStore.MediaColumns.WIDTH,
-            MediaStore.MediaColumns.HEIGHT
+            MediaStore.MediaColumns.HEIGHT,
+            MediaStore.MediaColumns.SIZE
         )
 
         val collections = mutableListOf(
@@ -717,6 +761,7 @@ class ImageRepository(private val context: Context) {
                     val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
                     val widthColumn = cursor.getColumnIndex(MediaStore.MediaColumns.WIDTH)
                     val heightColumn = cursor.getColumnIndex(MediaStore.MediaColumns.HEIGHT)
+                    val sizeColumn = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
 
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idColumn)
@@ -725,6 +770,7 @@ class ImageRepository(private val context: Context) {
                         val date = cursor.getLong(dateColumn) * 1000 // Convert to ms
                         val modified = cursor.getLong(modifiedColumn) * 1000 // Convert to ms
                         val mime = cursor.getString(mimeColumn)
+                        val size = if (sizeColumn != -1) cursor.getLong(sizeColumn) else 0L
                         
                         val dedupeKey = "$name-$modified"
                         if (!processedMediaKeys.add(dedupeKey)) continue
@@ -734,7 +780,7 @@ class ImageRepository(private val context: Context) {
                         val cdngFrameMatch = CINEMADNG_FRAME_REGEX.find(name)
                         val cdngAudioMatch = CINEMADNG_AUDIO_REGEX.find(name)
 
-                        when {
+                        val matchedBuilder = when {
                             cdngFrameMatch != null -> {
                                 val clipBaseName = cdngFrameMatch.groupValues[1]
                                 val frameIndex = cdngFrameMatch.groupValues[2].toIntOrNull() ?: 0
@@ -751,11 +797,13 @@ class ImageRepository(private val context: Context) {
                                 if (!fast && frameIndex == 0 && (builder.width == 0 || builder.height == 0)) {
                                     readExifForScanning(uri, builder)
                                 }
+                                builder
                             }
                             cdngAudioMatch != null -> {
                                 val clipBaseName = cdngAudioMatch.groupValues[1]
                                 val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
                                 builder.setCinemaDngAudio(uri, date, modified)
+                                builder
                             }
                             name.contains("_MULTI_") && mime == "image/jpeg" -> {
                                 val baseName = getBaseName(name)
@@ -772,11 +820,13 @@ class ImageRepository(private val context: Context) {
                                 if (!fast) {
                                     readExifForScanning(uri, builder)
                                 }
+                                builder
                             }
                             name.contains("_MULTI_") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
                                 val baseName = getBaseName(name)
                                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.addMultiDng(uri, name, date, modified)
+                                builder
                             }
                             mime == "image/jpeg" || name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
                                 val baseName = getBaseName(name)
@@ -793,33 +843,41 @@ class ImageRepository(private val context: Context) {
                                 if (!fast) {
                                     readExifForScanning(uri, builder)
                                 }
+                                builder
                             }
                             name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
                                 val baseName = getBaseName(name)
                                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setDng2(uri, date, modified)
+                                builder
                             }
                             name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
                                 val baseName = getBaseName(name)
                                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setDng1(uri, date, modified)
+                                builder
                             }
                             mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
                                 val baseName = getBaseName(name)
                                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setDng(uri, date, modified)
+                                builder
                             }
                             name.endsWith(".rawvid", ignoreCase = true) -> {
                                 val baseName = getBaseName(name)
                                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setRawVideo(uri, date, modified)
+                                builder
                             }
                             mime == "video/mp4" || name.endsWith(".mp4", ignoreCase = true) -> {
                                 val baseName = getBaseName(name)
                                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setMp4Video(uri, date, modified)
+                                builder
                             }
+                            else -> null
                         }
+                        matchedBuilder?.addSize(size)
                     }
                 }
             } catch (e: Exception) {
@@ -1048,6 +1106,13 @@ class ImageRepository(private val context: Context) {
         var motionPhotoVideoLength: Long = 0L
         var metadataLoaded: Boolean = false
         var isInProgress: Boolean = false
+        var totalSizeBytes: Long = 0L
+
+        fun addSize(sizeBytes: Long) {
+            if (sizeBytes > 0L) {
+                totalSizeBytes += sizeBytes
+            }
+        }
 
         fun applyFrom(group: ImageGroup): ImageGroupBuilder {
             jpgUri = group.jpgUri
@@ -1094,6 +1159,7 @@ class ImageRepository(private val context: Context) {
             motionPhotoVideoLength = group.motionPhotoVideoLength
             metadataLoaded = group.metadataLoaded
             isInProgress = group.isInProgress
+            totalSizeBytes = group.totalSizeBytes
             return this
         }
 
@@ -1168,6 +1234,9 @@ class ImageRepository(private val context: Context) {
             }
             if (other.metadataLoaded) metadataLoaded = true
             if (other.isInProgress) isInProgress = true
+            if (other.totalSizeBytes > 0L) {
+                totalSizeBytes = maxOf(totalSizeBytes, other.totalSizeBytes)
+            }
             updateTime(other.captureTime, other.lastModified)
         }
 
@@ -1422,7 +1491,8 @@ class ImageRepository(private val context: Context) {
                 cinemaDngFirstFrameUri = cinemaDngFirstFrameUri,
                 cinemaDngAudioUri = cinemaDngAudioUri,
                 cinemaDngFrameCount = cinemaDngFrameCount,
-                cinemaDngFrameUris = cinemaDngFrameUris.toList()
+                cinemaDngFrameUris = cinemaDngFrameUris.toList(),
+                totalSizeBytes = totalSizeBytes
             )
         }
     }

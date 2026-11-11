@@ -42,9 +42,20 @@ data class ImageGroup(
     val cinemaDngFirstFrameUri: Uri? = null,
     val cinemaDngAudioUri: Uri? = null,
     val cinemaDngFrameCount: Int = 0,
-    val cinemaDngFrameUris: List<Uri> = emptyList()
+    val cinemaDngFrameUris: List<Uri> = emptyList(),
+    val totalSizeBytes: Long = 0L
 ) : Parcelable {
     fun hasAny(): Boolean = isCinemaDng || cinemaDngFolderUri != null || cinemaDngFirstFrameUri != null || cinemaDngFrameUris.isNotEmpty() || jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || mp4VideoUri != null || multiJpgUris.isNotEmpty() || multiDngUris.isNotEmpty() || multiCameraLenses.isNotEmpty() || derivativeJpgUris.isNotEmpty() || derivativeMp4Uris.isNotEmpty()
+
+    val aspectRatio: String?
+        get() {
+            if (width <= 0 || height <= 0) return null
+            return if (orientation == 90 || orientation == 270) {
+                "$height:$width"
+            } else {
+                "$width:$height"
+            }
+        }
 
     val allDerivativeUris: List<Uri>
         get() {

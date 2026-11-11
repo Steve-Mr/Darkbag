@@ -103,6 +103,13 @@
     <string name="playground_btn_disband">Disband</string>
     <string name="playground_delete_title">Confirm Delete</string>
     <string name="playground_delete_message">Are you sure you want to delete the selected items?\n\nIf a half-frame group is selected, its original DNGs will also be deleted. If a DNG from a group is deleted, the group will be disbanded automatically.</string>
+    <string name="playground_title">PLAYGROUND</string>
+    <string name="playground_subtitle_format">External Darkroom · %1$d groups</string>
+    <string name="playground_btn_import">Import</string>
+    <string name="playground_btn_merge">Merge</string>
+    <string name="playground_btn_export">Export</string>
+    <string name="gallery_groups_count">%1$d groups</string>
+    <string name="gallery_layout_waterfall">Aspect</string>
 
     <string name="save_location_title">Save Location</string>
     <string name="save_location_summary">Attach GPS coordinates to photo EXIF metadata</string>
@@ -160,6 +167,7 @@
     <string name="gallery_delete_summary">Selected %1$d item(s). Choose deletion scope:</string>
     <string name="gallery_deleting">Deleting…</string>
     <string name="gallery_deleting_count">Deleting %1$d item(s)…</string>
+    <string name="gallery_loading">Loading darkroom…</string>
     <string name="format_raw_jpg">RAW+JPG</string>
     <string name="format_jpg">JPG</string>
     <string name="format_half_frame">HF</string>

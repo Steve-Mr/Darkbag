@@ -88,6 +88,13 @@
     <string name="playground_btn_disband">解散分组</string>
     <string name="playground_delete_title">确认删除</string>
     <string name="playground_delete_message">确定要删除所选项目吗？\n\n若选中了半格成片组，关联的源 DNG 也会被同步删除。若组内 DNG 被删除，该组将自动解散。</string>
+    <string name="playground_title">暗房工坊</string>
+    <string name="playground_subtitle_format">外部暗房 · %1$d 组</string>
+    <string name="playground_btn_import">导入</string>
+    <string name="playground_btn_merge">拼图</string>
+    <string name="playground_btn_export">导出</string>
+    <string name="gallery_groups_count">%1$d 组</string>
+    <string name="gallery_layout_waterfall">原比例</string>
 
     <string name="save_location_title">地理位置信息</string>
     <string name="save_location_summary">将 GPS 经纬度写入照片 EXIF 元数据</string>
@@ -145,6 +152,7 @@
     <string name="gallery_delete_summary">已选中 %1$d 个条目，请选择删除范围：</string>
     <string name="gallery_deleting">正在删除…</string>
     <string name="gallery_deleting_count">正在删除 %1$d 项…</string>
+    <string name="gallery_loading">正在载入暗房…</string>
     <string name="format_raw_jpg">RAW+JPG</string>
     <string name="format_jpg">JPG</string>
     <string name="format_half_frame">HF</string>

@@ -56,6 +56,14 @@ class DarkbagGalleryGridAdapter(
             }
         }
 
+    var isWaterfallMode: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                notifyItemRangeChanged(0, itemCount, "COLUMN_COUNT_CHANGED")
+            }
+        }
+
     private val metadataCache = android.util.LruCache<String, top.maary.darkbag.models.CaptureMetadata>(100)
     private val dateFormatter = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
 
@@ -207,6 +215,18 @@ class DarkbagGalleryGridAdapter(
             if (holder is SingleViewHolder) {
                 val targetUri = group.jpgUri ?: group.derivativeJpgUris.firstOrNull() ?: group.mp4VideoUri ?: group.derivativeMp4Uris.firstOrNull() ?: group.cinemaDngFirstFrameUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
                 bindSingleColumnMode(holder, group, targetUri)
+                // Re-apply Glide request options when switching between Waterfall (fitCenter) and Grid (centerCrop)
+                if (targetUri != null && (group.jpgUri != null || group.derivativeJpgUris.isNotEmpty())) {
+                    val requestOptions = if (isWaterfallMode) {
+                        RequestOptions().fitCenter().diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                    } else {
+                        RequestOptions().centerCrop().diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                    }
+                    Glide.with(holder.itemView.context)
+                        .load(targetUri)
+                        .apply(requestOptions)
+                        .into(holder.binding.thumbnailView)
+                }
             }
             return
         }
@@ -237,6 +257,14 @@ class DarkbagGalleryGridAdapter(
     override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
         super.onDetachedFromRecyclerView(recyclerView)
         adapterJob.cancel()
+    }
+
+    override fun onViewAttachedToWindow(holder: RecyclerView.ViewHolder) {
+        super.onViewAttachedToWindow(holder)
+        val lp = holder.itemView.layoutParams
+        if (lp is androidx.recyclerview.widget.StaggeredGridLayoutManager.LayoutParams) {
+            lp.isFullSpan = holder is MultiCamViewHolder
+        }
     }
 
     override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
@@ -283,9 +311,14 @@ class DarkbagGalleryGridAdapter(
                 holder.binding.thumbnailView.setImageDrawable(null)
                 loadMp4Thumbnail(holder, group, targetUri)
             } else {
+                val requestOptions = if (isWaterfallMode) {
+                    RequestOptions().fitCenter().diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                } else {
+                    RequestOptions().centerCrop().diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                }
                 Glide.with(holder.itemView.context)
                     .load(targetUri)
-                    .apply(RequestOptions().centerCrop().diskCacheStrategy(DiskCacheStrategy.RESOURCE))
+                    .apply(requestOptions)
                     .transition(DrawableTransitionOptions.withCrossFade())
                     .into(holder.binding.thumbnailView)
             }
@@ -336,9 +369,19 @@ class DarkbagGalleryGridAdapter(
 
     private fun bindSingleColumnMode(holder: SingleViewHolder, group: ImageGroup, targetUri: Uri?) {
         val lp = holder.binding.thumbnailView.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-        if (columnCount == 1) {
+        if (isWaterfallMode) {
+            lp.dimensionRatio = group.aspectRatio ?: "4:3"
+            holder.binding.thumbnailView.layoutParams = lp
+            holder.binding.thumbnailView.scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            holder.binding.thumbnailView.adjustViewBounds = true
+
+            holder.binding.layoutSingleColInfo.visibility = View.GONE
+            holder.binding.badgesContainer.visibility = View.VISIBLE
+        } else if (columnCount == 1) {
             lp.dimensionRatio = "4:3"
             holder.binding.thumbnailView.layoutParams = lp
+            holder.binding.thumbnailView.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            holder.binding.thumbnailView.adjustViewBounds = false
 
             holder.binding.layoutSingleColInfo.visibility = View.VISIBLE
             holder.binding.badgesContainer.visibility = View.GONE
@@ -358,6 +401,8 @@ class DarkbagGalleryGridAdapter(
         } else {
             lp.dimensionRatio = "1:1"
             holder.binding.thumbnailView.layoutParams = lp
+            holder.binding.thumbnailView.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            holder.binding.thumbnailView.adjustViewBounds = false
 
             holder.binding.layoutSingleColInfo.visibility = View.GONE
             holder.binding.badgesContainer.visibility = View.VISIBLE

@@ -27,6 +27,53 @@ class ViewerGalleryBentoTest {
     }
 
     @Test
+    fun testAlbumStatsCache_instantComputation() {
+        val g1 = ImageGroup(baseName = "IMG_001", captureTime = 1000L, totalSizeBytes = 1024L * 1024L * 10L)
+        val g2 = ImageGroup(baseName = "IMG_002", captureTime = 2000L, totalSizeBytes = 1024L * 1024L * 20L)
+        val items = listOf(g1, g2)
+
+        top.maary.darkbag.repository.AlbumStatsCache.invalidate()
+        val stats = top.maary.darkbag.repository.AlbumStatsCache.getOrCompute(items)
+
+        assertEquals(2, stats.totalCount)
+        assertEquals(1024L * 1024L * 30L, stats.totalSizeBytes)
+        assertEquals(2000L, stats.lastCaptureTime)
+
+        // Verify cache hit
+        val cached = top.maary.darkbag.repository.AlbumStatsCache.getOrCompute(items)
+        assertEquals(stats, cached)
+    }
+
+    @Test
+    fun testAlbumStatsCache_reactiveUpdateOnDatasetChange() {
+        val g1 = ImageGroup(baseName = "IMG_001", captureTime = 1000L, totalSizeBytes = 1024L * 1024L * 10L)
+        val items1 = listOf(g1)
+        top.maary.darkbag.repository.AlbumStatsCache.invalidate()
+        val stats1 = top.maary.darkbag.repository.AlbumStatsCache.getOrCompute(items1)
+        assertEquals(1, stats1.totalCount)
+        assertEquals(1024L * 1024L * 10L, stats1.totalSizeBytes)
+
+        val g2 = ImageGroup(baseName = "IMG_002", captureTime = 2500L, totalSizeBytes = 1024L * 1024L * 15L)
+        val items2 = listOf(g1, g2)
+        val stats2 = top.maary.darkbag.repository.AlbumStatsCache.getOrCompute(items2)
+        assertEquals(2, stats2.totalCount)
+        assertEquals(1024L * 1024L * 25L, stats2.totalSizeBytes)
+        assertEquals(2500L, stats2.lastCaptureTime)
+    }
+
+    @Test
+    fun testAlbumStatsCache_manualUpdateCalculatedSize() {
+        val g1 = ImageGroup(baseName = "IMG_001", captureTime = 1000L)
+        val items = listOf(g1)
+        top.maary.darkbag.repository.AlbumStatsCache.invalidate()
+        top.maary.darkbag.repository.AlbumStatsCache.updateCalculatedSize(1024L * 500L, items)
+
+        val stats = top.maary.darkbag.repository.AlbumStatsCache.getOrCompute(items)
+        assertEquals(1, stats.totalCount)
+        assertEquals(1024L * 500L, stats.totalSizeBytes)
+    }
+
+    @Test
     fun testHomogeneity_allStaticPhotos() {
         val fragment = ImageViewerFragment()
         val g1 = ImageGroup(baseName = "IMG_001", jpgUri = Uri.parse("content://media/1"))

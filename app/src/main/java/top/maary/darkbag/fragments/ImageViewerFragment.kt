@@ -102,7 +102,7 @@ open class ImageViewerFragment : Fragment() {
             }
         }
         lifecycleScope.launch {
-            repository.invalidateCache()
+            repository.invalidateCache(clearStale = true)
             loadImages(pendingDeleteNextTargetUri, forceRefresh = true)
             pendingDeleteNextTargetUri = null
         }
@@ -380,6 +380,10 @@ open class ImageViewerFragment : Fragment() {
         if (!isGalleryMode) {
             binding.initialLoadingIndicator.visibility = View.VISIBLE
             binding.imagePager.visibility = View.INVISIBLE
+        } else {
+            if (::galleryAdapter.isInitialized && galleryAdapter.itemCount == 0) {
+                showGalleryLoadingIndicator()
+            }
         }
 
         var hasNavigatedToTargetUri = false
@@ -387,6 +391,7 @@ open class ImageViewerFragment : Fragment() {
         lifecycleScope.launch {
             repository.getGroupedImagesFlow(targetUri).collect { groups ->
                 if (groups.isEmpty()) {
+                    hideGalleryLoadingIndicator()
                     hideGalleryDeletingIndicator()
                     if (isGalleryMode) {
                         exitGalleryMode()
@@ -398,6 +403,7 @@ open class ImageViewerFragment : Fragment() {
                 if (::galleryAdapter.isInitialized) {
                     galleryAdapter.submitList(groups) {
                         if (_binding != null) {
+                            hideGalleryLoadingIndicator()
                             val animator = binding.galleryRecyclerView.itemAnimator
                             if (animator != null && animator.isRunning) {
                                 animator.isRunning {
@@ -415,7 +421,8 @@ open class ImageViewerFragment : Fragment() {
                         }
                     }
                     if (isGalleryMode && !galleryAdapter.isSelectionMode) {
-                        binding.tvGalleryHeaderTitle.text = "${getString(R.string.gallery_album_darkroom)} (${groups.size})"
+                        binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
+                        binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_groups_count, groups.size)
                     }
                 }
 
@@ -3550,7 +3557,7 @@ open class ImageViewerFragment : Fragment() {
 
             // Calculate nextTargetUri for single file deletion after successful deletion attempts
             if (!deleteGroup) {
-                repository.invalidateCache()
+                repository.invalidateCache(clearStale = true)
                 val remainingGroup = repository.getGroupedImages(forceRefresh = true).find { it.baseName == group.baseName }
                 nextTargetUri = if (remainingGroup != null && remainingGroup.hasAny()) {
                     remainingGroup.firstAvailableUri?.toString()
@@ -3570,11 +3577,11 @@ open class ImageViewerFragment : Fragment() {
                     deleteLauncher.launch(IntentSenderRequest.Builder(deleteRequest.intentSender).build())
                 } catch (e: Exception) {
                     context.let { Toast.makeText(it, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show() }
-                    repository.invalidateCache()
+                    repository.invalidateCache(clearStale = true)
                     loadImages(nextTargetUri, forceRefresh = true)
                 }
             } else {
-                repository.invalidateCache()
+                repository.invalidateCache(clearStale = true)
                 loadImages(nextTargetUri, forceRefresh = true)
             }
         }
@@ -3626,19 +3633,7 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
-        val layoutManager = GridLayoutManager(requireContext(), initialCols)
-        layoutManager.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
-            override fun getSpanSize(position: Int): Int {
-                if (position in 0 until galleryAdapter.itemCount) {
-                    val item = galleryAdapter.getItem(position)
-                    if (item.isMultiCamera && item.multiCameraLenses.isNotEmpty()) {
-                        return layoutManager.spanCount
-                    }
-                }
-                return 1
-            }
-        }
-
+        val layoutManager = createGridLayoutManager(initialCols)
         binding.galleryRecyclerView.layoutManager = layoutManager
         binding.galleryRecyclerView.adapter = galleryAdapter
         (binding.galleryRecyclerView.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)?.apply {
@@ -3735,20 +3730,61 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
+    private fun createGridLayoutManager(cols: Int): GridLayoutManager {
+        val lm = GridLayoutManager(requireContext(), cols)
+        lm.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
+            override fun getSpanSize(position: Int): Int {
+                if (position in 0 until galleryAdapter.itemCount) {
+                    val item = galleryAdapter.getItem(position)
+                    if (item.isMultiCamera && item.multiCameraLenses.isNotEmpty()) {
+                        return lm.spanCount
+                    }
+                }
+                return 1
+            }
+        }
+        return lm
+    }
+
     private fun cycleGalleryLayout() {
         if (!::galleryAdapter.isInitialized) return
-        val nextCols = when (galleryAdapter.columnCount) {
-            1 -> 2
-            2 -> 3
-            3 -> 4
-            else -> 1
-        }
-        (binding.galleryRecyclerView.layoutManager as? GridLayoutManager)?.spanCount = nextCols
-        galleryAdapter.columnCount = nextCols
-        binding.btnGalleryDockLayout.text = if (nextCols == 1) {
-            getString(R.string.gallery_layout_1_col)
+        if (galleryAdapter.isWaterfallMode) {
+            // Waterfall -> 3 Columns Square
+            galleryAdapter.isWaterfallMode = false
+            galleryAdapter.columnCount = 3
+            binding.galleryRecyclerView.layoutManager = createGridLayoutManager(3)
+            binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_cols, 3)
         } else {
-            getString(R.string.gallery_layout_cols, nextCols)
+            when (galleryAdapter.columnCount) {
+                3 -> {
+                    // 3 -> 2 Columns Square
+                    galleryAdapter.columnCount = 2
+                    (binding.galleryRecyclerView.layoutManager as? GridLayoutManager)?.spanCount = 2
+                    binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_cols, 2)
+                }
+                2 -> {
+                    // 2 -> 1 Column Details
+                    galleryAdapter.columnCount = 1
+                    (binding.galleryRecyclerView.layoutManager as? GridLayoutManager)?.spanCount = 1
+                    binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_1_col)
+                }
+                1 -> {
+                    // 1 -> Waterfall Aspect Ratio (2 cols)
+                    galleryAdapter.isWaterfallMode = true
+                    galleryAdapter.columnCount = 2
+                    val spanCount = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 3 else 2
+                    val staggeredLm = androidx.recyclerview.widget.StaggeredGridLayoutManager(spanCount, androidx.recyclerview.widget.StaggeredGridLayoutManager.VERTICAL).apply {
+                        gapStrategy = androidx.recyclerview.widget.StaggeredGridLayoutManager.GAP_HANDLING_NONE
+                    }
+                    binding.galleryRecyclerView.layoutManager = staggeredLm
+                    binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_waterfall)
+                }
+                else -> {
+                    galleryAdapter.columnCount = 3
+                    binding.galleryRecyclerView.layoutManager = createGridLayoutManager(3)
+                    binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_cols, 3)
+                }
+            }
         }
     }
 
@@ -3788,8 +3824,15 @@ open class ImageViewerFragment : Fragment() {
         binding.imagePager.visibility = View.INVISIBLE
 
         val currentCount = if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0
-        binding.tvGalleryHeaderTitle.text = "${getString(R.string.gallery_album_darkroom)} ($currentCount)"
+        binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
+        binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_groups_count, currentCount)
         updateGallerySelectionUI(0)
+
+        if (currentCount == 0) {
+            showGalleryLoadingIndicator()
+        } else {
+            hideGalleryLoadingIndicator()
+        }
 
         if (targetPosition in 0 until (if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0)) {
             binding.galleryRecyclerView.scrollToPosition(targetPosition)
@@ -3803,6 +3846,7 @@ open class ImageViewerFragment : Fragment() {
         isGalleryMode = false
         startedInGalleryMode = false
         hideGalleryDeletingIndicator()
+        hideGalleryLoadingIndicator()
         binding.galleryRecyclerView.isEnabled = true
 
         if (::galleryAdapter.isInitialized) {
@@ -3837,7 +3881,8 @@ open class ImageViewerFragment : Fragment() {
         if (galleryAdapter.isSelectionMode) {
             binding.galleryHeaderCard.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.PRIMARY_CONTAINER, animated = true)
             binding.btnGalleryHeaderAction.setIconResource(R.drawable.ic_close)
-            binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_selected_count, selectedCount)
+            binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
+            binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_selected_count, selectedCount)
             binding.btnGalleryHeaderInfo.visibility = View.GONE
             binding.btnGalleryHeaderSelectAll.visibility = View.VISIBLE
 
@@ -3869,7 +3914,8 @@ open class ImageViewerFragment : Fragment() {
             binding.galleryHeaderCard.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.SURFACE_CONTAINER, animated = true)
             binding.btnGalleryHeaderAction.setIconResource(R.drawable.ic_back)
             val count = galleryAdapter.itemCount
-            binding.tvGalleryHeaderTitle.text = "${getString(R.string.gallery_album_darkroom)} ($count)"
+            binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_album_darkroom)
+            binding.tvGalleryHeaderSubtitle?.text = getString(R.string.gallery_groups_count, count)
             binding.btnGalleryHeaderInfo.visibility = View.VISIBLE
             binding.btnGalleryHeaderSelectAll.visibility = View.GONE
 
@@ -3881,46 +3927,18 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun showAlbumInfoSheet() {
-        val items = if (::galleryAdapter.isInitialized) galleryAdapter.currentList else emptyList()
-        val totalCount = items.size
-        val lastCaptureTime = items.maxOfOrNull { it.captureTime.takeIf { t -> t > 0 } ?: it.lastModified } ?: 0L
+        if (!isAdded || isStateSaved) return
+        if (childFragmentManager.isStateSaved || childFragmentManager.findFragmentByTag(GalleryAlbumInfoSheet.TAG) != null) return
 
-        lifecycleScope.launch {
-            val totalSize = withContext(Dispatchers.IO) {
-                var sum = 0L
-                val ctx = context ?: return@withContext 0L
-                for (group in items) {
-                    val uris = mutableListOf<Uri>()
-                    group.jpgUri?.let { uris.add(it) }
-                    group.dngUri?.let { uris.add(it) }
-                    group.dngUri1?.let { uris.add(it) }
-                    group.dngUri2?.let { uris.add(it) }
-                    group.rawVideoUri?.let { uris.add(it) }
-                    group.mp4VideoUri?.let { uris.add(it) }
-                    group.derivativeJpgUris.forEach { uris.add(it) }
-                    group.derivativeMp4Uris.forEach { uris.add(it) }
-                    group.multiJpgUris.forEach { uris.add(it) }
-                    group.multiDngUris.forEach { uris.add(it) }
-                    group.cinemaDngFrameUris.forEach { uris.add(it) }
-                    for (u in uris.distinct()) {
-                        try {
-                            ctx.contentResolver.openFileDescriptor(u, "r")?.use { pfd ->
-                                val s = pfd.statSize
-                                if (s > 0) sum += s
-                            }
-                        } catch (e: Exception) {
-                            // ignore
-                        }
-                    }
-                }
-                sum
-            }
-            if (isAdded) {
-                GalleryAlbumInfoSheet.newInstance(totalCount, totalSize, lastCaptureTime)
-                    .show(childFragmentManager, GalleryAlbumInfoSheet.TAG)
-            }
-        }
+        val items = if (::galleryAdapter.isInitialized) galleryAdapter.currentList else emptyList()
+        val stats = top.maary.darkbag.repository.AlbumStatsCache.getOrCompute(items)
+
+        GalleryAlbumInfoSheet.newInstance(stats.totalCount, stats.totalSizeBytes, stats.lastCaptureTime)
+            .show(childFragmentManager, GalleryAlbumInfoSheet.TAG)
     }
+
+    internal fun getGalleryItems(): List<ImageGroup> =
+        if (::galleryAdapter.isInitialized) galleryAdapter.currentList else emptyList()
 
     internal fun checkHomogeneity(selected: List<GallerySelectedItem>): Boolean {
         if (selected.isEmpty()) return false
@@ -4260,6 +4278,41 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
+    protected fun showGalleryLoadingIndicator() {
+        if (_binding == null) return
+        binding.galleryLoadingIndicator?.apply {
+            animate().cancel()
+            visibility = View.VISIBLE
+            alpha = 0f
+            scaleX = 0.9f
+            scaleY = 0.9f
+            animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(180)
+                .start()
+        }
+    }
+
+    protected fun hideGalleryLoadingIndicator() {
+        if (_binding == null) return
+        binding.galleryLoadingIndicator?.apply {
+            if (visibility == View.VISIBLE) {
+                animate().cancel()
+                animate()
+                    .alpha(0f)
+                    .scaleX(0.9f)
+                    .scaleY(0.9f)
+                    .setDuration(150)
+                    .withEndAction {
+                        visibility = View.GONE
+                    }
+                    .start()
+            }
+        }
+    }
+
     private fun deleteBatchImages(selectedItems: List<GallerySelectedItem>, deleteMode: Int) {
         val context = context ?: return
         showGalleryDeletingIndicator(selectedItems.size)
@@ -4333,7 +4386,7 @@ open class ImageViewerFragment : Fragment() {
                     deleteLauncher.launch(IntentSenderRequest.Builder(deleteRequest.intentSender).build())
                 } catch (e: Exception) {
                     context.let { Toast.makeText(it, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show() }
-                    repository.invalidateCache()
+                    repository.invalidateCache(clearStale = true)
                     loadImages(forceRefresh = true)
                     hideGalleryDeletingIndicator()
                     if (_binding != null) {
@@ -4342,7 +4395,7 @@ open class ImageViewerFragment : Fragment() {
                     }
                 }
             } else {
-                repository.invalidateCache()
+                repository.invalidateCache(clearStale = true)
                 loadImages(forceRefresh = true)
             }
         }
