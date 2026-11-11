@@ -1,0 +1,56 @@
+package top.maary.darkbag.repository
+
+import top.maary.darkbag.fragments.SettingsFragment
+
+/**
+ * Strongly typed, immutable snapshot of user settings across Darkbag.
+ */
+data class DarkbagPreferences(
+    val targetLog: String = "None",
+    val activeLut: String = "None",
+    val lutUri: String? = null,
+    val saveJpg: Boolean = true,
+    val saveRaw: Boolean = false,
+    val useGpu: Boolean = true,
+    val enableManualControls: Boolean = true,
+    val enableLutPreview: Boolean = true,
+    val defaultLensId: String? = null,
+    val defaultFocal1x: Float = 0f,
+    val antibandingMode: String = "Auto",
+    val flashMode: String = "off",
+    val hdrBurstCount: Int = 5,
+    val hdrFusionMode: String = SettingsFragment.HDR_FUSION_AUTO,
+    val burstProcessingStrategy: String = SettingsFragment.BURST_STRATEGY_BALANCED,
+    val showHdrUnderexposureButton: Boolean = true,
+    val showHdrPlusSwitch: Boolean = true,
+    val useInternalViewer: Boolean = true,
+    val externalViewerPackage: String? = null,
+    val showSettingsButton: Boolean = true,
+    val showCameraSwitchButton: Boolean = true,
+    val showModeSwitchButton: Boolean = true,
+    val showLensControls: Boolean = true,
+    val showLutSwitcher: Boolean = true,
+    val mirrorFrontCamera: Boolean = false,
+    val hdrPlusOis: Boolean = true,
+    val force60Fps: Boolean = false,
+    val debugEnabled: Boolean = false,
+    val motionPhotoEnabled: Boolean = false,
+    val motionPhotoAudioEnabled: Boolean = false,
+    val saveLocationEnabled: Boolean = false,
+    val rawOutputType: String = "Bayer CFA RAW (~12MB, Default)",
+    val dngCompressionMode: Int = 0,
+    val jpgStorageUri: String? = null,
+    val rawStorageUri: String? = null,
+    val activeCaptureMode: String = SettingsFragment.MODE_NORMAL,
+    val multiCameraModeEnabled: Boolean = false,
+    val multiCameraForceEnable: Boolean = false,
+    val multiCameraSaveRaw: Boolean = false,
+    val defaultStartupPage: String = SettingsFragment.STARTUP_CAMERA,
+    val onboardingCompleted: Boolean = false,
+    val expFocusPeaking: Boolean = false,
+    val focusPeakingActive: Boolean = false,
+    val colorEngineMode: Int = 0,
+    val shutterLongPressAction: String = SettingsFragment.SHUTTER_LONG_PRESS_MP4,
+    val rawVideoFps: String = "24",
+    val rawVideoResolution: String = SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION
+)
