@@ -57,4 +57,15 @@ class NormalModeCoordinator(
     override fun getShutterDotRotation(deviceOrientationDegrees: Int): Float {
         return -deviceOrientationDegrees.toFloat()
     }
+
+    override fun filterAvailableLenses(
+        lenses: List<top.maary.darkbag.models.Lens>,
+        repoFacing: Int
+    ): List<top.maary.darkbag.models.Lens> {
+        return lenses.filter { it.facing == repoFacing }.filter {
+            !it.isZoomPreset || it.sensorId.contains("virtual-2x")
+        }.filter {
+            !it.sensorId.contains(top.maary.darkbag.repository.CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
+        }
+    }
 }

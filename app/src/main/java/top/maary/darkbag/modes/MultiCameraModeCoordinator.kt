@@ -14,7 +14,11 @@ class MultiCameraModeCoordinator(
     override val mode: CaptureMode = CaptureMode.MULTI_CAMERA
 
     override fun onActivated() {
-        // 多摄模式激活
+        android.widget.Toast.makeText(
+            host.context,
+            top.maary.darkbag.R.string.multi_camera_mode_enabled_toast,
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
     }
 
     override fun onDeactivated() {
@@ -30,5 +34,29 @@ class MultiCameraModeCoordinator(
 
     override fun getShutterDotRotation(deviceOrientationDegrees: Int): Float {
         return -deviceOrientationDegrees.toFloat()
+    }
+
+    override fun onSwitchCameraClicked(): Boolean {
+        host.toggleFrontPipInMultiCameraMode()
+        return true
+    }
+
+    override fun filterAvailableLenses(
+        lenses: List<top.maary.darkbag.models.Lens>,
+        repoFacing: Int
+    ): List<top.maary.darkbag.models.Lens> {
+        val physical = lenses.filter { it.facing == repoFacing && !it.isLogicalAuto && !it.isZoomPreset }
+        return if (physical.isNotEmpty()) physical else lenses.filter { it.facing == repoFacing && !it.isZoomPreset }
+    }
+
+    override fun onLensSelected(lens: top.maary.darkbag.models.Lens): Boolean {
+        host.switchMultiCameraPrimaryLens(lens.multiplier)
+        return true
+    }
+
+    override fun supportsProLink(): Boolean = true
+
+    override fun bindCameraSession(): Boolean {
+        return host.bindMultiCameraSession()
     }
 }

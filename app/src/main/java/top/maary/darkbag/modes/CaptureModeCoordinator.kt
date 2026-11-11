@@ -27,4 +27,31 @@ interface CaptureModeCoordinator {
 
     /** 获取快门指示点目标旋转角度 (驱动 ExpressiveShutterButton 导向真实图像上方) */
     fun getShutterDotRotation(deviceOrientationDegrees: Int): Float = -deviceOrientationDegrees.toFloat()
+
+    /** 用户点击切换前后置摄像头按钮 (多摄模式返回 true 并切换画中画) */
+    fun onSwitchCameraClicked(): Boolean = false
+
+    /** 针对当前拍摄模式筛选可用镜头列表 */
+    fun filterAvailableLenses(
+        lenses: List<top.maary.darkbag.models.Lens>,
+        repoFacing: Int
+    ): List<top.maary.darkbag.models.Lens> = lenses.filter { it.facing == repoFacing }
+
+    /** 用户点击镜头切换按钮 (多摄模式返回 true 并切换主预览) */
+    fun onLensSelected(lens: top.maary.darkbag.models.Lens): Boolean = false
+
+    /** 是否应当隐藏相册缩略图按钮 (半格模式处于 step 1 期间返回 true) */
+    fun shouldHideGalleryThumbnail(): Boolean = false
+
+    /** 是否在抓拍完成入队时清空相册缩略图占位 */
+    fun shouldClearThumbnailOnCapture(): Boolean = false
+
+    /** 抓拍完成后是否保留进度动画 (半格第 1 帧返回 true) */
+    fun keepsProcessingAnimationActive(): Boolean = false
+
+    /** 是否支持专业模式 PRO 同步联动按钮 */
+    fun supportsProLink(): Boolean = false
+
+    /** 是否由协调器接管相机底层 Session 配置 (如多摄并发 Session) */
+    fun bindCameraSession(): Boolean = false
 }
