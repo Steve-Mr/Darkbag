@@ -42,14 +42,14 @@ class MultiCameraModeCoordinator(
     }
 
     override fun filterAvailableLenses(
-        lenses: List<top.maary.darkbag.models.Lens>,
+        lenses: List<top.maary.darkbag.utils.LensInfo>,
         repoFacing: Int
-    ): List<top.maary.darkbag.models.Lens> {
+    ): List<top.maary.darkbag.utils.LensInfo> {
         val physical = lenses.filter { it.facing == repoFacing && !it.isLogicalAuto && !it.isZoomPreset }
         return if (physical.isNotEmpty()) physical else lenses.filter { it.facing == repoFacing && !it.isZoomPreset }
     }
 
-    override fun onLensSelected(lens: top.maary.darkbag.models.Lens): Boolean {
+    override fun onLensSelected(lens: top.maary.darkbag.utils.LensInfo): Boolean {
         host.switchMultiCameraPrimaryLens(lens.multiplier)
         return true
     }

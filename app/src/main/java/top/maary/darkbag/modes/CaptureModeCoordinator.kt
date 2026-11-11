@@ -33,12 +33,12 @@ interface CaptureModeCoordinator {
 
     /** 针对当前拍摄模式筛选可用镜头列表 */
     fun filterAvailableLenses(
-        lenses: List<top.maary.darkbag.models.Lens>,
+        lenses: List<top.maary.darkbag.utils.LensInfo>,
         repoFacing: Int
-    ): List<top.maary.darkbag.models.Lens> = lenses.filter { it.facing == repoFacing }
+    ): List<top.maary.darkbag.utils.LensInfo> = lenses.filter { it.facing == repoFacing }
 
     /** 用户点击镜头切换按钮 (多摄模式返回 true 并切换主预览) */
-    fun onLensSelected(lens: top.maary.darkbag.models.Lens): Boolean = false
+    fun onLensSelected(lens: top.maary.darkbag.utils.LensInfo): Boolean = false
 
     /** 是否应当隐藏相册缩略图按钮 (半格模式处于 step 1 期间返回 true) */
     fun shouldHideGalleryThumbnail(): Boolean = false

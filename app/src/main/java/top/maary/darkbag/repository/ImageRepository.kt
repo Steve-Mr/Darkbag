@@ -986,7 +986,7 @@ class ImageRepository(
                 val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
                 // TAG_BASELINE_EXPOSURE is 50730
                 val baselineExposure = exif.getAttributeDouble("BaselineExposure", 0.0).toFloat()
-                val digitalGain = kotlin.math.pow(2.0, baselineExposure.toDouble()).toFloat()
+                val digitalGain = Math.pow(2.0, baselineExposure.toDouble()).toFloat()
 
                 if (isHalfFrame) {
                     val adjs = mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())

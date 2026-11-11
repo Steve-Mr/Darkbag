@@ -173,13 +173,13 @@ class HalfFrameModeCoordinator(
     }
 
     override fun filterAvailableLenses(
-        lenses: List<top.maary.darkbag.models.Lens>,
+        lenses: List<top.maary.darkbag.utils.LensInfo>,
         repoFacing: Int
-    ): List<top.maary.darkbag.models.Lens> {
+    ): List<top.maary.darkbag.utils.LensInfo> {
         return lenses.filter { it.facing == repoFacing }.filter {
             !it.isZoomPreset || it.sensorId.contains("virtual-2x")
         }.filter {
-            !it.sensorId.contains(top.maary.darkbag.repository.CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
+            !it.sensorId.contains(top.maary.darkbag.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
         }
     }
 
