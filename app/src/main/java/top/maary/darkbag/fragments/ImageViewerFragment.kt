@@ -179,20 +179,10 @@ open class ImageViewerFragment : Fragment() {
 
     protected lateinit var lutManager: top.maary.darkbag.utils.LutManager
     protected var previewJob: Job? = null
-    private val adapterUpdateMutex = kotlinx.coroutines.sync.Mutex()
-
     private suspend fun safeUpdateSingleGroup(updatedGroup: ImageGroup) {
         withContext(Dispatchers.Main) {
             if (_binding == null || !isAdded || !::adapter.isInitialized) return@withContext
-            kotlinx.coroutines.withTimeoutOrNull(300L) {
-                adapterUpdateMutex.withLock {
-                    suspendCancellableCoroutine<Unit> { continuation ->
-                        adapter.updateSingleGroup(updatedGroup) {
-                            if (continuation.isActive) continuation.resume(Unit)
-                        }
-                    }
-                }
-            }
+            adapter.updateSingleGroup(updatedGroup)
         }
     }
 
@@ -457,7 +447,7 @@ open class ImageViewerFragment : Fragment() {
         }
 
         binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
-        loadImages(forceRefresh = true)
+        loadImages(forceRefresh = false)
 
         viewLifecycleOwner.lifecycleScope.launch {
             ColorProcessor.backgroundSaveFlow.collect { event ->

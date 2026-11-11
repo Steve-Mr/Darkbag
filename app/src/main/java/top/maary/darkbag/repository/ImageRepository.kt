@@ -144,13 +144,7 @@ class ImageRepository(private val context: Context) {
             }
 
             val msResults = try { jobMediaStore.await() } catch (e: Throwable) { emptyMap() }
-            val hadCached = groups.isNotEmpty()
             mergeGroupMaps(groups, msResults)
-
-            // If starting from completely cold cache, emit early progressive milestone from MediaStore
-            if (!hadCached && msResults.isNotEmpty()) {
-                emitCurrent()
-            }
 
             val jpgResults = try {
                 kotlinx.coroutines.withTimeoutOrNull(3000L) { jobSafJpg.await() } ?: emptyMap()

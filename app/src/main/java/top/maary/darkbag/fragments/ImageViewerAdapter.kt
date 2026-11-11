@@ -93,10 +93,34 @@ class ImageViewerAdapter(
     }
 
     private val differ = AsyncListDiffer(this, diffCallback)
+    private var backingList: MutableList<ImageGroup> = initialGroups.toMutableList()
 
     init {
         differ.addListListener { previousList, currentList ->
-            onCurrentListChanged?.invoke(previousList, currentList)
+            val metadataMap = backingList.filter { it.metadataLoaded }.associateBy { it.baseName }
+            backingList = currentList.map { item ->
+                val cached = metadataMap[item.baseName]
+                if (cached != null && !item.metadataLoaded) {
+                    item.copy(
+                        metadataLoaded = true,
+                        width = if (item.width > 0) item.width else cached.width,
+                        height = if (item.height > 0) item.height else cached.height,
+                        orientation = if (item.orientation != 0) item.orientation else cached.orientation,
+                        editConfig = item.editConfig ?: cached.editConfig,
+                        isMotionPhoto = item.isMotionPhoto || cached.isMotionPhoto,
+                        motionPhotoPtsUs = if (item.motionPhotoPtsUs > 0) item.motionPhotoPtsUs else cached.motionPhotoPtsUs,
+                        motionPhotoVideoLength = if (item.motionPhotoVideoLength > 0) item.motionPhotoVideoLength else cached.motionPhotoVideoLength,
+                        rawVideoFps = if (item.rawVideoFps > 0) item.rawVideoFps else cached.rawVideoFps,
+                        rawVideoFrameCount = if (item.rawVideoFrameCount > 0) item.rawVideoFrameCount else cached.rawVideoFrameCount,
+                        rawVideoDurationMs = if (item.rawVideoDurationMs > 0) item.rawVideoDurationMs else cached.rawVideoDurationMs,
+                        isCinemaDng = item.isCinemaDng || cached.isCinemaDng,
+                        cinemaDngFrameCount = if (item.cinemaDngFrameCount > 0) item.cinemaDngFrameCount else cached.cinemaDngFrameCount
+                    )
+                } else {
+                    item
+                }
+            }.toMutableList()
+            onCurrentListChanged?.invoke(previousList, backingList)
         }
         differ.submitList(initialGroups)
     }
@@ -133,14 +157,17 @@ class ImageViewerAdapter(
     }
 
     fun updateSingleGroup(updatedGroup: ImageGroup, onComplete: (() -> Unit)? = null) {
-        val currentList = differ.currentList.toMutableList()
-        val index = currentList.indexOfFirst { it.baseName == updatedGroup.baseName }
+        val index = backingList.indexOfFirst { it.baseName == updatedGroup.baseName }
         if (index != -1) {
-            currentList[index] = updatedGroup
-            differ.submitList(currentList, onComplete)
-        } else {
-            onComplete?.invoke()
+            backingList[index] = updatedGroup
+            val holder = recyclerView?.findViewHolderForAdapterPosition(index) as? ViewHolder
+            if (holder != null) {
+                setupButtons(holder, updatedGroup)
+            } else {
+                notifyItemChanged(index, setOf("METADATA_LOADED"))
+            }
         }
+        onComplete?.invoke()
     }
 
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
@@ -163,7 +190,7 @@ class ImageViewerAdapter(
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
         if (payloads.isNotEmpty()) {
-            val group = differ.currentList[position]
+            val group = backingList.getOrNull(position) ?: return
             val importantPayloads = setOf(
                 "JPG_URI_CHANGED",
                 "LAST_MODIFIED_CHANGED",
@@ -190,7 +217,7 @@ class ImageViewerAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val group = differ.currentList[position]
+        val group = backingList.getOrNull(position) ?: return
         val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
         holder.loadJob?.cancel()
 
@@ -260,8 +287,8 @@ class ImageViewerAdapter(
 
             holder.binding.filmstripSeekbar.onFrameSelected = { frameIndex, uri ->
                 val currentPos = holder.bindingAdapterPosition
-                val currentGroup = if (currentPos != RecyclerView.NO_POSITION && currentPos in differ.currentList.indices) {
-                    differ.currentList[currentPos]
+                val currentGroup = if (currentPos != RecyclerView.NO_POSITION && currentPos in backingList.indices) {
+                    backingList[currentPos]
                 } else {
                     group
                 }
@@ -825,7 +852,7 @@ class ImageViewerAdapter(
             })
     }
 
-    override fun getItemCount(): Int = differ.currentList.size
+    override fun getItemCount(): Int = backingList.size
 
     override fun onViewRecycled(holder: ViewHolder) {
         holder.loadJob?.cancel()
@@ -1091,8 +1118,8 @@ class ImageViewerAdapter(
 
     fun playMotionVideoForPosition(position: Int, onComplete: (() -> Unit)? = null) {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null && position in differ.currentList.indices) {
-            playMotionVideo(holder, differ.currentList[position], onComplete)
+        if (holder != null && position in backingList.indices) {
+            playMotionVideo(holder, backingList[position], onComplete)
         } else {
             onComplete?.invoke()
         }
@@ -1199,8 +1226,8 @@ class ImageViewerAdapter(
 
     fun toggleRawVideoForPosition(position: Int) {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null && position in differ.currentList.indices) {
-            val group = differ.currentList[position]
+        if (holder != null && position in backingList.indices) {
+            val group = backingList[position]
             if (holder.isPlayingVideo) {
                 stopRawVideo(holder)
             } else {
@@ -1280,8 +1307,8 @@ class ImageViewerAdapter(
 
     fun toggleMp4VideoForPosition(position: Int) {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null && position in differ.currentList.indices) {
-            val group = differ.currentList[position]
+        if (holder != null && position in backingList.indices) {
+            val group = backingList[position]
             if (holder.isPlayingVideo) {
                 stopMotionVideo(holder)
                 holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
@@ -1339,8 +1366,8 @@ class ImageViewerAdapter(
         holder.isPlayingVideo = false
         holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
         val pos = holder.bindingAdapterPosition
-        if (pos != RecyclerView.NO_POSITION && pos in differ.currentList.indices) {
-            val group = differ.currentList[pos]
+        if (pos != RecyclerView.NO_POSITION && pos in backingList.indices) {
+            val group = backingList[pos]
             val totalMs = ((group.cinemaDngFrameUris.size / 24.0f) * 1000).toLong()
             val curMs = ((holder.activeCinemaDngFrameIndex / 24.0f) * 1000).toLong()
             onVideoPlaybackStateChanged?.invoke(pos, false, curMs, totalMs)
@@ -1349,8 +1376,8 @@ class ImageViewerAdapter(
 
     fun toggleCinemaDngForPosition(position: Int) {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null && position in differ.currentList.indices) {
-            val group = differ.currentList[position]
+        if (holder != null && position in backingList.indices) {
+            val group = backingList[position]
             if (holder.isPlayingVideo && holder.cinemaDngPlaybackJob?.isActive == true) {
                 stopCinemaDng(holder)
             } else {
@@ -1361,8 +1388,8 @@ class ImageViewerAdapter(
 
     fun selectCinemaDngFrame(position: Int, frameIndex: Int, uri: Uri? = null) {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null && position in differ.currentList.indices) {
-            val group = differ.currentList[position]
+        if (holder != null && position in backingList.indices) {
+            val group = backingList[position]
             val targetUri = uri ?: group.cinemaDngFrameUris.getOrNull(frameIndex) ?: group.cinemaDngFirstFrameUri
             holder.activeCinemaDngFrameIndex = frameIndex
             holder.activeCinemaDngFrameUri = targetUri
@@ -1380,8 +1407,8 @@ class ImageViewerAdapter(
     }
 
     fun getVideoDuration(position: Int): Long {
-        if (position !in differ.currentList.indices) return 0L
-        val group = differ.currentList[position]
+        if (position !in backingList.indices) return 0L
+        val group = backingList[position]
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
         val rawPlayer = holder?.rawVideoPlayer
         if (rawPlayer != null && rawPlayer.isVideoLoaded) {
@@ -1443,23 +1470,23 @@ class ImageViewerAdapter(
             for (i in 0 until itemCount) {
                 (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
                     val pos = holder.bindingAdapterPosition
-                    if (pos != RecyclerView.NO_POSITION && pos in differ.currentList.indices) {
-                        setupButtons(holder, differ.currentList[pos])
+                    if (pos != RecyclerView.NO_POSITION && pos in backingList.indices) {
+                        setupButtons(holder, backingList[pos])
                     }
                 }
             }
         }
     }
 
-    fun getGroup(position: Int): ImageGroup = differ.currentList[position]
+    fun getGroup(position: Int): ImageGroup = backingList[position]
 
-    fun getGroups(): List<ImageGroup> = differ.currentList
+    fun getGroups(): List<ImageGroup> = backingList
 
     fun getSelectedDerivativeIndex(baseName: String): Int = selectedDerivativeIndices[baseName] ?: 0
 
     fun cycleOrToggleFormat(position: Int): String {
-        if (position !in differ.currentList.indices) return FORMAT_JPG
-        val group = differ.currentList[position]
+        if (position !in backingList.indices) return FORMAT_JPG
+        val group = backingList[position]
         val currentFormat = selectedFormats[group.baseName] ?: getSelectedFormat(group)
         val isRawSelected = currentFormat == FORMAT_DNG
 
@@ -1483,8 +1510,8 @@ class ImageViewerAdapter(
     }
 
     fun cycleDerivativeVersion(position: Int) {
-        if (position !in differ.currentList.indices) return
-        val group = differ.currentList[position]
+        if (position !in backingList.indices) return
+        val group = backingList[position]
         val derivatives = getDerivativeUris(group)
         if (derivatives.size < 2) return
         val nextIdx = ((selectedDerivativeIndices[group.baseName] ?: 0) + 1) % derivatives.size
@@ -1502,8 +1529,8 @@ class ImageViewerAdapter(
     }
 
     fun setFormat(position: Int, format: String) {
-        if (position >= differ.currentList.size) return
-        val group = differ.currentList[position]
+        if (position >= backingList.size) return
+        val group = backingList[position]
         if (selectedFormats[group.baseName] == format) return
         selectedFormats[group.baseName] = format
 
@@ -1531,19 +1558,19 @@ class ImageViewerAdapter(
     }
 
     fun getSelectedFormat(position: Int): String {
-        if (position >= differ.currentList.size) return FORMAT_JPG
-        return getSelectedFormat(differ.currentList[position])
+        if (position >= backingList.size) return FORMAT_JPG
+        return getSelectedFormat(backingList[position])
     }
 
     fun getSelectedLensIndex(position: Int): Int {
-        if (position >= differ.currentList.size) return 0
-        val group = differ.currentList[position]
+        if (position >= backingList.size) return 0
+        val group = backingList[position]
         return selectedLensIndices[group.baseName] ?: 0
     }
 
     fun setSelectedLensIndex(position: Int, lensIndex: Int) {
-        if (position >= differ.currentList.size) return
-        val group = differ.currentList[position]
+        if (position >= backingList.size) return
+        val group = backingList[position]
         selectedLensIndices[group.baseName] = lensIndex
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
         if (holder != null) {
@@ -1555,8 +1582,8 @@ class ImageViewerAdapter(
     }
 
     fun getActiveCinemaDngFrame(position: Int): Pair<Int, Uri?>? {
-        if (position !in differ.currentList.indices) return null
-        val group = differ.currentList[position]
+        if (position !in backingList.indices) return null
+        val group = backingList[position]
         val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
         if (!isCinemaDngGroup) return null
 
@@ -1567,8 +1594,8 @@ class ImageViewerAdapter(
     }
 
     fun getCurrentUri(position: Int): Uri? {
-        if (position >= differ.currentList.size) return null
-        val group = differ.currentList[position]
+        if (position >= backingList.size) return null
+        val group = backingList[position]
         val format = getSelectedFormat(group)
         val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
         if (isCinemaDngGroup) {
@@ -1719,7 +1746,7 @@ class ImageViewerAdapter(
     }
 
     fun findGroupIndex(baseName: String): Int {
-        return differ.currentList.indexOfFirst { it.baseName == baseName }
+        return backingList.indexOfFirst { it.baseName == baseName }
     }
 
     fun setFormatForGroup(baseName: String, format: String) {
@@ -1733,7 +1760,7 @@ class ImageViewerAdapter(
         if (index != -1) {
             val holder = recyclerView?.findViewHolderForAdapterPosition(index) as? ViewHolder
             if (holder != null) {
-                val group = differ.currentList[index]
+                val group = backingList[index]
                 setupButtons(holder, group)
                 loadSelectedFormat(holder, group, format)
             } else {
