@@ -251,27 +251,27 @@ class CameraTierController(
     }
 
     fun handleDialSelection(item: ProDialWheelView.DialItem) {
-        val binding = host.binding ?: return
+        val binding = host.binding
         when (activeManualTab) {
             "Focus" -> {
                 host.currentFocusDistance = item.rawValue.toFloat()
                 host.isManualFocus = true
-                binding.tvDialTargetValue?.text = formatFocusDist(host.currentFocusDistance)
+                binding?.tvDialTargetValue?.text = formatFocusDist(host.currentFocusDistance)
                 updateFocusPeakingState()
             }
             "ISO" -> {
                 host.currentIso = item.rawValue.toInt()
                 host.isManualIso = true
-                binding.tvDialTargetValue?.text = "${host.currentIso}"
+                binding?.tvDialTargetValue?.text = "${host.currentIso}"
             }
             "Shutter" -> {
                 host.currentExposureTime = item.rawValue.toLong()
                 host.isManualShutter = true
-                binding.tvDialTargetValue?.text = formatShutterTime(host.currentExposureTime)
+                binding?.tvDialTargetValue?.text = formatShutterTime(host.currentExposureTime)
             }
             "EV" -> {
                 host.currentEvIndex = item.rawValue.toInt()
-                binding.tvDialTargetValue?.text = formatEvVal(host.currentEvIndex)
+                binding?.tvDialTargetValue?.text = formatEvVal(host.currentEvIndex)
             }
         }
         host.applyCameraControls()

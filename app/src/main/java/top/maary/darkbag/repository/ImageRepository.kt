@@ -982,19 +982,23 @@ class ImageRepository(
 
     fun readDngBaselineExposure(uri: Uri, isHalfFrame: Boolean, index: Int = 0): EditConfig? {
         return try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                // TAG_BASELINE_EXPOSURE is 50730
-                val baselineExposure = exif.getAttributeDouble("BaselineExposure", 0.0).toFloat()
-                val digitalGain = Math.pow(2.0, baselineExposure.toDouble()).toFloat()
+            val exif = if (uri.scheme == "file") {
+                androidx.exifinterface.media.ExifInterface(uri.path ?: return null)
+            } else {
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                } ?: return null
+            }
+            // TAG_BASELINE_EXPOSURE is 50730
+            val baselineExposure = exif.getAttributeDouble("BaselineExposure", 0.0).toFloat()
+            val digitalGain = Math.pow(2.0, baselineExposure.toDouble()).toFloat()
 
-                if (isHalfFrame) {
-                    val adjs = mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
-                    adjs[index] = top.maary.darkbag.models.BasicAdjustments(exposure = 0.0f, digitalGain = digitalGain)
-                    EditConfig(adjustments = adjs)
-                } else {
-                    EditConfig(exposure = 0.0f, digitalGain = digitalGain)
-                }
+            if (isHalfFrame) {
+                val adjs = mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
+                adjs[index] = top.maary.darkbag.models.BasicAdjustments(exposure = 0.0f, digitalGain = digitalGain)
+                EditConfig(adjustments = adjs)
+            } else {
+                EditConfig(exposure = 0.0f, digitalGain = digitalGain)
             }
         } catch (e: Exception) {
             android.util.Log.e("ImageRepository", "Failed to read baseline exposure from $uri", e)
