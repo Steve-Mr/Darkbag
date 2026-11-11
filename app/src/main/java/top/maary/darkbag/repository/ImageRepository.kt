@@ -1060,8 +1060,9 @@ class ImageRepository(
             else -> return null
         }
         val buf = java.nio.ByteBuffer.wrap(bytes).order(order)
-        if (buf.short != 42.toShort()) return null
-        var ifdOffset = buf.int
+        val magic = buf.getShort(2)
+        if (magic != 42.toShort()) return null
+        var ifdOffset = buf.getInt(4)
         while (ifdOffset > 0 && ifdOffset + 2 <= bytes.size) {
             buf.position(ifdOffset)
             val numEntries = buf.short.toInt() and 0xFFFF
