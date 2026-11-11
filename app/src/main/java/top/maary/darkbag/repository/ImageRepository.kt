@@ -19,16 +19,33 @@ import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.utils.DarkbagIdentity
 import java.io.File
 
-class ImageRepository(private val context: Context) {
+class ImageRepository(
+    private val context: Context,
+    private val cacheStore: GalleryCacheStore = GalleryCacheStore.getInstance()
+) {
 
     companion object {
-        @Volatile
+        @Deprecated(
+            "Use GalleryCacheStore directly or via ImageRepository instance to prevent static leaks",
+            ReplaceWith("GalleryCacheStore.getInstance().cachedGroups")
+        )
         @VisibleForTesting
-        internal var cachedGroups: List<ImageGroup>? = null
+        internal var cachedGroups: List<ImageGroup>?
+            get() = GalleryCacheStore.getInstance().cachedGroups
+            set(value) {
+                GalleryCacheStore.getInstance().cachedGroups = value
+            }
 
-        @Volatile
+        @Deprecated(
+            "Use GalleryCacheStore directly or via ImageRepository instance to prevent static leaks",
+            ReplaceWith("GalleryCacheStore.getInstance().staleCachedGroups")
+        )
         @VisibleForTesting
-        internal var staleCachedGroups: List<ImageGroup>? = null
+        internal var staleCachedGroups: List<ImageGroup>?
+            get() = GalleryCacheStore.getInstance().staleCachedGroups
+            set(value) {
+                GalleryCacheStore.getInstance().staleCachedGroups = value
+            }
 
         private val CINEMADNG_FRAME_REGEX = Regex("^(?:DBAG_)?((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)_([0-9]{6})\\.dng$", RegexOption.IGNORE_CASE)
         private val CINEMADNG_AUDIO_REGEX = Regex("^(?:DBAG_)?((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)\\.wav$", RegexOption.IGNORE_CASE)
@@ -48,7 +65,7 @@ class ImageRepository(private val context: Context) {
 
     suspend fun getGroupedImages(forceRefresh: Boolean = false): List<ImageGroup> {
         if (!forceRefresh) {
-            cachedGroups?.let { return it }
+            cacheStore.cachedGroups?.let { return it }
         }
 
         return withContext(Dispatchers.IO) {
@@ -76,7 +93,7 @@ class ImageRepository(private val context: Context) {
                 .filter { it.hasAny() && !it.isInProgress }
                 .sortedByDescending { it.captureTime }
 
-            cachedGroups = result
+            cacheStore.cachedGroups = result
             result
         }
     }
@@ -86,7 +103,7 @@ class ImageRepository(private val context: Context) {
         val groups = mutableMapOf<String, ImageGroupBuilder>()
 
         // Pre-populate with cached metadata if available (Stale-While-Revalidate)
-        val initialCache = cachedGroups ?: staleCachedGroups
+        val initialCache = cacheStore.cachedGroups ?: cacheStore.staleCachedGroups
         initialCache?.forEach { cached ->
             groups[cached.baseName] = ImageGroupBuilder(cached.baseName).applyFrom(cached)
         }
@@ -96,8 +113,8 @@ class ImageRepository(private val context: Context) {
                 .map { it.build() }
                 .filter { it.hasAny() && !it.isInProgress }
                 .sortedByDescending { it.captureTime }
-            cachedGroups = sorted
-            staleCachedGroups = sorted
+            cacheStore.cachedGroups = sorted
+            cacheStore.staleCachedGroups = sorted
             emit(sorted)
         }
 
@@ -377,20 +394,15 @@ class ImageRepository(private val context: Context) {
             updated.mp4VideoUri
         ).any { it.scheme == "file" }
 
-        val currentCache = cachedGroups
+        val currentCache = cacheStore.cachedGroups
         if (!isSandboxGroup && currentCache != null && currentCache.any { it.baseName == updated.baseName }) {
-            cachedGroups = currentCache.map { if (it.baseName == updated.baseName) updated else it }
+            cacheStore.updateCachedGroup(updated)
         }
         updated
     }
 
     fun invalidateCache(clearStale: Boolean = false) {
-        if (!clearStale && cachedGroups != null) {
-            staleCachedGroups = cachedGroups
-        } else if (clearStale) {
-            staleCachedGroups = null
-        }
-        cachedGroups = null
+        cacheStore.invalidate(clearStale)
     }
 
     private fun scanSafFolder(
