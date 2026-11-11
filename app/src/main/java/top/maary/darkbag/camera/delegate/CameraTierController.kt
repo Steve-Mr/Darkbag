@@ -11,7 +11,7 @@ import top.maary.darkbag.R
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.modes.CaptureModeCoordinator
-import top.maary.darkbag.processor.lut.LutProcessor
+import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.ui.ProDialWheelView
 import top.maary.darkbag.viewmodel.CameraUiTier
@@ -26,7 +26,7 @@ interface CameraTierHost {
     val rootViewGroup: ViewGroup?
     val activeCoordinator: CaptureModeCoordinator?
     val cameraViewModel: CameraViewModel
-    val lutProcessor: LutProcessor?
+    val lutProcessor: LutSurfaceProcessor?
     val isFrontPipActive: Boolean
     val hasMultipleAvailableLenses: Boolean
     val hasMultiCameraManager: Boolean
@@ -159,15 +159,16 @@ class CameraTierController(
     fun updateTierUi(tier: CameraUiTier = host.cameraViewModel.uiState.value.uiTier) {
         val binding = host.binding ?: return
         val prefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, tier)
+        val isAnyManual = host.isManualFocus || host.isManualIso || host.isManualShutter || host.currentEvIndex != 0
         CameraBentoDeckView.bindTierState(
             binding = binding,
             tier = tier,
-            prefs = prefs,
-            isManualFocus = host.isManualFocus,
-            isManualIso = host.isManualIso,
-            isManualShutter = host.isManualShutter,
-            isProLinked = host.isMultiCameraManualLinked
+            isAnyManual = isAnyManual,
+            hasActiveManualTab = activeManualTab != null,
+            visibilitySpec = spec
         )
+        CameraBentoDeckView.applyDynamicRowHeights(binding)
         updateFocusPeakingState()
         updateProInfoBar()
     }

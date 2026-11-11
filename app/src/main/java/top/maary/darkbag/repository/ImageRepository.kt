@@ -1002,6 +1002,10 @@ class ImageRepository(
         }
     }
 
+    fun saveEditConfig(uri: Uri, editConfig: EditConfig) {
+        top.maary.darkbag.utils.ImageSaver.writeMetadataToExif(context, uri, editConfig, null)
+    }
+
     fun getCaptureMetadata(uri: Uri): top.maary.darkbag.models.CaptureMetadata? {
         if (uri == Uri.EMPTY) return null
         return try {

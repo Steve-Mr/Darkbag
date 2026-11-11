@@ -21,6 +21,8 @@ class DarkbagBatchDeleteSheet : BottomSheetDialogFragment() {
     private var hasDerivatives = true
     private var hasCinemaDng = false
 
+    var onDeleteConfirmed: ((Int) -> Unit)? = null
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -108,6 +110,7 @@ class DarkbagBatchDeleteSheet : BottomSheetDialogFragment() {
         }
 
         binding.btnConfirmDelete.setOnClickListener {
+            onDeleteConfirmed?.invoke(selectedMode)
             setFragmentResult(REQUEST_KEY, Bundle().apply {
                 putInt(BUNDLE_KEY_DELETE_MODE, selectedMode)
             })
