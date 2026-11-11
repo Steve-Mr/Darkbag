@@ -27,6 +27,12 @@ import top.maary.darkbag.viewmodel.CameraEffect
 import top.maary.darkbag.viewmodel.CameraUserIntent
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.modes.CaptureMode
+import top.maary.darkbag.camera.delegate.CameraGestureDelegate
+import top.maary.darkbag.camera.delegate.CameraGestureHost
+import top.maary.darkbag.camera.delegate.CameraTierController
+import top.maary.darkbag.camera.delegate.CameraTierHost
+import top.maary.darkbag.camera.delegate.CameraOverlayController
+import top.maary.darkbag.camera.delegate.CameraOverlayHost
 import top.maary.darkbag.modes.CaptureModeCoordinator
 import top.maary.darkbag.modes.ModeCoordinatorFactory
 import top.maary.darkbag.modes.ModeExecutionContext
@@ -340,6 +346,124 @@ class CameraFragment : Fragment() {
 
     private var activeCoordinator: CaptureModeCoordinator? = null
 
+    private val gestureHost = object : CameraGestureHost {
+        override val isFloatingOverlayOpen: Boolean
+            get() = (cameraUiContainerBinding?.lutListContainer?.visibility == View.VISIBLE ||
+                    cameraUiContainerBinding?.manualControlsRoot?.visibility == View.VISIBLE ||
+                    tierController.activeManualTab != null)
+
+        override fun dismissFloatingOverlays() {
+            tierController.dismissFloatingOverlays()
+        }
+
+        override fun triggerTapToFocus(x: Float, y: Float) {
+            triggerTapToFocusCamera2(x, y)
+        }
+
+        override fun unlockFocusAndMetering() {
+            this@CameraFragment.unlockFocusAndMetering()
+        }
+    }
+    private val gestureDelegate by lazy { CameraGestureDelegate(requireContext(), gestureHost) }
+
+    private val tierHost = object : CameraTierHost {
+        override val context: Context get() = requireContext()
+        override val binding: CameraUiContainerBinding? get() = cameraUiContainerBinding
+        override val rootViewGroup: ViewGroup? get() = _fragmentCameraBinding?.root as? ViewGroup
+        override val activeCoordinator: CaptureModeCoordinator? get() = this@CameraFragment.activeCoordinator
+        override val cameraViewModel: CameraViewModel get() = this@CameraFragment.cameraViewModel
+        override val lutProcessor: top.maary.darkbag.processor.lut.LutProcessor? get() = this@CameraFragment.lutProcessor
+        override val isFrontPipActive: Boolean get() = this@CameraFragment.isFrontPipActive
+        override val hasMultipleAvailableLenses: Boolean get() = availableLenses.size > 1
+        override val hasMultiCameraManager: Boolean get() = multiCameraManager != null
+        override val minFocusDistance: Float get() = this@CameraFragment.minFocusDistance
+        override val isoRange: android.util.Range<Int>? get() = this@CameraFragment.isoRange
+        override val exposureTimeRange: android.util.Range<Long>? get() = this@CameraFragment.exposureTimeRange
+        override val evRange: android.util.Range<Int>? get() = this@CameraFragment.evRange
+
+        override var currentFocusDistance: Float
+            get() = this@CameraFragment.currentFocusDistance
+            set(v) { this@CameraFragment.currentFocusDistance = v }
+
+        override var liveFocusDistance: Float
+            get() = this@CameraFragment.liveFocusDistance
+            set(v) { this@CameraFragment.liveFocusDistance = v }
+
+        override var isManualFocus: Boolean
+            get() = this@CameraFragment.isManualFocus
+            set(v) { this@CameraFragment.isManualFocus = v }
+
+        override var currentIso: Int
+            get() = this@CameraFragment.currentIso
+            set(v) { this@CameraFragment.currentIso = v }
+
+        override var liveIso: Int
+            get() = this@CameraFragment.liveIso
+            set(v) { this@CameraFragment.liveIso = v }
+
+        override var isManualIso: Boolean
+            get() = this@CameraFragment.isManualIso
+            set(v) { this@CameraFragment.isManualIso = v }
+
+        override var currentExposureTime: Long
+            get() = this@CameraFragment.currentExposureTime
+            set(v) { this@CameraFragment.currentExposureTime = v }
+
+        override var liveExposureTime: Long
+            get() = this@CameraFragment.liveExposureTime
+            set(v) { this@CameraFragment.liveExposureTime = v }
+
+        override var isManualShutter: Boolean
+            get() = this@CameraFragment.isManualShutter
+            set(v) { this@CameraFragment.isManualShutter = v }
+
+        override var currentEvIndex: Int
+            get() = this@CameraFragment.currentEvIndex
+            set(v) { this@CameraFragment.currentEvIndex = v }
+
+        override var isMultiCameraManualLinked: Boolean
+            get() = this@CameraFragment.isMultiCameraManualLinked
+            set(v) { this@CameraFragment.isMultiCameraManualLinked = v }
+
+        override var hasFocusMeteringLock: Boolean
+            get() = focusMeteringRegion != null
+            set(_) {}
+
+        override fun applyCameraControls() {
+            this@CameraFragment.applyCameraControls()
+        }
+
+        override fun clearFocusMetering() {
+            focusMeteringRegion = null
+        }
+
+        override fun clearExposureMetering() {
+            exposureMeteringRegion = null
+        }
+    }
+    private val tierController by lazy { CameraTierController(tierHost) }
+
+    private val overlayHost = object : CameraOverlayHost {
+        override val context: Context get() = requireContext()
+        override val fragmentCameraBinding: FragmentCameraBinding? get() = _fragmentCameraBinding
+        override val cameraUiContainerBinding: CameraUiContainerBinding? get() = this@CameraFragment.cameraUiContainerBinding
+        override val activeCoordinator: CaptureModeCoordinator? get() = this@CameraFragment.activeCoordinator
+        override val cameraViewModel: CameraViewModel get() = this@CameraFragment.cameraViewModel
+        override val isProcessing: Boolean get() = this@CameraFragment.isProcessing
+        override val halfFrameStep: Int get() = this@CameraFragment.halfFrameStep
+        override var isHalfFrameUiAnimating: Boolean
+            get() = this@CameraFragment.isHalfFrameUiAnimating
+            set(v) { this@CameraFragment.isHalfFrameUiAnimating = v }
+        override var pendingVfSnapshot: Bitmap?
+            get() = this@CameraFragment.pendingVfSnapshot
+            set(v) { this@CameraFragment.pendingVfSnapshot = v }
+
+        override fun readScopedHalfFrameState(prefs: SharedPreferences, requireFileForStep1: Boolean) {
+            this@CameraFragment.readScopedHalfFrameState(prefs, requireFileForStep1)
+        }
+    }
+    private val overlayController by lazy { CameraOverlayController(overlayHost) }
+
     private fun updateActiveCoordinator(mode: CaptureMode) {
         if (activeCoordinator?.mode != mode) {
             activeCoordinator?.onDeactivated()
@@ -580,33 +704,15 @@ class CameraFragment : Fragment() {
     }
 
     private fun updateProcessingAnimationUi() {
-        val processing = isProcessing
-        val shouldHide = (activeCoordinator?.shouldHideGalleryThumbnail() == true)
-        if (processing) {
-            cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
-            cameraUiContainerBinding?.photoViewContainer?.visibility = View.VISIBLE
-            if (shouldHide) {
-                cameraUiContainerBinding?.photoViewButton?.visibility = View.INVISIBLE
-            }
-        } else {
-            cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
-            if (!shouldHide) {
-                cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
-                cameraUiContainerBinding?.photoViewButton?.alpha = 1f
-            }
-        }
+        overlayController.updateProcessingAnimationUi()
     }
 
     private fun showProcessingAnimation() {
-        lifecycleScope.launch(Dispatchers.Main) {
-            updateProcessingAnimationUi()
-        }
+        overlayController.showProcessingAnimation()
     }
 
     private fun hideProcessingAnimation() {
-        lifecycleScope.launch(Dispatchers.Main) {
-            updateProcessingAnimationUi()
-        }
+        overlayController.hideProcessingAnimation()
     }
 
     // Zoom State
@@ -2318,45 +2424,8 @@ class CameraFragment : Fragment() {
         }
 
     private fun setupTapToFocus() {
-        val gestureDetector = GestureDetector(requireContext(), object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean = true
-
-            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                val uiBinding = cameraUiContainerBinding
-                if (uiBinding?.lutListContainer?.visibility == View.VISIBLE ||
-                    uiBinding?.manualControlsRoot?.visibility == View.VISIBLE ||
-                    activeManualTab != null
-                ) {
-                    dismissFloatingOverlays()
-                    return true
-                }
-
-                triggerTapToFocusCamera2(e.x, e.y)
-                return true
-            }
-
-            override fun onDoubleTap(e: MotionEvent): Boolean {
-                val uiBinding = cameraUiContainerBinding
-                if (uiBinding?.lutListContainer?.visibility == View.VISIBLE ||
-                    uiBinding?.manualControlsRoot?.visibility == View.VISIBLE ||
-                    activeManualTab != null
-                ) {
-                    dismissFloatingOverlays()
-                    return true
-                }
-
-                unlockFocusAndMetering()
-                return true
-            }
-        })
-
-        _fragmentCameraBinding?.viewFinderStage?.setOnTouchListener { view, event ->
-            gestureDetector.onTouchEvent(event)
-            if (event.action == MotionEvent.ACTION_UP) {
-                view.performClick()
-            }
-            true
-        }
+        val stage = _fragmentCameraBinding?.viewFinderStage ?: return
+        gestureDelegate.setupTapToFocus(stage)
     }
 
     private fun unlockFocusAndMetering() {
@@ -2561,681 +2630,43 @@ class CameraFragment : Fragment() {
 
     private fun showFocusRingScanning(x: Float, y: Float) {
         val binding = _fragmentCameraBinding ?: return
-        val focusRing = binding.focusRing
         val size = resources.getDimension(R.dimen.focus_ring_size)
-
-        focusRing.animate().cancel()
-        binding.focusRingCircle.animate().cancel()
-        binding.focusLockBadge.animate().cancel()
-
-        focusRing.translationX = x - size / 2
-        focusRing.translationY = y - size / 2
-        focusRing.scaleX = 1.25f
-        focusRing.scaleY = 1.25f
-        focusRing.alpha = 1.0f
-        focusRing.visibility = View.VISIBLE
-
-        binding.focusLockBadge.visibility = View.GONE
-        setFocusRingStroke(Color.WHITE)
-
-        focusRing.animate()
-            .scaleX(1.0f)
-            .scaleY(1.0f)
-            .setDuration(200L)
-            .setInterpolator(DecelerateInterpolator())
-            .start()
-
-        binding.viewFinderStage.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        gestureDelegate.showFocusRingScanning(binding, x, y, size)
     }
 
     private fun showFocusRingLocked() {
         val binding = _fragmentCameraBinding ?: return
-        if (focusMeteringRegion == null) return
-
-        val colorTertiary = com.google.android.material.color.MaterialColors.getColor(
-            binding.root,
-            com.google.android.material.R.attr.colorTertiary,
-            Color.parseColor("#00E676")
-        )
-
-        setFocusRingStroke(colorTertiary)
-
-        // Pop in the AF-L badge with overshoot spring
-        binding.focusLockBadge.visibility = View.VISIBLE
-        binding.focusLockBadge.scaleX = 0f
-        binding.focusLockBadge.scaleY = 0f
-        binding.focusLockBadge.animate()
-            .scaleX(1.0f)
-            .scaleY(1.0f)
-            .setDuration(200L)
-            .setInterpolator(OvershootInterpolator())
-            .start()
-
-        // Subtle confirmation pulse on the circular ring
-        binding.focusRingCircle.animate()
-            .scaleX(1.08f)
-            .scaleY(1.08f)
-            .setDuration(120L)
-            .withEndAction {
-                binding.focusRingCircle.animate()
-                    .scaleX(1.0f)
-                    .scaleY(1.0f)
-                    .setDuration(120L)
-                    .start()
-            }
-            .start()
-
-        // Settle into quiet resident resting state (alpha 0.85f)
-        binding.focusRing.animate()
-            .alpha(0.85f)
-            .setDuration(250L)
-            .start()
-
-        binding.viewFinderStage.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        gestureDelegate.showFocusRingLocked(binding, focusMeteringRegion != null)
     }
 
     private fun showFocusRingFailed() {
         val binding = _fragmentCameraBinding ?: return
-
-        val colorError = com.google.android.material.color.MaterialColors.getColor(
-            binding.root,
-            androidx.appcompat.R.attr.colorError,
-            Color.parseColor("#FF5252")
-        )
-
-        setFocusRingStroke(colorError)
-        binding.focusLockBadge.visibility = View.GONE
-
-        binding.focusRing.animate()
-            .alpha(0.0f)
-            .setDuration(400L)
-            .withEndAction {
-                binding.focusRing.visibility = View.GONE
-                binding.focusRing.alpha = 1.0f
-                setFocusRingStroke(Color.WHITE)
-            }
-            .start()
+        gestureDelegate.showFocusRingFailed(binding)
     }
 
     private fun hideFocusRingUnlock() {
-        val focusRing = _fragmentCameraBinding?.focusRing ?: return
-        focusRing.animate().cancel()
-        focusRing.animate()
-            .scaleX(1.35f)
-            .scaleY(1.35f)
-            .alpha(0.0f)
-            .setDuration(220L)
-            .withEndAction {
-                focusRing.visibility = View.GONE
-                focusRing.scaleX = 1.0f
-                focusRing.scaleY = 1.0f
-                focusRing.alpha = 1.0f
-                _fragmentCameraBinding?.focusLockBadge?.visibility = View.GONE
-                setFocusRingStroke(Color.WHITE)
-            }
-            .start()
-        _fragmentCameraBinding?.viewFinderStage?.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-    }
-
-    private fun setFocusRingStroke(color: Int) {
         val binding = _fragmentCameraBinding ?: return
-        val drawable = binding.focusRingCircle.background?.mutate() as? GradientDrawable ?: return
-        val density = resources.displayMetrics.density
-        drawable.setStroke((1.5f * density).roundToInt(), color)
+        gestureDelegate.hideFocusRingUnlock(binding)
     }
 
     private fun dismissFloatingOverlays() {
-        val binding = cameraUiContainerBinding ?: return
-
-        if (binding.lutListContainer?.visibility == View.VISIBLE) {
-            binding.lutListContainer?.visibility = View.GONE
-        }
-
-        if (binding.manualControlsRoot?.visibility == View.VISIBLE ||
-            activeManualTab != null
-        ) {
-            val root = _fragmentCameraBinding?.root as? ViewGroup
-            if (root != null) {
-                val transition = android.transition.AutoTransition().apply {
-                    duration = 200
-                    ordering = android.transition.TransitionSet.ORDERING_TOGETHER
-                }
-                android.transition.TransitionManager.beginDelayedTransition(root, transition)
-            }
-            binding.manualControlsRoot?.visibility = View.GONE
-            activeManualTab = null
-            cameraViewModel.setActiveManualTab(null)
-            updateBentoFolding(isDialOpen = false)
-            updateFocusPeakingState()
-            updateProInfoBar()
-            updateLensControlRowPosition(animate = true)
-        }
-
-        binding.touchOverlay?.visibility = View.GONE
-    }
-
-    private fun updateBentoFolding(isDialOpen: Boolean) {
-        val binding = cameraUiContainerBinding ?: return
-        val density = resources.displayMetrics.density
-        val tier = CameraBentoDeckView.resolveScreenTier(resources)
-        val isCompact = tier == CameraBentoDeckView.BentoScreenTier.COMPACT
-
-        if (isDialOpen) {
-            // Collapse bento_film_row to View.GONE (reclaims vertical space!)
-            binding.bentoFilmRow?.visibility = View.GONE
-            // Compact lens_control_row height: 34dp on compact, 42dp on standard/tall
-            val lensHeightDp = if (isCompact) 34 else 42
-            binding.lensControlRow?.let { v ->
-                val lp = v.layoutParams
-                val h = (lensHeightDp * density).roundToInt()
-                if (lp != null && lp.height != h) {
-                    lp.height = h
-                    v.layoutParams = lp
-                }
-            }
-            // Compact bento_shutter_row height: 64dp on compact, 72dp on standard/tall
-            val shutterHeightDp = if (isCompact) 64 else 72
-            binding.bentoShutterRow?.let { v ->
-                val lp = v.layoutParams
-                val h = (shutterHeightDp * density).roundToInt()
-                if (lp != null && lp.height != h) {
-                    lp.height = h
-                    v.layoutParams = lp
-                }
-            }
-        } else {
-            // Restore bento_film_row to View.VISIBLE if enabled in current tier spec
-            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val uiTier = cameraViewModel.uiState.value.uiTier
-            val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, uiTier)
-            binding.bentoFilmRow?.visibility = if (spec.showFilmRow) View.VISIBLE else View.GONE
-            // Restore lens_control_row and bento_shutter_row to dynamic heights via applyDynamicRowHeights()
-            CameraBentoDeckView.applyDynamicRowHeights(binding)
-        }
+        tierController.dismissFloatingOverlays()
     }
 
     private fun initManualControls() {
-        val prefs =
-            requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val binding = cameraUiContainerBinding ?: return
-        binding.btnProMode?.visibility = View.GONE
-
-        // Dismiss touch overlay
-        binding.touchOverlay?.setOnClickListener {
-            dismissFloatingOverlays()
-        }
-
-        isMultiCameraManualLinked = prefs.getBoolean("pref_multi_camera_manual_linked", true)
-
-        // Level 2: Pill Click Listeners (Toggles Level 3 Dial Panel)
-        binding.pillFocus?.setOnClickListener { toggleManualTab("Focus") }
-        binding.pillIso?.setOnClickListener { toggleManualTab("ISO") }
-        binding.pillShutter?.setOnClickListener { toggleManualTab("Shutter") }
-        binding.pillEv?.setOnClickListener { toggleManualTab("EV") }
-
-        // Multi-Camera Sync Link Button
-        binding.btnProLink?.setOnClickListener { v ->
-            isMultiCameraManualLinked = !isMultiCameraManualLinked
-            val p = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            p.edit().putBoolean("pref_multi_camera_manual_linked", isMultiCameraManualLinked).apply()
-            v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
-            val msg = if (isMultiCameraManualLinked) {
-                getString(R.string.multi_camera_link_synced)
-            } else {
-                getString(R.string.multi_camera_link_primary_only)
-            }
-            Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
-            updateProInfoBar()
-        }
-
-        // Dial Wheel Item Selection
-        binding.dialWheelView?.setOnItemSelectedListener { item, _, fromUser ->
-            if (fromUser) {
-                handleDialSelection(item)
-            }
-        }
-
-        // Auto Button
-        binding.btnDialAuto?.setOnClickListener {
-            resetCurrentManualParameter()
-        }
-
-        // Focus Extras
-        binding.btnFocusNear?.setOnClickListener {
-            currentFocusDistance = minFocusDistance
-            isManualFocus = true
-            applyCameraControls()
-            updateDialPanel()
-            updateProInfoBar()
-        }
-
-        binding.btnFocusFar?.setOnClickListener {
-            currentFocusDistance = 0.0f
-            isManualFocus = true
-            applyCameraControls()
-            updateDialPanel()
-            updateProInfoBar()
-        }
-
-        updateLensControlRowPosition(animate = false)
-        updateProInfoBar()
-        updateTierUi()
+        tierController.initManualControls()
     }
 
-    private fun updateLensControlRowPosition(animate: Boolean = true) {
-        val uiBinding = cameraUiContainerBinding ?: return
-        val lensRow = uiBinding.lensControlRow ?: return
-        lensRow.translationY = 0f
-    }
-
-    private fun toggleManualTab(tab: String) {
-        val binding = cameraUiContainerBinding ?: return
-        val root = _fragmentCameraBinding?.root as? ViewGroup
-        if (root != null) {
-            val transition = android.transition.AutoTransition().apply {
-                duration = 200
-                ordering = android.transition.TransitionSet.ORDERING_TOGETHER
-            }
-            android.transition.TransitionManager.beginDelayedTransition(root, transition)
-        }
-        if (activeManualTab == tab) {
-            // Collapse dial
-            activeManualTab = null
-            cameraViewModel.setActiveManualTab(null)
-            binding.manualControlsRoot?.visibility = View.GONE
-            binding.touchOverlay?.visibility = View.GONE
-            updateBentoFolding(isDialOpen = false)
-            updateFocusPeakingState()
-            updateProInfoBar()
-        } else {
-            // Open dial
-            activeManualTab = tab
-            cameraViewModel.setActiveManualTab(tab)
-            binding.manualControlsRoot?.visibility = View.VISIBLE
-            binding.dialPanel?.visibility = View.VISIBLE
-            binding.touchOverlay?.visibility = View.VISIBLE
-            updateBentoFolding(isDialOpen = true)
-            updateDialPanel()
-            updateFocusPeakingState()
-            updateProInfoBar()
-        }
-    }
-
-    private fun updateFocusPeakingState() {
-        val context = context ?: return
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val currentTier = cameraViewModel.uiState.value.uiTier
-        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, currentTier)
-        val isBadgeVisible = spec.enableFocusPeaking
-        val badge = cameraUiContainerBinding?.btnFocusPeakingBadge
-
-        badge?.visibility = if (isBadgeVisible) View.VISIBLE else View.GONE
-        if (isBadgeVisible) {
-            val isActive = prefs.getBoolean(SettingsFragment.KEY_FOCUS_PEAKING_ACTIVE, true)
-            if (badge != null) {
-                CameraBentoDeckView.styleFocusPeakingBadge(badge, isActive)
-            }
-            lutProcessor?.setFocusPeakingEnabled(isActive)
-        } else {
-            lutProcessor?.setFocusPeakingEnabled(false)
-        }
-    }
-
-    private fun handleDialSelection(item: top.maary.darkbag.ui.ProDialWheelView.DialItem) {
-        val binding = cameraUiContainerBinding ?: return
-        when (activeManualTab) {
-            "Focus" -> {
-                currentFocusDistance = item.rawValue.toFloat()
-                isManualFocus = true
-                binding.tvDialTargetValue?.text = formatFocusDist(currentFocusDistance)
-                updateFocusPeakingState()
-            }
-            "ISO" -> {
-                currentIso = item.rawValue.toInt()
-                isManualIso = true
-                binding.tvDialTargetValue?.text = "$currentIso"
-            }
-            "Shutter" -> {
-                currentExposureTime = item.rawValue.toLong()
-                isManualShutter = true
-                binding.tvDialTargetValue?.text = formatShutterTime(currentExposureTime)
-            }
-            "EV" -> {
-                currentEvIndex = item.rawValue.toInt()
-                binding.tvDialTargetValue?.text = formatEvVal(currentEvIndex)
-            }
-        }
-        applyCameraControls()
-        updateProInfoBar()
-    }
-
-    private fun resetCurrentManualParameter() {
-        when (activeManualTab) {
-            "Focus" -> {
-                isManualFocus = false
-                focusMeteringRegion = null
-                updateFocusPeakingState()
-            }
-            "ISO" -> {
-                isManualIso = false
-                exposureMeteringRegion = null
-            }
-            "Shutter" -> {
-                isManualShutter = false
-                exposureMeteringRegion = null
-            }
-            "EV" -> {
-                currentEvIndex = 0
-                exposureMeteringRegion = null
-            }
-        }
-        applyCameraControls()
-        updateDialPanel()
-        updateProInfoBar()
-        updateLensControlRowPosition(animate = true)
-    }
-
-    private fun updateDialPanel() {
-        val binding = cameraUiContainerBinding ?: return
-        val wheel = binding.dialWheelView ?: return
-        binding.focusExtras?.visibility = if (activeManualTab == "Focus") View.VISIBLE else View.GONE
-
-        when (activeManualTab) {
-            "Focus" -> {
-                binding.tvDialTargetLabel?.text = "FOCUS"
-                val items = buildFocusDialItems(minFocusDistance)
-                val targetVal = if (isManualFocus) currentFocusDistance else 0.0f
-                var closestIndex = 0
-                var minDiff = Double.MAX_VALUE
-                items.forEachIndexed { i, it ->
-                    val diff = abs(it.rawValue - targetVal)
-                    if (diff < minDiff) {
-                        minDiff = diff
-                        closestIndex = i
-                    }
-                }
-                wheel.setItems(items, closestIndex)
-                binding.tvDialTargetValue?.text = if (isManualFocus) formatFocusDist(currentFocusDistance) else "AUTO (${formatFocusDist(liveFocusDistance)})"
-            }
-            "ISO" -> {
-                binding.tvDialTargetLabel?.text = "ISO"
-                val items = buildIsoDialItems(isoRange)
-                val targetVal = if (isManualIso) currentIso else liveIso
-                var closestIndex = 0
-                var minDiff = Double.MAX_VALUE
-                items.forEachIndexed { i, it ->
-                    val diff = abs(it.rawValue - targetVal)
-                    if (diff < minDiff) {
-                        minDiff = diff
-                        closestIndex = i
-                    }
-                }
-                wheel.setItems(items, closestIndex)
-                binding.tvDialTargetValue?.text = if (isManualIso) "$currentIso" else "AUTO ($liveIso)"
-            }
-            "Shutter" -> {
-                binding.tvDialTargetLabel?.text = "SHUTTER"
-                val items = buildShutterDialItems(exposureTimeRange)
-                val targetVal = if (isManualShutter) currentExposureTime else liveExposureTime
-                var closestIndex = 0
-                var minDiff = Double.MAX_VALUE
-                items.forEachIndexed { i, it ->
-                    val diff = abs(it.rawValue - targetVal)
-                    if (diff < minDiff) {
-                        minDiff = diff
-                        closestIndex = i
-                    }
-                }
-                wheel.setItems(items, closestIndex)
-                binding.tvDialTargetValue?.text = if (isManualShutter) formatShutterTime(currentExposureTime) else "AUTO (${formatShutterTime(liveExposureTime)})"
-            }
-            "EV" -> {
-                binding.tvDialTargetLabel?.text = "EV"
-                val items = buildEvDialItems(evRange)
-                var closestIndex = 0
-                var minDiff = Double.MAX_VALUE
-                items.forEachIndexed { i, it ->
-                    val diff = abs(it.rawValue - currentEvIndex)
-                    if (diff < minDiff) {
-                        minDiff = diff
-                        closestIndex = i
-                    }
-                }
-                wheel.setItems(items, closestIndex)
-                binding.tvDialTargetValue?.text = formatEvVal(currentEvIndex)
-            }
-        }
+    private fun updateTierUi(tier: CameraUiTier = cameraViewModel.uiState.value.uiTier) {
+        tierController.updateTierUi(tier)
     }
 
     private fun updateProInfoBar() {
-        val binding = cameraUiContainerBinding ?: return
-        val primaryColor = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, Color.parseColor("#FFD54F"))
-        val onSurfaceColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface, Color.WHITE)
-        val onSurfaceVariantColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.LTGRAY)
-        val density = resources.displayMetrics.density
-
-        // Focus
-        val isFocusLocked = !isManualFocus && focusMeteringRegion != null
-        val focusLabel = when {
-            isManualFocus -> "MF"
-            isFocusLocked -> "AF-L"
-            else -> "AF"
-        }
-        val isFocusManualOrLocked = isManualFocus || isFocusLocked
-        val focusVal = if (isManualFocus) formatFocusDist(currentFocusDistance) else formatFocusDist(liveFocusDistance)
-        binding.pillFocus?.let { pill ->
-            val isTabActive = activeManualTab == "Focus"
-            CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isFocusManualOrLocked)
-            pill.text = CameraBentoDeckView.formatProTelemetry(focusLabel, focusVal, isTabActive, isFocusManualOrLocked, pill.context)
-        }
-
-        // ISO
-        val isoLabel = "ISO"
-        val isoVal = if (isManualIso) "$currentIso" else "$liveIso"
-        binding.pillIso?.let { pill ->
-            val isTabActive = activeManualTab == "ISO"
-            CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isManualIso)
-            pill.text = CameraBentoDeckView.formatProTelemetry(isoLabel, isoVal, isTabActive, isManualIso, pill.context)
-        }
-
-        // Shutter
-        val shutterLabel = "SEC"
-        val shutterVal = if (isManualShutter) formatShutterTime(currentExposureTime) else formatShutterTime(liveExposureTime)
-        binding.pillShutter?.let { pill ->
-            val isTabActive = activeManualTab == "Shutter"
-            CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isManualShutter)
-            pill.text = CameraBentoDeckView.formatProTelemetry(shutterLabel, shutterVal, isTabActive, isManualShutter, pill.context)
-        }
-
-        // EV
-        val evLabel = "EV"
-        val evVal = if (currentEvIndex == 0) "0.0" else String.format(Locale.US, "%+d", currentEvIndex)
-        binding.pillEv?.let { pill ->
-            val isTabActive = activeManualTab == "EV"
-            val isManualEv = currentEvIndex != 0
-            CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isManualEv)
-            pill.text = CameraBentoDeckView.formatProTelemetry(evLabel, evVal, isTabActive, isManualEv, pill.context)
-        }
-
-        // Multi-Camera Link Button (Only visible if multi-camera mode or front PiP is active)
-        val isMultiCamActive = (activeCoordinator?.supportsProLink() == true) || isFrontPipActive || (availableLenses.size > 1 && multiCameraManager != null)
-        binding.btnProLink?.visibility = if (isMultiCamActive) View.VISIBLE else View.GONE
-        (binding.pillEv?.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
-            val targetMarginEnd = if (isMultiCamActive) (5f * density).roundToInt() else 0
-            if (lp.marginEnd != targetMarginEnd) {
-                lp.marginEnd = targetMarginEnd
-                binding.pillEv?.layoutParams = lp
-            }
-        }
-        binding.btnProLink?.let { linkBtn ->
-            CameraBentoDeckView.styleBentoProLink(linkBtn, isMultiCameraManualLinked)
-        }
-
-        // Sync manual flags to ViewModel & update tier button styling
-        cameraViewModel.updateManualFlags(
-            isManualFocus = isManualFocus,
-            isManualIso = isManualIso,
-            isManualShutter = isManualShutter,
-            isProLinked = isMultiCameraManualLinked
-        )
-        updateTierUi()
-
-        // Update Level 3 Dial Theme Colors
-        binding.dialWheelView?.setThemeColors(primaryColor, onSurfaceColor, onSurfaceVariantColor)
-        binding.tvDialTargetLabel?.setTextColor(primaryColor)
-        binding.tvDialTargetValue?.setTextColor(onSurfaceColor)
+        tierController.updateProInfoBar()
     }
 
-    private fun formatShutterTime(nanos: Long): String {
-        val ms = nanos / 1_000_000.0
-        return if (ms < 950.0) {
-            val fraction = 1000.0 / ms
-            if (fraction >= 10.0) String.format(Locale.US, "1/%.0fs", fraction)
-            else String.format(Locale.US, "1/%.1fs", fraction)
-        } else {
-            String.format(Locale.US, "%.1fs", ms / 1000.0)
-        }
-    }
-
-    private fun formatFocusDist(dist: Float): String {
-        return if (dist <= 0.001f) "∞"
-        else if (minFocusDistance > 0 && dist >= minFocusDistance * 0.95f) "Macro"
-        else {
-            val meters = 1.0f / dist
-            if (meters < 1.0f) String.format(Locale.US, "%.0fcm", meters * 100f)
-            else String.format(Locale.US, "%.1fm", meters)
-        }
-    }
-
-    private fun formatEvVal(evIndex: Int): String {
-        return if (evIndex == 0) "EV 0.0"
-        else String.format(Locale.US, "EV %+d", evIndex)
-    }
-
-    private fun buildShutterDialItems(range: android.util.Range<Long>?): List<top.maary.darkbag.ui.ProDialWheelView.DialItem> {
-        val standardNanos = listOf(
-            125_000L to "1/8000",
-            250_000L to "1/4000",
-            500_000L to "1/2000",
-            1_000_000L to "1/1000",
-            2_000_000L to "1/500",
-            3_000_000L to "1/320",
-            4_000_000L to "1/250",
-            6_000_000L to "1/160",
-            8_000_000L to "1/125",
-            12_500_000L to "1/80",
-            16_666_667L to "1/60",
-            25_000_000L to "1/40",
-            33_333_333L to "1/30",
-            50_000_000L to "1/20",
-            66_666_667L to "1/15",
-            100_000_000L to "1/10",
-            125_000_000L to "1/8",
-            250_000_000L to "1/4",
-            500_000_000L to "1/2",
-            1_000_000_000L to "1s",
-            2_000_000_000L to "2s",
-            4_000_000_000L to "4s",
-            8_000_000_000L to "8s",
-            15_000_000_000L to "15s",
-            30_000_000_000L to "30s"
-        )
-        val lower = range?.lower ?: 100_000L
-        val upper = range?.upper ?: 30_000_000_000L
-        return standardNanos.filter { it.first in lower..upper }.map { (nanos, label) ->
-            val isMajor = nanos in listOf(
-                125_000L, 250_000L, 500_000L, 1_000_000L, 2_000_000L, 4_000_000L,
-                8_000_000L, 16_666_667L, 33_333_333L, 66_666_667L, 125_000_000L,
-                250_000_000L, 500_000_000L, 1_000_000_000L, 2_000_000_000L,
-                4_000_000_000L, 8_000_000_000L, 15_000_000_000L, 30_000_000_000L
-            )
-            top.maary.darkbag.ui.ProDialWheelView.DialItem(
-                id = nanos.toString(),
-                label = label,
-                rawValue = nanos.toDouble(),
-                isMajor = isMajor
-            )
-        }
-    }
-
-    private fun buildIsoDialItems(range: android.util.Range<Int>?): List<top.maary.darkbag.ui.ProDialWheelView.DialItem> {
-        val standardIsos = listOf(
-            50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640,
-            800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 12800
-        )
-        val lower = range?.lower ?: 50
-        val upper = range?.upper ?: 6400
-        return standardIsos.filter { it in lower..upper }.map { iso ->
-            val isMajor = iso in listOf(50, 100, 200, 400, 800, 1600, 3200, 6400)
-            top.maary.darkbag.ui.ProDialWheelView.DialItem(
-                id = iso.toString(),
-                label = iso.toString(),
-                rawValue = iso.toDouble(),
-                isMajor = isMajor
-            )
-        }
-    }
-
-    private fun buildFocusDialItems(maxDiopter: Float): List<top.maary.darkbag.ui.ProDialWheelView.DialItem> {
-        if (maxDiopter <= 0f) {
-            return listOf(
-                top.maary.darkbag.ui.ProDialWheelView.DialItem("inf", "∞", 0.0, isMajor = true)
-            )
-        }
-        val items = mutableListOf<top.maary.darkbag.ui.ProDialWheelView.DialItem>()
-        items.add(top.maary.darkbag.ui.ProDialWheelView.DialItem("inf", "∞", 0.0, isMajor = true))
-
-        val stops = listOf(
-            0.5f to "2.0m",
-            1.0f to "1.0m",
-            1.5f to "0.7m",
-            2.0f to "0.5m",
-            3.0f to "0.33m",
-            4.0f to "0.25m",
-            5.0f to "0.2m",
-            7.0f to "0.14m",
-            10.0f to "0.1m"
-        )
-        for ((d, label) in stops) {
-            if (d <= maxDiopter * 0.95f) {
-                val isMajor = (d in listOf(0.5f, 1.0f, 2.0f, 5.0f, 10.0f))
-                items.add(
-                    top.maary.darkbag.ui.ProDialWheelView.DialItem(
-                        id = d.toString(),
-                        label = label,
-                        rawValue = d.toDouble(),
-                        isMajor = isMajor
-                    )
-                )
-            }
-        }
-        items.add(
-            top.maary.darkbag.ui.ProDialWheelView.DialItem(
-                id = "macro",
-                label = "Macro",
-                rawValue = maxDiopter.toDouble(),
-                isMajor = true
-            )
-        )
-        return items
-    }
-
-    private fun buildEvDialItems(range: android.util.Range<Int>?): List<top.maary.darkbag.ui.ProDialWheelView.DialItem> {
-        val lower = range?.lower ?: -6
-        val upper = range?.upper ?: 6
-        val items = mutableListOf<top.maary.darkbag.ui.ProDialWheelView.DialItem>()
-        for (i in lower..upper) {
-            val label = if (i == 0) "0" else if (i > 0) "+$i" else "$i"
-            items.add(
-                top.maary.darkbag.ui.ProDialWheelView.DialItem(
-                    id = i.toString(),
-                    label = label,
-                    rawValue = i.toDouble(),
-                    isMajor = (i % 3 == 0 || i == 0)
-                )
-            )
-        }
-        return items
+    private fun updateFocusPeakingState() {
+        tierController.updateFocusPeakingState()
     }
 
     private fun initLensControls() {
@@ -6480,253 +5911,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     }
 
     private fun showShutterBlackout() {
-        val vfBinding = _fragmentCameraBinding ?: return
-        val blackout = vfBinding.viewFinderBlackout ?: return
-        val vf = vfBinding.viewFinder
-
-        val applyBlackout = Runnable {
-            // Sync translation and scaling with the ViewFinder to ensure full coverage in Half-frame mode
-            blackout.translationX = vf.translationX
-            blackout.translationY = vf.translationY
-            blackout.scaleX = vf.scaleX
-            blackout.scaleY = vf.scaleY
-            blackout.elevation = vf.elevation + 4f
-
-            blackout.animate().cancel()
-            blackout.alpha = 0.85f
-            blackout.visibility = View.VISIBLE
-            blackout.animate()
-                .alpha(0f)
-                .setDuration(60L)
-                .withEndAction {
-                    blackout.visibility = View.INVISIBLE
-                }
-                .start()
-        }
-
-        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-            applyBlackout.run()
-        } else {
-            blackout.post(applyBlackout)
-        }
+        overlayController.showShutterBlackout()
     }
 
     private fun updateHalfFrameUI(animate: Boolean = false) {
-        val uiBinding = cameraUiContainerBinding ?: return
-        val vfBinding = _fragmentCameraBinding ?: return
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-
-        // Post all updates to the viewfinder to avoid requestLayout() during layout pass
-        // and ensure consistent ordering of state changes.
-        vfBinding.viewFinder.post {
-            val isEnabled = isHalfFrameModeEnabled
-            readScopedHalfFrameState(prefs)
-            cameraViewModel.setHalfFrameStep(halfFrameStep)
-            uiBinding.cameraCaptureButton?.setHalfFrameState(isEnabled, halfFrameStep)
-            uiBinding.bottomIslandCard?.let { card ->
-                CameraBentoDeckView.styleDeckCard(card, if (isEnabled) CaptureMode.HALF_FRAME_SBS else CaptureMode.NORMAL)
-            }
-
-            val gapView = vfBinding.halfFrameGapIndicator ?: return@post
-            val snapshotView = vfBinding.halfFrameSnapshot ?: return@post
-            val edgeTopView = vfBinding.halfFrameFilmEdgeTop ?: return@post
-            val edgeBottomView = vfBinding.halfFrameFilmEdgeBottom ?: return@post
-
-            if (!isEnabled) {
-                isHalfFrameUiAnimating = false
-                if (uiBinding.tvHalfFrameStep?.visibility != View.GONE) {
-                    uiBinding.tvHalfFrameStep?.visibility = View.GONE
-                }
-                if (gapView.visibility != View.GONE) gapView.visibility = View.GONE
-                if (snapshotView.visibility != View.GONE) snapshotView.visibility = View.GONE
-                if (edgeTopView.visibility != View.GONE) edgeTopView.visibility = View.GONE
-                if (edgeBottomView.visibility != View.GONE) edgeBottomView.visibility = View.GONE
-
-                vfBinding.viewFinder.animate().cancel()
-                vfBinding.viewFinder.alpha = 1f
-                vfBinding.viewFinder.scaleX = 1f
-                vfBinding.viewFinder.scaleY = 1f
-                vfBinding.viewFinder.translationX = 0f
-                vfBinding.viewFinder.translationY = 0f
-
-                if (uiBinding.photoViewButton?.visibility != View.VISIBLE) {
-                    uiBinding.photoViewButton?.visibility = View.VISIBLE
-                    uiBinding.photoViewButton?.alpha = 1f
-                }
-
-                return@post
-            }
-
-            // Enabled path: Half-Frame step is visually represented by the Left/Right split inside ExpressiveShutterButton
-            uiBinding.tvHalfFrameStep?.visibility = View.GONE
-            val stepText = if (halfFrameStep == 0) "1/2" else "2/2"
-            if (uiBinding.tvHalfFrameStep?.text != stepText) {
-                uiBinding.tvHalfFrameStep?.text = stepText
-            }
-
-            // Hide thumbnail button during processing of Shot 1 and throughout Shot 2
-            if (halfFrameStep == 1) {
-                uiBinding.photoViewButton?.visibility = View.INVISIBLE
-            } else if (!isProcessing) {
-                uiBinding.photoViewButton?.visibility = View.VISIBLE
-                uiBinding.photoViewButton?.alpha = 1f
-            }
-
-            val stageW = vfBinding.viewFinderStage.width.toFloat()
-            val stageH = vfBinding.viewFinderStage.height.toFloat()
-            if (stageW <= 0f || stageH <= 0f) return@post
-
-            val gapWidth = (stageW * 0.12f).coerceAtLeast(60f)
-            // Keep the viewfinder aspect ratio by applying a uniform scale on both axes.
-            // In half-frame mode, we shrink the VF slightly to reveal the gap.
-            val scale = stageW / (stageW + gapWidth)
-            val shift = (gapWidth * scale) / 2f
-
-            if (edgeTopView.visibility != View.VISIBLE) edgeTopView.visibility = View.VISIBLE
-            if (edgeBottomView.visibility != View.VISIBLE) edgeBottomView.visibility = View.VISIBLE
-
-            vfBinding.viewFinder.scaleX = scale
-            vfBinding.viewFinder.scaleY = scale
-
-            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
-            val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUT_TB
-
-            val baseShift = if (halfFrameStep == 0) -shift else shift
-            val targetShift = if (isTopBottom) -baseShift else baseShift
-
-            if (animate) {
-                performHalfFrameAdvanceAnimation(targetShift, stageW, gapWidth * scale, isTopBottom)
-            } else {
-                isHalfFrameUiAnimating = false
-                vfBinding.viewFinder.animate().cancel()
-                vfBinding.viewFinder.translationX = targetShift
-                // Ensure viewfinder is visible after lens/engine switch
-                vfBinding.viewFinder.alpha = 1f
-                gapView.visibility = View.GONE
-                snapshotView.visibility = View.GONE
-            }
-
-            if (vfBinding.viewFinder.translationY != 0f) {
-                vfBinding.viewFinder.translationY = 0f
-            }
-        }
-    }
-
-    private fun performHalfFrameAdvanceAnimation(targetShift: Float, stageW: Float, gapWidth: Float, isTopBottom: Boolean) {
-        val vfBinding = _fragmentCameraBinding ?: return
-        val vf = vfBinding.viewFinder
-        val snapshot = vfBinding.halfFrameSnapshot ?: return
-        val gap = vfBinding.halfFrameGapIndicator ?: return
-
-        // Direction logic: SBS moves Left (-X), TB moves Right (+X)
-        val moveFactor = if (isTopBottom) 1f else -1f
-        val duration = 500L
-        val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-
-        // 1. Snapshot logic
-        val bitmap = pendingVfSnapshot
-        if (bitmap != null) {
-            snapshot.setImageBitmap(bitmap)
-            snapshot.visibility = View.VISIBLE
-            snapshot.translationX = vf.translationX
-            snapshot.scaleX = vf.scaleX
-            snapshot.scaleY = vf.scaleY
-            if (snapshot.layoutParams.width != vf.width || snapshot.layoutParams.height != vf.height) {
-                snapshot.layoutParams.width = vf.width
-                snapshot.layoutParams.height = vf.height
-                snapshot.requestLayout()
-            }
-        }
-
-        // 2. Gap logic (only show when moving FROM Shot 1 TO Shot 2)
-        if (halfFrameStep == 1) {
-            gap.visibility = View.VISIBLE
-            val scaledVfWidth = vf.width * vf.scaleX
-            gap.translationX = if (isTopBottom) {
-                vf.translationX - gapWidth // Gap is to the LEFT of Shot 1 in TB
-            } else {
-                vf.translationX + scaledVfWidth // Gap is to the RIGHT of Shot 1 in SBS
-            }
-            val targetWidth = gapWidth.toInt()
-            val targetHeight = (vf.height * vf.scaleY).toInt()
-            if (gap.layoutParams.width != targetWidth || gap.layoutParams.height != targetHeight) {
-                gap.layoutParams.width = targetWidth
-                gap.layoutParams.height = targetHeight
-                gap.requestLayout()
-            }
-        } else {
-            gap.visibility = View.GONE
-        }
-
-        // 3. Prepare Live ViewFinder to slide in from opposite side
-        vf.animate().cancel()
-        isHalfFrameUiAnimating = true
-        // Start position is current target + distance of one stage width in opposite direction of roll
-        vf.translationX = targetShift - (moveFactor * stageW)
-
-        // 4. Perform animations
-        snapshot.animate()
-            .translationX(snapshot.translationX + (moveFactor * stageW))
-            .setDuration(duration)
-            .setInterpolator(interpolator)
-            .withEndAction {
-                snapshot.visibility = View.GONE
-                snapshot.setImageBitmap(null)
-                pendingVfSnapshot = null
-            }
-            .start()
-
-        if (gap.visibility == View.VISIBLE) {
-            gap.animate()
-                .translationX(gap.translationX + (moveFactor * stageW))
-                .setDuration(duration)
-                .setInterpolator(interpolator)
-                .withEndAction { gap.visibility = View.GONE }
-                .start()
-        }
-
-        vf.animate()
-            .translationX(targetShift)
-            .setDuration(duration)
-            .setInterpolator(interpolator)
-            .withEndAction { isHalfFrameUiAnimating = false }
-            .start()
-
-        animateFilmEdgeRoll(isTopBottom, duration)
-    }
-
-    private fun animateFilmEdgeRoll(isTopBottom: Boolean, duration: Long = 500L) {
-        val vfBinding = _fragmentCameraBinding ?: return
-        val topEdge = vfBinding.halfFrameFilmEdgeTop ?: return
-        val bottomEdge = vfBinding.halfFrameFilmEdgeBottom ?: return
-
-        topEdge.animate().cancel()
-        bottomEdge.animate().cancel()
-
-        // Sprocket hole period is 30dp.
-        val periodPx = android.util.TypedValue.applyDimension(
-            android.util.TypedValue.COMPLEX_UNIT_DIP, 30f, resources.displayMetrics
-        )
-        // Move by exactly 10 periods to ensure a seamless reset and a convincing roll
-        val rollDistance = periodPx * 10
-        val moveFactor = if (isTopBottom) 1f else -1f // Match VF move direction
-        val dist = moveFactor * rollDistance
-
-        val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-
-        topEdge.animate()
-            .translationX(dist)
-            .setDuration(duration)
-            .setInterpolator(interpolator)
-            .withEndAction { topEdge.translationX = 0f }
-            .start()
-
-        bottomEdge.animate()
-            .translationX(dist)
-            .setDuration(duration)
-            .setInterpolator(interpolator)
-            .withEndAction { bottomEdge.translationX = 0f }
-            .start()
+        overlayController.updateHalfFrameUI(animate)
     }
 
     private fun cycleCaptureMode() {
