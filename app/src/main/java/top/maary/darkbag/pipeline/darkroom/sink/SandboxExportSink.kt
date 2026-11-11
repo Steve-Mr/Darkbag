@@ -13,9 +13,9 @@ import java.io.FileOutputStream
  * 将冲洗产物直接写入 App 私有目录或指定的沙盒文件，不污染公共系统 MediaStore.
  */
 class SandboxExportSink(
-    private val targetFile: File? = null,
-    private val targetDirectory: File? = null,
-    private val baseName: String? = null
+    val targetFile: File? = null,
+    val targetDirectory: File? = null,
+    val baseName: String? = null
 ) : ExportSink {
     var exportedFile: File? = null
         private set
@@ -69,5 +69,21 @@ class SandboxExportSink(
         error: Throwable
     ) {
         exportedFile = null
+    }
+
+    override fun createChildSink(
+        childBaseName: String,
+        childTargetUri: Uri?,
+        isReplacement: Boolean
+    ): ExportSink {
+        val resolvedDir = targetDirectory ?: targetFile?.parentFile
+        val target = if (childTargetUri != null && childTargetUri.scheme == "file") {
+            childTargetUri.path?.let { File(it) }
+        } else null
+        return SandboxExportSink(
+            targetFile = target,
+            targetDirectory = resolvedDir,
+            baseName = childBaseName
+        )
     }
 }

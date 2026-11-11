@@ -280,9 +280,9 @@ object DarkroomRenderEngine {
                 dngUri = dngUri,
                 baseName = "${source.rootBaseName}_MULTI_${lens.lensTag}"
             )
-            val lensSink = MediaStoreExportSink(
-                baseName = single.baseName,
-                targetUri = if (source.isReplacement) lens.jpgUri else null,
+            val lensSink = spec.sink.createChildSink(
+                childBaseName = single.baseName,
+                childTargetUri = if (source.isReplacement) lens.jpgUri else null,
                 isReplacement = source.isReplacement
             )
             val lensSpec = spec.copy(

@@ -52,5 +52,21 @@ data class DarkbagPreferences(
     val colorEngineMode: Int = 0,
     val shutterLongPressAction: String = SettingsFragment.SHUTTER_LONG_PRESS_MP4,
     val rawVideoFps: String = "24",
-    val rawVideoResolution: String = SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION
+    val rawVideoResolution: String = SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION,
+    val hdrUnderexposureMode: String = "Dynamic",
+    val defaultFocal1xName: String? = null,
+    val enableCamera: Boolean = true,
+    val enablePlayground: Boolean = true,
+    val halfFrameMode: Boolean = false,
+    val halfFrameDownsample: Boolean = true,
+    val halfFrameDateStamp: Boolean = false,
+    val halfFrameLightLeak: Boolean = false,
+    val halfFrameSaveRaw: Boolean = false,
+    val externalViewerName: String? = null,
+    val jpgStorageUriName: String? = null,
+    val rawStorageUriName: String? = null,
+    val multiCameraCountPref: String = "auto_max",
+    val multiCameraDualPair: String = "wide_ultrawide",
+    val uiTier: String = "film",
+    val rawOutputFormatIndex: Int = 0
 )
