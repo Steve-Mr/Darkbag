@@ -12,7 +12,7 @@ import java.net.URLDecoder
 import java.util.Locale
 import kotlin.math.abs
 
-internal class MultiLensItemBuilder(
+class MultiLensItemBuilder(
     val lensTag: String,
     val multiplier: Float,
     var jpgUri: Uri? = null,
@@ -26,7 +26,7 @@ internal class MultiLensItemBuilder(
     )
 }
 
-internal class ImageGroupBuilder(
+class ImageGroupBuilder(
     val baseName: String,
     private val context: Context? = null
 ) {
