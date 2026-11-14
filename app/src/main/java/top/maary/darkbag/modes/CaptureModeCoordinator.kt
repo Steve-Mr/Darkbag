@@ -52,6 +52,9 @@ interface CaptureModeCoordinator {
     /** 是否支持专业模式 PRO 同步联动按钮 */
     fun supportsProLink(): Boolean = false
 
+    /** 是否支持长按快门触发视频录制 (普通模式返回 true) */
+    fun supportsLongPressVideo(): Boolean = false
+
     /** 是否由协调器接管相机底层 Session 配置 (如多摄并发 Session) */
     fun bindCameraSession(): Boolean = false
 }

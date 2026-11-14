@@ -3,7 +3,11 @@ package top.maary.darkbag.camera.delegate
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Bitmap
+import android.content.res.Configuration
 import android.view.View
+import androidx.constraintlayout.widget.ConstraintLayout
+import androidx.constraintlayout.widget.ConstraintSet
+import kotlin.math.roundToInt
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.databinding.FragmentCameraBinding
 import top.maary.darkbag.fragments.SettingsFragment
@@ -92,6 +96,63 @@ class CameraOverlayController(
 
     fun hideProcessingAnimation() {
         host.cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+    }
+
+    /** Pins the viewfinder container between the top controls and the bottom island (portrait) or the docked island (landscape). */
+    fun updateViewFinderConstraints() {
+        val uiBinding = host.cameraUiContainerBinding ?: return
+        val vfBinding = host.fragmentCameraBinding ?: return
+        val root = vfBinding.root as? ConstraintLayout ?: return
+        val bottomIsland = uiBinding.bottomIslandCard ?: return
+        val topControls = uiBinding.topRightControls ?: return
+
+        val set = ConstraintSet().apply { clone(root) }
+        val containerId = vfBinding.viewFinderContainer.id
+        val bottomIslandId = bottomIsland.id
+        val res = host.context.resources
+        val marginH = (10 * res.displayMetrics.density).roundToInt()
+        val marginV = (6 * res.displayMetrics.density).roundToInt()
+        val isPortrait = res.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        val parent = ConstraintSet.PARENT_ID
+
+        set.connect(containerId, ConstraintSet.START, parent, ConstraintSet.START, marginH)
+        set.constrainWidth(containerId, ConstraintSet.MATCH_CONSTRAINT)
+        set.constrainHeight(containerId, ConstraintSet.MATCH_CONSTRAINT)
+        set.setDimensionRatio(containerId, if (isPortrait) "3:4" else "4:3")
+        set.constrainedWidth(containerId, true)
+        set.constrainedHeight(containerId, true)
+        if (isPortrait) {
+            set.connect(containerId, ConstraintSet.END, parent, ConstraintSet.END, marginH)
+            set.connect(containerId, ConstraintSet.TOP, topControls.id, ConstraintSet.BOTTOM, marginV)
+            set.connect(containerId, ConstraintSet.BOTTOM, bottomIslandId, ConstraintSet.TOP, marginV)
+            set.setVerticalBias(containerId, 0.5f)
+        } else {
+            // Landscape: bottom_island_card is docked to the right edge
+            set.connect(containerId, ConstraintSet.END, bottomIslandId, ConstraintSet.START, marginH)
+            set.connect(containerId, ConstraintSet.TOP, parent, ConstraintSet.TOP, marginV)
+            set.connect(containerId, ConstraintSet.BOTTOM, parent, ConstraintSet.BOTTOM, marginV)
+            set.setHorizontalBias(containerId, 0.5f)
+        }
+        set.applyTo(root)
+        vfBinding.viewFinderContainer.clipToOutline = true
+        vfBinding.viewFinderStage.clipToOutline = true
+    }
+
+    fun syncViewFinderAspectRatio(isPortraitBounds: Boolean) {
+        val ratio = if (isPortraitBounds) "3:4" else "4:3"
+        val viewFinder = host.fragmentCameraBinding?.viewFinder
+        val viewFinderContainer = host.fragmentCameraBinding?.viewFinderContainer
+        (viewFinderContainer?.layoutParams as? ConstraintLayout.LayoutParams)?.let { lp ->
+            if (lp.dimensionRatio != ratio) {
+                lp.dimensionRatio = ratio
+                viewFinderContainer.layoutParams = lp
+            }
+        }
+        if (isPortraitBounds) {
+            viewFinder?.setAspectRatio(3, 4)
+        } else {
+            viewFinder?.setAspectRatio(4, 3)
+        }
     }
 
     fun updateHalfFrameUI(animate: Boolean = false) {
