@@ -77,10 +77,29 @@ class PlaygroundRepository(private val context: Context) {
         } ?: emptyArray()
 
         val dngMap = files.filter { it.extension.lowercase() == "dng" }.groupBy { it.nameWithoutExtension }
-        val jpgMap = files.filter { it.extension.lowercase() == "jpg" }.associateBy { it.nameWithoutExtension }
+        val jpgFiles = files.filter { it.extension.lowercase() == "jpg" }
+        val exactJpgMap = jpgFiles.associateBy { it.nameWithoutExtension }
+
+        // Group edited derivative JPGs by their master base name
+        val derivativeMap = mutableMapOf<String, MutableList<File>>()
+        for (jpg in jpgFiles) {
+            val name = jpg.nameWithoutExtension
+            if (name.contains("_edited_")) {
+                val masterBase = name.substringBefore("_edited_")
+                derivativeMap.getOrPut(masterBase) { mutableListOf() }.add(jpg)
+            }
+        }
 
         val newItems = mutableListOf<PlaygroundItem>()
         val processedBases = mutableSetOf<String>()
+
+        // Pre-mark all derivative JPGs so they are not treated as independent standalone items
+        for (derivList in derivativeMap.values) {
+            derivList.sortBy { it.lastModified() }
+            for (f in derivList) {
+                processedBases.add(f.nameWithoutExtension)
+            }
+        }
 
         for (file in files) {
             val baseName = file.nameWithoutExtension
@@ -95,20 +114,22 @@ class PlaygroundRepository(private val context: Context) {
 
             val dng1 = dngMap["${groupBase}_1"]?.firstOrNull()
             val dng2 = dngMap["${groupBase}_2"]?.firstOrNull()
-            val groupJpg = jpgMap[groupBase]
+            val groupJpg = exactJpgMap[groupBase]
 
             if (dng1 != null && dng2 != null && groupJpg != null) {
                 val ratio = getOrCalculateAspectRatio(groupJpg)
-                newItems.add(PlaygroundItem.Group(groupJpg, dng1, dng2, aspectRatio = ratio))
+                val derivs = derivativeMap[groupBase] ?: emptyList()
+                newItems.add(PlaygroundItem.Group(groupJpg, dng1, dng2, derivativeFiles = derivs, aspectRatio = ratio))
                 processedBases.add(groupBase)
                 processedBases.add("${groupBase}_1")
                 processedBases.add("${groupBase}_2")
             } else if (file.extension.lowercase() == "dng") {
                 if (!processedBases.contains(baseName)) {
-                    val singleJpg = jpgMap[baseName]
-                    val ratioFile = singleJpg ?: file
+                    val singleJpg = exactJpgMap[baseName]
+                    val derivs = derivativeMap[baseName] ?: emptyList()
+                    val ratioFile = singleJpg ?: derivs.firstOrNull() ?: file
                     val ratio = getOrCalculateAspectRatio(ratioFile)
-                    newItems.add(PlaygroundItem.Single(file, aspectRatio = ratio))
+                    newItems.add(PlaygroundItem.Single(file, derivativeFiles = derivs, aspectRatio = ratio))
                     processedBases.add(baseName)
                 }
             }
@@ -121,10 +142,8 @@ class PlaygroundRepository(private val context: Context) {
         val cached = aspectRatioCache[file.absolutePath]
         if (cached != null) return cached
 
-        val ratio = top.maary.darkbag.utils.GalleryAspectRatioHelper.getOrCalculateAspectRatio(file)
-        if (ratio != null) {
-            aspectRatioCache[file.absolutePath] = ratio
-        }
+        val ratio = top.maary.darkbag.utils.GalleryAspectRatioHelper.getOrCalculateAspectRatio(file) ?: "3:4"
+        aspectRatioCache[file.absolutePath] = ratio
         return ratio
     }
 

@@ -2,6 +2,7 @@ package top.maary.darkbag.pipeline.darkroom.sink
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import top.maary.darkbag.pipeline.darkroom.model.DarkroomRenderResult
 import top.maary.darkbag.pipeline.darkroom.model.DarkroomRenderSpec
 
@@ -40,4 +41,10 @@ class BitmapPreviewSink(
     ) {
         deliveredBitmap = null
     }
+
+    override fun createChildSink(
+        childBaseName: String,
+        childTargetUri: Uri?,
+        isReplacement: Boolean
+    ): ExportSink = BitmapPreviewSink(onBitmapReady = onBitmapReady)
 }

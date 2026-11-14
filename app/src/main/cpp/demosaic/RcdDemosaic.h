@@ -6,6 +6,24 @@
 namespace darkbag {
 namespace demosaic {
 
+// Helper to determine CFA color at given coordinate
+// 0=R, 1=G, 2=B
+inline int fc(int cfa_pattern, int r, int c) {
+    if (cfa_pattern == 0) { // RGGB
+        if (r % 2 == 0) return (c % 2 == 0) ? 0 : 1;
+        else            return (c % 2 == 0) ? 1 : 2;
+    } else if (cfa_pattern == 1) { // GRBG
+        if (r % 2 == 0) return (c % 2 == 0) ? 1 : 0;
+        else            return (c % 2 == 0) ? 2 : 1;
+    } else if (cfa_pattern == 2) { // GBRG
+        if (r % 2 == 0) return (c % 2 == 0) ? 1 : 2;
+        else            return (c % 2 == 0) ? 0 : 1;
+    } else { // BGGR
+        if (r % 2 == 0) return (c % 2 == 0) ? 2 : 1;
+        else            return (c % 2 == 0) ? 1 : 0;
+    }
+}
+
 /**
  * High-Performance C++ Native RCD (Ratio-Corrected Demosaicing) Engine
  *

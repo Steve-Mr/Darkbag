@@ -230,4 +230,20 @@ class PlaygroundGalleryViewModelTest {
             assertEquals("SBS", effect.hfLayout)
         }
     }
+
+    @Test
+    fun testPlaygroundColumnPersistence() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val vm1 = PlaygroundGalleryViewModel(app)
+        // Default is 2 columns
+        assertEquals(2, vm1.uiState.value.columnCount)
+
+        // Toggle layout: 2 -> 3
+        vm1.processIntent(PlaygroundUserIntent.ToggleLayout)
+        assertEquals(3, vm1.uiState.value.columnCount)
+
+        // New ViewModel restores 3
+        val vm2 = PlaygroundGalleryViewModel(app)
+        assertEquals(3, vm2.uiState.value.columnCount)
+    }
 }

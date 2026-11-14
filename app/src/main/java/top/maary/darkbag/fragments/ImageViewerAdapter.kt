@@ -1,28 +1,31 @@
 package top.maary.darkbag.fragments
 
 import android.graphics.Bitmap
-import android.graphics.Color
-import android.graphics.Matrix
 import android.graphics.RectF
 import android.net.Uri
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.LinearLayout
-import androidx.core.view.updateLayoutParams
 import androidx.recyclerview.widget.AsyncListDiffer
-import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
-import com.bumptech.glide.Glide
-import com.bumptech.glide.load.engine.DiskCacheStrategy
-import com.bumptech.glide.request.RequestOptions
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.ItemImageGroupBinding
 import top.maary.darkbag.models.ImageGroup
-import top.maary.darkbag.utils.ImageUtils
+import top.maary.darkbag.models.MultiCameraLensItem
+import top.maary.darkbag.ui.viewer.ImageViewerDiffCallback
+import top.maary.darkbag.ui.viewer.derivative.ViewerDerivativeSelectorDelegate
+import top.maary.darkbag.ui.viewer.filmstrip.ViewerFilmstripDelegate
+import top.maary.darkbag.ui.viewer.image.ViewerImageLoaderDelegate
+import top.maary.darkbag.ui.viewer.lens.ViewerLensSelectorDelegate
+import top.maary.darkbag.ui.viewer.playback.ViewerPagePlaybackController
 
+/**
+ * 图像查看器适配器 (ImageViewerAdapter).
+ * 负责 ViewPager2 页面绑定、手势监听与多模态媒体分发。
+ * 遵循 Invariant 4 与 Invariant 5，具体多摄选择、衍生版本轮换、胶片条交互、视频播放及图像异步加载分别委托给专用 Delegate 与 Controller。
+ */
 class ImageViewerAdapter(
     initialGroups: List<ImageGroup>,
     private val scope: CoroutineScope,
@@ -50,53 +53,44 @@ class ImageViewerAdapter(
 
     private var recyclerView: RecyclerView? = null
     private val selectedFormats = mutableMapOf<String, String>()
-    private val selectedLensIndices = mutableMapOf<String, Int>()
-    private val selectedDerivativeIndices = mutableMapOf<String, Int>()
-    private val videoDurationCache = java.util.concurrent.ConcurrentHashMap<Uri, Long>()
+
+    val derivativeSelectorDelegate = ViewerDerivativeSelectorDelegate()
+    val lensSelectorDelegate = ViewerLensSelectorDelegate()
+    val filmstripDelegate = ViewerFilmstripDelegate()
+
+    val playbackController = ViewerPagePlaybackController(
+        context = context,
+        scope = scope,
+        getRecyclerView = { recyclerView },
+        getGroupAt = { pos -> backingList.getOrNull(pos) },
+        getBackingList = { backingList },
+        radius = radius,
+        loadCinemaDngFrame = { h, g, u, idx -> loadCinemaDngFrame(h, g, u, idx) },
+        onCinemaDngFrameSelected = { g, idx, u -> onCinemaDngFrameSelected?.invoke(g, idx, u) },
+        onVideoPlaybackStateChanged = { pos, isPlaying, cur, total -> onVideoPlaybackStateChanged?.invoke(pos, isPlaying, cur, total) }
+    )
+    val videoDurationCache get() = playbackController.videoDurationCache
+
+    val imageLoaderDelegate = ViewerImageLoaderDelegate(
+        scope = scope,
+        videoDurationCache = playbackController.videoDurationCache,
+        formatVideoTime = { playbackController.formatVideoTime(it) }
+    )
+
     var onMultiCameraLensChanged: ((position: Int, lensIndex: Int) -> Unit)? = null
     var onDerivativeVersionChanged: ((position: Int, derivativeUri: Uri) -> Unit)? = null
     var onFormatChanged: ((position: Int, format: String) -> Unit)? = null
     private var isUiVisible = true
     private var isFormatSwitcherPersistentHidden = false
 
-    internal val diffCallback = object : DiffUtil.ItemCallback<ImageGroup>() {
-        override fun areItemsTheSame(oldItem: ImageGroup, newItem: ImageGroup): Boolean {
-            return oldItem.baseName == newItem.baseName
-        }
-
-        override fun areContentsTheSame(oldItem: ImageGroup, newItem: ImageGroup): Boolean {
-            return oldItem == newItem &&
-                oldItem.metadataLoaded == newItem.metadataLoaded &&
-                oldItem.isMotionPhoto == newItem.isMotionPhoto &&
-                oldItem.isCinemaDng == newItem.isCinemaDng &&
-                oldItem.cinemaDngFrameUris == newItem.cinemaDngFrameUris &&
-                oldItem.mp4VideoUri == newItem.mp4VideoUri &&
-                oldItem.derivativeMp4Uris == newItem.derivativeMp4Uris &&
-                oldItem.derivativeJpgUris == newItem.derivativeJpgUris &&
-                oldItem.cinemaDngFolderUri == newItem.cinemaDngFolderUri
-        }
-
-        override fun getChangePayload(oldItem: ImageGroup, newItem: ImageGroup): Any? {
-            val payloads = mutableSetOf<String>()
-            if (oldItem.jpgUri != newItem.jpgUri) payloads.add("JPG_URI_CHANGED")
-            if (oldItem.dngUri != newItem.dngUri || oldItem.dngUri1 != newItem.dngUri1 || oldItem.dngUri2 != newItem.dngUri2) payloads.add("DNG_AVAILABILITY_CHANGED")
-            if (oldItem.metadataLoaded != newItem.metadataLoaded) payloads.add("METADATA_LOADED")
-            if (oldItem.lastModified != newItem.lastModified) payloads.add("LAST_MODIFIED_CHANGED")
-            if (oldItem.editConfig != newItem.editConfig) payloads.add("EDIT_CONFIG_CHANGED")
-            if (oldItem.isMotionPhoto != newItem.isMotionPhoto) payloads.add("MOTION_PHOTO_CHANGED")
-            if (oldItem.cinemaDngFolderUri != newItem.cinemaDngFolderUri || oldItem.isCinemaDng != newItem.isCinemaDng || oldItem.cinemaDngFrameUris != newItem.cinemaDngFrameUris) payloads.add("CINEMADNG_CHANGED")
-            if (oldItem.mp4VideoUri != newItem.mp4VideoUri || oldItem.derivativeMp4Uris != newItem.derivativeMp4Uris) payloads.add("MP4_URI_CHANGED")
-            if (oldItem.allDerivativeUris != newItem.allDerivativeUris) payloads.add("DERIVATIVES_CHANGED")
-
-            return if (payloads.isEmpty()) null else payloads
-        }
-    }
-
+    internal val diffCallback = ImageViewerDiffCallback()
     private val differ = AsyncListDiffer(this, diffCallback)
+    private var backingList: MutableList<ImageGroup> = initialGroups.toMutableList()
 
     init {
         differ.addListListener { previousList, currentList ->
-            onCurrentListChanged?.invoke(previousList, currentList)
+            backingList = diffCallback.mergeMetadata(currentList, backingList).toMutableList()
+            onCurrentListChanged?.invoke(previousList, backingList)
         }
         differ.submitList(initialGroups)
     }
@@ -108,7 +102,7 @@ class ImageViewerAdapter(
         var rawVideoPlayer: top.maary.darkbag.rawvideo.RawVideoPlayer? = null
         var isPlayingVideo: Boolean = false
         var playCompletionCallback: (() -> Unit)? = null
-        var manualBitmap: android.graphics.Bitmap? = null
+        var manualBitmap: Bitmap? = null
         var currentUri: Uri? = null
         var currentBaseName: String? = null
         var currentVersion: Long = 0L
@@ -133,14 +127,13 @@ class ImageViewerAdapter(
     }
 
     fun updateSingleGroup(updatedGroup: ImageGroup, onComplete: (() -> Unit)? = null) {
-        val currentList = differ.currentList.toMutableList()
-        val index = currentList.indexOfFirst { it.baseName == updatedGroup.baseName }
+        val index = backingList.indexOfFirst { it.baseName == updatedGroup.baseName }
         if (index != -1) {
-            currentList[index] = updatedGroup
-            differ.submitList(currentList, onComplete)
-        } else {
-            onComplete?.invoke()
+            backingList[index] = updatedGroup
+            val holder = recyclerView?.findViewHolderForAdapterPosition(index) as? ViewHolder
+            if (holder != null) setupButtons(holder) else notifyItemChanged(index, setOf("METADATA_LOADED"))
         }
+        onComplete?.invoke()
     }
 
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
@@ -149,55 +142,32 @@ class ImageViewerAdapter(
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val binding = ItemImageGroupBinding.inflate(
-            LayoutInflater.from(parent.context), parent, false
-        )
+        val binding = ItemImageGroupBinding.inflate(LayoutInflater.from(parent.context), parent, false)
         val holder = ViewHolder(binding)
         holder.binding.videoView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            holder.lastDisplayRect?.let { rect ->
-                updateVideoViewBounds(holder, rect)
-            }
+            holder.lastDisplayRect?.let { rect -> playbackController.updateVideoViewBounds(holder, rect) }
         }
         return holder
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
         if (payloads.isNotEmpty()) {
-            val group = differ.currentList[position]
-            val importantPayloads = setOf(
-                "JPG_URI_CHANGED",
-                "LAST_MODIFIED_CHANGED",
-                "EDIT_CONFIG_CHANGED",
-                "CINEMADNG_CHANGED",
-                "MP4_URI_CHANGED",
-                "DERIVATIVES_CHANGED"
-            )
-
-            val needsReload = payloads.any { payload ->
-                (payload as? Set<*>)?.any { it in importantPayloads } == true
-            }
-
-            if (needsReload) {
-                // Important changes that might require image reload
-                onBindViewHolder(holder, position)
-            } else {
-                // Minor changes (DNG appeared, metadata loaded) - just update buttons
-                setupButtons(holder, group)
-            }
+            val importantPayloads = setOf("JPG_URI_CHANGED", "LAST_MODIFIED_CHANGED", "EDIT_CONFIG_CHANGED", "CINEMADNG_CHANGED", "MP4_URI_CHANGED", "DERIVATIVES_CHANGED")
+            val needsReload = payloads.any { p -> (p as? Set<*>)?.any { it in importantPayloads } == true }
+            if (needsReload) onBindViewHolder(holder, position) else setupButtons(holder)
             return
         }
         onBindViewHolder(holder, position)
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val group = differ.currentList[position]
+        val group = backingList.getOrNull(position) ?: return
         val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
         holder.loadJob?.cancel()
 
         val isSameImage = holder.currentBaseName == group.baseName
         holder.binding.imageView.setMaintainZoomOnNextImage(isSameImage)
         holder.currentBaseName = group.baseName
-
         holder.binding.imageView.setVisualParams(margin, radius)
 
         holder.binding.videoView.isClickable = false
@@ -209,519 +179,74 @@ class ImageViewerAdapter(
         holder.binding.imageView.onLongPressEnded = { onLongPressEnded?.invoke(it) }
         holder.binding.imageView.onPinchToOverview = { onPinchToOverview?.invoke() }
 
-        val shouldShow = isUiVisible && !isFormatSwitcherPersistentHidden
-        holder.binding.formatToggleGroup.visibility = View.GONE
-        holder.binding.formatToggleGroup.alpha = 0f
-        holder.binding.motionPhotoToggleGroup.visibility = View.GONE
-        holder.binding.motionPhotoToggleGroup.alpha = 0f
-
-        if (isCinemaDngGroup) {
-            holder.binding.filmstripContainer.visibility = if (shouldShow) View.VISIBLE else View.GONE
-            holder.binding.filmstripContainer.alpha = if (shouldShow) 0.35f else 0f
-            holder.binding.filmstripSeekbar.alpha = 1.0f
-
-            val frameUris = if (group.cinemaDngFrameUris.isNotEmpty()) {
-                group.cinemaDngFrameUris
-            } else if (group.cinemaDngFirstFrameUri != null) {
-                listOf(group.cinemaDngFirstFrameUri)
-            } else {
-                emptyList()
-            }
-
-            val currentActiveIndex = holder.activeCinemaDngFrameIndex.coerceIn(0, (frameUris.size - 1).coerceAtLeast(0))
-            val currentActiveUri = frameUris.getOrNull(currentActiveIndex)
-            holder.activeCinemaDngFrameIndex = currentActiveIndex
-            holder.activeCinemaDngFrameUri = currentActiveUri
-
-            holder.binding.filmstripSeekbar.setFrames(frameUris, currentActiveIndex)
-
-            holder.binding.filmstripSeekbar.onScrubStateChanged = { isScrubbing ->
-                holder.filmstripFadeRunnable?.let { holder.binding.filmstripContainer.removeCallbacks(it) }
-                holder.filmstripFadeRunnable = null
-
-                if (isScrubbing) {
-                    holder.binding.filmstripContainer.animate()
-                        .alpha(1.0f)
-                        .setDuration(150)
-                        .start()
-                } else {
-                    val fadeRunnable = Runnable {
-                        if (isUiVisible && !isFormatSwitcherPersistentHidden) {
-                            holder.binding.filmstripContainer.animate()
-                                .alpha(0.35f)
-                                .setDuration(400)
-                                .start()
-                        }
-                    }
-                    holder.filmstripFadeRunnable = fadeRunnable
-                    holder.binding.filmstripContainer.postDelayed(fadeRunnable, 3000)
-                }
-            }
-
-            holder.binding.filmstripSeekbar.onFrameSelected = { frameIndex, uri ->
-                val currentPos = holder.bindingAdapterPosition
-                val currentGroup = if (currentPos != RecyclerView.NO_POSITION && currentPos in differ.currentList.indices) {
-                    differ.currentList[currentPos]
-                } else {
-                    group
-                }
-                holder.activeCinemaDngFrameIndex = frameIndex
-                holder.activeCinemaDngFrameUri = uri
-                if (uri != null) {
-                    loadCinemaDngFrame(holder, currentGroup, uri, frameIndex)
-                }
-                onCinemaDngFrameSelected?.invoke(currentGroup, frameIndex, uri)
-            }
-        } else {
-            holder.filmstripFadeRunnable?.let { holder.binding.filmstripContainer.removeCallbacks(it) }
-            holder.filmstripFadeRunnable = null
-            holder.binding.filmstripContainer.visibility = View.GONE
-            holder.activeCinemaDngFrameIndex = 0
-            holder.activeCinemaDngFrameUri = null
+        filmstripDelegate.bindFilmstrip(holder, group, isUiVisible, isFormatSwitcherPersistentHidden) { frameIndex, uri ->
+            val currentPos = holder.bindingAdapterPosition
+            val currentGroup = if (currentPos != RecyclerView.NO_POSITION && currentPos in backingList.indices) backingList[currentPos] else group
+            if (uri != null) loadCinemaDngFrame(holder, currentGroup, uri, frameIndex)
+            onCinemaDngFrameSelected?.invoke(currentGroup, frameIndex, uri)
         }
 
         holder.binding.imageView.onZoomChanged = { isZoomed ->
             onZoomChanged?.invoke(isZoomed)
-            val currentlyShouldShow = isUiVisible && !isZoomed && !isFormatSwitcherPersistentHidden
-            holder.binding.formatToggleGroup.visibility = View.GONE
-            holder.binding.formatToggleGroup.alpha = 0f
-            val isRawSelected = selectedFormats[group.baseName] == FORMAT_DNG
-            holder.binding.motionPhotoToggleGroup.visibility = View.GONE
-            holder.binding.motionPhotoToggleGroup.alpha = 0f
-            val hasDots = !group.isMultiCamera && !isRawSelected && getDerivativeUris(group).size >= 2
-            if (hasDots) {
-                holder.binding.derivativeDotsContainer.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
-                holder.binding.derivativeDotsContainer.alpha = if (currentlyShouldShow) 1f else 0f
-            } else {
-                holder.binding.derivativeDotsContainer.visibility = View.GONE
-                holder.binding.derivativeDotsContainer.alpha = 0f
-            }
-            val activeDerivUri = getDerivativeUris(group).getOrNull(selectedDerivativeIndices[group.baseName] ?: 0) ?: group.jpgUri ?: group.mp4VideoUri
-            val isMp4 = !isRawSelected && activeDerivUri != null && (activeDerivUri.toString().endsWith(".mp4", ignoreCase = true) || group.isMp4Video)
-            val isVideo = (isRawSelected && group.isRawVideo) || isMp4
-            if (isVideo) {
-                holder.binding.videoDurationGroup.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
-                holder.binding.videoDurationGroup.alpha = if (currentlyShouldShow) 1f else 0f
-            } else {
-                holder.binding.videoDurationGroup.visibility = View.GONE
-                holder.binding.videoDurationGroup.alpha = 0f
-            }
             if (isCinemaDngGroup) {
-                holder.binding.filmstripContainer.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
-                holder.binding.filmstripContainer.alpha = if (currentlyShouldShow) 0.35f else 0f
+                val shouldShow = isUiVisible && !isZoomed && !isFormatSwitcherPersistentHidden
+                holder.binding.filmstripContainer.visibility = if (shouldShow) View.VISIBLE else View.GONE
+                holder.binding.filmstripContainer.alpha = if (shouldShow) 0.35f else 0f
             }
         }
 
         if (!isSameImage) {
             holder.binding.imageView.rotation = 0f
-            holder.binding.formatToggleGroup.translationX = 0f
-            holder.binding.formatToggleGroup.translationY = 0f
-            holder.binding.motionPhotoToggleGroup.translationX = 0f
-            holder.binding.motionPhotoToggleGroup.translationY = 0f
-            holder.binding.cameraOverlaysVerticalGroup.translationX = 0f
-            holder.binding.cameraOverlaysVerticalGroup.translationY = 0f
-            holder.binding.multiCameraToggleContainer.translationX = 0f
-            holder.binding.multiCameraToggleContainer.translationY = 0f
-            holder.binding.derivativeDotsContainer.translationX = 0f
-            holder.binding.derivativeDotsContainer.translationY = 0f
-            holder.binding.videoDurationGroup.translationX = 0f
-            holder.binding.videoDurationGroup.translationY = 0f
+            listOf(holder.binding.cameraOverlaysVerticalGroup, holder.binding.multiCameraToggleContainer, holder.binding.derivativeDotsContainer, holder.binding.videoDurationGroup).forEach {
+                it.translationX = 0f
+                it.translationY = 0f
+            }
             stopMotionVideo(holder)
         }
 
         holder.binding.imageView.onMatrixChanged = { rect ->
             holder.lastDisplayRect = RectF(rect)
-            // Use measured dimensions if layout hasn't happened yet
-            val viewWidth = holder.binding.imageView.measuredWidth.takeIf { it > 0 } ?: holder.binding.imageView.width
-            val viewHeight = holder.binding.imageView.measuredHeight.takeIf { it > 0 } ?: holder.binding.imageView.height
-
-            if (viewWidth > 0 && viewHeight > 0) {
-                // Determine actual visual right margin (distance from right edge of screen)
-                val visualRightSpace = viewWidth - rect.right
-                val rightMargin = if (visualRightSpace > 0) visualRightSpace else 0f
-                val visualLeftSpace = rect.left
-                val leftMargin = if (visualLeftSpace > 0) visualLeftSpace else 0f
-
-                // Determine actual visual top and bottom margins
-                val topMargin = if (rect.top > 0) rect.top else 0f
-                val visualBottomSpace = viewHeight - rect.bottom
-                val bottomMargin = if (visualBottomSpace > 0) visualBottomSpace else 0f
-
-                // Instead of layoutParams (which causes requestLayout and UI jank), use translationX/Y.
-                holder.binding.formatToggleGroup.translationX = -rightMargin
-                holder.binding.formatToggleGroup.translationY = topMargin
-                holder.binding.motionPhotoToggleGroup.translationX = leftMargin
-                holder.binding.motionPhotoToggleGroup.translationY = topMargin
-                holder.binding.cameraOverlaysVerticalGroup.translationY = -bottomMargin
-                holder.binding.multiCameraToggleContainer.translationY = 0f
-                holder.binding.derivativeDotsContainer.translationY = 0f
-                holder.binding.videoDurationGroup.translationX = -rightMargin
-                holder.binding.videoDurationGroup.translationY = -bottomMargin
-
-                updateVideoViewBounds(holder, rect)
+            val w = holder.binding.imageView.measuredWidth.takeIf { it > 0 } ?: holder.binding.imageView.width
+            val h = holder.binding.imageView.measuredHeight.takeIf { it > 0 } ?: holder.binding.imageView.height
+            if (w > 0 && h > 0) {
+                val rMargin = (w - rect.right).coerceAtLeast(0f)
+                val bMargin = (h - rect.bottom).coerceAtLeast(0f)
+                holder.binding.cameraOverlaysVerticalGroup.translationY = -bMargin
+                holder.binding.videoDurationGroup.translationX = -rMargin
+                holder.binding.videoDurationGroup.translationY = -bMargin
+                playbackController.updateVideoViewBounds(holder, rect)
             }
         }
 
         val format = getSelectedFormat(group)
         selectedFormats[group.baseName] = format
-
-        setupButtons(holder, group)
-
+        setupButtons(holder)
         loadSelectedFormat(holder, group, format)
     }
 
-    fun getDerivativeUris(group: ImageGroup): List<Uri> {
-        val list = mutableListOf<Uri>()
-        group.jpgUri?.let { list.add(it) }
-        for (u in group.derivativeJpgUris) {
-            if (u !in list) list.add(u)
-        }
-        group.mp4VideoUri?.let { if (it !in list) list.add(it) }
-        for (u in group.derivativeMp4Uris) {
-            if (u !in list) list.add(u)
-        }
-        return list
+    fun getDerivativeUris(group: ImageGroup): List<Uri> = derivativeSelectorDelegate.getDerivativeUris(group)
+
+    fun getMultiCameraLenses(group: ImageGroup): List<MultiCameraLensItem> = lensSelectorDelegate.getMultiCameraLenses(group)
+
+    private fun setupButtons(holder: ViewHolder) = with(holder.binding) {
+        videoDurationGroup.visibility = View.GONE
+        videoDurationGroup.alpha = 0f
+        btnVideoDuration.setOnClickListener(null)
+        multiCameraToggleContainer.visibility = View.GONE
+        multiCameraToggleContainer.alpha = 0f
+        multiCameraToggleGroup.removeAllViews()
+        derivativeDotsContainer.visibility = View.GONE
+        derivativeDotsContainer.alpha = 0f
+        derivativeDotsGroup.removeAllViews()
     }
 
-    fun getMultiCameraLenses(group: ImageGroup): List<top.maary.darkbag.models.MultiCameraLensItem> {
-        if (!group.isMultiCamera) return emptyList()
-        if (group.multiCameraLenses.isNotEmpty()) {
-            return group.multiCameraLenses
-        }
+    private fun loadSelectedFormat(holder: ViewHolder, group: ImageGroup, format: String) =
+        imageLoaderDelegate.loadSelectedFormat(holder, group, format, lensSelectorDelegate, derivativeSelectorDelegate, playbackController)
 
-        // Fallback for tests or legacy ImageGroups without multiCameraLenses pre-populated
-        val lenses = mutableListOf<top.maary.darkbag.models.MultiCameraLensItem>()
-        val maxLen = maxOf(group.multiJpgUris.size, group.multiDngUris.size)
-        for (i in 0 until maxLen) {
-            val jpg = group.multiJpgUris.getOrNull(i)
-            val dng = group.multiDngUris.getOrNull(i)
-            val sample = jpg ?: dng
-            val tag = if (sample != null) top.maary.darkbag.utils.ImageUtils.extractMultiCameraLensTag(sample.toString()) else ""
-            val mult = if (sample != null) top.maary.darkbag.utils.ImageUtils.extractMultiCameraMultiplier(sample.toString()) else 1.0f
-            val effectiveTag = if (tag.isNotEmpty()) tag else String.format(java.util.Locale.US, "%.1fx", mult)
-            lenses.add(top.maary.darkbag.models.MultiCameraLensItem(
-                lensTag = effectiveTag,
-                multiplier = mult,
-                jpgUri = jpg,
-                dngUri = dng
-            ))
-        }
-        return lenses.sortedWith(compareBy<top.maary.darkbag.models.MultiCameraLensItem> { it.multiplier }.thenBy { it.lensTag })
-    }
-
-    private fun setupButtons(holder: ViewHolder, group: ImageGroup) {
-        with(holder.binding) {
-            val currentFormat = selectedFormats[group.baseName] ?: getSelectedFormat(group)
-            val isRawSelected = currentFormat == FORMAT_DNG
-            val shouldShow = isUiVisible && !isFormatSwitcherPersistentHidden
-
-            val isRawVideo = group.isRawVideo || group.rawVideoUri != null
-            val derivatives = getDerivativeUris(group)
-            val activeDerivativeIndex = (selectedDerivativeIndices[group.baseName] ?: 0).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
-            val activeDerivativeUri = derivatives.getOrNull(activeDerivativeIndex) ?: group.jpgUri ?: group.mp4VideoUri
-            val isMp4Active = !isRawSelected && activeDerivativeUri != null && (activeDerivativeUri.toString().endsWith(".mp4", ignoreCase = true) || group.isMp4Video)
-
-            // 1. Legacy corner groups are replaced by Bento Deck controls, keep GONE
-            formatToggleGroup.visibility = View.GONE
-            formatToggleGroup.alpha = 0f
-            motionPhotoToggleGroup.visibility = View.GONE
-            motionPhotoToggleGroup.alpha = 0f
-            btnMotionPhotoIndicator.visibility = View.GONE
-            btnMotionPhotoIndicator.alpha = 0f
-            btnMotionPhotoIndicator.setOnClickListener(null)
-
-            // Video Duration indicator setup (Superseded by Bento Deck viewer_video_deck)
-            val videoDurationGroup = holder.binding.videoDurationGroup
-            val btnVideoDuration = holder.binding.btnVideoDuration
-            videoDurationGroup.visibility = View.GONE
-            videoDurationGroup.alpha = 0f
-            btnVideoDuration.setOnClickListener(null)
-
-            // 2. Master RAW Format indicator setup (Legacy hidden, kept synced)
-            val lenses = if (group.isMultiCamera) getMultiCameraLenses(group) else emptyList()
-            val activeLens = if (group.isMultiCamera && lenses.isNotEmpty()) {
-                val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, lenses.size - 1)
-                lenses[idx]
-            } else null
-
-            val hasDng = if (group.isMultiCamera) {
-                activeLens?.dngUri != null
-            } else {
-                group.hasMasterRaw
-            }
-
-            val hasDerivatives = if (group.isMultiCamera) {
-                activeLens?.jpgUri != null
-            } else {
-                derivatives.isNotEmpty()
-            }
-
-            if (!hasDng) {
-                btnFormatIndicator.visibility = View.GONE
-            } else {
-                btnFormatIndicator.visibility = View.GONE
-                btnFormatIndicator.isSelected = isRawSelected
-
-                if (hasDerivatives && hasDng) {
-                    btnFormatIndicator.isClickable = true
-                    btnFormatIndicator.setOnClickListener {
-                        val currentPos = holder.bindingAdapterPosition
-                        if (currentPos == RecyclerView.NO_POSITION) return@setOnClickListener
-                        val currentGroup = getGroup(currentPos)
-
-                        btnFormatIndicator.isSelected = !btnFormatIndicator.isSelected
-                        val newFormat = if (btnFormatIndicator.isSelected) FORMAT_DNG else FORMAT_JPG
-                        selectedFormats[currentGroup.baseName] = newFormat
-                        stopMotionVideo(holder)
-                        setupButtons(holder, currentGroup)
-                        loadSelectedFormat(holder, currentGroup, newFormat)
-                        onFormatChanged?.invoke(currentPos, newFormat)
-                    }
-                } else {
-                    btnFormatIndicator.isClickable = false
-                    btnFormatIndicator.setOnClickListener(null)
-                }
-            }
-
-            // 3. Multi-Camera & Derivative overlays are replaced by Bento Deck controls, keep GONE
-            multiCameraToggleContainer.visibility = View.GONE
-            multiCameraToggleContainer.alpha = 0f
-            multiCameraToggleGroup.removeAllViews()
-
-            derivativeDotsContainer.visibility = View.GONE
-            derivativeDotsContainer.alpha = 0f
-            derivativeDotsGroup.removeAllViews()
-        }
-    }
-
-    private fun loadSelectedFormat(holder: ViewHolder, group: ImageGroup, format: String) {
-        if (group.isMultiCamera) {
-            val lenses = getMultiCameraLenses(group)
-            val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
-            val lens = lenses.getOrNull(idx)
-            when (format) {
-                FORMAT_JPG -> {
-                    val uri = lens?.jpgUri ?: lens?.dngUri
-                    uri?.let { loadImage(holder, it, version = group.lastModified) }
-                }
-                FORMAT_DNG -> {
-                    val uri = lens?.dngUri ?: lens?.jpgUri
-                    uri?.let { loadImage(holder, it) }
-                }
-            }
-            return
-        }
-
-        if (format == FORMAT_DNG) {
-            stopMotionVideo(holder)
-            val isRawVideo = group.isRawVideo || group.rawVideoUri != null
-            if (isRawVideo) {
-                val rawUri = group.rawVideoUri
-                if (rawUri != null) {
-                    loadRawVideoPosterFrame(holder, rawUri, group)
-                }
-                return
-            }
-
-            if (group.isHalfFrame()) {
-                loadHalfFrameDngs(holder, group, group.editConfig?.zoomFactor ?: 1.0f)
-            } else {
-                val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
-                val dngUri = if (isCinemaDngGroup) {
-                    holder.activeCinemaDngFrameUri ?: group.cinemaDngFirstFrameUri ?: group.cinemaDngFrameUris.firstOrNull()
-                } else {
-                    group.dngUri ?: group.dngUri1 ?: group.dngUri2
-                }
-                dngUri?.let { loadImage(holder, it) }
-            }
-            return
-        }
-
-        // FORMAT_JPG (Derivative version loading)
-        val derivatives = getDerivativeUris(group)
-        val activeIndex = (selectedDerivativeIndices[group.baseName] ?: 0).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
-        val activeDerivativeUri = derivatives.getOrNull(activeIndex) ?: group.jpgUri ?: group.mp4VideoUri
-
-        if (activeDerivativeUri != null) {
-            val isMp4 = activeDerivativeUri.toString().endsWith(".mp4", ignoreCase = true) || (group.isMp4Video && group.rawVideoUri == null)
-            if (isMp4) {
-                holder.binding.videoView.visibility = View.GONE
-                holder.binding.imageView.visibility = View.VISIBLE
-                loadMp4PosterFrame(holder, activeDerivativeUri)
-            } else {
-                loadImage(holder, activeDerivativeUri, version = group.lastModified)
-            }
-        } else if (group.rawVideoUri != null) {
-            loadRawVideoPosterFrame(holder, group.rawVideoUri!!, group)
-        }
-    }
-
-    private fun loadMp4PosterFrame(holder: ViewHolder, uri: Uri) {
-        val ctx = holder.binding.root.context
-        scope.launch(Dispatchers.IO) {
-            var bmp: Bitmap? = null
-            var durMs: Long = 0L
-            try {
-                val retriever = android.media.MediaMetadataRetriever()
-                if (uri.scheme == "content") {
-                    ctx.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                        retriever.setDataSource(pfd.fileDescriptor)
-                        bmp = retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                        durMs = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                    }
-                } else {
-                    retriever.setDataSource(uri.path)
-                    bmp = retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                    durMs = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                }
-                retriever.release()
-            } catch (e: Exception) {
-                Log.w("ImageViewerAdapter", "MediaMetadataRetriever failed for $uri", e)
-            }
-
-            if (durMs > 0) {
-                videoDurationCache[uri] = durMs
-            }
-
-            withContext(Dispatchers.Main) {
-                if (bmp != null) {
-                    if (holder.binding.imageView.rotation != 0f) {
-                        holder.binding.imageView.rotation = 0f
-                    }
-                    holder.binding.imageView.setImageBitmap(bmp)
-                } else {
-                    Glide.with(holder.binding.imageView)
-                        .asBitmap()
-                        .load(uri)
-                        .apply(RequestOptions().frame(0).diskCacheStrategy(DiskCacheStrategy.RESOURCE))
-                        .into(holder.binding.imageView)
-                }
-                if (durMs > 0 && !holder.isPlayingVideo) {
-                    holder.binding.btnVideoDuration.text = formatVideoTime(durMs)
-                }
-            }
-        }
-    }
-
-    private fun loadRawVideoPosterFrame(holder: ViewHolder, uri: Uri, group: ImageGroup) {
-        val ctx = holder.binding.root.context
-        holder.binding.videoView.visibility = View.GONE
-        holder.binding.imageView.visibility = View.VISIBLE
-
-        val player = holder.rawVideoPlayer ?: top.maary.darkbag.rawvideo.RawVideoPlayer(
-            context = ctx,
-            onFrameRendered = { bitmap, _ ->
-                if (holder.binding.imageView.rotation != 0f) {
-                    holder.binding.imageView.rotation = 0f
-                }
-                holder.binding.imageView.setImageBitmap(bitmap)
-            },
-            onPlaybackStateChanged = { isPlaying ->
-                holder.isPlayingVideo = isPlaying
-                if (isPlaying) {
-                    holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_pause)
-                    holder.videoProgressRunnable?.let {
-                        holder.binding.btnVideoDuration.removeCallbacks(it)
-                        holder.binding.btnVideoDuration.post(it)
-                    }
-                } else {
-                    holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
-                    val cached = videoDurationCache[uri] ?: 0L
-                    if (cached > 0) {
-                        holder.binding.btnVideoDuration.text = formatVideoTime(cached)
-                    }
-                }
-            }
-        ).also { holder.rawVideoPlayer = it }
-
-        if (!player.isVideoLoaded || holder.currentLoadedRawUri != uri) {
-            holder.currentLoadedRawUri = uri
-            player.load(uri)
-        } else {
-            player.seekTo(0)
-        }
-        val fps = player.fps.takeIf { it > 0 } ?: 24.0f
-        val totalMs = ((player.frameCount / fps) * 1000).toLong()
-        if (totalMs > 0) {
-            videoDurationCache[uri] = totalMs
-            if (!holder.isPlayingVideo) {
-                holder.binding.btnVideoDuration.text = formatVideoTime(totalMs)
-            }
-        }
-        player.updateAdjustments(group.editConfig)
-    }
-
-    private fun setBitmapAndRecyclePrevious(holder: ViewHolder, bitmap: android.graphics.Bitmap) {
-        Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
-        val oldManual = holder.manualBitmap
-        if (oldManual != null && oldManual !== bitmap && !oldManual.isRecycled) {
-            oldManual.recycle()
-        }
-        holder.manualBitmap = bitmap
-        holder.binding.imageView.setImageBitmap(bitmap)
-    }
-
-
-    fun setManualBitmap(position: Int, bitmap: android.graphics.Bitmap) {
+    fun setManualBitmap(position: Int, bitmap: Bitmap) {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null) {
-            setBitmapAndRecyclePrevious(holder, bitmap)
-        } else {
-            bitmap.recycle()
-        }
+        if (holder != null) imageLoaderDelegate.setBitmapAndRecyclePrevious(holder, bitmap) else bitmap.recycle()
     }
-
-    private fun clearCurrentBitmap(holder: ViewHolder) {
-        Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
-        holder.manualBitmap?.let { bitmap ->
-            if (!bitmap.isRecycled) bitmap.recycle()
-        }
-        holder.manualBitmap = null
-        holder.binding.imageView.setImageDrawable(null)
-    }
-
-    private fun loadDngThumbnailOnly(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f) {
-        val trackingUri = uri.buildUpon().appendQueryParameter("zoom", zoomFactor.toString()).build()
-        if (holder.currentUri == trackingUri && holder.binding.imageView.drawable != null) {
-            holder.binding.loadingIndicator.visibility = View.GONE
-            return
-        }
-        holder.loadJob?.cancel()
-        holder.currentUri = trackingUri
-        holder.binding.imageView.visibility = View.VISIBLE
-        holder.binding.loadingIndicator.visibility = View.VISIBLE
-
-        holder.loadJob = scope.launch {
-            var thumbnailBitmap: android.graphics.Bitmap? = null
-            try {
-                thumbnailBitmap =
-                    ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
-                ensureActive()
-
-                if (thumbnailBitmap == null) {
-                    thumbnailBitmap = ImageUtils.renderDngBitmap(holder.binding.root.context, uri, reqWidth = 1024, reqHeight = 1024, zoomFactor = zoomFactor)
-                    ensureActive()
-                }
-
-                if (thumbnailBitmap != null) {
-                    setBitmapAndRecyclePrevious(holder, thumbnailBitmap)
-                    thumbnailBitmap = null // Now owned by ViewHolder
-                } else {
-                    loadWithGlide(holder, uri)
-                }
-            } catch (e: CancellationException) {
-                thumbnailBitmap?.recycle()
-                throw e
-            } catch (e: Exception) {
-                android.util.Log.e("ImageViewerAdapter", "Failed to load DNG thumbnail: $uri", e)
-                thumbnailBitmap?.recycle()
-                loadWithGlide(holder, uri)
-            } finally {
-                holder.binding.loadingIndicator.visibility = View.GONE
-            }
-        }
-    }
-
 
     fun loadCinemaDngFrame(holder: ViewHolder, group: ImageGroup, uri: Uri, index: Int) {
         holder.activeCinemaDngFrameIndex = index
@@ -729,746 +254,96 @@ class ImageViewerAdapter(
         stopMotionVideo(holder)
         holder.binding.videoView.visibility = View.GONE
         holder.binding.imageView.visibility = View.VISIBLE
-        loadImage(holder, uri)
+        imageLoaderDelegate.loadImage(holder, uri)
     }
 
-    private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f, version: Long = 0L) {
-        if (holder.currentUri == uri && holder.currentVersion == version && holder.binding.imageView.drawable != null) {
-            holder.binding.loadingIndicator.visibility = View.GONE
-            return
-        }
-        holder.loadJob?.cancel()
-        holder.binding.imageView.visibility = View.VISIBLE
-        holder.binding.loadingIndicator.visibility = View.VISIBLE
-
-        if (uri.toString().endsWith(".dng", ignoreCase = true)) {
-            loadDngThumbnailOnly(holder, uri, zoomFactor)
-        } else {
-            loadWithGlide(holder, uri, version = version)
-        }
-    }
-
-    private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup, zoomFactor: Float = 1.0f) {
-        val trackingUri = Uri.parse("hf://${group.baseName}?layout=${group.hfLayout}&zoom=$zoomFactor")
-        if (holder.currentUri == trackingUri && holder.binding.imageView.drawable != null) {
-            holder.binding.loadingIndicator.visibility = View.GONE
-            return
-        }
-        holder.loadJob?.cancel()
-        holder.currentUri = trackingUri
-        holder.binding.imageView.visibility = View.VISIBLE
-        holder.binding.loadingIndicator.visibility = View.VISIBLE
-        holder.loadJob = scope.launch {
-            var composite: android.graphics.Bitmap? = null
-            try {
-                composite = ImageUtils.generateHalfFrameComposite(
-                    holder.binding.root.context,
-                    group.dngUri1,
-                    group.dngUri2,
-                    group.hfLayout,
-                    zoomFactor
-                )
-                ensureActive()
-                if (composite != null) {
-                    setBitmapAndRecyclePrevious(holder, composite)
-                    composite = null // Now owned by ViewHolder
-                } else {
-                    clearCurrentBitmap(holder)
-                    holder.binding.imageView.setImageResource(android.R.drawable.ic_menu_gallery)
-                }
-            } catch (e: CancellationException) {
-                composite?.recycle()
-                throw e
-            } catch (e: Exception) {
-                android.util.Log.e("ImageViewerAdapter", "Failed to load half-frame DNGs", e)
-                composite?.recycle()
-                clearCurrentBitmap(holder)
-                holder.binding.imageView.setImageResource(android.R.drawable.ic_menu_gallery)
-            } finally {
-                holder.binding.loadingIndicator.visibility = View.GONE
-            }
-        }
-    }
-
-    private fun loadWithGlide(holder: ViewHolder, uri: Uri, version: Long = 0L) {
-        if (holder.currentUri == uri && holder.currentVersion == version && holder.binding.imageView.drawable != null) {
-            holder.binding.loadingIndicator.visibility = View.GONE
-            return
-        }
-        val previousDrawable = holder.binding.imageView.drawable
-        holder.currentUri = uri
-        holder.currentVersion = version
-
-        val model = if (version > 0) {
-            com.bumptech.glide.signature.ObjectKey(version)
-        } else {
-            null
-        }
-
-        Glide.with(holder.binding.imageView)
-            .asDrawable()
-            .load(uri)
-            .let { if (model != null) it.signature(model) else it }
-            .placeholder(previousDrawable)
-            .into(object : com.bumptech.glide.request.target.DrawableImageViewTarget(holder.binding.imageView) {
-                override fun onLoadFailed(errorDrawable: android.graphics.drawable.Drawable?) {
-                    super.onLoadFailed(errorDrawable)
-                    holder.binding.loadingIndicator.visibility = android.view.View.GONE
-                }
-                override fun onResourceReady(
-                    resource: android.graphics.drawable.Drawable,
-                    transition: com.bumptech.glide.request.transition.Transition<in android.graphics.drawable.Drawable>?
-                ) {
-                    super.onResourceReady(resource, transition)
-                    holder.binding.loadingIndicator.visibility = android.view.View.GONE
-                }
-            })
-    }
-
-    override fun getItemCount(): Int = differ.currentList.size
+    override fun getItemCount(): Int = backingList.size
 
     override fun onViewRecycled(holder: ViewHolder) {
         holder.loadJob?.cancel()
-        holder.filmstripFadeRunnable?.let { holder.binding.filmstripContainer.removeCallbacks(it) }
-        holder.filmstripFadeRunnable = null
-        stopMotionVideo(holder)
-        holder.rawVideoPlayer?.release()
-        holder.rawVideoPlayer = null
-        holder.player?.release()
-        holder.player = null
-        clearCurrentBitmap(holder)
+        filmstripDelegate.onViewRecycled(holder)
+        playbackController.onViewRecycled(holder)
+        imageLoaderDelegate.clearCurrentBitmap(holder)
         holder.currentUri = null
         holder.currentBaseName = null
         holder.currentVersion = 0L
-        holder.activeCinemaDngFrameIndex = 0
-        holder.activeCinemaDngFrameUri = null
         holder.binding.loadingIndicator.visibility = View.GONE
         super.onViewRecycled(holder)
     }
 
     override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
-        stopAllMotionVideos()
-        for (i in 0 until itemCount) {
-            (recyclerView.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
-                holder.filmstripFadeRunnable?.let { holder.binding.filmstripContainer.removeCallbacks(it) }
-                holder.filmstripFadeRunnable = null
-                holder.rawVideoPlayer?.release()
-                holder.rawVideoPlayer = null
-                holder.player?.release()
-                holder.player = null
-            }
-        }
+        playbackController.onDetachedFromRecyclerView(recyclerView, itemCount)
         super.onDetachedFromRecyclerView(recyclerView)
         this.recyclerView = null
     }
 
-    fun playMotionVideo(holder: ViewHolder, group: ImageGroup, onComplete: (() -> Unit)? = null) {
-        val currentFormat = selectedFormats[group.baseName] ?: getSelectedFormat(group)
-        if (!group.isMotionPhoto || group.jpgUri == null || currentFormat == FORMAT_DNG) {
-            onComplete?.invoke()
-            return
-        }
-        val context = holder.binding.root.context
-        holder.extractJob?.cancel()
-        holder.playCompletionCallback = onComplete
+    fun playMotionVideo(holder: ViewHolder, group: ImageGroup, onComplete: (() -> Unit)? = null) =
+        playbackController.playMotionVideo(holder, group, (selectedFormats[group.baseName] ?: getSelectedFormat(group)) == FORMAT_DNG, onComplete)
 
-        // Align videoView bounds immediately to match current imageView rect
-        val iv = holder.binding.imageView
-        val d = iv.drawable
-        if (d != null && iv.width > 0 && iv.height > 0) {
-            val rect = RectF(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
-            iv.imageMatrix.mapRect(rect)
-            rect.intersect(0f, 0f, iv.width.toFloat(), iv.height.toFloat())
-            holder.lastDisplayRect = RectF(rect)
-            updateVideoViewBounds(holder, rect)
-        }
+    fun stopMotionVideo(holder: ViewHolder) = playbackController.stopMotionVideo(holder)
 
-        // Make TextureView part of layout hierarchy with alpha 0 so its SurfaceTexture is allocated immediately
-        holder.binding.videoView.alpha = 0f
-        holder.binding.videoView.visibility = View.VISIBLE
+    fun playMotionVideoForPosition(position: Int, onComplete: (() -> Unit)? = null) =
+        backingList.getOrNull(position)?.let { g -> playbackController.playMotionVideoForPosition(position, (selectedFormats[g.baseName] ?: getSelectedFormat(g)) == FORMAT_DNG, onComplete) } ?: onComplete?.invoke()
 
-        holder.extractJob = scope.launch {
-            val videoFile = withContext(Dispatchers.IO) {
-                val info = if (group.motionPhotoVideoLength > 0) {
-                    top.maary.darkbag.motionphoto.MotionPhotoInfo(
-                        videoLength = group.motionPhotoVideoLength,
-                        presentationTimestampUs = group.motionPhotoPtsUs
-                    )
-                } else null
-                val candidateUris = listOfNotNull(group.jpgUri) + group.derivativeJpgUris
-                val motionUri = candidateUris.firstOrNull { uri ->
-                    top.maary.darkbag.motionphoto.MotionPhotoReader.isMotionPhoto(context, uri)
-                } ?: group.jpgUri
-                top.maary.darkbag.motionphoto.MotionPhotoReader.extractVideoToCache(
-                    context,
-                    motionUri,
-                    group.baseName,
-                    info
-                )
-            }
-            ensureActive()
-            if (videoFile == null || !videoFile.exists()) {
-                stopMotionVideo(holder)
-                val cb = holder.playCompletionCallback
-                holder.playCompletionCallback = null
-                cb?.invoke()
-                return@launch
-            }
+    fun stopMotionVideoForPosition(position: Int) = playbackController.stopMotionVideoForPosition(position)
 
-            val player = holder.player ?: androidx.media3.exoplayer.ExoPlayer.Builder(context).build().also { p ->
-                holder.player = p
-                p.setVideoTextureView(holder.binding.videoView)
-                p.addListener(object : androidx.media3.common.Player.Listener {
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
-                            stopMotionVideo(holder)
-                            val cb = holder.playCompletionCallback
-                            holder.playCompletionCallback = null
-                            cb?.invoke()
-                        }
-                    }
+    fun playRawVideo(holder: ViewHolder, group: ImageGroup) = playbackController.playRawVideo(holder, group)
 
-                    override fun onRenderedFirstFrame() {
-                        holder.binding.videoView.alpha = 1f
-                    }
+    fun stopRawVideo(holder: ViewHolder) = playbackController.stopRawVideo(holder)
 
-                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        android.util.Log.e("ImageViewerAdapter", "Motion photo playback error", error)
-                        stopMotionVideo(holder)
-                        val cb = holder.playCompletionCallback
-                        holder.playCompletionCallback = null
-                        cb?.invoke()
-                    }
-                })
-            }
-
-            val mediaItem = androidx.media3.common.MediaItem.fromUri(Uri.fromFile(videoFile))
-            player.setMediaItem(mediaItem)
-            player.repeatMode = androidx.media3.common.Player.REPEAT_MODE_OFF
-            player.seekTo(0)
-            player.prepare()
-            player.play()
-            holder.isPlayingVideo = true
-        }
-    }
-
-    private fun formatVideoTime(millis: Long): String {
-        val totalSec = (millis / 1000).coerceAtLeast(0)
-        val minutes = totalSec / 60
-        val seconds = totalSec % 60
-        return String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
-    }
-
-    private fun startVideoProgressTracking(holder: ViewHolder) {
-        stopVideoProgressTracking(holder)
-        val binding = holder.binding
-
-        val runnable = object : Runnable {
-            override fun run() {
-                val rawPlayer = holder.rawVideoPlayer
-                val exo = holder.player
-
-                if (rawPlayer != null && rawPlayer.isVideoLoaded) {
-                    val frame = rawPlayer.currentFrame
-                    val count = rawPlayer.frameCount
-                    val fps = rawPlayer.fps.takeIf { it > 0 } ?: 24.0f
-                    val curMs = ((frame / fps) * 1000).toLong()
-                    val totalMs = ((count / fps) * 1000).toLong()
-
-                    binding.btnVideoDuration.text = "${formatVideoTime(curMs)} / ${formatVideoTime(totalMs)}"
-                    val isPlaying = holder.isPlayingVideo
-                    binding.btnVideoDuration.setIconResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
-                    val pos = holder.bindingAdapterPosition
-                    if (pos != RecyclerView.NO_POSITION) {
-                        onVideoPlaybackStateChanged?.invoke(pos, isPlaying, curMs, totalMs)
-                    }
-                } else if (exo != null) {
-                    val curMs = exo.currentPosition.coerceAtLeast(0)
-                    val totalMs = exo.duration.takeIf { it > 0 } ?: 0L
-
-                    if (totalMs > 0) {
-                        binding.btnVideoDuration.text = "${formatVideoTime(curMs)} / ${formatVideoTime(totalMs)}"
-                    } else {
-                        binding.btnVideoDuration.text = formatVideoTime(curMs)
-                    }
-                    val isPlaying = exo.isPlaying
-                    binding.btnVideoDuration.setIconResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
-                    val pos = holder.bindingAdapterPosition
-                    if (pos != RecyclerView.NO_POSITION) {
-                        onVideoPlaybackStateChanged?.invoke(pos, isPlaying, curMs, totalMs)
-                    }
-                }
-
-                if (holder.isPlayingVideo) {
-                    binding.btnVideoDuration.postDelayed(this, 100)
-                }
-            }
-        }
-        holder.videoProgressRunnable = runnable
-        binding.btnVideoDuration.post(runnable)
-    }
-
-    private fun stopVideoProgressTracking(holder: ViewHolder) {
-        holder.videoProgressRunnable?.let {
-            holder.binding.btnVideoDuration.removeCallbacks(it)
-        }
-        holder.videoProgressRunnable = null
-        val rawPlayer = holder.rawVideoPlayer
-        val exo = holder.player
-        val currentUri = holder.currentUri
-        val cached = currentUri?.let { videoDurationCache[it] }
-        val totalMs: Long
-        val curMs: Long
-        if (cached != null && cached > 0) {
-            holder.binding.btnVideoDuration.text = formatVideoTime(cached)
-            totalMs = cached
-            curMs = 0L
-        } else if (rawPlayer != null && rawPlayer.isVideoLoaded) {
-            val count = rawPlayer.frameCount
-            val fps = rawPlayer.fps.takeIf { it > 0 } ?: 24.0f
-            totalMs = ((count / fps) * 1000).toLong()
-            curMs = ((rawPlayer.currentFrame / fps) * 1000).toLong()
-            holder.binding.btnVideoDuration.text = formatVideoTime(totalMs)
-        } else if (exo != null && exo.duration > 0) {
-            totalMs = exo.duration
-            curMs = exo.currentPosition.coerceAtLeast(0)
-            holder.binding.btnVideoDuration.text = formatVideoTime(exo.duration)
-        } else {
-            totalMs = 0L
-            curMs = 0L
-        }
-        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
-        val pos = holder.bindingAdapterPosition
-        if (pos != RecyclerView.NO_POSITION) {
-            onVideoPlaybackStateChanged?.invoke(pos, false, curMs, totalMs)
-        }
-    }
-
-    fun stopMotionVideo(holder: ViewHolder) {
-        stopVideoProgressTracking(holder)
-        holder.cinemaDngPlaybackJob?.cancel()
-        holder.cinemaDngPlaybackJob = null
-        holder.extractJob?.cancel()
-        holder.extractJob = null
-        holder.player?.stop()
-        holder.binding.videoView.visibility = View.INVISIBLE
-        holder.binding.videoView.alpha = 0f
-        holder.isPlayingVideo = false
-        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
-        val pos = holder.bindingAdapterPosition
-        if (pos != RecyclerView.NO_POSITION) {
-            onVideoPlaybackStateChanged?.invoke(pos, false, 0L, getVideoDuration(pos))
-        }
-    }
-
-    private fun updateVideoViewBounds(holder: ViewHolder, rect: RectF) {
-        val videoView = holder.binding.videoView
-        val viewWidth = videoView.width.toFloat().takeIf { it > 0 }
-            ?: holder.binding.imageView.measuredWidth.toFloat().takeIf { it > 0 }
-            ?: return
-        val viewHeight = videoView.height.toFloat().takeIf { it > 0 }
-            ?: holder.binding.imageView.measuredHeight.toFloat().takeIf { it > 0 }
-            ?: return
-
-        if (rect.width() <= 0 || rect.height() <= 0) return
-
-        val matrix = Matrix()
-        val scaleX = rect.width() / viewWidth
-        val scaleY = rect.height() / viewHeight
-        matrix.setScale(scaleX, scaleY)
-        matrix.postTranslate(rect.left, rect.top)
-        videoView.setTransform(matrix)
-
-        holder.videoOutlineRect.set(
-            rect.left.toInt(),
-            rect.top.toInt(),
-            rect.right.toInt(),
-            rect.bottom.toInt()
-        )
-        holder.videoOutlineRadius = radius
-        videoView.invalidateOutline()
-    }
-
-    fun playMotionVideoForPosition(position: Int, onComplete: (() -> Unit)? = null) {
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null && position in differ.currentList.indices) {
-            playMotionVideo(holder, differ.currentList[position], onComplete)
-        } else {
-            onComplete?.invoke()
-        }
-    }
-
-    fun stopMotionVideoForPosition(position: Int) {
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null) {
-            stopMotionVideo(holder)
-        }
-    }
-
-    fun playRawVideo(holder: ViewHolder, group: ImageGroup) {
-        val uri = group.rawVideoUri ?: return
-        val player = holder.rawVideoPlayer ?: top.maary.darkbag.rawvideo.RawVideoPlayer(
-            context = holder.binding.root.context,
-            onFrameRendered = { bitmap, _ ->
-                if (holder.binding.imageView.rotation != 0f) {
-                    holder.binding.imageView.rotation = 0f
-                }
-                holder.binding.imageView.setImageBitmap(bitmap)
-            },
-            onPlaybackStateChanged = { isPlaying ->
-                holder.isPlayingVideo = isPlaying
-                if (isPlaying) {
-                    holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_pause)
-                    holder.videoProgressRunnable?.let {
-                        holder.binding.btnVideoDuration.removeCallbacks(it)
-                        holder.binding.btnVideoDuration.post(it)
-                    }
-                } else {
-                    holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
-                    val cached = videoDurationCache[uri] ?: 0L
-                    if (cached > 0) {
-                        holder.binding.btnVideoDuration.text = formatVideoTime(cached)
-                    }
-                }
-                val pos = holder.bindingAdapterPosition
-                if (pos != RecyclerView.NO_POSITION) {
-                    val p = holder.rawVideoPlayer
-                    val curMs = if (p != null && p.isVideoLoaded) ((p.currentFrame / (p.fps.takeIf { it > 0 } ?: 24.0f)) * 1000).toLong() else 0L
-                    val totalMs = if (p != null && p.isVideoLoaded) ((p.frameCount / (p.fps.takeIf { it > 0 } ?: 24.0f)) * 1000).toLong() else (videoDurationCache[uri] ?: 0L)
-                    onVideoPlaybackStateChanged?.invoke(pos, isPlaying, curMs, totalMs)
-                }
-            }
-        ).also { holder.rawVideoPlayer = it }
-
-        if (!player.isVideoLoaded) {
-            player.load(uri)
-        }
-        val fps = player.fps.takeIf { it > 0 } ?: 24.0f
-        val totalMs = ((player.frameCount / fps) * 1000).toLong()
-        if (totalMs > 0) {
-            videoDurationCache[uri] = totalMs
-        }
-        player.updateAdjustments(group.editConfig)
-
-        // Align videoView bounds immediately to match current imageView rect
-        val iv = holder.binding.imageView
-        val d = iv.drawable
-        if (d != null && iv.width > 0 && iv.height > 0) {
-            val rect = RectF(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
-            iv.imageMatrix.mapRect(rect)
-            rect.intersect(0f, 0f, iv.width.toFloat(), iv.height.toFloat())
-            holder.lastDisplayRect = RectF(rect)
-            updateVideoViewBounds(holder, rect)
-        }
-
-        holder.binding.videoView.alpha = 1f
-        holder.binding.videoView.visibility = View.VISIBLE
-        if (holder.binding.videoView.isAvailable) {
-            player.setSurface(android.view.Surface(holder.binding.videoView.surfaceTexture))
-        } else {
-            holder.binding.videoView.surfaceTextureListener = object : android.view.TextureView.SurfaceTextureListener {
-                override fun onSurfaceTextureAvailable(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {
-                    player.setSurface(android.view.Surface(surface))
-                }
-                override fun onSurfaceTextureSizeChanged(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {}
-                override fun onSurfaceTextureDestroyed(surface: android.graphics.SurfaceTexture): Boolean {
-                    player.setSurface(null)
-                    return true
-                }
-                override fun onSurfaceTextureUpdated(surface: android.graphics.SurfaceTexture) {}
-            }
-        }
-
-        player.play()
-        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_pause)
-        startVideoProgressTracking(holder)
-    }
-
-    fun stopRawVideo(holder: ViewHolder) {
-        stopVideoProgressTracking(holder)
-        holder.rawVideoPlayer?.pause()
-        holder.isPlayingVideo = false
-        holder.binding.videoView.visibility = View.GONE
-        holder.binding.videoView.alpha = 0f
-        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
-        val pos = holder.bindingAdapterPosition
-        if (pos != RecyclerView.NO_POSITION) {
-            onVideoPlaybackStateChanged?.invoke(pos, false, 0L, getVideoDuration(pos))
-        }
-    }
-
-    fun toggleRawVideoForPosition(position: Int) {
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null && position in differ.currentList.indices) {
-            val group = differ.currentList[position]
-            if (holder.isPlayingVideo) {
-                stopRawVideo(holder)
-            } else {
-                playRawVideo(holder, group)
-            }
-        }
-    }
+    fun toggleRawVideoForPosition(position: Int) = playbackController.toggleRawVideoForPosition(position)
 
     fun playMp4Video(holder: ViewHolder, group: ImageGroup) {
-        val derivatives = getDerivativeUris(group)
-        val activeIndex = (selectedDerivativeIndices[group.baseName] ?: 0).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
-        val uri = derivatives.getOrNull(activeIndex) ?: group.mp4VideoUri ?: return
-
-        val iv = holder.binding.imageView
-        val d = iv.drawable
-        if (d != null && iv.width > 0 && iv.height > 0) {
-            val rect = RectF(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
-            iv.imageMatrix.mapRect(rect)
-            rect.intersect(0f, 0f, iv.width.toFloat(), iv.height.toFloat())
-            holder.lastDisplayRect = RectF(rect)
-            updateVideoViewBounds(holder, rect)
-        }
-
-        holder.binding.videoView.alpha = 0f
-        holder.binding.videoView.visibility = View.VISIBLE
-
-        val player = holder.player ?: androidx.media3.exoplayer.ExoPlayer.Builder(holder.itemView.context).build().also { p ->
-            holder.player = p
-            p.setVideoTextureView(holder.binding.videoView)
-            p.addListener(object : androidx.media3.common.Player.Listener {
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
-                        stopMotionVideo(holder)
-                        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
-                    } else if (playbackState == androidx.media3.common.Player.STATE_READY) {
-                        val dur = p.duration
-                        if (dur > 0) {
-                            videoDurationCache[uri] = dur
-                        }
-                    }
-                }
-                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                    android.util.Log.e("ImageViewerAdapter", "MP4 playback error", error)
-                    stopMotionVideo(holder)
-                    holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
-                }
-                override fun onRenderedFirstFrame() {
-                    holder.binding.videoView.alpha = 1f
-                }
-                override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-                    val iv = holder.binding.imageView
-                    val d = iv.drawable
-                    if (d != null && iv.width > 0 && iv.height > 0) {
-                        val rect = RectF(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
-                        iv.imageMatrix.mapRect(rect)
-                        rect.intersect(0f, 0f, iv.width.toFloat(), iv.height.toFloat())
-                        holder.lastDisplayRect = RectF(rect)
-                        updateVideoViewBounds(holder, rect)
-                    } else {
-                        holder.lastDisplayRect?.let { rect ->
-                            updateVideoViewBounds(holder, rect)
-                        }
-                    }
-                }
-            })
-        }
-        val mediaItem = androidx.media3.common.MediaItem.fromUri(uri)
-        player.setMediaItem(mediaItem)
-        player.repeatMode = androidx.media3.common.Player.REPEAT_MODE_OFF
-        player.seekTo(0)
-        player.prepare()
-        player.play()
-        holder.isPlayingVideo = true
-        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_pause)
-        startVideoProgressTracking(holder)
+        derivativeSelectorDelegate.getActiveDerivativeUri(group)?.let { playbackController.playMp4Video(holder, it) }
     }
 
     fun toggleMp4VideoForPosition(position: Int) {
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null && position in differ.currentList.indices) {
-            val group = differ.currentList[position]
-            if (holder.isPlayingVideo) {
-                stopMotionVideo(holder)
-                holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
-            } else {
-                playMp4Video(holder, group)
-            }
-        }
+        backingList.getOrNull(position)?.let { g -> playbackController.toggleMp4VideoForPosition(position, derivativeSelectorDelegate.getActiveDerivativeUri(g)) }
     }
 
-    fun updateRawVideoAdjustments(position: Int, editConfig: top.maary.darkbag.models.EditConfig?) {
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        holder?.rawVideoPlayer?.updateAdjustments(editConfig)
-    }
+    fun updateRawVideoAdjustments(position: Int, editConfig: top.maary.darkbag.models.EditConfig?) = playbackController.updateRawVideoAdjustments(position, editConfig)
 
-    fun playCinemaDng(holder: ViewHolder, group: ImageGroup) {
-        val frames = if (group.cinemaDngFrameUris.isNotEmpty()) group.cinemaDngFrameUris else listOfNotNull(group.cinemaDngFirstFrameUri)
-        if (frames.isEmpty()) return
-        holder.cinemaDngPlaybackJob?.cancel()
-        holder.isPlayingVideo = true
-        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_pause)
-        val fps = 24.0f
-        val frameDurationMs = (1000f / fps).toLong()
-        val totalMs = ((frames.size / fps) * 1000).toLong()
+    fun playCinemaDng(holder: ViewHolder, group: ImageGroup) = playbackController.playCinemaDng(holder, group)
 
-        val pos = holder.bindingAdapterPosition
-        val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-        holder.cinemaDngPlaybackJob = scope.launch {
-            var idx = holder.activeCinemaDngFrameIndex
-            if (idx >= frames.size - 1) idx = 0
-            while (isActive && idx < frames.size) {
-                val uri = frames[idx]
-                holder.activeCinemaDngFrameIndex = idx
-                holder.activeCinemaDngFrameUri = uri
-                loadCinemaDngFrame(holder, group, uri, idx)
-                holder.binding.filmstripSeekbar.setProgress(idx, frames.size)
-                val curMs = ((idx / fps) * 1000).toLong()
-                onCinemaDngFrameSelected?.invoke(group, idx, uri)
-                if (pos != RecyclerView.NO_POSITION) {
-                    onVideoPlaybackStateChanged?.invoke(pos, true, curMs, totalMs)
-                }
-                delay(frameDurationMs)
-                idx++
-            }
-            holder.isPlayingVideo = false
-            holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
-            if (pos != RecyclerView.NO_POSITION) {
-                onVideoPlaybackStateChanged?.invoke(pos, false, totalMs, totalMs)
-            }
-        }
-    }
+    fun stopCinemaDng(holder: ViewHolder) = playbackController.stopCinemaDng(holder)
 
-    fun stopCinemaDng(holder: ViewHolder) {
-        holder.cinemaDngPlaybackJob?.cancel()
-        holder.cinemaDngPlaybackJob = null
-        holder.isPlayingVideo = false
-        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
-        val pos = holder.bindingAdapterPosition
-        if (pos != RecyclerView.NO_POSITION && pos in differ.currentList.indices) {
-            val group = differ.currentList[pos]
-            val totalMs = ((group.cinemaDngFrameUris.size / 24.0f) * 1000).toLong()
-            val curMs = ((holder.activeCinemaDngFrameIndex / 24.0f) * 1000).toLong()
-            onVideoPlaybackStateChanged?.invoke(pos, false, curMs, totalMs)
-        }
-    }
+    fun toggleCinemaDngForPosition(position: Int) = playbackController.toggleCinemaDngForPosition(position)
 
-    fun toggleCinemaDngForPosition(position: Int) {
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null && position in differ.currentList.indices) {
-            val group = differ.currentList[position]
-            if (holder.isPlayingVideo && holder.cinemaDngPlaybackJob?.isActive == true) {
-                stopCinemaDng(holder)
-            } else {
-                playCinemaDng(holder, group)
-            }
-        }
-    }
+    fun selectCinemaDngFrame(position: Int, frameIndex: Int, uri: Uri? = null) = playbackController.selectCinemaDngFrame(position, frameIndex, uri)
 
-    fun selectCinemaDngFrame(position: Int, frameIndex: Int, uri: Uri? = null) {
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null && position in differ.currentList.indices) {
-            val group = differ.currentList[position]
-            val targetUri = uri ?: group.cinemaDngFrameUris.getOrNull(frameIndex) ?: group.cinemaDngFirstFrameUri
-            holder.activeCinemaDngFrameIndex = frameIndex
-            holder.activeCinemaDngFrameUri = targetUri
-            if (targetUri != null) {
-                loadCinemaDngFrame(holder, group, targetUri, frameIndex)
-            }
-            holder.binding.filmstripSeekbar.setProgress(frameIndex, group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: 1)
-            onCinemaDngFrameSelected?.invoke(group, frameIndex, targetUri)
-        }
-    }
+    fun isVideoPlaying(position: Int): Boolean = playbackController.isVideoPlaying(position)
 
-    fun isVideoPlaying(position: Int): Boolean {
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder ?: return false
-        return holder.isPlayingVideo || holder.player?.isPlaying == true || holder.rawVideoPlayer?.isPlayingVideo == true || holder.cinemaDngPlaybackJob?.isActive == true
-    }
+    fun getVideoDuration(position: Int): Long = playbackController.getVideoDuration(position)
 
-    fun getVideoDuration(position: Int): Long {
-        if (position !in differ.currentList.indices) return 0L
-        val group = differ.currentList[position]
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        val rawPlayer = holder?.rawVideoPlayer
-        if (rawPlayer != null && rawPlayer.isVideoLoaded) {
-            val fps = rawPlayer.fps.takeIf { it > 0 } ?: 24.0f
-            return ((rawPlayer.frameCount / fps) * 1000).toLong()
-        }
-        if (group.isRawVideo && group.rawVideoDurationMs > 0) {
-            return group.rawVideoDurationMs
-        }
-        if (group.isRawVideo && group.rawVideoFrameCount > 0) {
-            val fps = group.rawVideoFps.takeIf { it > 0 } ?: 24.0f
-            return ((group.rawVideoFrameCount / fps) * 1000).toLong()
-        }
-        if (group.isCinemaDng || group.cinemaDngFrameUris.isNotEmpty()) {
-            val count = group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: group.cinemaDngFrameCount
-            return ((count / 24.0f) * 1000).toLong()
-        }
-        val exo = holder?.player
-        if (exo != null && exo.duration > 0) {
-            return exo.duration
-        }
-        val uri = holder?.currentUri ?: group.mp4VideoUri ?: group.rawVideoUri
-        return uri?.let { videoDurationCache[it] } ?: 0L
-    }
+    fun getVideoCurrentPosition(position: Int): Long = playbackController.getVideoCurrentPosition(position)
 
-    fun getVideoCurrentPosition(position: Int): Long {
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder ?: return 0L
-        val rawPlayer = holder.rawVideoPlayer
-        if (rawPlayer != null && rawPlayer.isVideoLoaded) {
-            val fps = rawPlayer.fps.takeIf { it > 0 } ?: 24.0f
-            return ((rawPlayer.currentFrame / fps) * 1000).toLong()
-        }
-        val exo = holder.player
-        if (exo != null) {
-            return exo.currentPosition.coerceAtLeast(0)
-        }
-        if (holder.activeCinemaDngFrameIndex > 0) {
-            return ((holder.activeCinemaDngFrameIndex / 24.0f) * 1000).toLong()
-        }
-        return 0L
-    }
-
-    fun stopAllMotionVideos() {
-        recyclerView?.let { rv ->
-            for (i in 0 until itemCount) {
-                (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
-                    stopMotionVideo(holder)
-                    stopRawVideo(holder)
-                    stopCinemaDng(holder)
-                }
-            }
-        }
-    }
+    fun stopAllMotionVideos() = playbackController.stopAllVideos(itemCount)
 
     fun setMotionPhotoAutoPlayEnabled(enabled: Boolean) {
         if (this.isMotionPhotoAutoPlay == enabled) return
         this.isMotionPhotoAutoPlay = enabled
         recyclerView?.let { rv ->
             for (i in 0 until itemCount) {
-                (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
-                    val pos = holder.bindingAdapterPosition
-                    if (pos != RecyclerView.NO_POSITION && pos in differ.currentList.indices) {
-                        setupButtons(holder, differ.currentList[pos])
-                    }
+                (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { h ->
+                    val pos = h.bindingAdapterPosition
+                    if (pos != RecyclerView.NO_POSITION && pos in backingList.indices) setupButtons(h)
                 }
             }
         }
     }
 
-    fun getGroup(position: Int): ImageGroup = differ.currentList[position]
+    fun getGroup(position: Int): ImageGroup = backingList[position]
 
-    fun getGroups(): List<ImageGroup> = differ.currentList
+    fun getGroups(): List<ImageGroup> = backingList
 
-    fun getSelectedDerivativeIndex(baseName: String): Int = selectedDerivativeIndices[baseName] ?: 0
+    fun getSelectedDerivativeIndex(baseName: String): Int = derivativeSelectorDelegate.getSelectedDerivativeIndex(baseName)
 
     fun cycleOrToggleFormat(position: Int): String {
-        if (position !in differ.currentList.indices) return FORMAT_JPG
-        val group = differ.currentList[position]
+        val group = backingList.getOrNull(position) ?: return FORMAT_JPG
         val currentFormat = selectedFormats[group.baseName] ?: getSelectedFormat(group)
         val isRawSelected = currentFormat == FORMAT_DNG
 
-        val lenses = if (group.isMultiCamera) getMultiCameraLenses(group) else emptyList()
-        val activeLens = if (group.isMultiCamera && lenses.isNotEmpty()) {
-            val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, lenses.size - 1)
-            lenses[idx]
-        } else null
-
+        val activeLens = lensSelectorDelegate.getActiveLens(group)
         val hasDng = if (group.isMultiCamera) activeLens?.dngUri != null else group.hasMasterRaw
         val derivatives = getDerivativeUris(group)
         val hasDerivatives = if (group.isMultiCamera) activeLens?.jpgUri != null else derivatives.isNotEmpty()
@@ -1483,80 +358,61 @@ class ImageViewerAdapter(
     }
 
     fun cycleDerivativeVersion(position: Int) {
-        if (position !in differ.currentList.indices) return
-        val group = differ.currentList[position]
-        val derivatives = getDerivativeUris(group)
-        if (derivatives.size < 2) return
-        val nextIdx = ((selectedDerivativeIndices[group.baseName] ?: 0) + 1) % derivatives.size
-        selectedDerivativeIndices[group.baseName] = nextIdx
+        val group = backingList.getOrNull(position) ?: return
+        val result = derivativeSelectorDelegate.cycleDerivativeVersion(group) ?: return
+        val (_, nextUri) = result
         selectedFormats[group.baseName] = FORMAT_JPG
+
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
         if (holder != null) {
-            setupButtons(holder, group)
+            setupButtons(holder)
             loadSelectedFormat(holder, group, FORMAT_JPG)
         } else {
             notifyItemChanged(position)
         }
-        onDerivativeVersionChanged?.invoke(position, derivatives[nextIdx])
+        onDerivativeVersionChanged?.invoke(position, nextUri)
         onFormatChanged?.invoke(position, FORMAT_JPG)
     }
 
     fun setFormat(position: Int, format: String) {
-        if (position >= differ.currentList.size) return
-        val group = differ.currentList[position]
+        val group = backingList.getOrNull(position) ?: return
         if (selectedFormats[group.baseName] == format) return
         selectedFormats[group.baseName] = format
-
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null) {
-            setupButtons(holder, group)
+        (recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder)?.let { holder ->
+            setupButtons(holder)
             loadSelectedFormat(holder, group, format)
         }
     }
 
-    fun getSelectedFormat(group: ImageGroup): String {
-        return selectedFormats[group.baseName] ?: when {
+    fun getSelectedFormat(group: ImageGroup): String =
+        selectedFormats[group.baseName] ?: when {
             group.isMultiCamera -> {
-                val lenses = getMultiCameraLenses(group)
-                val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
-                val lens = lenses.getOrNull(idx)
-                if (lens?.jpgUri != null) FORMAT_JPG
-                else if (lens?.dngUri != null) FORMAT_DNG
-                else FORMAT_JPG
+                val lens = lensSelectorDelegate.getActiveLens(group)
+                if (lens?.jpgUri != null) FORMAT_JPG else if (lens?.dngUri != null) FORMAT_DNG else FORMAT_JPG
             }
             getDerivativeUris(group).isNotEmpty() -> FORMAT_JPG
             group.hasMasterRaw -> FORMAT_DNG
             else -> FORMAT_JPG
         }
-    }
 
-    fun getSelectedFormat(position: Int): String {
-        if (position >= differ.currentList.size) return FORMAT_JPG
-        return getSelectedFormat(differ.currentList[position])
-    }
+    fun getSelectedFormat(position: Int): String =
+        backingList.getOrNull(position)?.let { getSelectedFormat(it) } ?: FORMAT_JPG
 
-    fun getSelectedLensIndex(position: Int): Int {
-        if (position >= differ.currentList.size) return 0
-        val group = differ.currentList[position]
-        return selectedLensIndices[group.baseName] ?: 0
-    }
+    fun getSelectedLensIndex(position: Int): Int =
+        backingList.getOrNull(position)?.let { lensSelectorDelegate.getSelectedLensIndex(it.baseName) } ?: 0
 
     fun setSelectedLensIndex(position: Int, lensIndex: Int) {
-        if (position >= differ.currentList.size) return
-        val group = differ.currentList[position]
-        selectedLensIndices[group.baseName] = lensIndex
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        if (holder != null) {
-            setupButtons(holder, group)
-            val format = selectedFormats[group.baseName] ?: getSelectedFormat(group)
-            loadSelectedFormat(holder, group, format)
+        val group = backingList.getOrNull(position) ?: return
+        lensSelectorDelegate.setSelectedLensIndex(group.baseName, lensIndex)
+        (recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder)?.let { holder ->
+            setupButtons(holder)
+            loadSelectedFormat(holder, group, selectedFormats[group.baseName] ?: getSelectedFormat(group))
         }
         onMultiCameraLensChanged?.invoke(position, lensIndex)
     }
 
     fun getActiveCinemaDngFrame(position: Int): Pair<Int, Uri?>? {
-        if (position !in differ.currentList.indices) return null
-        val group = differ.currentList[position]
+        val group = backingList.getOrNull(position) ?: return null
         val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
         if (!isCinemaDngGroup) return null
 
@@ -1566,9 +422,10 @@ class ImageViewerAdapter(
         return Pair(index, uri)
     }
 
+    fun updateVideoViewBounds(holder: ViewHolder, rect: RectF) = playbackController.updateVideoViewBounds(holder, rect)
+
     fun getCurrentUri(position: Int): Uri? {
-        if (position >= differ.currentList.size) return null
-        val group = differ.currentList[position]
+        val group = backingList.getOrNull(position) ?: return null
         val format = getSelectedFormat(group)
         val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
         if (isCinemaDngGroup) {
@@ -1576,166 +433,63 @@ class ImageViewerAdapter(
             return holder?.activeCinemaDngFrameUri ?: group.cinemaDngFirstFrameUri ?: group.cinemaDngFrameUris.firstOrNull() ?: group.dngUri
         }
         return if (group.isMultiCamera) {
-            val lenses = getMultiCameraLenses(group)
-            val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
-            val lens = lenses.getOrNull(idx)
-            if (format == FORMAT_DNG) {
-                lens?.dngUri ?: lens?.jpgUri
-            } else {
-                lens?.jpgUri ?: lens?.dngUri
-            }
+            val lens = lensSelectorDelegate.getActiveLens(group)
+            if (format == FORMAT_DNG) (lens?.dngUri ?: lens?.jpgUri) else (lens?.jpgUri ?: lens?.dngUri)
         } else {
             if (format == FORMAT_DNG) {
                 group.rawVideoUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2 ?: group.jpgUri
             } else {
-                val derivatives = getDerivativeUris(group)
-                val idx = (selectedDerivativeIndices[group.baseName] ?: 0).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
-                derivatives.getOrNull(idx) ?: group.jpgUri ?: group.mp4VideoUri ?: group.rawVideoUri ?: group.dngUri
+                derivativeSelectorDelegate.getActiveDerivativeUri(group) ?: group.rawVideoUri ?: group.dngUri
+            }
+        }
+    }
+
+    private fun updateOverlaysVisibility(isVisible: Boolean, isHidden: Boolean) {
+        recyclerView?.let { rv ->
+            for (i in 0 until itemCount) {
+                (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
+                    setupButtons(holder)
+                    filmstripDelegate.updateFilmstripVisibility(holder, getGroup(i), isVisible, isHidden)
+                }
             }
         }
     }
 
     fun setUiVisibility(isVisible: Boolean) {
         this.isUiVisible = isVisible
-        recyclerView?.let { rv ->
-            for (i in 0 until itemCount) {
-                (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
-                    val formatGroup = holder.binding.formatToggleGroup
-                    val motionGroup = holder.binding.motionPhotoToggleGroup
-                    val multiCamContainer = holder.binding.multiCameraToggleContainer
-                    val dotsContainer = holder.binding.derivativeDotsContainer
-                    val filmstripContainer = holder.binding.filmstripContainer
-                    val durationGroup = holder.binding.videoDurationGroup
-                    val group = getGroup(i)
-                    val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
-                    val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
-                    val isRawSelected = selectedFormats[group.baseName] == FORMAT_DNG
-                    val hasDots = !group.isMultiCamera && !isRawSelected && getDerivativeUris(group).size >= 2
-                    val activeDerivUri = getDerivativeUris(group).getOrNull(selectedDerivativeIndices[group.baseName] ?: 0) ?: group.jpgUri ?: group.mp4VideoUri
-                    val isMp4 = !isRawSelected && activeDerivUri != null && (activeDerivUri.toString().endsWith(".mp4", ignoreCase = true) || group.isMp4Video)
-                    val isVideo = (isRawSelected && (group.isRawVideo || group.rawVideoUri != null)) || isMp4
-                    val shouldBeVisible = isVisible && !isFormatSwitcherPersistentHidden
-                    formatGroup.visibility = View.GONE
-                    formatGroup.alpha = 0f
-                    motionGroup.visibility = View.GONE
-                    motionGroup.alpha = 0f
-                    multiCamContainer.visibility = View.GONE
-                    multiCamContainer.alpha = 0f
-                    dotsContainer.visibility = View.GONE
-                    dotsContainer.alpha = 0f
-                    durationGroup.visibility = View.GONE
-                    durationGroup.alpha = 0f
-                    if (shouldBeVisible) {
-                        if (isCinemaDngGroup) {
-                            filmstripContainer.visibility = View.VISIBLE
-                            filmstripContainer.animate().alpha(0.35f).setDuration(200).setListener(null).start()
-                        }
-                    } else {
-                        if (isCinemaDngGroup) {
-                            holder.filmstripFadeRunnable?.let { filmstripContainer.removeCallbacks(it) }
-                            holder.filmstripFadeRunnable = null
-                            filmstripContainer.animate().alpha(0f).setDuration(200)
-                                .setListener(object : android.animation.AnimatorListenerAdapter() {
-                                    override fun onAnimationEnd(animation: android.animation.Animator) {
-                                        if (!isUiVisible || isFormatSwitcherPersistentHidden) filmstripContainer.visibility = View.GONE
-                                    }
-                                }).start()
-                        }
-                    }
-                }
-            }
-        }
+        updateOverlaysVisibility(isVisible, isFormatSwitcherPersistentHidden)
     }
 
     fun setFormatSwitcherPersistentHidden(hidden: Boolean) {
         if (this.isFormatSwitcherPersistentHidden == hidden) return
         this.isFormatSwitcherPersistentHidden = hidden
-        if (hidden) {
-            stopAllMotionVideos()
-        }
-        recyclerView?.let { rv ->
-            for (i in 0 until itemCount) {
-                (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
-                    val formatGroup = holder.binding.formatToggleGroup
-                    val motionGroup = holder.binding.motionPhotoToggleGroup
-                    val multiCamContainer = holder.binding.multiCameraToggleContainer
-                    val dotsContainer = holder.binding.derivativeDotsContainer
-                    val filmstripContainer = holder.binding.filmstripContainer
-                    val durationGroup = holder.binding.videoDurationGroup
-                    val group = getGroup(i)
-                    val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
-                    val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
-                    val isRawSelected = selectedFormats[group.baseName] == FORMAT_DNG
-                    val hasDots = !group.isMultiCamera && !isRawSelected && getDerivativeUris(group).size >= 2
-                    val activeDerivUri = getDerivativeUris(group).getOrNull(selectedDerivativeIndices[group.baseName] ?: 0) ?: group.jpgUri ?: group.mp4VideoUri
-                    val isMp4 = !isRawSelected && activeDerivUri != null && (activeDerivUri.toString().endsWith(".mp4", ignoreCase = true) || group.isMp4Video)
-                    val isVideo = (isRawSelected && (group.isRawVideo || group.rawVideoUri != null)) || isMp4
-                    val shouldBeVisible = isUiVisible && !isFormatSwitcherPersistentHidden
-                    formatGroup.visibility = View.GONE
-                    formatGroup.alpha = 0f
-                    motionGroup.visibility = View.GONE
-                    motionGroup.alpha = 0f
-                    multiCamContainer.visibility = View.GONE
-                    multiCamContainer.alpha = 0f
-                    dotsContainer.visibility = View.GONE
-                    dotsContainer.alpha = 0f
-                    durationGroup.visibility = View.GONE
-                    durationGroup.alpha = 0f
-                    if (shouldBeVisible) {
-                        if (isCinemaDngGroup) {
-                            filmstripContainer.visibility = View.VISIBLE
-                            filmstripContainer.animate().alpha(0.35f).setDuration(200).setListener(null).start()
-                        }
-                    } else {
-                        if (isCinemaDngGroup) {
-                            holder.filmstripFadeRunnable?.let { filmstripContainer.removeCallbacks(it) }
-                            holder.filmstripFadeRunnable = null
-                            filmstripContainer.animate().alpha(0f).setDuration(200)
-                                .setListener(object : android.animation.AnimatorListenerAdapter() {
-                                    override fun onAnimationEnd(animation: android.animation.Animator) {
-                                        if (isFormatSwitcherPersistentHidden) filmstripContainer.visibility = View.GONE
-                                    }
-                                }).start()
-                        }
-                    }
-                }
-            }
-        }
+        if (hidden) stopAllMotionVideos()
+        updateOverlaysVisibility(isUiVisible, hidden)
     }
 
     fun cancelLoadJob(position: Int, clearView: Boolean = true) {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
         if (holder != null) {
             holder.loadJob?.cancel()
-            if (clearView) {
-                clearCurrentBitmap(holder)
-            }
+            if (clearView) imageLoaderDelegate.clearCurrentBitmap(holder)
             holder.binding.loadingIndicator.visibility = View.GONE
         }
     }
 
-    fun updateGroups(newGroups: List<ImageGroup>, commitCallback: (() -> Unit)? = null) {
-        differ.submitList(newGroups, commitCallback)
-    }
+    fun updateGroups(newGroups: List<ImageGroup>, commitCallback: (() -> Unit)? = null) = differ.submitList(newGroups, commitCallback)
 
-    fun findGroupIndex(baseName: String): Int {
-        return differ.currentList.indexOfFirst { it.baseName == baseName }
-    }
+    fun findGroupIndex(baseName: String): Int = backingList.indexOfFirst { it.baseName == baseName }
 
-    fun setFormatForGroup(baseName: String, format: String) {
-        selectedFormats[baseName] = format
-    }
+    fun setFormatForGroup(baseName: String, format: String) { selectedFormats[baseName] = format }
 
     fun forceFormat(baseName: String, format: String) {
-
         selectedFormats[baseName] = format
         val index = findGroupIndex(baseName)
         if (index != -1) {
             val holder = recyclerView?.findViewHolderForAdapterPosition(index) as? ViewHolder
             if (holder != null) {
-                val group = differ.currentList[index]
-                setupButtons(holder, group)
-                loadSelectedFormat(holder, group, format)
+                setupButtons(holder)
+                loadSelectedFormat(holder, backingList[index], format)
             } else {
                 notifyItemChanged(index)
             }

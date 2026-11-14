@@ -160,4 +160,38 @@ class ImageRepositoryCacheTest {
         assertEquals("content", cacheItem!!.jpgUri?.scheme)
         assertFalse("cachedGroups must NOT be overwritten by file:// sandbox group", cacheItem.metadataLoaded)
     }
+
+    @Test
+    fun testIsDarkbagFileName_matchesAllDarkbagPrefixes() {
+        assertTrue(ImageRepository.isDarkbagFileName("DBAG_20261111_120000.jpg"))
+        assertTrue(ImageRepository.isDarkbagFileName("Darkbag_20261111_120000.jpg"))
+        assertTrue(ImageRepository.isDarkbagFileName("RAWVID_20261111_120000.rawvid"))
+        assertTrue(ImageRepository.isDarkbagFileName("CDNG_20261111_120000_000000.dng"))
+        assertTrue(ImageRepository.isDarkbagFileName("dbag_lowercase.jpg"))
+        assertFalse(ImageRepository.isDarkbagFileName("IMG_20261111_120000.jpg"))
+        assertFalse(ImageRepository.isDarkbagFileName("PXL_20261111_120000.jpg"))
+    }
+
+    @Test
+    fun testGalleryCacheStore_directInstanceOperations() {
+        val store = GalleryCacheStore.getInstance()
+        store.clear()
+
+        assertNull(store.cachedGroups)
+        assertNull(store.staleCachedGroups)
+
+        val group = ImageGroup(baseName = "test_store", metadataLoaded = true)
+        store.cachedGroups = listOf(group)
+        assertEquals(1, store.cachedGroups?.size)
+        assertEquals("test_store", store.cachedGroups?.first()?.baseName)
+
+        store.invalidate(clearStale = false)
+        assertNull(store.cachedGroups)
+        assertEquals(1, store.staleCachedGroups?.size)
+
+        store.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+        store.clear()
+        assertNull(store.cachedGroups)
+        assertNull(store.staleCachedGroups)
+    }
 }

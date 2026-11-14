@@ -29,4 +29,23 @@ object DarkbagIdentity {
     } else {
         "Captured with Darkbag"
     }
+
+    fun isDarkbagUri(uri: android.net.Uri, cr: android.content.ContentResolver): Boolean {
+        return try {
+            val name = when (uri.scheme) {
+                "content" -> {
+                    cr.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    }
+                }
+                else -> uri.lastPathSegment
+            }
+            name != null && (name.startsWith(FILE_PREFIX, ignoreCase = true) ||
+                    name.startsWith("Darkbag_", ignoreCase = true) ||
+                    name.startsWith("RAWVID_", ignoreCase = true) ||
+                    name.startsWith("CDNG_", ignoreCase = true))
+        } catch (e: Exception) {
+            false
+        }
+    }
 }

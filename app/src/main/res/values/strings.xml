@@ -177,6 +177,10 @@
     <string name="gallery_delete_desc_raw_only">Frees storage space while keeping JPG/MP4 deliverables</string>
     <string name="gallery_delete_option_jpg_only">Delete Deliverables (JPG/MP4) only</string>
     <string name="gallery_delete_desc_jpg_only">Removes JPG/MP4 deliverables while keeping original RAW/RAWVID files</string>
+    <string name="gallery_delete_option_current_derivative">Delete current version (%1$s) only</string>
+    <string name="gallery_delete_desc_current_derivative">Deletes only the currently viewed deliverable version while keeping other versions and RAW</string>
+    <string name="gallery_delete_option_all_derivatives">Delete all rendered versions (%1$d versions)</string>
+    <string name="gallery_delete_desc_all_derivatives">Removes all rendered JPG/MP4 versions while keeping original RAW</string>
     <string name="batch_delete_cdng_only">Clean Up CinemaDNG Sequences Only</string>
     <string name="batch_delete_cdng_only_desc">Frees multi-gigabyte frame sequence folders while keeping RAWVID masters and graded deliverables</string>
     <string name="gallery_delete_confirm_format">Delete (%1$d items)</string>
@@ -554,4 +558,7 @@
     <string name="lut_mgmt_empty_title">No Film Recipes Imported</string>
     <string name="lut_mgmt_empty_desc">Import .cube 3D LUT film simulation recipes paired with your camera Log curves.</string>
     <string name="lut_mgmt_filter_all">All</string>
+    <string name="toast_queue_full">Queue full: processing %1$d photos, please wait…</string>
+    <string name="toast_memory_low">System memory low, waiting for processing to complete…</string>
+    <string name="error_configure_camera_session">Failed to configure camera session</string>
 </resources>

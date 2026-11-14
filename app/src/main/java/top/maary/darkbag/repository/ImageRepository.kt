@@ -19,29 +19,53 @@ import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.utils.DarkbagIdentity
 import java.io.File
 
-class ImageRepository(private val context: Context) {
+class ImageRepository(
+    private val context: Context,
+    private val cacheStore: GalleryCacheStore = GalleryCacheStore.getInstance()
+) {
 
     companion object {
-        @Volatile
+        @Deprecated(
+            "Use GalleryCacheStore directly or via ImageRepository instance to prevent static leaks",
+            ReplaceWith("GalleryCacheStore.getInstance().cachedGroups")
+        )
         @VisibleForTesting
-        internal var cachedGroups: List<ImageGroup>? = null
+        internal var cachedGroups: List<ImageGroup>?
+            get() = GalleryCacheStore.getInstance().cachedGroups
+            set(value) {
+                GalleryCacheStore.getInstance().cachedGroups = value
+            }
 
-        @Volatile
+        @Deprecated(
+            "Use GalleryCacheStore directly or via ImageRepository instance to prevent static leaks",
+            ReplaceWith("GalleryCacheStore.getInstance().staleCachedGroups")
+        )
         @VisibleForTesting
-        internal var staleCachedGroups: List<ImageGroup>? = null
+        internal var staleCachedGroups: List<ImageGroup>?
+            get() = GalleryCacheStore.getInstance().staleCachedGroups
+            set(value) {
+                GalleryCacheStore.getInstance().staleCachedGroups = value
+            }
 
         private val CINEMADNG_FRAME_REGEX = Regex("^(?:DBAG_)?((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)_([0-9]{6})\\.dng$", RegexOption.IGNORE_CASE)
         private val CINEMADNG_AUDIO_REGEX = Regex("^(?:DBAG_)?((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)\\.wav$", RegexOption.IGNORE_CASE)
 
         private fun isCinemaDngDirectoryName(name: String): Boolean {
-            return (name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true) || name.startsWith("RAWVID_", ignoreCase = true) || name.startsWith("CDNG_", ignoreCase = true)) &&
+            return isDarkbagFileName(name) &&
                     (name.contains("RAWVID", ignoreCase = true) || name.contains("CDNG", ignoreCase = true))
+        }
+
+        internal fun isDarkbagFileName(name: String): Boolean {
+            return name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true) ||
+                    name.startsWith("Darkbag_", ignoreCase = true) ||
+                    name.startsWith("RAWVID_", ignoreCase = true) ||
+                    name.startsWith("CDNG_", ignoreCase = true)
         }
     }
 
     suspend fun getGroupedImages(forceRefresh: Boolean = false): List<ImageGroup> {
         if (!forceRefresh) {
-            cachedGroups?.let { return it }
+            cacheStore.cachedGroups?.let { return it }
         }
 
         return withContext(Dispatchers.IO) {
@@ -69,7 +93,7 @@ class ImageRepository(private val context: Context) {
                 .filter { it.hasAny() && !it.isInProgress }
                 .sortedByDescending { it.captureTime }
 
-            cachedGroups = result
+            cacheStore.cachedGroups = result
             result
         }
     }
@@ -79,28 +103,18 @@ class ImageRepository(private val context: Context) {
         val groups = mutableMapOf<String, ImageGroupBuilder>()
 
         // Pre-populate with cached metadata if available (Stale-While-Revalidate)
-        val initialCache = cachedGroups ?: staleCachedGroups
+        val initialCache = cacheStore.cachedGroups ?: cacheStore.staleCachedGroups
         initialCache?.forEach { cached ->
             groups[cached.baseName] = ImageGroupBuilder(cached.baseName).applyFrom(cached)
         }
-
-        var hasEmittedInitialChunk = false
 
         suspend fun emitCurrent() {
             val sorted = groups.values
                 .map { it.build() }
                 .filter { it.hasAny() && !it.isInProgress }
                 .sortedByDescending { it.captureTime }
-            cachedGroups = sorted
-            staleCachedGroups = sorted
-
-            // Progressive chunk delivery for large datasets (500+ groups):
-            // Emit top 40 items first if not yet emitted, allowing instant T2 paint (<25ms)
-            if (sorted.size > 40 && !hasEmittedInitialChunk) {
-                hasEmittedInitialChunk = true
-                emit(sorted.take(40))
-                kotlinx.coroutines.delay(40)
-            }
+            cacheStore.cachedGroups = sorted
+            cacheStore.staleCachedGroups = sorted
             emit(sorted)
         }
 
@@ -116,35 +130,46 @@ class ImageRepository(private val context: Context) {
         coroutineScope {
             val jobMediaStore = async(Dispatchers.IO) {
                 val msGroups = mutableMapOf<String, ImageGroupBuilder>()
-                scanMediaStore(msGroups, fast = true)
+                try {
+                    scanMediaStore(msGroups, fast = true)
+                } catch (e: Throwable) {
+                    android.util.Log.e("ImageRepository", "Error scanning MediaStore", e)
+                }
                 msGroups
             }
             val jobSafJpg = async(Dispatchers.IO) {
                 val jpgGroups = mutableMapOf<String, ImageGroupBuilder>()
                 if (safJpgUri != null) {
-                    scanSafFolder(safJpgUri, jpgGroups, fast = true)
+                    try {
+                        scanSafFolder(safJpgUri, jpgGroups, fast = true)
+                    } catch (e: Throwable) {
+                        android.util.Log.e("ImageRepository", "Error scanning SAF JPG folder: $safJpgUri", e)
+                    }
                 }
                 jpgGroups
             }
             val jobSafRaw = async(Dispatchers.IO) {
                 val rawGroups = mutableMapOf<String, ImageGroupBuilder>()
                 if (safRawUri != null && safRawUri != safJpgUri) {
-                    scanSafFolder(safRawUri, rawGroups, fast = true)
+                    try {
+                        scanSafFolder(safRawUri, rawGroups, fast = true)
+                    } catch (e: Throwable) {
+                        android.util.Log.e("ImageRepository", "Error scanning SAF RAW folder: $safRawUri", e)
+                    }
                 }
                 rawGroups
             }
 
-            val msResults = jobMediaStore.await()
-            val hadCached = groups.isNotEmpty()
+            val msResults = try { jobMediaStore.await() } catch (e: Throwable) { emptyMap() }
             mergeGroupMaps(groups, msResults)
 
-            // If starting from completely cold cache, emit early progressive milestone from MediaStore
-            if (!hadCached && msResults.isNotEmpty()) {
-                emitCurrent()
-            }
+            val jpgResults = try {
+                kotlinx.coroutines.withTimeoutOrNull(3000L) { jobSafJpg.await() } ?: emptyMap()
+            } catch (e: Throwable) { emptyMap() }
 
-            val jpgResults = jobSafJpg.await()
-            val rawResults = jobSafRaw.await()
+            val rawResults = try {
+                kotlinx.coroutines.withTimeoutOrNull(3000L) { jobSafRaw.await() } ?: emptyMap()
+            } catch (e: Throwable) { emptyMap() }
 
             mergeGroupMaps(groups, jpgResults)
             mergeGroupMaps(groups, rawResults)
@@ -154,12 +179,12 @@ class ImageRepository(private val context: Context) {
                 baseName in validBaseNames || groups[baseName]?.isInProgress == true
             }
 
+            emitCurrent()
+
             withContext(Dispatchers.IO) {
                 preloadInitialMetadata(groups, initialUri)
             }
         }
-
-        emitCurrent()
     }
 
     private fun mergeGroupMaps(target: MutableMap<String, ImageGroupBuilder>, source: Map<String, ImageGroupBuilder>) {
@@ -369,20 +394,15 @@ class ImageRepository(private val context: Context) {
             updated.mp4VideoUri
         ).any { it.scheme == "file" }
 
-        val currentCache = cachedGroups
+        val currentCache = cacheStore.cachedGroups
         if (!isSandboxGroup && currentCache != null && currentCache.any { it.baseName == updated.baseName }) {
-            cachedGroups = currentCache.map { if (it.baseName == updated.baseName) updated else it }
+            cacheStore.updateCachedGroup(updated)
         }
         updated
     }
 
     fun invalidateCache(clearStale: Boolean = false) {
-        if (!clearStale && cachedGroups != null) {
-            staleCachedGroups = cachedGroups
-        } else if (clearStale) {
-            staleCachedGroups = null
-        }
-        cachedGroups = null
+        cacheStore.invalidate(clearStale)
     }
 
     private fun scanSafFolder(
@@ -390,313 +410,8 @@ class ImageRepository(private val context: Context) {
         groups: MutableMap<String, ImageGroupBuilder>,
         fast: Boolean = false
     ) {
-        try {
-            val treeUri = Uri.parse(folderUri)
-            val docId = if (DocumentsContract.isTreeUri(treeUri)) {
-                DocumentsContract.getTreeDocumentId(treeUri)
-            } else {
-                DocumentsContract.getDocumentId(treeUri)
-            }
-            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
-            val projection = arrayOf(
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE,
-                DocumentsContract.Document.COLUMN_LAST_MODIFIED,
-                DocumentsContract.Document.COLUMN_SIZE
-            )
-
-            var scannedWithDirectQuery = false
-            try {
-                context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
-                    scannedWithDirectQuery = true
-                    val idColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                    val nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                    val mimeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
-                    val modifiedColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
-                    val sizeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
-
-                    while (cursor.moveToNext()) {
-                        if (idColumn == -1 || nameColumn == -1) continue
-                        val childDocId = cursor.getString(idColumn) ?: continue
-                        val name = cursor.getString(nameColumn) ?: continue
-                        val mime = if (mimeColumn != -1) cursor.getString(mimeColumn) else null
-                        val lastModified = if (modifiedColumn != -1) cursor.getLong(modifiedColumn) else 0L
-                        val size = if (sizeColumn != -1) cursor.getLong(sizeColumn) else 0L
-
-                        if (mime == DocumentsContract.Document.MIME_TYPE_DIR || mime == "vnd.android.document/directory") {
-                            if (isCinemaDngDirectoryName(name)) {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                val folderDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
-
-                                var firstFrameUri: Uri? = null
-                                var audioUri: Uri? = null
-                                var folderLastModified = lastModified
-                                val frameUris = mutableListOf<Uri>()
-
-                                try {
-                                    val subChildrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, childDocId)
-                                    context.contentResolver.query(subChildrenUri, projection, null, null, null)?.use { subCursor ->
-                                        val subIdCol = subCursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                                        val subNameCol = subCursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                                        val subModCol = subCursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
-                                        val subSizeCol = subCursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
-
-                                        val subFrames = mutableListOf<Pair<String, Uri>>()
-
-                                        while (subCursor.moveToNext()) {
-                                            if (subIdCol == -1 || subNameCol == -1) continue
-                                            val subDocId = subCursor.getString(subIdCol) ?: continue
-                                            val subName = subCursor.getString(subNameCol) ?: continue
-                                            val subMod = if (subModCol != -1) subCursor.getLong(subModCol) else 0L
-                                            val subSize = if (subSizeCol != -1) subCursor.getLong(subSizeCol) else 0L
-                                            val subDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, subDocId)
-                                            if (subMod > folderLastModified) folderLastModified = subMod
-                                            builder.addSize(subSize)
-
-                                            if (subName.endsWith(".dng", ignoreCase = true)) {
-                                                subFrames.add(subName to subDocUri)
-                                            } else if (subName.endsWith(".wav", ignoreCase = true)) {
-                                                audioUri = subDocUri
-                                            }
-                                        }
-
-                                        subFrames.sortBy { it.first }
-                                        firstFrameUri = subFrames.firstOrNull { it.first.contains("_000000.dng", ignoreCase = true) }?.second
-                                            ?: subFrames.firstOrNull()?.second
-                                        frameUris.addAll(subFrames.map { it.second })
-                                    }
-                                } catch (e: Exception) {
-                                    android.util.Log.w("ImageRepository", "Failed to query child documents for CinemaDNG folder $name", e)
-                                }
-
-                                builder.setCinemaDngFolder(
-                                    folderUri = folderDocUri,
-                                    firstFrameUri = firstFrameUri,
-                                    audioUri = audioUri,
-                                    frameCount = frameUris.size,
-                                    time = folderLastModified,
-                                    modifiedTime = folderLastModified
-                                )
-                                if (frameUris.isNotEmpty()) {
-                                    builder.cinemaDngFrameUris.clear()
-                                    builder.cinemaDngFrameUris.addAll(frameUris)
-                                }
-
-                                if (!fast) {
-                                    firstFrameUri?.let { readExifForScanning(it, builder) }
-                                }
-                                continue
-                            }
-                        }
-
-                        if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) continue
-                        val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
-
-                        val cdngFrameMatch = CINEMADNG_FRAME_REGEX.find(name)
-                        val cdngAudioMatch = CINEMADNG_AUDIO_REGEX.find(name)
-
-                        val matchedBuilder = when {
-                            cdngFrameMatch != null -> {
-                                val clipBaseName = cdngFrameMatch.groupValues[1]
-                                val frameIndex = cdngFrameMatch.groupValues[2].toIntOrNull() ?: 0
-                                val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
-                                builder.addCinemaDngFrame(docUri, frameIndex, lastModified)
-                                if (!fast && frameIndex == 0) {
-                                    readExifForScanning(docUri, builder)
-                                }
-                                builder
-                            }
-                            cdngAudioMatch != null -> {
-                                val clipBaseName = cdngAudioMatch.groupValues[1]
-                                val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
-                                builder.setCinemaDngAudio(docUri, lastModified)
-                                builder
-                            }
-                            name.contains("_MULTI_") && (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.addMultiJpg(docUri, name, lastModified)
-                                if (!fast) {
-                                    readExifForScanning(docUri, builder)
-                                }
-                                builder
-                            }
-                            name.contains("_MULTI_") && name.endsWith(".dng", ignoreCase = true) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.addMultiDng(docUri, name, lastModified)
-                                builder
-                            }
-                            name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.setJpg(docUri, lastModified)
-                                if (!fast) {
-                                    readExifForScanning(docUri, builder)
-                                }
-                                builder
-                            }
-                            name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.setDng2(docUri, lastModified)
-                                builder
-                            }
-                            name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.setDng1(docUri, lastModified)
-                                builder
-                            }
-                            name.endsWith(".dng", ignoreCase = true) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.setDng(docUri, lastModified)
-                                builder
-                            }
-                            name.endsWith(".rawvid", ignoreCase = true) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.setRawVideo(docUri, lastModified)
-                                builder
-                            }
-                            name.endsWith(".mp4", ignoreCase = true) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.setMp4Video(docUri, lastModified)
-                                builder
-                            }
-                            else -> null
-                        }
-                        matchedBuilder?.addSize(size)
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("ImageRepository", "Direct SAF children query failed for $folderUri, falling back", e)
-            }
-
-            // Fallback for providers that don't support buildChildDocumentsUriUsingTree
-            if (!scannedWithDirectQuery) {
-                val root = DocumentFile.fromTreeUri(context, treeUri)
-                root?.listFiles()?.forEach { file ->
-                    val name = file.name ?: return@forEach
-                    if (file.isDirectory) {
-                        if (isCinemaDngDirectoryName(name)) {
-                            val baseName = getBaseName(name)
-                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                            var firstFrameUri: Uri? = null
-                            var audioUri: Uri? = null
-                            val subFrames = mutableListOf<Pair<String, Uri>>()
-                            var folderLastModified = file.lastModified()
-
-                            file.listFiles().forEach { subFile ->
-                                val subName = subFile.name ?: return@forEach
-                                val subMod = subFile.lastModified()
-                                if (subMod > folderLastModified) folderLastModified = subMod
-                                if (subName.endsWith(".dng", ignoreCase = true)) {
-                                    subFrames.add(subName to subFile.uri)
-                                } else if (subName.endsWith(".wav", ignoreCase = true)) {
-                                    audioUri = subFile.uri
-                                }
-                            }
-                            subFrames.sortBy { it.first }
-                            firstFrameUri = subFrames.firstOrNull { it.first.contains("_000000.dng", ignoreCase = true) }?.second
-                                ?: subFrames.firstOrNull()?.second
-                            val frameUris = subFrames.map { it.second }
-
-                            builder.setCinemaDngFolder(
-                                folderUri = file.uri,
-                                firstFrameUri = firstFrameUri,
-                                audioUri = audioUri,
-                                frameCount = frameUris.size,
-                                time = folderLastModified,
-                                modifiedTime = folderLastModified
-                            )
-                            if (frameUris.isNotEmpty()) {
-                                builder.cinemaDngFrameUris.clear()
-                                builder.cinemaDngFrameUris.addAll(frameUris)
-                            }
-                            if (!fast) {
-                                firstFrameUri?.let { readExifForScanning(it, builder) }
-                            }
-                            return@forEach
-                        }
-                    }
-
-                    if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) return@forEach
-                    val lastModified = file.lastModified()
-
-                    val cdngFrameMatch = CINEMADNG_FRAME_REGEX.find(name)
-                    val cdngAudioMatch = CINEMADNG_AUDIO_REGEX.find(name)
-
-                    when {
-                        cdngFrameMatch != null -> {
-                            val clipBaseName = cdngFrameMatch.groupValues[1]
-                            val frameIndex = cdngFrameMatch.groupValues[2].toIntOrNull() ?: 0
-                            val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
-                            builder.addCinemaDngFrame(file.uri, frameIndex, lastModified)
-                            if (!fast && frameIndex == 0) {
-                                readExifForScanning(file.uri, builder)
-                            }
-                        }
-                        cdngAudioMatch != null -> {
-                            val clipBaseName = cdngAudioMatch.groupValues[1]
-                            val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
-                            builder.setCinemaDngAudio(file.uri, lastModified)
-                        }
-                        name.contains("_MULTI_") && (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)) -> {
-                            val baseName = getBaseName(name)
-                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                            builder.addMultiJpg(file.uri, name, lastModified)
-                            if (!fast) {
-                                readExifForScanning(file.uri, builder)
-                            }
-                        }
-                        name.contains("_MULTI_") && name.endsWith(".dng", ignoreCase = true) -> {
-                            val baseName = getBaseName(name)
-                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                            builder.addMultiDng(file.uri, name, lastModified)
-                        }
-                        name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
-                            val baseName = getBaseName(name)
-                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                            builder.setJpg(file.uri, lastModified)
-                            if (!fast) {
-                                readExifForScanning(file.uri, builder)
-                            }
-                        }
-                        name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
-                            val baseName = getBaseName(name)
-                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                            builder.setDng2(file.uri, lastModified)
-                        }
-                        name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
-                            val baseName = getBaseName(name)
-                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                            builder.setDng1(file.uri, lastModified)
-                        }
-                        name.endsWith(".dng", ignoreCase = true) -> {
-                            val baseName = getBaseName(name)
-                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                            builder.setDng(file.uri, lastModified)
-                        }
-                        name.endsWith(".rawvid", ignoreCase = true) -> {
-                            val baseName = getBaseName(name)
-                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                            builder.setRawVideo(file.uri, lastModified)
-                        }
-                        name.endsWith(".mp4", ignoreCase = true) -> {
-                            val baseName = getBaseName(name)
-                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                            builder.setMp4Video(file.uri, lastModified)
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("ImageRepository", "Failed to scan SAF folder: $folderUri", e)
+        SafStorageScanner.scanSafFolder(context, folderUri, groups, fast) { uri, builder ->
+            readExifForScanning(uri, builder)
         }
     }
 
@@ -730,169 +445,8 @@ class ImageRepository(private val context: Context) {
     }
 
     private fun scanMediaStore(groups: MutableMap<String, ImageGroupBuilder>, fast: Boolean = false) {
-        val projection = arrayOf(
-            MediaStore.MediaColumns._ID,
-            MediaStore.MediaColumns.DISPLAY_NAME,
-            MediaStore.MediaColumns.DATE_ADDED,
-            MediaStore.MediaColumns.DATE_MODIFIED,
-            MediaStore.MediaColumns.MIME_TYPE,
-            MediaStore.MediaColumns.WIDTH,
-            MediaStore.MediaColumns.HEIGHT,
-            MediaStore.MediaColumns.SIZE
-        )
-
-        val collections = mutableListOf(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            collections.add(MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL))
-        } else {
-            collections.add(MediaStore.Files.getContentUri("external"))
-        }
-
-        val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
-        } else {
-            "${MediaStore.MediaColumns.DATA} LIKE ? OR ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
-        }
-        val selectionArgs = arrayOf("%Darkbag%", "${DarkbagIdentity.FILE_PREFIX}%")
-
-        val processedMediaKeys = mutableSetOf<String>()
-
-        for (collection in collections) {
-            try {
-                context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
-                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                    val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                    val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
-                    val modifiedColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
-                    val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
-                    val widthColumn = cursor.getColumnIndex(MediaStore.MediaColumns.WIDTH)
-                    val heightColumn = cursor.getColumnIndex(MediaStore.MediaColumns.HEIGHT)
-                    val sizeColumn = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
-
-                    while (cursor.moveToNext()) {
-                        val id = cursor.getLong(idColumn)
-                        val name = cursor.getString(nameColumn) ?: continue
-                        if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) continue
-                        val date = cursor.getLong(dateColumn) * 1000 // Convert to ms
-                        val modified = cursor.getLong(modifiedColumn) * 1000 // Convert to ms
-                        val mime = cursor.getString(mimeColumn)
-                        val size = if (sizeColumn != -1) cursor.getLong(sizeColumn) else 0L
-                        
-                        val dedupeKey = "$name-$modified"
-                        if (!processedMediaKeys.add(dedupeKey)) continue
-
-                        val uri = ContentUris.withAppendedId(collection, id)
-
-                        val cdngFrameMatch = CINEMADNG_FRAME_REGEX.find(name)
-                        val cdngAudioMatch = CINEMADNG_AUDIO_REGEX.find(name)
-
-                        val matchedBuilder = when {
-                            cdngFrameMatch != null -> {
-                                val clipBaseName = cdngFrameMatch.groupValues[1]
-                                val frameIndex = cdngFrameMatch.groupValues[2].toIntOrNull() ?: 0
-                                val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
-                                builder.addCinemaDngFrame(uri, frameIndex, date, modified)
-                                if (widthColumn != -1 && heightColumn != -1 && builder.width == 0 && builder.height == 0) {
-                                    val w = cursor.getInt(widthColumn)
-                                    val h = cursor.getInt(heightColumn)
-                                    if (w > 0 && h > 0) {
-                                        builder.width = w
-                                        builder.height = h
-                                    }
-                                }
-                                if (!fast && frameIndex == 0 && (builder.width == 0 || builder.height == 0)) {
-                                    readExifForScanning(uri, builder)
-                                }
-                                builder
-                            }
-                            cdngAudioMatch != null -> {
-                                val clipBaseName = cdngAudioMatch.groupValues[1]
-                                val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
-                                builder.setCinemaDngAudio(uri, date, modified)
-                                builder
-                            }
-                            name.contains("_MULTI_") && mime == "image/jpeg" -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                if (widthColumn != -1 && heightColumn != -1 && builder.width == 0 && builder.height == 0) {
-                                    val w = cursor.getInt(widthColumn)
-                                    val h = cursor.getInt(heightColumn)
-                                    if (w > 0 && h > 0) {
-                                        builder.width = w
-                                        builder.height = h
-                                    }
-                                }
-                                builder.addMultiJpg(uri, name, date, modified)
-                                if (!fast) {
-                                    readExifForScanning(uri, builder)
-                                }
-                                builder
-                            }
-                            name.contains("_MULTI_") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.addMultiDng(uri, name, date, modified)
-                                builder
-                            }
-                            mime == "image/jpeg" || name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                if (widthColumn != -1 && heightColumn != -1 && builder.width == 0 && builder.height == 0) {
-                                    val w = cursor.getInt(widthColumn)
-                                    val h = cursor.getInt(heightColumn)
-                                    if (w > 0 && h > 0) {
-                                        builder.width = w
-                                        builder.height = h
-                                    }
-                                }
-                                builder.setJpg(uri, date, modified)
-                                if (!fast) {
-                                    readExifForScanning(uri, builder)
-                                }
-                                builder
-                            }
-                            name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.setDng2(uri, date, modified)
-                                builder
-                            }
-                            name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.setDng1(uri, date, modified)
-                                builder
-                            }
-                            mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.setDng(uri, date, modified)
-                                builder
-                            }
-                            name.endsWith(".rawvid", ignoreCase = true) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.setRawVideo(uri, date, modified)
-                                builder
-                            }
-                            mime == "video/mp4" || name.endsWith(".mp4", ignoreCase = true) -> {
-                                val baseName = getBaseName(name)
-                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                                builder.setMp4Video(uri, date, modified)
-                                builder
-                            }
-                            else -> null
-                        }
-                        matchedBuilder?.addSize(size)
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("ImageRepository", "Error querying collection $collection", e)
-            }
+        MediaStoreStorageScanner.scanMediaStore(context, groups, fast) { uri, builder ->
+            readExifForScanning(uri, builder)
         }
     }
 
@@ -953,24 +507,11 @@ class ImageRepository(private val context: Context) {
     }
 
     fun readDngBaselineExposure(uri: Uri, isHalfFrame: Boolean, index: Int = 0): EditConfig? {
-        return try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                // TAG_BASELINE_EXPOSURE is 50730
-                val baselineExposure = exif.getAttributeDouble("BaselineExposure", 0.0).toFloat()
+        return DngMetadataSeekParser.readDngBaselineExposure(context, uri, isHalfFrame, index)
+    }
 
-                if (isHalfFrame) {
-                    val adjs = mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
-                    adjs[index] = top.maary.darkbag.models.BasicAdjustments(exposure = baselineExposure, digitalGain = 1.0f)
-                    EditConfig(adjustments = adjs)
-                } else {
-                    EditConfig(exposure = baselineExposure, digitalGain = 1.0f)
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("ImageRepository", "Failed to read baseline exposure from $uri", e)
-            null
-        }
+    fun saveEditConfig(uri: Uri, editConfig: EditConfig) {
+        top.maary.darkbag.utils.ImageSaver.writeMetadataToExif(context, uri, editConfig, null)
     }
 
     fun getCaptureMetadata(uri: Uri): top.maary.darkbag.models.CaptureMetadata? {
@@ -1061,448 +602,5 @@ class ImageRepository(private val context: Context) {
         return top.maary.darkbag.utils.ImageUtils.getBaseName(fileName)
     }
 
-    private class MultiLensItemBuilder(
-        val lensTag: String,
-        val multiplier: Float,
-        var jpgUri: Uri? = null,
-        var dngUri: Uri? = null
-    ) {
-        fun build(): top.maary.darkbag.models.MultiCameraLensItem = top.maary.darkbag.models.MultiCameraLensItem(
-            lensTag = lensTag,
-            multiplier = multiplier,
-            jpgUri = jpgUri,
-            dngUri = dngUri
-        )
-    }
 
-    private inner class ImageGroupBuilder(val baseName: String) {
-        var jpgUri: Uri? = null
-        var jpgTime: Long = 0L
-        var dngUri: Uri? = null
-        var dngTime: Long = 0L
-        var dngUri1: Uri? = null
-        var dngUri1Time: Long = 0L
-        var dngUri2: Uri? = null
-        var dngUri2Time: Long = 0L
-        var rawVideoUri: Uri? = null
-        var rawVideoTime: Long = 0L
-        var isRawVideo: Boolean = false
-        var rawVideoFps: Float = 24.0f
-        var rawVideoFrameCount: Int = 0
-        var rawVideoDurationMs: Long = 0L
-        var mp4VideoUri: Uri? = null
-        var mp4VideoTime: Long = 0L
-        var isMp4Video: Boolean = false
-        val derivativeJpgUris = mutableListOf<Uri>()
-        val derivativeMp4Uris = mutableListOf<Uri>()
-        var isCinemaDng: Boolean = false
-        var cinemaDngFolderUri: Uri? = null
-        var cinemaDngFirstFrameUri: Uri? = null
-        var cinemaDngAudioUri: Uri? = null
-        var cinemaDngFrameCount: Int = 0
-        val cinemaDngFrameUris = mutableListOf<Uri>()
-        val multiLensBuilders = mutableMapOf<String, MultiLensItemBuilder>()
-        var isMultiCamera: Boolean = false
-        var hfLayout: String? = null
-        var width: Int = 0
-        var height: Int = 0
-        var orientation: Int = 0
-        var captureTime: Long = 0L
-        var lastModified: Long = 0L
-        var editConfig: EditConfig? = null
-        var isMotionPhoto: Boolean = false
-        var motionPhotoPtsUs: Long = 0L
-        var motionPhotoVideoLength: Long = 0L
-        var metadataLoaded: Boolean = false
-        var isInProgress: Boolean = false
-        var totalSizeBytes: Long = 0L
-
-        fun addSize(sizeBytes: Long) {
-            if (sizeBytes > 0L) {
-                totalSizeBytes += sizeBytes
-            }
-        }
-
-        fun applyFrom(group: ImageGroup): ImageGroupBuilder {
-            jpgUri = group.jpgUri
-            dngUri = group.dngUri
-            dngUri1 = group.dngUri1
-            dngUri2 = group.dngUri2
-            rawVideoUri = group.rawVideoUri
-            isRawVideo = group.isRawVideo
-            rawVideoFps = group.rawVideoFps
-            rawVideoFrameCount = group.rawVideoFrameCount
-            rawVideoDurationMs = group.rawVideoDurationMs
-            mp4VideoUri = group.mp4VideoUri
-            isMp4Video = group.isMp4Video
-            derivativeJpgUris.clear()
-            derivativeJpgUris.addAll(group.derivativeJpgUris)
-            derivativeMp4Uris.clear()
-            derivativeMp4Uris.addAll(group.derivativeMp4Uris)
-            isCinemaDng = group.isCinemaDng
-            cinemaDngFolderUri = group.cinemaDngFolderUri
-            cinemaDngFirstFrameUri = group.cinemaDngFirstFrameUri
-            cinemaDngAudioUri = group.cinemaDngAudioUri
-            cinemaDngFrameCount = group.cinemaDngFrameCount
-            cinemaDngFrameUris.clear()
-            cinemaDngFrameUris.addAll(group.cinemaDngFrameUris)
-            isMultiCamera = group.isMultiCamera
-            multiLensBuilders.clear()
-            for (lens in group.multiCameraLenses) {
-                multiLensBuilders[lens.lensTag] = MultiLensItemBuilder(
-                    lensTag = lens.lensTag,
-                    multiplier = lens.multiplier,
-                    jpgUri = lens.jpgUri,
-                    dngUri = lens.dngUri
-                )
-            }
-            hfLayout = group.hfLayout
-            width = group.width
-            height = group.height
-            orientation = group.orientation
-            captureTime = group.captureTime
-            lastModified = group.lastModified
-            editConfig = group.editConfig
-            isMotionPhoto = group.isMotionPhoto
-            motionPhotoPtsUs = group.motionPhotoPtsUs
-            motionPhotoVideoLength = group.motionPhotoVideoLength
-            metadataLoaded = group.metadataLoaded
-            isInProgress = group.isInProgress
-            totalSizeBytes = group.totalSizeBytes
-            return this
-        }
-
-        private fun isSameBaseFile(existingUri: Uri?, newUri: Uri, expectedExt: String): Boolean {
-            if (existingUri == null) return false
-            if (existingUri == newUri || existingUri.toString() == newUri.toString()) return true
-            val existingName = existingUri.lastPathSegment?.let { 
-                try { java.net.URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it }
-            }?.substringAfterLast("/")?.substringAfterLast(":") ?: ""
-            val newName = newUri.lastPathSegment?.let { 
-                try { java.net.URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it }
-            }?.substringAfterLast("/")?.substringAfterLast(":") ?: ""
-            if (existingName.isNotEmpty() && newName.isNotEmpty() && existingName.equals(newName, ignoreCase = true)) {
-                return true
-            }
-            val defaultName1 = "${DarkbagIdentity.FILE_PREFIX}$baseName.$expectedExt"
-            val defaultName2 = "$baseName.$expectedExt"
-            val defaultGraded1 = "${DarkbagIdentity.FILE_PREFIX}${baseName}_graded.$expectedExt"
-            val defaultGraded2 = "${baseName}_graded.$expectedExt"
-            val isExistingDefault = existingName.isEmpty() || existingName.equals(defaultName1, true) || existingName.equals(defaultName2, true) || existingName.equals(defaultGraded1, true) || existingName.equals(defaultGraded2, true)
-            val isNewDefault = newName.isEmpty() || newName.equals(defaultName1, true) || newName.equals(defaultName2, true) || newName.equals(defaultGraded1, true) || newName.equals(defaultGraded2, true)
-            return isExistingDefault && isNewDefault
-        }
-
-        fun mergeFrom(other: ImageGroupBuilder) {
-            if (other.jpgUri != null) setJpg(other.jpgUri!!, other.jpgTime)
-            for (uri in other.derivativeJpgUris) {
-                if (!isSameBaseFile(jpgUri, uri, "jpg") && uri !in derivativeJpgUris) {
-                    derivativeJpgUris.add(uri)
-                }
-            }
-            if (other.dngUri != null) setDng(other.dngUri!!, other.dngTime)
-            if (other.dngUri1 != null) setDng1(other.dngUri1!!, other.dngUri1Time)
-            if (other.dngUri2 != null) setDng2(other.dngUri2!!, other.dngUri2Time)
-            if (other.rawVideoUri != null) setRawVideo(other.rawVideoUri!!, other.rawVideoTime)
-            if (other.mp4VideoUri != null) setMp4Video(other.mp4VideoUri!!, other.mp4VideoTime)
-            for (uri in other.derivativeMp4Uris) {
-                if (!isSameBaseFile(mp4VideoUri, uri, "mp4") && uri !in derivativeMp4Uris) {
-                    derivativeMp4Uris.add(uri)
-                }
-            }
-            if (other.isCinemaDng) {
-                isCinemaDng = true
-                if (other.cinemaDngFolderUri != null) cinemaDngFolderUri = other.cinemaDngFolderUri
-                if (other.cinemaDngFirstFrameUri != null) cinemaDngFirstFrameUri = other.cinemaDngFirstFrameUri
-                if (other.cinemaDngAudioUri != null) cinemaDngAudioUri = other.cinemaDngAudioUri
-                if (other.cinemaDngFrameCount > cinemaDngFrameCount) cinemaDngFrameCount = other.cinemaDngFrameCount
-                for (uri in other.cinemaDngFrameUris) {
-                    if (uri !in cinemaDngFrameUris) cinemaDngFrameUris.add(uri)
-                }
-            }
-            for ((tag, lens) in other.multiLensBuilders) {
-                val item = multiLensBuilders.getOrPut(tag) { MultiLensItemBuilder(tag, lens.multiplier) }
-                if (lens.jpgUri != null) item.jpgUri = lens.jpgUri
-                if (lens.dngUri != null) item.dngUri = lens.dngUri
-            }
-            if (other.isMultiCamera) isMultiCamera = true
-            if (other.hfLayout != null) hfLayout = other.hfLayout
-            if (other.width > 0) width = other.width
-            if (other.height > 0) height = other.height
-            if (other.orientation != 0) orientation = other.orientation
-            if (other.editConfig != null) editConfig = other.editConfig
-            if (other.isMotionPhoto) {
-                isMotionPhoto = true
-                motionPhotoPtsUs = other.motionPhotoPtsUs
-                motionPhotoVideoLength = other.motionPhotoVideoLength
-            }
-            if (other.rawVideoFps > 0) {
-                rawVideoFps = other.rawVideoFps
-                rawVideoFrameCount = other.rawVideoFrameCount
-                rawVideoDurationMs = other.rawVideoDurationMs
-            }
-            if (other.metadataLoaded) metadataLoaded = true
-            if (other.isInProgress) isInProgress = true
-            if (other.totalSizeBytes > 0L) {
-                totalSizeBytes = maxOf(totalSizeBytes, other.totalSizeBytes)
-            }
-            updateTime(other.captureTime, other.lastModified)
-        }
-
-        fun setCinemaDngFolder(folderUri: Uri, firstFrameUri: Uri?, audioUri: Uri?, frameCount: Int, time: Long, modifiedTime: Long = time) {
-            isCinemaDng = true
-            cinemaDngFolderUri = folderUri
-            if (firstFrameUri != null) cinemaDngFirstFrameUri = firstFrameUri
-            if (audioUri != null) cinemaDngAudioUri = audioUri
-            if (frameCount > 0) cinemaDngFrameCount = frameCount
-            updateTime(time, modifiedTime)
-        }
-
-        fun addCinemaDngFrame(uri: Uri, frameIndex: Int, time: Long, modifiedTime: Long = time) {
-            isCinemaDng = true
-            if (frameIndex == 0 || cinemaDngFirstFrameUri == null) {
-                cinemaDngFirstFrameUri = uri
-            }
-            if (uri !in cinemaDngFrameUris) {
-                cinemaDngFrameUris.add(uri)
-            }
-            cinemaDngFrameCount = maxOf(cinemaDngFrameCount, cinemaDngFrameUris.size)
-            updateTime(time, modifiedTime)
-        }
-
-        fun setCinemaDngAudio(uri: Uri, time: Long, modifiedTime: Long = time) {
-            isCinemaDng = true
-            cinemaDngAudioUri = uri
-            updateTime(time, modifiedTime)
-        }
-
-        fun addMultiJpg(uri: Uri, fileName: String, time: Long, modifiedTime: Long = time) {
-            isMultiCamera = true
-            val tag = top.maary.darkbag.utils.ImageUtils.extractMultiCameraLensTag(fileName)
-            val mult = top.maary.darkbag.utils.ImageUtils.extractMultiCameraMultiplier(fileName)
-            val effectiveTag = if (tag.isNotEmpty()) tag else String.format(java.util.Locale.US, "%.1fx", mult)
-            val item = multiLensBuilders.getOrPut(effectiveTag) { MultiLensItemBuilder(effectiveTag, mult) }
-            item.jpgUri = uri
-            updateTime(time, modifiedTime)
-        }
-
-        fun addMultiDng(uri: Uri, fileName: String, time: Long, modifiedTime: Long = time) {
-            isMultiCamera = true
-            val tag = top.maary.darkbag.utils.ImageUtils.extractMultiCameraLensTag(fileName)
-            val mult = top.maary.darkbag.utils.ImageUtils.extractMultiCameraMultiplier(fileName)
-            val effectiveTag = if (tag.isNotEmpty()) tag else String.format(java.util.Locale.US, "%.1fx", mult)
-            val item = multiLensBuilders.getOrPut(effectiveTag) { MultiLensItemBuilder(effectiveTag, mult) }
-            item.dngUri = uri
-            updateTime(time, modifiedTime)
-        }
-
-        fun setRawVideo(uri: Uri, time: Long, modifiedTime: Long = time) {
-            if (rawVideoUri == null) {
-                rawVideoUri = uri
-                rawVideoTime = time
-                isRawVideo = true
-            } else if (isSameBaseFile(rawVideoUri, uri, "rawvid")) {
-                if (uri.authority?.contains("documents") == true || uri.scheme == "file") {
-                    rawVideoUri = uri
-                }
-                rawVideoTime = maxOf(rawVideoTime, time)
-                isRawVideo = true
-            } else if (time > rawVideoTime + 2000) {
-                rawVideoUri = uri
-                rawVideoTime = time
-                isRawVideo = true
-            }
-            updateTime(time, modifiedTime)
-        }
-
-        fun setMp4Video(uri: Uri, time: Long, modifiedTime: Long = time) {
-            if (mp4VideoUri == null) {
-                mp4VideoUri = uri
-                mp4VideoTime = time
-                isMp4Video = true
-            } else if (isSameBaseFile(mp4VideoUri, uri, "mp4")) {
-                if (uri.authority?.contains("documents") == true || uri.scheme == "file") {
-                    mp4VideoUri = uri
-                }
-                mp4VideoTime = maxOf(mp4VideoTime, time)
-                isMp4Video = true
-            } else if (mp4VideoUri != uri) {
-                if (uri !in derivativeMp4Uris) {
-                    derivativeMp4Uris.add(uri)
-                }
-                if (time > mp4VideoTime + 2000) {
-                    val old = mp4VideoUri
-                    if (old != null && old !in derivativeMp4Uris) {
-                        derivativeMp4Uris.add(0, old)
-                    }
-                    mp4VideoUri = uri
-                    mp4VideoTime = time
-                }
-            }
-            updateTime(time, modifiedTime)
-        }
-
-        fun setJpg(uri: Uri, time: Long, modifiedTime: Long = time) {
-            if (jpgUri == null) {
-                jpgUri = uri
-                jpgTime = time
-            } else if (isSameBaseFile(jpgUri, uri, "jpg")) {
-                if (uri.authority?.contains("documents") == true || uri.scheme == "file") {
-                    jpgUri = uri
-                }
-                jpgTime = maxOf(jpgTime, time)
-            } else if (jpgUri != uri) {
-                if (uri !in derivativeJpgUris) {
-                    derivativeJpgUris.add(uri)
-                }
-                if (time > jpgTime + 2000) {
-                    val old = jpgUri
-                    if (old != null && old !in derivativeJpgUris) {
-                        derivativeJpgUris.add(0, old)
-                    }
-                    jpgUri = uri
-                    jpgTime = time
-                }
-            }
-            updateTime(time, modifiedTime)
-        }
-
-        fun setDng(uri: Uri, time: Long, modifiedTime: Long = time) {
-            if (dngUri == null) {
-                dngUri = uri
-                dngTime = time
-            } else if (isSameBaseFile(dngUri, uri, "dng")) {
-                if (uri.authority?.contains("documents") == true || uri.scheme == "file") {
-                    dngUri = uri
-                }
-                dngTime = maxOf(dngTime, time)
-            } else if (time > dngTime + 2000) {
-                dngUri = uri
-                dngTime = time
-            }
-            updateTime(time, modifiedTime)
-        }
-
-        fun setDng1(uri: Uri, time: Long, modifiedTime: Long = time) {
-            if (dngUri1 == null) {
-                dngUri1 = uri
-                dngUri1Time = time
-            } else if (isSameBaseFile(dngUri1, uri, "dng")) {
-                if (uri.authority?.contains("documents") == true || uri.scheme == "file") {
-                    dngUri1 = uri
-                }
-                dngUri1Time = maxOf(dngUri1Time, time)
-            } else if (time > dngUri1Time + 2000) {
-                dngUri1 = uri
-                dngUri1Time = time
-            }
-            updateTime(time, modifiedTime)
-        }
-
-        fun setDng2(uri: Uri, time: Long, modifiedTime: Long = time) {
-            if (dngUri2 == null) {
-                dngUri2 = uri
-                dngUri2Time = time
-            } else if (isSameBaseFile(dngUri2, uri, "dng")) {
-                if (uri.authority?.contains("documents") == true || uri.scheme == "file") {
-                    dngUri2 = uri
-                }
-                dngUri2Time = maxOf(dngUri2Time, time)
-            } else if (time > dngUri2Time + 2000) {
-                dngUri2 = uri
-                dngUri2Time = time
-            }
-            updateTime(time, modifiedTime)
-        }
-
-        fun updateTime(time: Long, modifiedTime: Long) {
-            if (time > captureTime) captureTime = time
-            if (modifiedTime > lastModified) lastModified = modifiedTime
-        }
-
-        fun build(): ImageGroup {
-            var isInProgress = this.isInProgress
-            var isPartial = false
-
-            // Check for in-progress half-frame capture
-            if (dngUri1 != null && dngUri2 == null && jpgUri == null) {
-                val sideFile = top.maary.darkbag.utils.HalfFrameSessionStore(context).tempFileForProfile(top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE)
-                val topFile = top.maary.darkbag.utils.HalfFrameSessionStore(context).tempFileForProfile(top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP)
-
-                val sideMatch = sideFile.exists() && Math.abs(sideFile.lastModified() - dngUri1Time) < 60000
-                val topMatch = topFile.exists() && Math.abs(topFile.lastModified() - dngUri1Time) < 60000
-
-                if (sideMatch || topMatch) {
-                    isInProgress = true
-                }
-            }
-
-            // Check for partial half-frame (JPG exists but exactly one DNG is missing)
-            if (jpgUri != null && (hfLayout == "SBS" || hfLayout == "TB" || hfLayout == "Side-by-side" || hfLayout == "Top-bottom")) {
-                if ((dngUri1 == null) xor (dngUri2 == null)) {
-                    isPartial = true
-                }
-            }
-
-            // If it's a half-frame DNG group but no layout is specified, default to SBS
-            var finalLayout = hfLayout
-            if (finalLayout == null && dngUri1 != null && dngUri2 != null && jpgUri == null) {
-                finalLayout = "SBS"
-            }
-
-            val lenses = multiLensBuilders.values
-                .map { it.build() }
-                .sortedWith(compareBy<top.maary.darkbag.models.MultiCameraLensItem> { it.multiplier }.thenBy { it.lensTag })
-
-            val sortedJpgs = lenses.mapNotNull { it.jpgUri }
-            val sortedDngs = lenses.mapNotNull { it.dngUri }
-
-            val finalJpgUri = if (isMultiCamera && sortedJpgs.isNotEmpty()) {
-                lenses.find { it.lensTag == "1.0x" || it.lensTag == "1x" }?.jpgUri
-                    ?: sortedJpgs.firstOrNull()
-                    ?: jpgUri
-            } else jpgUri
-
-            return ImageGroup(
-                baseName = baseName,
-                jpgUri = finalJpgUri,
-                dngUri = dngUri,
-                dngUri1 = dngUri1,
-                dngUri2 = dngUri2,
-                hfLayout = finalLayout,
-                width = width,
-                height = height,
-                orientation = orientation,
-                captureTime = captureTime,
-                lastModified = if (lastModified > 0) lastModified else maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time, rawVideoTime, mp4VideoTime),
-                editConfig = editConfig,
-                metadataLoaded = metadataLoaded,
-                isInProgress = isInProgress,
-                isPartial = isPartial,
-                isMotionPhoto = isMotionPhoto,
-                motionPhotoPtsUs = motionPhotoPtsUs,
-                motionPhotoVideoLength = motionPhotoVideoLength,
-                isMultiCamera = isMultiCamera || lenses.isNotEmpty(),
-                multiJpgUris = sortedJpgs,
-                multiDngUris = sortedDngs,
-                multiCameraLenses = lenses,
-                rawVideoUri = rawVideoUri,
-                isRawVideo = isRawVideo,
-                rawVideoFps = rawVideoFps,
-                rawVideoFrameCount = rawVideoFrameCount,
-                rawVideoDurationMs = rawVideoDurationMs,
-                mp4VideoUri = mp4VideoUri,
-                isMp4Video = isMp4Video,
-                derivativeJpgUris = derivativeJpgUris.toList(),
-                derivativeMp4Uris = derivativeMp4Uris.toList(),
-                isCinemaDng = isCinemaDng,
-                cinemaDngFolderUri = cinemaDngFolderUri,
-                cinemaDngFirstFrameUri = cinemaDngFirstFrameUri,
-                cinemaDngAudioUri = cinemaDngAudioUri,
-                cinemaDngFrameCount = cinemaDngFrameCount,
-                cinemaDngFrameUris = cinemaDngFrameUris.toList(),
-                totalSizeBytes = totalSizeBytes
-            )
-        }
-    }
 }

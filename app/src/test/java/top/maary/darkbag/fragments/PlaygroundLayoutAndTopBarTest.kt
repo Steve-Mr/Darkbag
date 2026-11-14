@@ -15,6 +15,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import top.maary.darkbag.R
+import top.maary.darkbag.databinding.FragmentDarkroomGalleryBinding
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
 import top.maary.darkbag.databinding.FragmentPlaygroundGalleryBinding
 import top.maary.darkbag.databinding.ItemPlaygroundImageBinding
@@ -205,11 +206,12 @@ class PlaygroundLayoutAndTopBarTest {
             binding.adjustmentIsland is BentoTrayCard
         )
 
-        // Gallery bottom bar
-        assertNotNull(binding.galleryBottomBar)
+        // Gallery bottom bar (in decoupled DarkroomGallery layout)
+        val galleryBinding = FragmentDarkroomGalleryBinding.inflate(LayoutInflater.from(context))
+        assertNotNull(galleryBinding.galleryBottomBar)
         assertTrue(
             "galleryBottomBar must be BentoTrayCard",
-            binding.galleryBottomBar is BentoTrayCard
+            galleryBinding.galleryBottomBar is BentoTrayCard
         )
     }
 }

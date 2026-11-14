@@ -23,6 +23,9 @@ import top.maary.darkbag.pipeline.sink.DirectMediaStoreSink
 import top.maary.darkbag.pipeline.sink.HalfFrameCacheSink
 import top.maary.darkbag.utils.HalfFrameManager
 import top.maary.darkbag.utils.HalfFrameSessionStore
+import top.maary.darkbag.utils.LensInfo
+import top.maary.darkbag.utils.LensType
+import top.maary.darkbag.utils.CameraRepository
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
@@ -108,9 +111,26 @@ class CaptureModeCoordinatorTest {
             lastTiming = timing
         }
 
+        var frontPipToggled = false
+        var lastSwitchedMultiplier: Float? = null
+        var multiCamSessionBound = false
+
         override fun triggerMultiCameraPicture(timing: StandardTimingTracker) {
             multiCamTriggered = true
             lastTiming = timing
+        }
+
+        override fun toggleFrontPipInMultiCameraMode() {
+            frontPipToggled = true
+        }
+
+        override fun switchMultiCameraPrimaryLens(multiplier: Float) {
+            lastSwitchedMultiplier = multiplier
+        }
+
+        override fun bindMultiCameraSession(): Boolean {
+            multiCamSessionBound = true
+            return true
         }
     }
 
@@ -337,6 +357,100 @@ class CaptureModeCoordinatorTest {
 
         assertFalse(multi.onShutterLongPressed())
         assertEquals(180, multi.getEffectiveOrientation(180))
+    }
+
+    @Test
+    fun testModeSpecificSwitchCameraAndSessionBinding() {
+        val host = MockModeExecutionContext(context, prefs)
+        val normal = NormalModeCoordinator(host)
+        val half = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+        val multi = MultiCameraModeCoordinator(host)
+
+        assertFalse(normal.onSwitchCameraClicked())
+        assertFalse(half.onSwitchCameraClicked())
+        assertTrue(multi.onSwitchCameraClicked())
+        assertTrue(host.frontPipToggled)
+
+        assertFalse(normal.bindCameraSession())
+        assertFalse(half.bindCameraSession())
+        assertTrue(multi.bindCameraSession())
+        assertTrue(host.multiCamSessionBound)
+
+        assertFalse(normal.supportsProLink())
+        assertFalse(half.supportsProLink())
+        assertTrue(multi.supportsProLink())
+    }
+
+    @Test
+    fun testHalfFrameModeCoordinator_ThumbnailAndProgressHoldInStep1() {
+        val sessionStore = HalfFrameSessionStore(context)
+        sessionStore.clearProfile(HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        val host = MockModeExecutionContext(context, prefs)
+        val half = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+
+        // In step 0
+        assertFalse(half.shouldHideGalleryThumbnail())
+        assertFalse(half.shouldClearThumbnailOnCapture())
+        assertFalse(half.keepsProcessingAnimationActive())
+
+        // In step 1
+        sessionStore.markStep(1, System.currentTimeMillis(), profile = HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        assertTrue(half.shouldHideGalleryThumbnail())
+        assertTrue(half.shouldClearThumbnailOnCapture())
+        assertTrue(half.keepsProcessingAnimationActive())
+    }
+
+    @Test
+    fun testFilterAvailableLenses_Normal_HalfFrame_MultiCamera() {
+        val host = MockModeExecutionContext(context, prefs)
+        val normal = NormalModeCoordinator(host)
+        val half = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+        val multi = MultiCameraModeCoordinator(host)
+
+        val wideBack = LensInfo(
+            id = "0", physicalId = null, sensorId = "wide-0", name = "1x Wide",
+            focalLength = 4.38f, equivalentFocalLength = 26f, multiplier = 1.0f,
+            type = LensType.WIDE, facing = 0, isLogicalAuto = false, isZoomPreset = false
+        )
+        val teleVirtual = LensInfo(
+            id = "0", physicalId = null, sensorId = "wide-0${CameraRepository.VIRTUAL_TELE_2X_SUFFIX}", name = "2x Crop",
+            focalLength = 4.38f, equivalentFocalLength = 52f, multiplier = 2.0f,
+            type = LensType.TELE, facing = 0, isLogicalAuto = false, isZoomPreset = true
+        )
+        val frontLens = LensInfo(
+            id = "1", physicalId = null, sensorId = "front-1", name = "Front",
+            focalLength = 3.5f, equivalentFocalLength = 24f, multiplier = 1.0f,
+            type = LensType.WIDE, facing = 1, isLogicalAuto = false, isZoomPreset = false
+        )
+
+        val allLenses = listOf(wideBack, teleVirtual, frontLens)
+
+        val normalFiltered = normal.filterAvailableLenses(allLenses, repoFacing = 0)
+        assertEquals(1, normalFiltered.size)
+        assertEquals("wide-0", normalFiltered[0].sensorId)
+
+        val halfFiltered = half.filterAvailableLenses(allLenses, repoFacing = 0)
+        assertEquals(1, halfFiltered.size)
+        assertEquals("wide-0", halfFiltered[0].sensorId)
+
+        val multiFiltered = multi.filterAvailableLenses(allLenses, repoFacing = 0)
+        assertEquals(1, multiFiltered.size)
+        assertEquals("wide-0", multiFiltered[0].sensorId)
+
+        assertTrue(multi.onLensSelected(wideBack))
+        assertEquals(1.0f, host.lastSwitchedMultiplier)
+    }
+
+    @Test
+    fun testSupportsLongPressVideo_policyByCoordinator() {
+        val host = MockModeExecutionContext(context, prefs)
+        val normal = NormalModeCoordinator(host)
+        val half = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+        val multi = MultiCameraModeCoordinator(host)
+
+        assertTrue(normal.supportsLongPressVideo())
+        assertFalse(half.supportsLongPressVideo())
+        assertFalse(multi.supportsLongPressVideo())
     }
 }
 

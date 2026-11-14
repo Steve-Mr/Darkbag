@@ -66,4 +66,17 @@ class ShareFileSink(
     ) {
         deliveredFile = null
     }
+
+    override fun createChildSink(
+        childBaseName: String,
+        childTargetUri: Uri?,
+        isReplacement: Boolean
+    ): ExportSink {
+        val ext = outputFile.extension.ifEmpty { if (mimeType.contains("tiff")) "tif" else "jpg" }
+        val childFile = File(outputFile.parentFile, "$childBaseName.$ext")
+        return ShareFileSink(
+            outputFile = childFile,
+            mimeType = mimeType
+        )
+    }
 }

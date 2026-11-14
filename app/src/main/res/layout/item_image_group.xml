@@ -38,49 +38,7 @@
             android:elevation="10dp"
             app:indicatorSize="48dp" />
 
-        <!-- Motion Photo Indicator Container -->
-        <FrameLayout
-            android:id="@+id/motionPhotoToggleGroup"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top|start"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="16dp">
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnMotionPhotoIndicator"
-                style="@style/Widget.Material3.Button.IconButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:contentDescription="Motion Photo"
-                app:backgroundTint="@color/format_indicator_background_tint"
-                app:iconTint="@color/format_indicator_icon_tint"
-                app:icon="@drawable/ic_play_arrow"
-                android:visibility="gone" />
-
-        </FrameLayout>
-
-        <!-- RAW Format Indicator Container -->
-        <FrameLayout
-            android:id="@+id/formatToggleGroup"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top|end"
-            android:layout_marginEnd="16dp"
-            android:layout_marginTop="16dp">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnFormatIndicator"
-                style="@style/Widget.Material3.Button.IconButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:contentDescription="@string/format_raw"
-                app:backgroundTint="@color/format_indicator_background_tint"
-                app:iconTint="@color/format_indicator_icon_tint"
-                app:icon="@drawable/ic_raw"
-                android:visibility="gone" />
-
-        </FrameLayout>
 
         <!-- Camera Overlays Vertical Group (Collisions 1 & 2 resolved: Never overlap) -->
         <LinearLayout
