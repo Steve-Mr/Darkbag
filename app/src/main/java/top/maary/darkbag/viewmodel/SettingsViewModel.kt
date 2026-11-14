@@ -8,8 +8,9 @@ import top.maary.darkbag.repository.SettingsRepository
 
 /**
  * ViewModel for application settings, driving UI state reactively from SettingsRepository.
+ * Uses @JvmOverloads constructor to ensure AndroidViewModelFactory reflection can instantiate it.
  */
-class SettingsViewModel(
+class SettingsViewModel @JvmOverloads constructor(
     application: Application,
     private val settingsRepository: SettingsRepository = SettingsRepository.getInstance(application)
 ) : AndroidViewModel(application) {

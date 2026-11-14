@@ -633,4 +633,16 @@ class SettingsFragmentTest {
         prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, false).apply()
         assertFalse(prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true))
     }
+
+    @Test
+    fun testSettingsFragmentLifecycleAttachmentAndViewModelResolution() {
+        val activity = org.robolectric.Robolectric.buildActivity(androidx.fragment.app.FragmentActivity::class.java).setup().get()
+        activity.setTheme(top.maary.darkbag.R.style.AppTheme)
+        val fragment = SettingsFragment()
+        activity.supportFragmentManager.beginTransaction()
+            .add(fragment, "settings_test")
+            .commitNow()
+
+        assertNotNull(fragment.view)
+    }
 }
