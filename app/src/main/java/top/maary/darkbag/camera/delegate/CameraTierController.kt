@@ -132,30 +132,6 @@ class CameraTierController(
         updateTierUi()
     }
 
-    fun bindTierSwitcher() {
-        val initialPrefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val savedTier = CameraUiTier.fromKey(initialPrefs.getString(CameraBentoDeckView.PREF_KEY_UI_TIER, CameraUiTier.FILM.key))
-        host.cameraViewModel.setUiTier(savedTier)
-        updateTierUi(savedTier)
-
-        host.binding?.btnBentoTier?.setOnClickListener { v ->
-            v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-            val root = host.rootViewGroup
-            if (root != null) {
-                val transition = android.transition.AutoTransition().apply {
-                    duration = 200
-                    ordering = android.transition.TransitionSet.ORDERING_TOGETHER
-                }
-                android.transition.TransitionManager.beginDelayedTransition(root, transition)
-            }
-            val tierPrefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val nextTier = host.cameraViewModel.uiState.value.uiTier.next()
-            tierPrefs.edit().putString(CameraBentoDeckView.PREF_KEY_UI_TIER, nextTier.key).apply()
-            host.cameraViewModel.setUiTier(nextTier)
-            updateTierUi(nextTier)
-        }
-    }
-
     fun updateTierUi(tier: CameraUiTier = host.cameraViewModel.uiState.value.uiTier) {
         val binding = host.binding ?: return
         val prefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -170,7 +146,6 @@ class CameraTierController(
         )
         CameraBentoDeckView.applyDynamicRowHeights(binding)
         updateFocusPeakingState()
-        updateProInfoBar()
     }
 
     fun toggleManualTab(tab: String) {
@@ -375,83 +350,91 @@ class CameraTierController(
         }
     }
 
+    private var isUpdatingProInfoBar = false
+
     fun updateProInfoBar() {
-        val binding = host.binding ?: return
-        val primaryColor = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, Color.parseColor("#FFD54F"))
-        val onSurfaceColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface, Color.WHITE)
-        val onSurfaceVariantColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.LTGRAY)
-        val density = host.context.resources.displayMetrics.density
+        if (isUpdatingProInfoBar) return
+        isUpdatingProInfoBar = true
+        try {
+            val binding = host.binding ?: return
+            val primaryColor = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, Color.parseColor("#FFD54F"))
+            val onSurfaceColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface, Color.WHITE)
+            val onSurfaceVariantColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.LTGRAY)
+            val density = host.context.resources.displayMetrics.density
 
-        // Focus
-        val isFocusLocked = !host.isManualFocus && host.hasFocusMeteringLock
-        val focusLabel = when {
-            host.isManualFocus -> "MF"
-            isFocusLocked -> "AF-L"
-            else -> "AF"
-        }
-        val isFocusManualOrLocked = host.isManualFocus || isFocusLocked
-        val focusVal = if (host.isManualFocus) formatFocusDist(host.currentFocusDistance) else formatFocusDist(host.liveFocusDistance)
-        binding.pillFocus?.let { pill ->
-            val isTabActive = activeManualTab == "Focus"
-            CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isFocusManualOrLocked)
-            pill.text = CameraBentoDeckView.formatProTelemetry(focusLabel, focusVal, isTabActive, isFocusManualOrLocked, pill.context)
-        }
-
-        // ISO
-        val isoLabel = "ISO"
-        val isoVal = if (host.isManualIso) "${host.currentIso}" else "${host.liveIso}"
-        binding.pillIso?.let { pill ->
-            val isTabActive = activeManualTab == "ISO"
-            CameraBentoDeckView.styleBentoProPill(pill, isTabActive, host.isManualIso)
-            pill.text = CameraBentoDeckView.formatProTelemetry(isoLabel, isoVal, isTabActive, host.isManualIso, pill.context)
-        }
-
-        // Shutter
-        val shutterLabel = "SEC"
-        val shutterVal = if (host.isManualShutter) formatShutterTime(host.currentExposureTime) else formatShutterTime(host.liveExposureTime)
-        binding.pillShutter?.let { pill ->
-            val isTabActive = activeManualTab == "Shutter"
-            CameraBentoDeckView.styleBentoProPill(pill, isTabActive, host.isManualShutter)
-            pill.text = CameraBentoDeckView.formatProTelemetry(shutterLabel, shutterVal, isTabActive, host.isManualShutter, pill.context)
-        }
-
-        // EV
-        val evLabel = "EV"
-        val evVal = if (host.currentEvIndex == 0) "0.0" else String.format(Locale.US, "%+d", host.currentEvIndex)
-        binding.pillEv?.let { pill ->
-            val isTabActive = activeManualTab == "EV"
-            val isManualEv = host.currentEvIndex != 0
-            CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isManualEv)
-            pill.text = CameraBentoDeckView.formatProTelemetry(evLabel, evVal, isTabActive, isManualEv, pill.context)
-        }
-
-        // Multi-Camera Link Button (Only visible if coordinator supports link or front PiP is active)
-        val isMultiCamActive = (host.activeCoordinator?.supportsProLink() == true) || host.isFrontPipActive || (host.hasMultipleAvailableLenses && host.hasMultiCameraManager)
-        binding.btnProLink?.visibility = if (isMultiCamActive) View.VISIBLE else View.GONE
-        (binding.pillEv?.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
-            val targetMarginEnd = if (isMultiCamActive) (5f * density).roundToInt() else 0
-            if (lp.marginEnd != targetMarginEnd) {
-                lp.marginEnd = targetMarginEnd
-                binding.pillEv?.layoutParams = lp
+            // Focus
+            val isFocusLocked = !host.isManualFocus && host.hasFocusMeteringLock
+            val focusLabel = when {
+                host.isManualFocus -> "MF"
+                isFocusLocked -> "AF-L"
+                else -> "AF"
             }
-        }
-        binding.btnProLink?.let { linkBtn ->
-            CameraBentoDeckView.styleBentoProLink(linkBtn, host.isMultiCameraManualLinked)
-        }
+            val isFocusManualOrLocked = host.isManualFocus || isFocusLocked
+            val focusVal = if (host.isManualFocus) formatFocusDist(host.currentFocusDistance) else formatFocusDist(host.liveFocusDistance)
+            binding.pillFocus?.let { pill ->
+                val isTabActive = activeManualTab == "Focus"
+                CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isFocusManualOrLocked)
+                pill.text = CameraBentoDeckView.formatProTelemetry(focusLabel, focusVal, isTabActive, isFocusManualOrLocked, pill.context)
+            }
 
-        // Sync manual flags to ViewModel & update tier button styling
-        host.cameraViewModel.updateManualFlags(
-            isManualFocus = host.isManualFocus,
-            isManualIso = host.isManualIso,
-            isManualShutter = host.isManualShutter,
-            isProLinked = host.isMultiCameraManualLinked
-        )
-        updateTierUi()
+            // ISO
+            val isoLabel = "ISO"
+            val isoVal = if (host.isManualIso) "${host.currentIso}" else "${host.liveIso}"
+            binding.pillIso?.let { pill ->
+                val isTabActive = activeManualTab == "ISO"
+                CameraBentoDeckView.styleBentoProPill(pill, isTabActive, host.isManualIso)
+                pill.text = CameraBentoDeckView.formatProTelemetry(isoLabel, isoVal, isTabActive, host.isManualIso, pill.context)
+            }
 
-        // Update Level 3 Dial Theme Colors
-        binding.dialWheelView?.setThemeColors(primaryColor, onSurfaceColor, onSurfaceVariantColor)
-        binding.tvDialTargetLabel?.setTextColor(primaryColor)
-        binding.tvDialTargetValue?.setTextColor(onSurfaceColor)
+            // Shutter
+            val shutterLabel = "SEC"
+            val shutterVal = if (host.isManualShutter) formatShutterTime(host.currentExposureTime) else formatShutterTime(host.liveExposureTime)
+            binding.pillShutter?.let { pill ->
+                val isTabActive = activeManualTab == "Shutter"
+                CameraBentoDeckView.styleBentoProPill(pill, isTabActive, host.isManualShutter)
+                pill.text = CameraBentoDeckView.formatProTelemetry(shutterLabel, shutterVal, isTabActive, host.isManualShutter, pill.context)
+            }
+
+            // EV
+            val evLabel = "EV"
+            val evVal = if (host.currentEvIndex == 0) "0.0" else String.format(Locale.US, "%+d", host.currentEvIndex)
+            binding.pillEv?.let { pill ->
+                val isTabActive = activeManualTab == "EV"
+                val isManualEv = host.currentEvIndex != 0
+                CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isManualEv)
+                pill.text = CameraBentoDeckView.formatProTelemetry(evLabel, evVal, isTabActive, isManualEv, pill.context)
+            }
+
+            // Multi-Camera Link Button (Only visible if coordinator supports link or front PiP is active)
+            val isMultiCamActive = (host.activeCoordinator?.supportsProLink() == true) || host.isFrontPipActive || (host.hasMultipleAvailableLenses && host.hasMultiCameraManager)
+            binding.btnProLink?.visibility = if (isMultiCamActive) View.VISIBLE else View.GONE
+            (binding.pillEv?.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
+                val targetMarginEnd = if (isMultiCamActive) (5f * density).roundToInt() else 0
+                if (lp.marginEnd != targetMarginEnd) {
+                    lp.marginEnd = targetMarginEnd
+                    binding.pillEv?.layoutParams = lp
+                }
+            }
+            binding.btnProLink?.let { linkBtn ->
+                CameraBentoDeckView.styleBentoProLink(linkBtn, host.isMultiCameraManualLinked)
+            }
+
+            // Sync manual flags to ViewModel & update tier button styling
+            host.cameraViewModel.updateManualFlags(
+                isManualFocus = host.isManualFocus,
+                isManualIso = host.isManualIso,
+                isManualShutter = host.isManualShutter,
+                isProLinked = host.isMultiCameraManualLinked
+            )
+            updateTierUi()
+
+            // Update Level 3 Dial Theme Colors
+            binding.dialWheelView?.setThemeColors(primaryColor, onSurfaceColor, onSurfaceVariantColor)
+            binding.tvDialTargetLabel?.setTextColor(primaryColor)
+            binding.tvDialTargetValue?.setTextColor(onSurfaceColor)
+        } finally {
+            isUpdatingProInfoBar = false
+        }
     }
 
     fun updateBentoFolding(isDialOpen: Boolean) {
@@ -683,6 +666,8 @@ class CameraTierController(
                 host.cameraViewModel.setActiveManualTab(null)
                 updateBentoFolding(isDialOpen = false)
                 updateFocusPeakingState()
+                updateProInfoBar()
+            } else if (nextSpec.showProModule) {
                 updateProInfoBar()
             }
             onVisibilityRefresh()

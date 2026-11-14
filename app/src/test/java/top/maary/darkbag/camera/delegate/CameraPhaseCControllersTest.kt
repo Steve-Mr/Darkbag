@@ -19,6 +19,7 @@ import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
 import android.view.Surface
 import android.view.View
+import android.view.ViewGroup
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.fragment.app.FragmentActivity
 import androidx.test.core.app.ApplicationProvider
@@ -421,6 +422,70 @@ class CameraPhaseCControllersTest {
         assertTrue(fragmentBinding.viewFinderContainer.clipToOutline)
     }
 
+    // -------------------------------------------------------------------------
+    // CameraTierController tests
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun testTierController_bindTierControls_noRecursion() {
+        val megaHost = FakeMegaHost()
+        val tierController = CameraTierController(megaHost)
+        var visibilityRefreshed = false
+        var lensRefreshed = false
+
+        tierController.bindTierControls(
+            onVisibilityRefresh = { visibilityRefreshed = true },
+            onLensRefresh = { lensRefreshed = true }
+        )
+
+        // Verifies no StackOverflowError during bindTierControls
+        assertEquals(CameraUiTier.FILM, viewModel.uiState.value.uiTier)
+        assertNotNull(uiBinding.btnBentoTier)
+
+        // Switching tier via btnBentoTier click
+        uiBinding.btnBentoTier?.performClick()
+        ShadowLooperHelper.runMainLooperIdle()
+
+        assertEquals(CameraUiTier.PRO, viewModel.uiState.value.uiTier)
+        assertTrue(visibilityRefreshed)
+        assertTrue(lensRefreshed)
+    }
+
+    @Test
+    fun testTierController_updateTierUi_and_updateProInfoBar_noStackOverflow() {
+        val megaHost = FakeMegaHost()
+        val tierController = CameraTierController(megaHost)
+
+        // Repeated mutual calls should complete cleanly without StackOverflowError
+        viewModel.setUiTier(CameraUiTier.PRO)
+        tierController.updateTierUi(CameraUiTier.PRO)
+        tierController.updateProInfoBar()
+        assertEquals(CameraUiTier.PRO.displayLabel, uiBinding.btnBentoTier?.text)
+
+        viewModel.setUiTier(CameraUiTier.FILM)
+        tierController.updateTierUi(CameraUiTier.FILM)
+        tierController.updateProInfoBar()
+        assertEquals(CameraUiTier.FILM.displayLabel, uiBinding.btnBentoTier?.text)
+
+        viewModel.setUiTier(CameraUiTier.POINT_AND_SHOOT)
+        tierController.updateTierUi(CameraUiTier.POINT_AND_SHOOT)
+        assertEquals(CameraUiTier.POINT_AND_SHOOT.displayLabel, uiBinding.btnBentoTier?.text)
+    }
+
+    @Test
+    fun testTierController_manualFlags_syncToViewModel() {
+        val megaHost = FakeMegaHost()
+        val tierController = CameraTierController(megaHost)
+        megaHost.isManualFocus = true
+        megaHost.isManualIso = true
+        megaHost.currentIso = 800
+
+        tierController.updateProInfoBar()
+
+        assertTrue(viewModel.uiState.value.isManualFocus)
+        assertTrue(viewModel.uiState.value.isManualIso)
+    }
+
     // =========================================================================
     // Test Doubles
     // =========================================================================
@@ -516,7 +581,8 @@ class CameraPhaseCControllersTest {
         CameraMotionPhotoHost,
         CameraCapturePipelineHost,
         CameraMultiCaptureHost,
-        CameraHardwareStreamHost {
+        CameraHardwareStreamHost,
+        CameraTierHost {
 
         var applyCameraControlsCalled = false
         var modeCycledFlag: Boolean? = null
@@ -558,20 +624,29 @@ class CameraPhaseCControllersTest {
         override var isFlashEnabled: Boolean = false
         override val isHdrPlusEnabled: Boolean get() = viewModel.uiState.value.isHdrPlusEnabled
         override var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null
+        override val context: Context get() = themedContext
+        override val binding: CameraUiContainerBinding get() = uiBinding
+        override val rootViewGroup: ViewGroup? get() = fragmentBinding.root as? ViewGroup
+        override val hasMultipleAvailableLenses: Boolean get() = availableLenses.size > 1
+        override val hasMultiCameraManager: Boolean get() = multiCameraManager != null
+        override val minFocusDistance: Float = 10f
+        override val evRange: Range<Int>? = Range(-4, 4)
+        override var hasFocusMeteringLock: Boolean = false
+
         override val isOisSupported: Boolean = false
         override val isHdrOisEnabledPref: Boolean = true
         override val isRawSupported: Boolean = true
-        override val isManualFocus: Boolean = false
-        override val isManualIso: Boolean = false
-        override val isManualShutter: Boolean = false
+        override var isManualFocus: Boolean = false
+        override var isManualIso: Boolean = false
+        override var isManualShutter: Boolean = false
         override val isManualExposure: Boolean = false
         override var currentFocusDistance: Float = 0f
         override var liveFocusDistance: Float = 0f
-        override val currentIso: Int = 100
+        override var currentIso: Int = 100
         override var liveIso: Int = 100
-        override val currentExposureTime: Long = 10_000_000L
+        override var currentExposureTime: Long = 10_000_000L
         override var liveExposureTime: Long = 10_000_000L
-        override val currentEvIndex: Int = 0
+        override var currentEvIndex: Int = 0
         override val isoRange: Range<Int>? = Range(50, 3200)
         override val exposureTimeRange: Range<Long>? = Range(1000L, 1_000_000_000L)
         override var lastClippingRatio: Double = 0.0
@@ -596,7 +671,7 @@ class CameraPhaseCControllersTest {
         override var pendingMotionPhotoTask: CompletableDeferred<Pair<String?, Long>>? = null
         override var pendingVfSnapshot: Bitmap? = null
         override var isFrontPipActive: Boolean = false
-        override val isMultiCameraManualLinked: Boolean = true
+        override var isMultiCameraManualLinked: Boolean = true
         override val isProcessing: Boolean = false
         override var isVideoSaving: Boolean = false
         override var transientLensLabel: String? = null
@@ -629,6 +704,8 @@ class CameraPhaseCControllersTest {
         }
         override fun requestAudioPermission() {}
         override fun onCaptureModeCycled(modeChanged: Boolean) { modeCycledFlag = modeChanged }
+        override fun clearFocusMetering() {}
+        override fun clearExposureMetering() {}
         override fun formatFocusDist(dist: Float): String = "∞"
         override fun formatShutterTime(nanos: Long): String = "1/100s"
         override fun onSessionConfigured() {}
