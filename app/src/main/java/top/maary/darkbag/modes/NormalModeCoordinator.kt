@@ -54,6 +54,8 @@ class NormalModeCoordinator(
         }
     }
 
+    override fun supportsLongPressVideo(): Boolean = true
+
     override fun getShutterDotRotation(deviceOrientationDegrees: Int): Float {
         return -deviceOrientationDegrees.toFloat()
     }

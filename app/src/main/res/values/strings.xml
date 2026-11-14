@@ -558,4 +558,7 @@
     <string name="lut_mgmt_empty_title">No Film Recipes Imported</string>
     <string name="lut_mgmt_empty_desc">Import .cube 3D LUT film simulation recipes paired with your camera Log curves.</string>
     <string name="lut_mgmt_filter_all">All</string>
+    <string name="toast_queue_full">Queue full: processing %1$d photos, please wait…</string>
+    <string name="toast_memory_low">System memory low, waiting for processing to complete…</string>
+    <string name="error_configure_camera_session">Failed to configure camera session</string>
 </resources>

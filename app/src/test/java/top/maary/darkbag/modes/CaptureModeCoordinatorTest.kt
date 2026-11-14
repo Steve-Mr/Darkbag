@@ -440,5 +440,17 @@ class CaptureModeCoordinatorTest {
         assertTrue(multi.onLensSelected(wideBack))
         assertEquals(1.0f, host.lastSwitchedMultiplier)
     }
+
+    @Test
+    fun testSupportsLongPressVideo_policyByCoordinator() {
+        val host = MockModeExecutionContext(context, prefs)
+        val normal = NormalModeCoordinator(host)
+        val half = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+        val multi = MultiCameraModeCoordinator(host)
+
+        assertTrue(normal.supportsLongPressVideo())
+        assertFalse(half.supportsLongPressVideo())
+        assertFalse(multi.supportsLongPressVideo())
+    }
 }
 

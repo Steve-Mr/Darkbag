@@ -534,4 +534,7 @@
     <string name="lut_mgmt_empty_title">暂无导入的胶片配方</string>
     <string name="lut_mgmt_empty_desc">导入匹配相机 Log 曲线的 .cube 3D LUT 胶片模拟配方。</string>
     <string name="lut_mgmt_filter_all">全部</string>
+    <string name="toast_queue_full">处理队列已满：正在处理 %1$d 张照片，请稍候…</string>
+    <string name="toast_memory_low">系统内存不足，正在等待处理完成…</string>
+    <string name="error_configure_camera_session">配置相机对话失败</string>
 </resources>
