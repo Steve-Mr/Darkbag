@@ -16,6 +16,7 @@ import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.display.DisplayManager
 import android.media.ImageReader
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.util.Log
@@ -153,6 +154,43 @@ class CameraFragment : Fragment(),
         get() = sessionController.captureSession
     override val camera2Handler: Handler?
         get() = sessionController.backgroundHandler
+
+    override val activePreviewDevice: CameraDevice?
+        get() = if (modeController.isMultiCameraActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            multiCameraManager?.getPreviewDevice()
+        } else {
+            camera2Device
+        }
+    override val activePreviewSession: android.hardware.camera2.CameraCaptureSession?
+        get() = if (modeController.isMultiCameraActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            multiCameraManager?.getPreviewSession()
+        } else {
+            camera2Session
+        }
+    override val activePreviewSurface: Surface?
+        get() = if (modeController.isMultiCameraActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            multiCameraManager?.getPreviewSurface()
+        } else {
+            camera2PreviewSurface
+        }
+    override val activePreviewHandler: Handler?
+        get() = if (modeController.isMultiCameraActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            multiCameraManager?.getCameraHandler()
+        } else {
+            camera2Handler
+        }
+    override val activePreviewPhysicalCharacteristics: CameraCharacteristics?
+        get() = if (modeController.isMultiCameraActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            multiCameraManager?.getActivePreviewPhysicalCharacteristics()
+        } else {
+            null
+        }
+
+    override fun applyPreviewZoomAndCropToRequest(builder: CaptureRequest.Builder) {
+        if (modeController.isMultiCameraActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            multiCameraManager?.applyCurrentPreviewZoomAndCrop(builder)
+        }
+    }
 
     override var camera2PreviewSurface: Surface? = null
     override var rawImageReader: ImageReader? = null
@@ -292,7 +330,8 @@ class CameraFragment : Fragment(),
                 pipeline = pipelineDispatcher,
                 multiCapture = multiCaptureDispatcher,
                 stream = streamController,
-                lens = lensController
+                lens = lensController,
+                focus = focusMeteringController
             )
         )
     }
@@ -441,11 +480,23 @@ class CameraFragment : Fragment(),
     }
 
     override fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean) {
-        streamController.applyManualSettingsToRequest(request, isHdrBurst)
+        if (modeController.isMultiCameraActive) {
+            streamController.applyFocusAndExposureSettingsToRequest(request, isHdrBurst)
+        } else {
+            streamController.applyManualSettingsToRequest(request, isHdrBurst)
+        }
     }
 
     override fun applyManualSettingsToRequest(request: CaptureRequest.Builder) {
-        streamController.applyManualSettingsToRequest(request, false)
+        if (modeController.isMultiCameraActive) {
+            streamController.applyFocusAndExposureSettingsToRequest(request, false)
+        } else {
+            streamController.applyManualSettingsToRequest(request, false)
+        }
+    }
+
+    override fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder) {
+        streamController.applyFocusAndExposureSettingsToRequest(builder, false)
     }
 
     override fun handleCaptureResult(result: TotalCaptureResult) {
@@ -453,7 +504,11 @@ class CameraFragment : Fragment(),
     }
 
     override fun applyCameraControls() {
-        streamController.updateCamera2RepeatingRequest()
+        if (modeController.isMultiCameraActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            multiCameraManager?.updatePreviewRequest()
+        } else {
+            streamController.updateCamera2RepeatingRequest()
+        }
     }
 
     override fun updateProInfoBar() {
@@ -591,6 +646,9 @@ class CameraFragment : Fragment(),
         motionPhotoController.release()
 
         lifecycleScope.launch(Dispatchers.Main.immediate + NonCancellable) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                multiCameraManager?.close()
+            }
             streamController.closeCamera2()
             sessionController.release()
         }
@@ -658,6 +716,9 @@ class CameraFragment : Fragment(),
         shutterController.onDestroy()
 
         lifecycleScope.launch(Dispatchers.Main.immediate + NonCancellable) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                multiCameraManager?.close()
+            }
             streamController.closeCamera2()
             sessionController.release()
         }
@@ -843,6 +904,9 @@ class CameraFragment : Fragment(),
             withContext(Dispatchers.Default) {
                 lensController.refreshLenses()
             }
+            if (!modeController.isMultiCameraActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                multiCameraManager?.close()
+            }
             streamController.closeCamera2()
             if (!isBurstActive && !isProcessing && HdrPlusRequestManager.pendingTasksCount.value == 0) {
                 StreamingBufferPool.clear()
@@ -852,8 +916,7 @@ class CameraFragment : Fragment(),
     }
 
     private suspend fun bindCameraUseCasesInternal() {
-        focusMeteringRegion = null
-        exposureMeteringRegion = null
+        focusMeteringController.clearFocusAndMeteringState()
 
         val targetId = currentLens?.id ?: if (lensFacing == CameraCharacteristics.LENS_FACING_BACK) "0" else "1"
 

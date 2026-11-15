@@ -4,6 +4,8 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Bitmap
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.TotalCaptureResult
 import android.os.Build
 import android.os.Handler
 import android.os.SystemClock
@@ -58,6 +60,8 @@ interface CameraModeHost {
     var pendingVfSnapshot: Bitmap?
 
     fun bindCameraUseCases()
+    fun handleCaptureResult(result: TotalCaptureResult)
+    fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder)
 
     /** Called after the user cycled modes so the host can refresh dependent UI. */
     fun onCaptureModeCycled(modeChanged: Boolean)
@@ -72,7 +76,8 @@ class CameraModeCollaborators(
     val pipeline: CameraCapturePipelineDispatcher,
     val multiCapture: CameraMultiCaptureDispatcher,
     val stream: CameraHardwareStreamController,
-    val lens: CameraLensController
+    val lens: CameraLensController,
+    val focus: CameraFocusMeteringController? = null
 )
 
 /**
@@ -233,6 +238,12 @@ class CameraModeController(
                     if (!host.isHostAdded) return@launch
                     val manager = host.multiCameraManager
                         ?: MultiCameraCaptureManager(host.hostContext, host.lifecycleScope).also { host.multiCameraManager = it }
+                    manager.onPreviewCaptureResultListener = { result ->
+                        host.handleCaptureResult(result)
+                    }
+                    manager.previewRequestConfigProvider = { builder ->
+                        host.applyPreviewFocusAndExposureSettings(builder)
+                    }
                     manager.onSessionFailedListener = { error ->
                         Log.e(TAG, "Multi-camera session failed: $error, falling back to standard mode")
                         host.lifecycleScope.launch(Dispatchers.Main) {
@@ -341,6 +352,7 @@ class CameraModeController(
             override fun toggleFrontPipInMultiCameraMode() = parts.multiCapture.toggleFrontPipInMultiCameraMode()
 
             override fun switchMultiCameraPrimaryLens(multiplier: Float) {
+                parts.focus?.clearFocusAndMeteringState()
                 host.multiCameraManager?.switchPrimaryPreviewLensByMultiplier(multiplier)
             }
 

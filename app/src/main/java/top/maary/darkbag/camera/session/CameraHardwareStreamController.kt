@@ -145,7 +145,7 @@ class CameraHardwareStreamController(
         }
     }
 
-    fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean = false) {
+    fun applyFocusAndExposureSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean = false) {
         applyStabilizationToRequest(request, isHdrBurst)
 
         request.set(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_DISABLED)
@@ -193,6 +193,10 @@ class CameraHardwareStreamController(
                 request.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(MeteringRectangle(0, 0, 0, 0, 0)))
             }
         }
+    }
+
+    fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean = false) {
+        applyFocusAndExposureSettingsToRequest(request, isHdrBurst)
 
         if (host.currentLens?.useCamera2 == true) {
             val deviceId = host.sessionController.cameraDevice?.id ?: host.currentLens?.id

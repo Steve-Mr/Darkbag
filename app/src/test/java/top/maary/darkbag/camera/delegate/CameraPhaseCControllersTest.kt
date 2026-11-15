@@ -389,7 +389,8 @@ class CameraPhaseCControllersTest {
                 pipeline = pipelineDispatcher,
                 multiCapture = multiCaptureDispatcher,
                 stream = streamController,
-                lens = lensController
+                lens = lensController,
+                focus = focusController
             )
         )
 
@@ -423,6 +424,231 @@ class CameraPhaseCControllersTest {
         modeController.cycleCaptureMode()
         assertEquals(CaptureMode.NORMAL, modeController.effectiveMode)
         ShadowLooperHelper.runMainLooperIdle()
+    }
+
+    @Test
+    fun testFocusMeteringController_clearAndShowRingBehavior() {
+        val megaHost = FakeMegaHost()
+        val gestureDelegate = CameraGestureDelegate(themedContext, FakeGestureHost())
+        val focusController = CameraFocusMeteringController(megaHost, gestureDelegate)
+
+        // Default activePreview* properties fall back to single-camera properties
+        assertEquals(megaHost.camera2Device, megaHost.activePreviewDevice)
+        assertEquals(megaHost.camera2Session, megaHost.activePreviewSession)
+        assertEquals(megaHost.camera2PreviewSurface, megaHost.activePreviewSurface)
+        assertEquals(megaHost.camera2Handler, megaHost.activePreviewHandler)
+        assertNull(megaHost.activePreviewPhysicalCharacteristics)
+
+        // AE-only lock does not display AF-L badge
+        val rect = MeteringRectangle(100, 100, 200, 200, MeteringRectangle.METERING_WEIGHT_MAX)
+        megaHost.focusMeteringRegion = null
+        megaHost.exposureMeteringRegion = rect
+        focusController.showFocusRingLocked()
+        assertEquals(View.GONE, fragmentBinding.focusLockBadge.visibility)
+
+        // AF+AE lock displays AF-L badge
+        megaHost.focusMeteringRegion = rect
+        focusController.showFocusRingLocked()
+        assertEquals(View.VISIBLE, fragmentBinding.focusLockBadge.visibility)
+
+        // clearFocusAndMeteringState resets regions and updates PRO bar once when state existed
+        focusController.clearFocusAndMeteringState()
+        ShadowLooperHelper.runMainLooperIdle()
+        assertNull(megaHost.focusMeteringRegion)
+        assertNull(megaHost.exposureMeteringRegion)
+        assertEquals(1, megaHost.updateProInfoBarCount)
+
+        // Calling again when empty does not redundantly trigger PRO bar update
+        focusController.clearFocusAndMeteringState()
+        ShadowLooperHelper.runMainLooperIdle()
+        assertEquals(1, megaHost.updateProInfoBarCount)
+
+        // unlockFocusAndMetering clears active regions and updates PRO bar
+        megaHost.focusMeteringRegion = rect
+        megaHost.exposureMeteringRegion = rect
+        focusController.unlockFocusAndMetering()
+        ShadowLooperHelper.runMainLooperIdle()
+        assertNull(megaHost.focusMeteringRegion)
+        assertNull(megaHost.exposureMeteringRegion)
+        assertEquals(2, megaHost.updateProInfoBarCount)
+
+        focusController.onDestroy()
+    }
+
+    @Test
+    fun testMultiCamera_lensSwitchClearsFocusLock_andManualConfigCarriesMeteringRegions() {
+        val megaHost = FakeMegaHost()
+        val overlayController = CameraOverlayController(FakeOverlayHost())
+        val gestureDelegate = CameraGestureDelegate(themedContext, FakeGestureHost())
+        val focusController = CameraFocusMeteringController(megaHost, gestureDelegate)
+        val videoController = CameraVideoController(megaHost)
+        val shutterController = CameraShutterController(megaHost, overlayController, focusController, videoController)
+        val thumbnailController = CameraThumbnailController(megaHost)
+        val motionController = CameraMotionPhotoController(megaHost)
+        val pipelineDispatcher = CameraCapturePipelineDispatcher(megaHost)
+        val multiCaptureDispatcher = CameraMultiCaptureDispatcher(megaHost)
+        val streamController = CameraHardwareStreamController(megaHost)
+        val lensController = CameraLensController(megaHost)
+
+        val modeController = CameraModeController(
+            megaHost,
+            CameraModeCollaborators(
+                overlay = overlayController,
+                shutter = shutterController,
+                thumbnail = thumbnailController,
+                motionPhoto = motionController,
+                pipeline = pipelineDispatcher,
+                multiCapture = multiCaptureDispatcher,
+                stream = streamController,
+                lens = lensController,
+                focus = focusController
+            )
+        )
+        megaHost.modeControllerRef = modeController
+
+        val rect = MeteringRectangle(50, 50, 150, 150, MeteringRectangle.METERING_WEIGHT_MAX)
+        megaHost.focusMeteringRegion = rect
+        megaHost.exposureMeteringRegion = rect
+
+        modeController.updateActiveCoordinator(CaptureMode.MULTI_CAMERA)
+        val coordinator = modeController.activeCoordinator
+        assertNotNull(coordinator)
+        val sampleLens = LensInfo(
+            id = "0",
+            physicalId = "2",
+            sensorId = "2",
+            name = "0.6x",
+            focalLength = 1.9f,
+            equivalentFocalLength = 14f,
+            multiplier = 0.6f,
+            type = top.maary.darkbag.utils.LensType.ULTRA_WIDE,
+            facing = CameraCharacteristics.LENS_FACING_BACK,
+            useCamera2 = true
+        )
+        assertTrue(coordinator!!.onLensSelected(sampleLens))
+        ShadowLooperHelper.runMainLooperIdle()
+
+        assertNull(megaHost.focusMeteringRegion)
+        assertNull(megaHost.exposureMeteringRegion)
+        assertEquals(1, megaHost.updateProInfoBarCount)
+
+        val config = top.maary.darkbag.camera.MultiCameraManualConfig(
+            focusMeteringRegion = rect,
+            exposureMeteringRegion = rect
+        )
+        assertEquals(rect, config.focusMeteringRegion)
+        assertEquals(rect, config.exposureMeteringRegion)
+
+        shutterController.onDestroy()
+        focusController.onDestroy()
+    }
+
+    @Test
+    fun testFocusMeteringController_sanitizeCropRegion_validatesBounds() {
+        val megaHost = FakeMegaHost()
+        val gestureDelegate = CameraGestureDelegate(themedContext, FakeGestureHost())
+        val focusController = CameraFocusMeteringController(megaHost, gestureDelegate)
+
+        val activeArray = android.graphics.Rect(0, 0, 3264, 2448)
+
+        // Null or empty crop falls back to activeArray
+        assertEquals(activeArray, focusController.sanitizeCropRegion(null, activeArray))
+        assertEquals(activeArray, focusController.sanitizeCropRegion(android.graphics.Rect(0, 0, 0, 0), activeArray))
+
+        // Oversized stale crop from a larger previous sensor falls back to activeArray
+        val oversized = android.graphics.Rect(0, 0, 4000, 3000)
+        assertEquals(activeArray, focusController.sanitizeCropRegion(oversized, activeArray))
+
+        // Valid zoomed sub-crop within activeArray is preserved
+        val validSubCrop = android.graphics.Rect(408, 306, 2856, 2142)
+        assertEquals(validSubCrop, focusController.sanitizeCropRegion(validSubCrop, activeArray))
+
+        focusController.onDestroy()
+    }
+
+    @Test
+    fun testMultiCamera_concurrentStandalone_keepsPreviewCharacteristicsAndMeteringOnStandalonePrimary() {
+        val wideChars = org.robolectric.shadows.ShadowCameraCharacteristics.newCameraCharacteristics()
+        val uwChars = org.robolectric.shadows.ShadowCameraCharacteristics.newCameraCharacteristics()
+
+        val wideLens = top.maary.darkbag.utils.PhysicalLensInfo(
+            physicalId = "0",
+            name = "1.0x",
+            focalLength = 4.5f,
+            equivalentFocalLength = 24f,
+            multiplier = 1.0f,
+            type = top.maary.darkbag.utils.LensType.WIDE,
+            characteristics = wideChars
+        )
+        val uwLens = top.maary.darkbag.utils.PhysicalLensInfo(
+            physicalId = "2",
+            name = "0.6x",
+            focalLength = 1.9f,
+            equivalentFocalLength = 14f,
+            multiplier = 0.6f,
+            type = top.maary.darkbag.utils.LensType.ULTRA_WIDE,
+            characteristics = uwChars
+        )
+        val standaloneInfo = top.maary.darkbag.utils.LogicalMultiCameraInfo(
+            logicalCameraId = "0",
+            isLogicalMultiCamera = false,
+            syncType = 0,
+            physicalLenses = listOf(wideLens, uwLens),
+            hardwareType = top.maary.darkbag.utils.MultiCameraHardwareType.CONCURRENT_STANDALONE
+        )
+
+        val manager = MultiCameraCaptureManager(themedContext, testScope)
+        manager.configurePreviewStateForTesting(
+            logicalInfo = standaloneInfo,
+            lenses = listOf(wideLens, uwLens),
+            primaryLens = wideLens,
+            standalonePrimaryId = "0"
+        )
+
+        // Switching primary selection to 0.6x in CONCURRENT_STANDALONE keeps preview on standalonePrimaryPhysicalId ("0")
+        manager.setPrimaryPreviewLens(uwLens)
+        assertEquals("0", manager.resolveActivePreviewPhysicalId())
+        assertTrue(manager.getActivePreviewPhysicalCharacteristics() === wideChars)
+
+        // In NATIVE_LOGICAL mode, switching primary lens updates active preview characteristics to 0.6x
+        val logicalInfo = standaloneInfo.copy(
+            isLogicalMultiCamera = true,
+            hardwareType = top.maary.darkbag.utils.MultiCameraHardwareType.NATIVE_LOGICAL
+        )
+        manager.configurePreviewStateForTesting(
+            logicalInfo = logicalInfo,
+            lenses = listOf(wideLens, uwLens),
+            primaryLens = wideLens,
+            standalonePrimaryId = null
+        )
+        manager.setPrimaryPreviewLens(uwLens)
+        assertEquals("2", manager.resolveActivePreviewPhysicalId())
+        assertTrue(manager.getActivePreviewPhysicalCharacteristics() === uwChars)
+
+        // Metering regions only route to isMeteringPrimary (standalone primary "0"), even when unlinked
+        val region = MeteringRectangle(100, 100, 200, 200, MeteringRectangle.METERING_WEIGHT_MAX)
+        val manualConfig = top.maary.darkbag.camera.MultiCameraManualConfig(
+            isLinked = false,
+            focusMeteringRegion = region,
+            exposureMeteringRegion = region
+        )
+        val specForPreviewWide = manager.resolveManualControlSpec(
+            isPrimary = false,
+            config = manualConfig,
+            isMeteringPrimary = true
+        )
+        assertEquals(CaptureRequest.CONTROL_AF_MODE_AUTO, specForPreviewWide.afMode)
+        assertEquals(region, specForPreviewWide.afRegion)
+        assertEquals(region, specForPreviewWide.aeRegion)
+
+        val specForNonPreviewUw = manager.resolveManualControlSpec(
+            isPrimary = true,
+            config = manualConfig,
+            isMeteringPrimary = false
+        )
+        assertEquals(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE, specForNonPreviewUw.afMode)
+        assertNull(specForNonPreviewUw.afRegion)
+        assertNull(specForNonPreviewUw.aeRegion)
     }
 
     // -------------------------------------------------------------------------
@@ -612,6 +838,7 @@ class CameraPhaseCControllersTest {
         CameraTierHost {
 
         var applyCameraControlsCalled = false
+        var updateProInfoBarCount = 0
         var modeCycledFlag: Boolean? = null
         var modeControllerRef: CameraModeController? = null
         var audioRationaleChecked = false
@@ -709,9 +936,10 @@ class CameraPhaseCControllersTest {
         override fun bindCameraUseCases() {}
         override fun applyManualSettingsToRequest(request: CaptureRequest.Builder) {}
         override fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean) {}
+        override fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder) {}
         override fun handleCaptureResult(result: TotalCaptureResult) {}
         override fun applyUIVisibility() {}
-        override fun updateProInfoBar() {}
+        override fun updateProInfoBar() { updateProInfoBarCount++ }
         override fun updateDialPanel() {}
         override fun ensureActiveCoordinator(): CaptureModeCoordinator? = activeCoordinator
         override fun showShutterBlackout() {}
