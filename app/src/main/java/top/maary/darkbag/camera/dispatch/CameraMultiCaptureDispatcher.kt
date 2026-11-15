@@ -3,6 +3,7 @@ package top.maary.darkbag.camera.dispatch
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.SurfaceTexture
+import android.hardware.camera2.params.MeteringRectangle
 import android.net.Uri
 import android.os.Build
 import android.util.Log
@@ -61,6 +62,8 @@ interface CameraMultiCaptureHost {
     val isManualShutter: Boolean
     val currentExposureTime: Long
     val currentEvIndex: Int
+    val focusMeteringRegion: MeteringRectangle?
+    val exposureMeteringRegion: MeteringRectangle?
     var isFrontPipActive: Boolean
     var isBurstActive: Boolean
 
@@ -118,7 +121,9 @@ class CameraMultiCaptureDispatcher(
             iso = host.currentIso,
             isManualShutter = host.isManualShutter,
             exposureTimeNanos = host.currentExposureTime,
-            evIndex = host.currentEvIndex
+            evIndex = host.currentEvIndex,
+            focusMeteringRegion = host.focusMeteringRegion,
+            exposureMeteringRegion = host.exposureMeteringRegion
         )
 
         val frontJpegDeferred = CompletableDeferred<ByteArray?>()

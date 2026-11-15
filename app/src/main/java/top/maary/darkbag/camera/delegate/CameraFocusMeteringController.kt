@@ -56,8 +56,15 @@ interface CameraFocusMeteringHost {
     var exposureMeteringRegion: MeteringRectangle?
     var currentFocusDistance: Float
 
+    val activePreviewDevice: CameraDevice? get() = camera2Device
+    val activePreviewSession: CameraCaptureSession? get() = camera2Session
+    val activePreviewSurface: Surface? get() = camera2PreviewSurface
+    val activePreviewHandler: Handler? get() = camera2Handler
+    val activePreviewPhysicalCharacteristics: CameraCharacteristics? get() = null
+
     fun applyCameraControls()
     fun applyManualSettingsToRequest(builder: CaptureRequest.Builder)
+    fun applyPreviewZoomAndCropToRequest(builder: CaptureRequest.Builder) {}
     fun updateProInfoBar()
     fun updateDialPanel()
 }
@@ -80,6 +87,27 @@ class CameraFocusMeteringController(
         gestureDelegate.setupTapToFocus(stageView)
     }
 
+    fun clearFocusAndMeteringState() {
+        tapToFocusJob?.cancel()
+        tapToFocusJob = null
+
+        val hadState = host.focusMeteringRegion != null || host.exposureMeteringRegion != null
+        host.focusMeteringRegion = null
+        host.exposureMeteringRegion = null
+
+        val uiAction = {
+            hideFocusRingUnlock()
+            if (hadState) {
+                host.updateProInfoBar()
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            uiAction()
+        } else {
+            Handler(Looper.getMainLooper()).post(uiAction)
+        }
+    }
+
     fun unlockFocusAndMetering() {
         val hadFocusLock = host.focusMeteringRegion != null || host.exposureMeteringRegion != null
         if (!hadFocusLock) return
@@ -100,17 +128,18 @@ class CameraFocusMeteringController(
             Handler(Looper.getMainLooper()).post(uiAction)
         }
 
-        val handler = host.camera2Handler
+        val handler = host.activePreviewHandler
         val cameraAction = {
-            val device = host.camera2Device
-            val session = host.camera2Session
-            val surface = host.camera2PreviewSurface
+            val device = host.activePreviewDevice
+            val session = host.activePreviewSession
+            val surface = host.activePreviewSurface
             if (device != null && session != null && surface != null && handler != null) {
                 try {
                     if (!host.isManualFocus) {
                         val cancelRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                         cancelRequest.addTarget(surface)
                         host.applyManualSettingsToRequest(cancelRequest)
+                        host.applyPreviewZoomAndCropToRequest(cancelRequest)
                         cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
                         session.capture(cancelRequest.build(), null, handler)
                     }
@@ -128,10 +157,10 @@ class CameraFocusMeteringController(
     }
 
     fun triggerTapToFocusCamera2(x: Float, y: Float) {
-        val device = host.camera2Device ?: return
-        val session = host.camera2Session ?: return
-        val surface = host.camera2PreviewSurface ?: return
-        val handler = host.camera2Handler ?: return
+        val device = host.activePreviewDevice ?: return
+        val session = host.activePreviewSession ?: return
+        val surface = host.activePreviewSurface ?: return
+        val handler = host.activePreviewHandler ?: return
 
         tapToFocusJob?.cancel()
         tapToFocusJob = host.lifecycleScope.launch(Dispatchers.Default) {
@@ -140,8 +169,17 @@ class CameraFocusMeteringController(
                 val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
                 val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return@launch
 
+                val effectiveAfChars = host.activePreviewPhysicalCharacteristics ?: characteristics
+                val afModes = effectiveAfChars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)
+                val maxAfRegions = effectiveAfChars.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF)
+                val afSupported = (afModes == null || afModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO)) &&
+                    (maxAfRegions == null || maxAfRegions > 0)
+
+                val maxAeRegions = characteristics.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE)
+                val aeRegionsSupported = maxAeRegions == null || maxAeRegions > 0
+
                 val lastResult = host.captureResultFlow.replayCache.lastOrNull()
-                val cropRegion = lastResult?.get(CaptureResult.SCALER_CROP_REGION) ?: activeArray
+                val cropRegion = sanitizeCropRegion(lastResult?.get(CaptureResult.SCALER_CROP_REGION), activeArray)
 
                 val region = getMeteringRectangle(
                     x, y,
@@ -152,8 +190,8 @@ class CameraFocusMeteringController(
                     cropRegion
                 )
 
-                host.focusMeteringRegion = region
-                if (!host.isManualExposure) {
+                host.focusMeteringRegion = if (afSupported) region else null
+                if (!host.isManualExposure && aeRegionsSupported) {
                     host.exposureMeteringRegion = region
                 }
 
@@ -163,10 +201,24 @@ class CameraFocusMeteringController(
                     host.updateProInfoBar()
                 }
 
+                if (!afSupported) {
+                    withContext(Dispatchers.Main) {
+                        host.applyCameraControls()
+                        if (host.exposureMeteringRegion != null) {
+                            showFocusRingLocked()
+                        } else {
+                            hideFocusRingUnlock()
+                        }
+                        host.updateProInfoBar()
+                    }
+                    return@launch
+                }
+
                 // 2. Submit cancel request cleanly and suspend until processed by HAL
                 val cancelRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                 cancelRequest.addTarget(surface)
                 host.applyManualSettingsToRequest(cancelRequest)
+                host.applyPreviewZoomAndCropToRequest(cancelRequest)
                 cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
 
                 suspendCancellableCoroutine<Unit> { cont ->
@@ -208,8 +260,9 @@ class CameraFocusMeteringController(
                 val triggerRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                 triggerRequest.addTarget(surface)
                 host.applyManualSettingsToRequest(triggerRequest)
+                host.applyPreviewZoomAndCropToRequest(triggerRequest)
                 triggerRequest.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(region))
-                if (!host.isManualExposure) {
+                if (!host.isManualExposure && aeRegionsSupported) {
                     triggerRequest.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(region))
                 }
                 if (host.isManualFocus) {
@@ -217,7 +270,8 @@ class CameraFocusMeteringController(
                 }
                 triggerRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
 
-                suspendCancellableCoroutine<Unit> { cont ->
+                var triggerFrameNumber = -1L
+                val triggerSucceeded = suspendCancellableCoroutine<Boolean> { cont ->
                     try {
                         session.capture(triggerRequest.build(), object : CameraCaptureSession.CaptureCallback() {
                             override fun onCaptureCompleted(
@@ -226,10 +280,11 @@ class CameraFocusMeteringController(
                                 result: TotalCaptureResult
                             ) {
                                 super.onCaptureCompleted(session, request, result)
+                                triggerFrameNumber = result.frameNumber
                                 if (host.isManualFocus) {
-                                    syncManualFocusAfterTap()
+                                    syncManualFocusAfterTap(triggerFrameNumber)
                                 }
-                                if (cont.isActive) cont.resume(Unit)
+                                if (cont.isActive) cont.resume(true)
                             }
 
                             override fun onCaptureFailed(
@@ -238,23 +293,33 @@ class CameraFocusMeteringController(
                                 failure: CaptureFailure
                             ) {
                                 super.onCaptureFailed(session, request, failure)
-                                if (cont.isActive) cont.resume(Unit)
+                                if (cont.isActive) cont.resume(false)
                             }
                         }, handler)
                     } catch (e: Exception) {
-                        if (cont.isActive) cont.resume(Unit)
+                        if (cont.isActive) cont.resume(false)
                     }
                 }
 
                 ensureActive()
+                if (!triggerSucceeded) {
+                    host.focusMeteringRegion = null
+                    withContext(Dispatchers.Main) {
+                        showFocusRingFailed()
+                        host.updateProInfoBar()
+                    }
+                    return@launch
+                }
 
                 // 5. Await AF convergence (FOCUSED_LOCKED or NOT_FOCUSED_LOCKED)
                 if (!host.isManualFocus) {
                     val convergenceResult = withTimeoutOrNull(3500L) {
                         host.captureResultFlow.first { res ->
                             val afState = res.get(CaptureResult.CONTROL_AF_STATE)
-                            afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
-                            afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                            res.frameNumber >= triggerFrameNumber && (
+                                afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                                afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                            )
                         }
                     }
 
@@ -293,7 +358,12 @@ class CameraFocusMeteringController(
 
     fun showFocusRingLocked() {
         val binding = host.fragmentCameraBinding ?: return
-        gestureDelegate.showFocusRingLocked(binding, host.focusMeteringRegion != null)
+        val hasAnyLock = host.focusMeteringRegion != null || host.exposureMeteringRegion != null
+        gestureDelegate.showFocusRingLocked(binding, hasAnyLock)
+        if (host.focusMeteringRegion == null) {
+            binding.focusLockBadge.animate().cancel()
+            binding.focusLockBadge.visibility = View.GONE
+        }
     }
 
     fun showFocusRingFailed() {
@@ -306,13 +376,15 @@ class CameraFocusMeteringController(
         gestureDelegate.hideFocusRingUnlock(binding)
     }
 
-    fun syncManualFocusAfterTap() {
+    fun syncManualFocusAfterTap(minFrameNumber: Long = -1L) {
         host.lifecycleScope.launch(Dispatchers.Default) {
             withTimeoutOrNull(3000) {
                 host.captureResultFlow.first { res ->
                     val afState = res.get(CaptureResult.CONTROL_AF_STATE)
-                    afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
-                            afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                    res.frameNumber >= minFrameNumber && (
+                        afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                        afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                    )
                 }
             }?.let { res ->
                 val dist = res.get(CaptureResult.LENS_FOCUS_DISTANCE)
@@ -326,6 +398,12 @@ class CameraFocusMeteringController(
                 }
             }
         }
+    }
+
+    internal fun sanitizeCropRegion(rawCrop: Rect?, activeArray: Rect): Rect {
+        return rawCrop?.takeIf {
+            it.width() > 0 && it.height() > 0 && activeArray.contains(it)
+        } ?: activeArray
     }
 
     fun getMeteringRectangle(

@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.ImageFormat
 import android.hardware.camera2.*
+import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.ExifInterface
@@ -58,7 +59,9 @@ data class MultiCameraManualConfig(
     val iso: Int = 100,
     val isManualShutter: Boolean = false,
     val exposureTimeNanos: Long = 10_000_000L,
-    val evIndex: Int = 0
+    val evIndex: Int = 0,
+    val focusMeteringRegion: MeteringRectangle? = null,
+    val exposureMeteringRegion: MeteringRectangle? = null
 )
 
 @RequiresApi(Build.VERSION_CODES.P)
@@ -84,6 +87,7 @@ class MultiCameraCaptureManager(
     // Standalone Concurrent Session State
     private val openDevices = ConcurrentHashMap<String, CameraDevice>()
     private val openSessions = ConcurrentHashMap<String, CameraCaptureSession>()
+    private var standalonePrimaryPhysicalId: String? = null
 
     private var currentLogicalInfo: LogicalMultiCameraInfo? = null
     private var currentCountPref: MultiCameraCountPreference = MultiCameraCountPreference.AUTO_MAX
@@ -108,11 +112,14 @@ class MultiCameraCaptureManager(
             result: TotalCaptureResult
         ) {
             lastPreviewResult = result
+            onPreviewCaptureResultListener?.invoke(result)
         }
     }
 
     var onSessionConfiguredListener: (() -> Unit)? = null
     var onSessionFailedListener: ((String) -> Unit)? = null
+    var onPreviewCaptureResultListener: ((TotalCaptureResult) -> Unit)? = null
+    var previewRequestConfigProvider: ((CaptureRequest.Builder) -> Unit)? = null
 
     private fun ensureThread() {
         if (cameraThread == null) {
@@ -321,7 +328,10 @@ class MultiCameraCaptureManager(
         targetPreviewSurface: Surface,
         saveRaw: Boolean
     ) {
-        val primaryLens = lenses.find { it.type == LensType.WIDE } ?: lenses.first()
+        val primaryLens = currentPrimaryLens?.takeIf { cur -> lenses.any { it.physicalId == cur.physicalId } }
+            ?: lenses.find { it.type == LensType.WIDE }
+            ?: lenses.first()
+        standalonePrimaryPhysicalId = primaryLens.physicalId
         var openedCount = 0
 
         for (lens in lenses) {
@@ -502,6 +512,94 @@ class MultiCameraCaptureManager(
     var currentPrimaryLens: PhysicalLensInfo? = null
         private set
 
+    fun getPreviewDevice(): CameraDevice? {
+        val hwType = currentLogicalInfo?.hardwareType
+        return if (hwType == MultiCameraHardwareType.CONCURRENT_STANDALONE) {
+            val pid = standalonePrimaryPhysicalId ?: currentPrimaryLens?.physicalId
+            if (pid != null) openDevices[pid] else null
+        } else {
+            cameraDevice
+        }
+    }
+
+    fun getPreviewSession(): CameraCaptureSession? {
+        val hwType = currentLogicalInfo?.hardwareType
+        return if (hwType == MultiCameraHardwareType.CONCURRENT_STANDALONE) {
+            val pid = standalonePrimaryPhysicalId ?: currentPrimaryLens?.physicalId
+            if (pid != null) openSessions[pid] else null
+        } else {
+            captureSession
+        }
+    }
+
+    fun getPreviewSurface(): Surface? = previewSurface
+
+    fun getCameraHandler(): Handler? = cameraHandler
+
+    internal fun resolveActivePreviewPhysicalId(): String? {
+        val hwType = currentLogicalInfo?.hardwareType
+        return if (hwType == MultiCameraHardwareType.CONCURRENT_STANDALONE) {
+            standalonePrimaryPhysicalId ?: currentPrimaryLens?.physicalId
+        } else {
+            currentPrimaryLens?.physicalId
+        }
+    }
+
+    internal fun resolveActivePreviewLens(): PhysicalLensInfo? {
+        val pid = resolveActivePreviewPhysicalId()
+        return if (pid != null) {
+            activeLenses.find { it.physicalId == pid } ?: currentPrimaryLens
+        } else {
+            currentPrimaryLens
+        }
+    }
+
+    fun getActivePreviewPhysicalCharacteristics(): CameraCharacteristics? =
+        resolveActivePreviewLens()?.characteristics
+
+    fun getActivePreviewZoomRatio(): Float {
+        val dev = getPreviewDevice() ?: return 1.0f
+        val isNativeLogical = currentLogicalInfo?.isLogicalMultiCamera == true &&
+                dev.id == currentLogicalInfo?.logicalCameraId
+        val lens = resolveActivePreviewLens() ?: return 1.0f
+        if (!isNativeLogical || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return 1.0f
+        }
+        return try {
+            val chars = CameraRepository.getCharacteristics(cameraManager, dev.id)
+            val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+            zoomRange?.let { lens.multiplier.coerceIn(it.lower, it.upper) } ?: 1.0f
+        } catch (_: Exception) {
+            1.0f
+        }
+    }
+
+    fun applyCurrentPreviewZoomAndCrop(builder: CaptureRequest.Builder) {
+        val dev = getPreviewDevice() ?: return
+        try {
+            val chars = CameraRepository.getCharacteristics(cameraManager, dev.id)
+            applyPreviewZoomAndCrop(builder, chars, dev.id, resolveActivePreviewLens())
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to apply preview zoom/crop: ${e.message}")
+        }
+    }
+
+    fun updatePreviewRequest() {
+        val handler = cameraHandler ?: return
+        handler.post {
+            val dev = getPreviewDevice() ?: return@post
+            val session = getPreviewSession() ?: return@post
+            val surface = previewSurface ?: return@post
+            try {
+                val chars = CameraRepository.getCharacteristics(cameraManager, dev.id)
+                val builder = buildPreviewRequest(dev, surface, chars, resolveActivePreviewLens())
+                session.setRepeatingRequest(builder.build(), previewCaptureCallback, handler)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to update multi-camera repeating preview request", e)
+            }
+        }
+    }
+
     fun switchPrimaryPreviewLensByMultiplier(multiplier: Float) {
         val matchingLens = activeLenses.minByOrNull { kotlin.math.abs(it.multiplier - multiplier) } ?: return
         setPrimaryPreviewLens(matchingLens)
@@ -512,7 +610,17 @@ class MultiCameraCaptureManager(
         val surface = previewSurface ?: return
         val hwType = currentLogicalInfo?.hardwareType ?: MultiCameraHardwareType.NATIVE_LOGICAL
 
-        if (hwType == MultiCameraHardwareType.FAST_RELAY_BURST || cameraDevice?.id != currentLogicalInfo?.logicalCameraId) {
+        if (hwType == MultiCameraHardwareType.CONCURRENT_STANDALONE) {
+            // In standalone concurrent mode, preview stays on the primary hardware surface;
+            // still refresh repeating controls for consistency.
+            updatePreviewRequest()
+            return
+        }
+
+        if (hwType == MultiCameraHardwareType.FAST_RELAY_BURST ||
+            hwType == MultiCameraHardwareType.NONE ||
+            cameraDevice?.id != currentLogicalInfo?.logicalCameraId
+        ) {
             scope.launch {
                 val info = currentLogicalInfo ?: return@launch
                 openRelayPrimarySession(info, surface, targetLens = lens)
@@ -522,21 +630,38 @@ class MultiCameraCaptureManager(
 
         val dev = cameraDevice ?: return
         val session = captureSession ?: return
+        val handler = cameraHandler
 
-        try {
-            val chars = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, dev.id)
-            val requestBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(surface)
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-
-                applyPreviewZoomAndCrop(this, chars, dev.id, lens)
+        val updateAction = Runnable {
+            try {
+                val chars = CameraRepository.getCharacteristics(cameraManager, dev.id)
+                val requestBuilder = buildPreviewRequest(dev, surface, chars, lens)
+                session.setRepeatingRequest(requestBuilder.build(), previewCaptureCallback, handler)
+                triggerFast3AWarmup(dev, session, surface, lens)
+                Log.i(TAG, "Switched primary preview lens to: ${lens.name} (${lens.multiplier}x)")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to switch primary preview lens", e)
             }
-            session.setRepeatingRequest(requestBuilder.build(), previewCaptureCallback, cameraHandler)
-            triggerFast3AWarmup(dev, session, surface, lens)
-            Log.i(TAG, "Switched primary preview lens to: ${lens.name} (${lens.multiplier}x)")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to switch primary preview lens", e)
+        }
+        if (handler != null) {
+            handler.post(updateAction)
+        } else {
+            updateAction.run()
+        }
+    }
+
+    private fun buildPreviewRequest(
+        device: CameraDevice,
+        targetPreviewSurface: Surface,
+        chars: CameraCharacteristics,
+        lens: PhysicalLensInfo?
+    ): CaptureRequest.Builder {
+        return device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+            addTarget(targetPreviewSurface)
+            set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+            previewRequestConfigProvider?.invoke(this)
+            applyPreviewZoomAndCrop(this, chars, device.id, lens)
         }
     }
 
@@ -546,13 +671,8 @@ class MultiCameraCaptureManager(
                 currentPrimaryLens = activeLenses.find { it.type == LensType.WIDE } ?: activeLenses.firstOrNull()
             }
             val prim = currentPrimaryLens
-            val chars = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, device.id)
-            val requestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(targetPreviewSurface)
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                applyPreviewZoomAndCrop(this, chars, device.id, prim)
-            }
+            val chars = CameraRepository.getCharacteristics(cameraManager, device.id)
+            val requestBuilder = buildPreviewRequest(device, targetPreviewSurface, chars, prim)
             session.setRepeatingRequest(requestBuilder.build(), previewCaptureCallback, cameraHandler)
             triggerFast3AWarmup(device, session, targetPreviewSurface, prim)
             Log.i(TAG, "Started repeating preview with lens: ${prim?.name}")
@@ -658,44 +778,108 @@ class MultiCameraCaptureManager(
         }
     }
 
-    private fun applyManualConfig(
-        builder: CaptureRequest.Builder,
-        isPrimary: Boolean,
-        config: MultiCameraManualConfig?
+    internal data class AppliedManualControlSpec(
+        val afMode: Int,
+        val aeMode: Int,
+        val focusDistance: Float? = null,
+        val iso: Int? = null,
+        val exposureTimeNanos: Long? = null,
+        val evIndex: Int? = null,
+        val afRegion: MeteringRectangle? = null,
+        val aeRegion: MeteringRectangle? = null
+    )
+
+    internal fun configurePreviewStateForTesting(
+        logicalInfo: LogicalMultiCameraInfo,
+        lenses: List<PhysicalLensInfo>,
+        primaryLens: PhysicalLensInfo?,
+        standalonePrimaryId: String?
     ) {
+        currentLogicalInfo = logicalInfo
+        activeLenses = lenses
+        currentPrimaryLens = primaryLens
+        standalonePrimaryPhysicalId = standalonePrimaryId
+    }
+
+    internal fun resolveManualControlSpec(
+        isPrimary: Boolean,
+        config: MultiCameraManualConfig?,
+        isMeteringPrimary: Boolean = isPrimary
+    ): AppliedManualControlSpec {
         if (config == null) {
-            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-            return
+            return AppliedManualControlSpec(
+                afMode = CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
+                aeMode = CaptureRequest.CONTROL_AE_MODE_ON
+            )
         }
 
         val shouldApply = config.isLinked || isPrimary
         if (shouldApply) {
-            if (config.isManualIso || config.isManualShutter) {
-                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                if (config.isManualIso) {
-                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, config.iso)
-                }
-                if (config.isManualShutter) {
-                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, config.exposureTimeNanos)
-                }
+            val isManualAe = config.isManualIso || config.isManualShutter
+            val aeMode = if (isManualAe) CaptureRequest.CONTROL_AE_MODE_OFF else CaptureRequest.CONTROL_AE_MODE_ON
+            val aeRegion = if (!isManualAe && isMeteringPrimary) config.exposureMeteringRegion else null
+            val evIndex = if (!isManualAe && config.evIndex != 0) config.evIndex else null
+
+            val afMode: Int
+            val focusDistance: Float?
+            val afRegion: MeteringRectangle?
+            if (config.isManualFocus) {
+                afMode = CaptureRequest.CONTROL_AF_MODE_OFF
+                focusDistance = config.focusDistance
+                afRegion = null
+            } else if (isMeteringPrimary && config.focusMeteringRegion != null) {
+                afMode = CaptureRequest.CONTROL_AF_MODE_AUTO
+                focusDistance = null
+                afRegion = config.focusMeteringRegion
             } else {
-                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                if (config.evIndex != 0) {
-                    builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, config.evIndex)
-                }
+                afMode = CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                focusDistance = null
+                afRegion = null
             }
 
-            if (config.isManualFocus) {
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-                builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, config.focusDistance)
-            } else {
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-            }
+            return AppliedManualControlSpec(
+                afMode = afMode,
+                aeMode = aeMode,
+                focusDistance = focusDistance,
+                iso = if (isManualAe && config.isManualIso) config.iso else null,
+                exposureTimeNanos = if (isManualAe && config.isManualShutter) config.exposureTimeNanos else null,
+                evIndex = evIndex,
+                afRegion = afRegion,
+                aeRegion = aeRegion
+            )
         } else {
-            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+            val afRegion = if (isMeteringPrimary) config.focusMeteringRegion else null
+            val aeRegion = if (isMeteringPrimary) config.exposureMeteringRegion else null
+            val afMode = if (afRegion != null) {
+                CaptureRequest.CONTROL_AF_MODE_AUTO
+            } else {
+                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            }
+            return AppliedManualControlSpec(
+                afMode = afMode,
+                aeMode = CaptureRequest.CONTROL_AE_MODE_ON,
+                afRegion = afRegion,
+                aeRegion = aeRegion
+            )
         }
+    }
+
+    internal fun applyManualConfig(
+        builder: CaptureRequest.Builder,
+        isPrimary: Boolean,
+        config: MultiCameraManualConfig?,
+        isMeteringPrimary: Boolean = isPrimary
+    ) {
+        val spec = resolveManualControlSpec(isPrimary, config, isMeteringPrimary)
+        builder.set(CaptureRequest.CONTROL_AE_MODE, spec.aeMode)
+        spec.iso?.let { builder.set(CaptureRequest.SENSOR_SENSITIVITY, it) }
+        spec.exposureTimeNanos?.let { builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, it) }
+        spec.evIndex?.let { builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, it) }
+        spec.aeRegion?.let { builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(it)) }
+
+        builder.set(CaptureRequest.CONTROL_AF_MODE, spec.afMode)
+        spec.focusDistance?.let { builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, it) }
+        spec.afRegion?.let { builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(it)) }
     }
 
     private fun captureNativeLogical(
@@ -1072,7 +1256,8 @@ class MultiCameraCaptureManager(
                     rawReader?.surface?.let { addTarget(it) }
                     set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
                     val isPrimary = (lens.physicalId == currentPrimaryLens?.physicalId)
-                    applyManualConfig(this, isPrimary, manualConfig)
+                    val isMeteringPrimary = (lens.physicalId == (resolveActivePreviewPhysicalId() ?: currentPrimaryLens?.physicalId))
+                    applyManualConfig(this, isPrimary, manualConfig, isMeteringPrimary = isMeteringPrimary)
                 }
 
                 sess.capture(req.build(), object : CameraCaptureSession.CaptureCallback() {
@@ -1615,6 +1800,7 @@ class MultiCameraCaptureManager(
             openSessions.clear()
             openDevices.values.forEach { it.close() }
             openDevices.clear()
+            standalonePrimaryPhysicalId = null
 
             closeReaders()
         } catch (e: Exception) {
