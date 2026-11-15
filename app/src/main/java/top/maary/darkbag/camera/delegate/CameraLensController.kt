@@ -2,6 +2,7 @@ package top.maary.darkbag.camera.delegate
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -180,7 +181,7 @@ class CameraLensController(
                             host.currentLens = if (isCurrentlyNative) telePresets[1] else telePresets[0]
                         } else if (is1x) {
                             val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, null)
+                            val default1xFocal = resolveDefault1xFocal(prefs)
                             val presets1x = host.cameraRepository.get1xPresets(lens)
                             host.currentLens = presets1x.find { it.name == default1xFocal } ?: presets1x.firstOrNull() ?: lens
                         } else {
@@ -242,7 +243,7 @@ class CameraLensController(
                     CameraBentoDeckView.styleBentoLensButton(btn, isActive = true, isDigitalCrop = isDigitalCrop)
                 } else {
                     if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
-                        val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, null)
+                        val default1xFocal = resolveDefault1xFocal(prefs)
                         val presets1x = host.cameraRepository.get1xPresets(lens)
                         val defaultPreset = presets1x.find { it.name == default1xFocal } ?: presets1x.firstOrNull() ?: lens
                         btn.text = String.format("%.1fx", defaultPreset.multiplier)
@@ -423,7 +424,7 @@ class CameraLensController(
             val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
             val defaultLensId = prefs.getString(SettingsFragment.KEY_DEFAULT_LENS_ID, null)
-            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, null)
+            val default1xFocal = resolveDefault1xFocal(prefs)
 
             if (savedLensId != null) {
                 var found = newLenses.find { it.sensorId == savedLensId }
@@ -478,6 +479,19 @@ class CameraLensController(
                 }
                 initLensControls()
                 host.bindCameraUseCases()
+            }
+        }
+    }
+
+    private fun resolveDefault1xFocal(prefs: SharedPreferences): String? {
+        return try {
+            prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, null)
+        } catch (_: Exception) {
+            try {
+                val f = prefs.getFloat(SettingsFragment.KEY_DEFAULT_FOCAL_1X, 0f)
+                if (f > 0f) "${f.toInt()}mm" else null
+            } catch (_: Exception) {
+                null
             }
         }
     }

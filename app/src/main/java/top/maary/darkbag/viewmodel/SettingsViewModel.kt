@@ -65,6 +65,10 @@ class SettingsViewModel @JvmOverloads constructor(
         settingsRepository.setFlashMode(flashMode)
     }
 
+    fun updateFlashEnabled(enabled: Boolean) {
+        settingsRepository.setFlashEnabled(enabled)
+    }
+
     fun updateAntibandingMode(mode: String) {
         settingsRepository.setAntibandingMode(mode)
     }
@@ -97,6 +101,10 @@ class SettingsViewModel @JvmOverloads constructor(
 
     fun updateRawOutputFormatIndex(index: Int) {
         settingsRepository.setRawOutputFormatIndex(index)
+    }
+
+    fun updateRawOutputType(type: String) {
+        settingsRepository.setRawOutputType(type)
     }
 
     fun updateMultiCameraModeEnabled(enabled: Boolean) {

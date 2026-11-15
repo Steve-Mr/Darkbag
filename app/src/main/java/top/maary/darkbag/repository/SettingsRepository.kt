@@ -33,6 +33,49 @@ class SettingsRepository(context: Context) {
     fun current(): DarkbagPreferences = _preferences.value
 
     private fun readPreferencesFromDisk(): DarkbagPreferences {
+        val flashEnabled = try {
+            prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
+        } catch (_: Exception) {
+            try {
+                prefs.getString(SettingsFragment.KEY_FLASH_MODE, "off")?.equals("on", ignoreCase = true) ?: false
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        val rawFormatIndex = try {
+            prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
+        } catch (_: Exception) {
+            try {
+                val s = prefs.getString(SettingsFragment.KEY_RAW_OUTPUT_TYPE, null)
+                if (s != null && s.contains("Linear")) 1 else (s?.toIntOrNull() ?: 0)
+            } catch (_: Exception) {
+                0
+            }
+        }
+        val rawTypeName = if (rawFormatIndex == 1) "Linear DNG RAW (~36MB, Sabre/Merged)" else "Bayer CFA RAW (~12MB, Default)"
+
+        val defaultFocal1xStr = try {
+            prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, null)
+        } catch (_: Exception) {
+            null
+        }
+        val defaultFocal1xFloat = try {
+            prefs.getFloat(SettingsFragment.KEY_DEFAULT_FOCAL_1X, 0f)
+        } catch (_: Exception) {
+            defaultFocal1xStr?.filter { it.isDigit() || it == '.' }?.toFloatOrNull() ?: 0f
+        }
+
+        val burstCount = try {
+            prefs.getInt(SettingsFragment.KEY_HDR_BURST_COUNT, 5)
+        } catch (_: Exception) {
+            try {
+                prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5")?.toIntOrNull() ?: 5
+            } catch (_: Exception) {
+                5
+            }
+        }
+
         return DarkbagPreferences(
             targetLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None",
             activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None") ?: "None",
@@ -43,23 +86,12 @@ class SettingsRepository(context: Context) {
             enableManualControls = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, true),
             enableLutPreview = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, true),
             defaultLensId = prefs.getString(SettingsFragment.KEY_DEFAULT_LENS_ID, null),
-            defaultFocal1x = try {
-                prefs.getFloat(SettingsFragment.KEY_DEFAULT_FOCAL_1X, 0f)
-            } catch (_: Exception) {
-                0f
-            },
-            defaultFocal1xName = try {
-                prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, null)
-            } catch (_: Exception) {
-                null
-            },
+            defaultFocal1x = defaultFocal1xFloat,
+            defaultFocal1xName = defaultFocal1xStr ?: if (defaultFocal1xFloat > 0f) "${defaultFocal1xFloat.toInt()}mm" else null,
             antibandingMode = prefs.getString(SettingsFragment.KEY_ANTIBANDING, "Auto") ?: "Auto",
-            flashMode = prefs.getString(SettingsFragment.KEY_FLASH_MODE, "off") ?: "off",
-            hdrBurstCount = try {
-                prefs.getInt(SettingsFragment.KEY_HDR_BURST_COUNT, 5)
-            } catch (_: Exception) {
-                prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5")?.toIntOrNull() ?: 5
-            },
+            flashMode = if (flashEnabled) "on" else "off",
+            flashEnabled = flashEnabled,
+            hdrBurstCount = burstCount,
             hdrFusionMode = prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_AUTO) ?: SettingsFragment.HDR_FUSION_AUTO,
             burstProcessingStrategy = prefs.getString(SettingsFragment.KEY_BURST_PROCESSING_STRATEGY, SettingsFragment.BURST_STRATEGY_BALANCED) ?: SettingsFragment.BURST_STRATEGY_BALANCED,
             showHdrUnderexposureButton = prefs.getBoolean(SettingsFragment.KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, true),
@@ -78,7 +110,7 @@ class SettingsRepository(context: Context) {
             motionPhotoEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false),
             motionPhotoAudioEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, false),
             saveLocationEnabled = prefs.getBoolean(SettingsFragment.KEY_SAVE_LOCATION, false),
-            rawOutputType = prefs.getString(SettingsFragment.KEY_RAW_OUTPUT_TYPE, "Bayer CFA RAW (~12MB, Default)") ?: "Bayer CFA RAW (~12MB, Default)",
+            rawOutputType = rawTypeName,
             dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
             jpgStorageUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null),
             rawStorageUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null),
@@ -108,11 +140,7 @@ class SettingsRepository(context: Context) {
             multiCameraCountPref = prefs.getString(SettingsFragment.KEY_MULTI_CAMERA_COUNT_PREF, "auto_max") ?: "auto_max",
             multiCameraDualPair = prefs.getString(SettingsFragment.KEY_MULTI_CAMERA_DUAL_PAIR, "wide_ultrawide") ?: "wide_ultrawide",
             uiTier = prefs.getString(top.maary.darkbag.ui.CameraBentoDeckView.PREF_KEY_UI_TIER, "film") ?: "film",
-            rawOutputFormatIndex = try {
-                prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
-            } catch (_: Exception) {
-                0
-            }
+            rawOutputFormatIndex = rawFormatIndex
         )
     }
 
@@ -164,7 +192,12 @@ class SettingsRepository(context: Context) {
     }
 
     fun setFlashMode(flashMode: String) {
-        prefs.edit().putString(SettingsFragment.KEY_FLASH_MODE, flashMode).apply()
+        val enabled = flashMode.equals("on", ignoreCase = true)
+        prefs.edit().putBoolean(SettingsFragment.KEY_FLASH_MODE, enabled).apply()
+    }
+
+    fun setFlashEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(SettingsFragment.KEY_FLASH_MODE, enabled).apply()
     }
 
     fun setAntibandingMode(mode: String) {
@@ -207,6 +240,11 @@ class SettingsRepository(context: Context) {
     }
 
     fun setRawOutputFormatIndex(index: Int) {
+        prefs.edit().putInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, index).apply()
+    }
+
+    fun setRawOutputType(type: String) {
+        val index = if (type.contains("Linear")) 1 else 0
         prefs.edit().putInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, index).apply()
     }
 

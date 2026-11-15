@@ -268,7 +268,16 @@ class CameraTaskSpecAssembler(
             renderRecipe = renderRecipe,
             timing = request.timing,
             dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
-            rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0),
+            rawOutputType = try {
+                prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
+            } catch (_: Exception) {
+                try {
+                    val s = prefs.getString(SettingsFragment.KEY_RAW_OUTPUT_TYPE, null)
+                    if (s != null && s.contains("Linear")) 1 else (s?.toIntOrNull() ?: 0)
+                } catch (_: Exception) {
+                    0
+                }
+            },
             fusionMode = request.fusionModeOverride ?: resolveFusionModeInt(prefs),
             baseName = baseName,
             fullResJpgPath = fullResJpgFile.absolutePath,

@@ -70,5 +70,21 @@ class SettingsViewModelTest {
 
         viewModel.updateUiTier("PRO")
         assertEquals("PRO", viewModel.preferences.value.uiTier)
+
+        viewModel.updateFlashEnabled(true)
+        assertTrue(viewModel.preferences.value.flashEnabled)
+        assertEquals("on", viewModel.preferences.value.flashMode)
+
+        viewModel.updateFlashMode("off")
+        assertFalse(viewModel.preferences.value.flashEnabled)
+        assertEquals("off", viewModel.preferences.value.flashMode)
+
+        viewModel.updateRawOutputFormatIndex(1)
+        assertEquals(1, viewModel.preferences.value.rawOutputFormatIndex)
+        assertTrue(viewModel.preferences.value.rawOutputType.contains("Linear"))
+
+        viewModel.updateRawOutputType("Bayer CFA RAW")
+        assertEquals(0, viewModel.preferences.value.rawOutputFormatIndex)
+        assertTrue(viewModel.preferences.value.rawOutputType.contains("Bayer"))
     }
 }

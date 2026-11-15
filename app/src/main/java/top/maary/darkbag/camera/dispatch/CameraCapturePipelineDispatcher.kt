@@ -311,7 +311,15 @@ class CameraCapturePipelineDispatcher(
             } else {
                 config.digitalGain
             }
-            val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5").toIntOrNull() ?: 5
+            val burstSize = try {
+                prefs.getInt(SettingsFragment.KEY_HDR_BURST_COUNT, 5)
+            } catch (_: Exception) {
+                try {
+                    (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5").toIntOrNull() ?: 5
+                } catch (_: Exception) {
+                    5
+                }
+            }
 
             if (isFrame1Trigger) {
                 host.writeScopedHalfFrameStep(prefs, 1, captureStartTime, digitalGain = burstGain, flareType = hfMetadata?.flareType ?: -1)
