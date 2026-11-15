@@ -10,9 +10,9 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.sync.Semaphore
 import top.maary.darkbag.camera.video.CameraVideoController
 import top.maary.darkbag.databinding.CameraUiContainerBinding
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.modes.CaptureModeCoordinator
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.ExpressiveShutterButton
 import top.maary.darkbag.viewmodel.CameraViewModel
 
@@ -93,11 +93,11 @@ class CameraShutterController(
     }
 
     private fun startLongPressRecording() {
-        val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val action = SettingsRepository.getInstance(host.hostContext).current().shutterLongPressAction
         val hasAudio = ContextCompat.checkSelfPermission(host.hostContext, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
         videoController.handleShutterLongPress(
-            action = prefs.getString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, SettingsFragment.SHUTTER_LONG_PRESS_MP4),
+            action = action,
             isAudioGranted = hasAudio,
             shouldShowRationale = host.shouldShowAudioPermissionRationale(),
             onShowRationale = { onContinueSilent ->

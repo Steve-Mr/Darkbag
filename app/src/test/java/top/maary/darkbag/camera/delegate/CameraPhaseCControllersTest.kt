@@ -53,8 +53,6 @@ import top.maary.darkbag.camera.video.CameraVideoController
 import top.maary.darkbag.camera.video.CameraVideoHost
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.databinding.FragmentCameraBinding
-import top.maary.darkbag.fragments.CameraFragment
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.modes.CaptureModeCoordinator
@@ -62,6 +60,8 @@ import top.maary.darkbag.processor.HdrPlusStreamingBurst
 import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.rawvideo.RawVideoSessionManager
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.ExposureUtils
 import top.maary.darkbag.utils.HalfFrameSessionStore
@@ -76,7 +76,6 @@ import top.maary.darkbag.viewmodel.CameraViewModel
 class CameraPhaseCControllersTest {
 
     private lateinit var themedContext: Context
-    private lateinit var prefs: SharedPreferences
     private lateinit var fragmentBinding: FragmentCameraBinding
     private lateinit var uiBinding: CameraUiContainerBinding
     private lateinit var viewModel: CameraViewModel
@@ -86,8 +85,9 @@ class CameraPhaseCControllersTest {
     fun setUp() {
         val app = ApplicationProvider.getApplicationContext<Context>()
         themedContext = ContextThemeWrapper(app, R.style.AppTheme)
-        prefs = themedContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
+        themedContext.getSharedPreferences(PreferenceKeys.LEGACY_PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit()
+        SettingsRepository.resetForTest(themedContext)
+        SettingsRepository.getInstance(themedContext).awaitHydratedBlocking()
         fragmentBinding = FragmentCameraBinding.inflate(LayoutInflater.from(themedContext))
         val root = fragmentBinding.root as ConstraintLayout
         uiBinding = CameraUiContainerBinding.inflate(LayoutInflater.from(themedContext), root)
@@ -156,10 +156,10 @@ class CameraPhaseCControllersTest {
 
     @Test
     fun testHdrPlusController_restoreAndToggle() {
-        prefs.edit()
-            .putBoolean(SettingsFragment.KEY_FLASH_MODE, true)
-            .putBoolean(CameraFragment.KEY_HDR_PLUS_ENABLED, false)
-            .apply()
+        SettingsRepository.getInstance(themedContext).edit {
+            this[PreferenceKeys.FLASH_MODE] = true
+            this[PreferenceKeys.HDR_PLUS_ENABLED] = false
+        }
 
         val megaHost = FakeMegaHost()
         val lutController = CameraLutController(megaHost)
@@ -179,7 +179,7 @@ class CameraPhaseCControllersTest {
         uiBinding.hdrPlusPill?.performClick()
         assertTrue(uiBinding.hdrPlusSwitch!!.isChecked)
         assertTrue(viewModel.uiState.value.isHdrPlusEnabled)
-        assertTrue(prefs.getBoolean(CameraFragment.KEY_HDR_PLUS_ENABLED, false))
+        assertTrue(SettingsRepository.getInstance(themedContext).current().hdrPlusEnabled)
 
         // Enabling HDR+ clears flash
         assertFalse(megaHost.isFlashEnabled)
@@ -194,26 +194,30 @@ class CameraPhaseCControllersTest {
         val controller = CameraHdrPlusController(megaHost, lutController, lensController)
 
         // When HDR+ is disabled, clicking flashButton toggles flash mode
+        val repo = SettingsRepository.getInstance(themedContext)
         viewModel.setHdrPlusEnabled(false)
         megaHost.isFlashEnabled = false
         controller.bindFlashButton()
         uiBinding.flashButton?.performClick()
         assertTrue(megaHost.isFlashEnabled)
-        assertTrue(prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false))
+        assertTrue(repo.current().flashEnabled)
 
         // When HDR+ is enabled, clicking flashButton cycles underexposure mode instead
         viewModel.setHdrPlusEnabled(true)
-        val beforeMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)")
+        val beforeMode = repo.current().hdrUnderexposureMode
         uiBinding.flashButton?.performClick()
-        val afterMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)")
+        val afterMode = repo.current().hdrUnderexposureMode
         assertTrue(beforeMode != afterMode)
     }
 
     @Test
     fun testHdrPlusController_restoreWithLegacyStringFlashMode() {
-        prefs.edit()
-            .putString(SettingsFragment.KEY_FLASH_MODE, "on")
-            .apply()
+        SettingsRepository.resetForTest(themedContext)
+        themedContext.getSharedPreferences(PreferenceKeys.LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(PreferenceKeys.KEY_FLASH_MODE, "on")
+            .commit()
+        SettingsRepository.getInstance(themedContext).awaitHydratedBlocking()
 
         val megaHost = FakeMegaHost()
         val lutController = CameraLutController(megaHost)
@@ -226,9 +230,12 @@ class CameraPhaseCControllersTest {
 
     @Test
     fun testLensController_withFloatDefaultFocal1xDoesNotCrash() {
-        prefs.edit()
-            .putFloat(SettingsFragment.KEY_DEFAULT_FOCAL_1X, 28f)
-            .apply()
+        SettingsRepository.resetForTest(themedContext)
+        themedContext.getSharedPreferences(PreferenceKeys.LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putFloat(PreferenceKeys.KEY_DEFAULT_FOCAL_1X, 28f)
+            .commit()
+        SettingsRepository.getInstance(themedContext).awaitHydratedBlocking()
 
         val megaHost = FakeMegaHost()
         val lensController = CameraLensController(megaHost)
@@ -259,7 +266,7 @@ class CameraPhaseCControllersTest {
 
         uiBinding.motionPhotoButton?.performClick()
         assertTrue(controller.isEnabled)
-        assertTrue(prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false))
+        assertTrue(SettingsRepository.getInstance(themedContext).current().motionPhotoEnabled)
         assertTrue(viewModel.uiState.value.isMotionPhotoEnabled)
 
         // Switching to HALF_FRAME_SBS hides button because half-frame doesn't support motion photo
@@ -401,14 +408,15 @@ class CameraPhaseCControllersTest {
         assertFalse(modeController.isHalfFrameActive)
 
         // Stale HALF_FRAME_SBS preference without KEY_HALF_FRAME_MODE falls back to NORMAL
-        prefs.edit().putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, CaptureMode.HALF_FRAME_SBS.key).apply()
+        val repo = SettingsRepository.getInstance(themedContext)
+        repo.setActiveCaptureMode(CaptureMode.HALF_FRAME_SBS.key)
         assertEquals(CaptureMode.NORMAL, modeController.resolveActiveCaptureMode())
 
         // Enabling half-frame with cleared saved mode resolves HALF_FRAME_SBS and cycles SBS -> TB -> NORMAL
-        prefs.edit()
-            .remove(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE)
-            .putBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, true)
-            .apply()
+        repo.edit {
+            remove(PreferenceKeys.ACTIVE_CAPTURE_MODE)
+            this[PreferenceKeys.HALF_FRAME_MODE] = true
+        }
         modeController.resolveActiveCaptureMode()
         assertEquals(CaptureMode.HALF_FRAME_SBS, modeController.effectiveMode)
 
@@ -792,7 +800,7 @@ class CameraPhaseCControllersTest {
         override val halfFrameStep: Int = 0
         override var isHalfFrameUiAnimating: Boolean = false
         override var pendingVfSnapshot: Bitmap? = null
-        override fun readScopedHalfFrameState(prefs: SharedPreferences, requireFileForStep1: Boolean) {}
+        override fun readScopedHalfFrameState(requireFileForStep1: Boolean) {}
     }
 
     private class FakeGestureHost : CameraGestureHost {
@@ -948,11 +956,11 @@ class CameraPhaseCControllersTest {
         override fun hideProcessingAnimation() {}
         override fun updateMotionPhotoEncoder() {}
         override fun getCombinedOrientation(): Int = 0
-        override fun writeScopedHalfFrameStep(prefs: SharedPreferences, step: Int, captureTimeMillis: Long?, digitalGain: Float, flareType: Int) {}
+        override fun writeScopedHalfFrameStep(step: Int, captureTimeMillis: Long?, digitalGain: Float, flareType: Int) {}
         override fun getDigitalGainAndUpdateStep(timestamp: Long, isFrame1Trigger: Boolean, shutterClick: Long?): Float = 1.0f
         override fun resetBurstUi() {}
         override fun setGalleryThumbnail(filename: String?) {}
-        override fun triggerAutoBurst(prefs: SharedPreferences) {}
+        override fun triggerAutoBurst() {}
         override fun shouldShowAudioPermissionRationale(): Boolean {
             audioRationaleChecked = true
             return false

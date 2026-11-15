@@ -8,10 +8,10 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CompletableDeferred
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.CameraUiContainerBinding
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.motionphoto.MotionPhotoEncoder
 import top.maary.darkbag.processor.LutSurfaceProcessor
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.viewmodel.CameraViewModel
 import java.io.File
@@ -38,14 +38,15 @@ class CameraMotionPhotoController(private val host: CameraMotionPhotoHost) {
     var isEnabled = false
         private set
 
-    private val prefs get() = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+    private val settingsRepository by lazy { SettingsRepository.getInstance(host.hostContext) }
 
     /** Re-reads preferences and starts/stops the encoder + LUT encoder surface accordingly. */
     fun updateEncoder() {
         if (!host.isHostAdded) return
-        isEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false)
+        val snapshot = settingsRepository.current()
+        isEnabled = snapshot.motionPhotoEnabled
         host.cameraViewModel.setMotionPhotoEnabled(isEnabled)
-        val isAudioEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, false) &&
+        val isAudioEnabled = snapshot.motionPhotoAudioEnabled &&
             ContextCompat.checkSelfPermission(host.hostContext, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
 
@@ -79,7 +80,10 @@ class CameraMotionPhotoController(private val host: CameraMotionPhotoHost) {
     fun updateButton() {
         val btn = host.cameraUiContainerBinding?.motionPhotoButton ?: return
         val supportsMotion = host.effectiveCaptureMode.supportsMotionPhoto
-        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, host.cameraViewModel.uiState.value.uiTier)
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(
+            settingsRepository.current(),
+            host.cameraViewModel.uiState.value.uiTier
+        )
         if (!supportsMotion || !spec.showFilmRow || !spec.showMotionPhoto) {
             btn.visibility = View.GONE
             return
@@ -96,7 +100,7 @@ class CameraMotionPhotoController(private val host: CameraMotionPhotoHost) {
         btn.setOnClickListener {
             if (!host.effectiveCaptureMode.supportsMotionPhoto) return@setOnClickListener
             isEnabled = !isEnabled
-            prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO, isEnabled).apply()
+            settingsRepository.setMotionPhotoEnabled(isEnabled)
             updateEncoder()
         }
     }

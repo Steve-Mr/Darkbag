@@ -3,12 +3,15 @@ package top.maary.darkbag.utils
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.DarkbagDataStoreProvider
+import top.maary.darkbag.repository.PreferenceKeys
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
 
 class LutManager(private val context: Context) {
+
+    private val store by lazy { DarkbagDataStoreProvider.getStore(context) }
 
     data class LutItem(
         val file: File,
@@ -66,7 +69,7 @@ class LutManager(private val context: Context) {
     }
 
     /**
-     * Maps an associated Log curve to a valid KEY_TARGET_LOG value for SettingsFragment.LOG_CURVES.
+     * Maps an associated Log curve to a valid KEY_TARGET_LOG value for PreferenceKeys.LOG_CURVES.
      * Specifically, Rec.709 and Universal curves map to standard capture ("None" at index 0).
      */
     fun toTargetLogPreference(associatedLog: String?): String {
@@ -97,19 +100,18 @@ class LutManager(private val context: Context) {
     }
 
     fun getAssociatedLog(lutFileName: String): String? {
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(PREF_PREFIX_LUT_LOG + lutFileName, null)
+        return store.current()[PreferenceKeys.lutAssocLogKey(lutFileName)]
     }
 
     fun setAssociatedLog(lutFileName: String, logCurve: String?) {
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val editor = prefs.edit()
-        if (logCurve != null && logCurve != LOG_NONE) {
-            editor.putString(PREF_PREFIX_LUT_LOG + lutFileName, logCurve)
-        } else {
-            editor.remove(PREF_PREFIX_LUT_LOG + lutFileName)
+        val key = PreferenceKeys.lutAssocLogKey(lutFileName)
+        store.updateAsync { mutable ->
+            if (logCurve != null && logCurve != LOG_NONE) {
+                mutable[key] = logCurve
+            } else {
+                mutable.remove(key)
+            }
         }
-        editor.apply()
     }
 
     fun importLut(uri: Uri, associatedLog: String? = null): String? {

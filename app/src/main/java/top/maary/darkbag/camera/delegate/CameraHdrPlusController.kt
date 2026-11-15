@@ -5,8 +5,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.view.View
 import top.maary.darkbag.databinding.CameraUiContainerBinding
-import top.maary.darkbag.fragments.CameraFragment
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.LensInfo
@@ -36,20 +35,13 @@ class CameraHdrPlusController(
     private val lutController: CameraLutController,
     private val lensController: CameraLensController
 ) {
-    private val prefs get() = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+    private val settingsRepository by lazy { SettingsRepository.getInstance(host.hostContext) }
 
     /** Seeds the flash flag and HDR+ state from preferences (call once when the view is created). */
     fun restorePersistedState() {
-        host.isFlashEnabled = try {
-            prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
-        } catch (_: Exception) {
-            try {
-                prefs.getString(SettingsFragment.KEY_FLASH_MODE, "off")?.equals("on", ignoreCase = true) ?: false
-            } catch (_: Exception) {
-                false
-            }
-        }
-        host.cameraViewModel.setHdrPlusEnabled(prefs.getBoolean(CameraFragment.KEY_HDR_PLUS_ENABLED, true))
+        val current = settingsRepository.current()
+        host.isFlashEnabled = current.flashEnabled
+        host.cameraViewModel.setHdrPlusEnabled(current.hdrPlusEnabled)
     }
 
     fun updateHdrPlusUi() {
@@ -60,7 +52,10 @@ class CameraHdrPlusController(
 
     fun updateHdrPlusConstraints() {
         val binding = host.cameraUiContainerBinding ?: return
-        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, host.cameraViewModel.uiState.value.uiTier)
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(
+            settingsRepository.current(),
+            host.cameraViewModel.uiState.value.uiTier
+        )
         val showFlashButton = spec.showUnderexposure
 
         if (host.isHdrPlusEnabled) {
@@ -105,7 +100,7 @@ class CameraHdrPlusController(
             } else {
                 host.isFlashEnabled = !host.isFlashEnabled
                 host.cameraViewModel.setFlashEnabled(host.isFlashEnabled)
-                prefs.edit().putBoolean(SettingsFragment.KEY_FLASH_MODE, host.isFlashEnabled).apply()
+                settingsRepository.setFlashEnabled(host.isFlashEnabled)
                 lutController.updateFlashIcon(btn)
                 host.applyCameraControls()
             }
@@ -117,7 +112,7 @@ class CameraHdrPlusController(
         val binding = host.cameraUiContainerBinding ?: return
         binding.hdrPlusSwitch?.setOnCheckedChangeListener { _, isChecked ->
             host.cameraViewModel.setHdrPlusEnabled(isChecked)
-            prefs.edit().putBoolean(CameraFragment.KEY_HDR_PLUS_ENABLED, isChecked).apply()
+            settingsRepository.setHdrPlusEnabled(isChecked)
             updateHdrPlusUi()
             updateHdrPlusConstraints()
         }

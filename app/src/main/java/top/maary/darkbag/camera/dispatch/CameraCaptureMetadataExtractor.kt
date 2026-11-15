@@ -9,9 +9,9 @@ import android.util.Log
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.processor.SensorCalibrationHelper
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.DarkbagIdentity
 import top.maary.darkbag.utils.LensInfo
@@ -121,8 +121,7 @@ class CameraCaptureMetadataExtractor(
         }
 
         val saveLoc = try {
-            context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                ?.getBoolean(SettingsFragment.KEY_SAVE_LOCATION, false) == true
+            SettingsRepository.getInstance(context).current().saveLocationEnabled
         } catch (_: Exception) {
             false
         }

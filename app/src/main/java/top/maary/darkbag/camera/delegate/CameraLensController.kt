@@ -2,7 +2,6 @@ package top.maary.darkbag.camera.delegate
 
 import android.animation.ValueAnimator
 import android.content.Context
-import android.content.SharedPreferences
 import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -25,8 +24,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.databinding.FragmentCameraBinding
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.modes.CaptureModeCoordinator
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.LensInfo
@@ -71,9 +70,9 @@ class CameraLensController(
 ) {
     companion object {
         private const val TAG = "CameraLensController"
-        const val KEY_SELECTED_LENS_ID = "selected_lens_id"
     }
 
+    private val settingsRepository by lazy { SettingsRepository.getInstance(host.hostContext) }
     private var lensSwitchWatchdog: Job? = null
 
     fun updateLensControlRowPosition(animate: Boolean = true) {
@@ -180,8 +179,7 @@ class CameraLensController(
                             val isCurrentlyNative = oldLens?.sensorId == lens.sensorId
                             host.currentLens = if (isCurrentlyNative) telePresets[1] else telePresets[0]
                         } else if (is1x) {
-                            val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                            val default1xFocal = resolveDefault1xFocal(prefs)
+                            val default1xFocal = settingsRepository.current().defaultFocal1xName
                             val presets1x = host.cameraRepository.get1xPresets(lens)
                             host.currentLens = presets1x.find { it.name == default1xFocal } ?: presets1x.firstOrNull() ?: lens
                         } else {
@@ -207,11 +205,11 @@ class CameraLensController(
     }
 
     fun updateLensUI() {
-        val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, host.cameraViewModel.uiState.value.uiTier)
+        val currentPrefs = settingsRepository.current()
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(currentPrefs, host.cameraViewModel.uiState.value.uiTier)
         val showLensControls = spec.showLensControls
         host.currentLens?.let {
-            prefs.edit().putString(KEY_SELECTED_LENS_ID, it.sensorId).apply()
+            settingsRepository.setSelectedLensId(it.sensorId)
         }
 
         val binding = host.cameraUiContainerBinding ?: return
@@ -243,7 +241,7 @@ class CameraLensController(
                     CameraBentoDeckView.styleBentoLensButton(btn, isActive = true, isDigitalCrop = isDigitalCrop)
                 } else {
                     if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
-                        val default1xFocal = resolveDefault1xFocal(prefs)
+                        val default1xFocal = currentPrefs.defaultFocal1xName
                         val presets1x = host.cameraRepository.get1xPresets(lens)
                         val defaultPreset = presets1x.find { it.name == default1xFocal } ?: presets1x.firstOrNull() ?: lens
                         btn.text = String.format("%.1fx", defaultPreset.multiplier)
@@ -264,8 +262,7 @@ class CameraLensController(
 
     /** Enables/disables the camera-switch button depending on available facings and tier visibility. */
     fun updateCameraSwitchButton() {
-        val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, host.cameraViewModel.uiState.value.uiTier)
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(settingsRepository.current(), host.cameraViewModel.uiState.value.uiTier)
         val button = host.cameraUiContainerBinding?.cameraSwitchButtonAlt ?: return
         try {
             button.isEnabled = hasCameraFacing(CameraCharacteristics.LENS_FACING_BACK) &&
@@ -421,10 +418,10 @@ class CameraLensController(
         }
 
         if (updatedLens == null) {
-            val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
-            val defaultLensId = prefs.getString(SettingsFragment.KEY_DEFAULT_LENS_ID, null)
-            val default1xFocal = resolveDefault1xFocal(prefs)
+            val currentPrefs = settingsRepository.current()
+            val savedLensId = currentPrefs.selectedLensId
+            val defaultLensId = currentPrefs.defaultLensId
+            val default1xFocal = currentPrefs.defaultFocal1xName
 
             if (savedLensId != null) {
                 var found = newLenses.find { it.sensorId == savedLensId }
@@ -470,8 +467,7 @@ class CameraLensController(
             } else {
                 CameraCharacteristics.LENS_FACING_FRONT
             }
-            val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            prefs.edit().putInt(top.maary.darkbag.fragments.CameraFragment.KEY_LENS_FACING, host.lensFacing).apply()
+            settingsRepository.setLensFacing(host.lensFacing)
 
             host.lifecycleScope.launch {
                 kotlinx.coroutines.withContext(Dispatchers.Default) {
@@ -479,19 +475,6 @@ class CameraLensController(
                 }
                 initLensControls()
                 host.bindCameraUseCases()
-            }
-        }
-    }
-
-    private fun resolveDefault1xFocal(prefs: SharedPreferences): String? {
-        return try {
-            prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, null)
-        } catch (_: Exception) {
-            try {
-                val f = prefs.getFloat(SettingsFragment.KEY_DEFAULT_FOCAL_1X, 0f)
-                if (f > 0f) "${f.toInt()}mm" else null
-            } catch (_: Exception) {
-                null
             }
         }
     }

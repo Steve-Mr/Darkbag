@@ -128,7 +128,7 @@ class RawVideoPlayer(
         val hdr = header
         val effectiveLog = currentEditConfig?.log ?: hdr?.activeLogName?.takeIf { it.isNotBlank() }
         cachedTargetLogIndex = if (effectiveLog != null && effectiveLog != "None") {
-            top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(effectiveLog).takeIf { it >= 0 } ?: -1
+            top.maary.darkbag.repository.PreferenceKeys.LOG_CURVES.indexOf(effectiveLog).takeIf { it >= 0 } ?: -1
         } else -1
 
         val effectiveLut = currentEditConfig?.lut ?: hdr?.activeLutName?.takeIf { it.isNotBlank() }

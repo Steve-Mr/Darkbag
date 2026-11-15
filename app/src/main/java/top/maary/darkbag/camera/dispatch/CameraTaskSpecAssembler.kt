@@ -1,14 +1,12 @@
 package top.maary.darkbag.camera.dispatch
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureResult
 import android.os.Build
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import top.maary.darkbag.calibration.LensCalibrationStore
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.BasicAdjustments
 import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.models.EditConfig
@@ -18,6 +16,8 @@ import top.maary.darkbag.pipeline.model.CaptureTaskSpec
 import top.maary.darkbag.pipeline.model.HardwareProfile
 import top.maary.darkbag.pipeline.model.RenderRecipe
 import top.maary.darkbag.pipeline.sink.CaptureSink
+import top.maary.darkbag.repository.DarkbagPreferences
+import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.utils.DarkbagIdentity
 import top.maary.darkbag.utils.HalfFrameManager
 import top.maary.darkbag.utils.HalfFrameSessionStore
@@ -63,7 +63,8 @@ data class TaskSpecAssemblyRequest(
     val timing: StandardTimingTracker? = null,
     val motionPhotoMp4Path: String? = null,
     val motionPhotoStillPtsUs: Long = 0L,
-    val sink: CaptureSink? = null
+    val sink: CaptureSink? = null,
+    val saveRawOverride: Boolean? = null
 )
 
 /**
@@ -108,11 +109,11 @@ class CameraTaskSpecAssembler(
         return if (lutFile.exists()) lutFile.absolutePath else null
     }
 
-    fun resolveFusionModeInt(prefs: SharedPreferences): Int {
-        return when (prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_SABRE)) {
-            SettingsFragment.HDR_FUSION_SPATIAL_RCD -> 1
-            SettingsFragment.HDR_FUSION_SABRE -> 2
-            SettingsFragment.HDR_FUSION_CLASSIC -> 3
+    fun resolveFusionModeInt(prefs: DarkbagPreferences): Int {
+        return when (prefs.hdrFusionMode) {
+            PreferenceKeys.HDR_FUSION_SPATIAL_RCD -> 1
+            PreferenceKeys.HDR_FUSION_SABRE -> 2
+            PreferenceKeys.HDR_FUSION_CLASSIC -> 3
             else -> 0
         }
     }
@@ -181,20 +182,20 @@ class CameraTaskSpecAssembler(
 
     fun buildEditConfigAndRecipe(
         context: Context,
-        prefs: SharedPreferences,
+        prefs: DarkbagPreferences,
         digitalGain: Float,
         hfMetadata: HalfFrameManager.Metadata?,
         zoomFactor: Float,
         faithfulHighlights: Boolean
     ): Pair<EditConfig, RenderRecipe> {
-        val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
-        val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
-        val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+        val targetLogName = prefs.targetLog
+        val targetLogIndex = PreferenceKeys.LOG_CURVES.indexOf(targetLogName)
+        val activeLutName = prefs.activeLut.takeIf { it != "None" }
         val nativeLutPath = resolveNativeLutPath(context, activeLutName)
-        val colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
+        val colorEngineMode = prefs.colorEngineMode
 
         val editConfig = EditConfig(
-            log = targetLogName ?: "None",
+            log = targetLogName,
             lut = activeLutName ?: "None",
             digitalGain = digitalGain,
             adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
@@ -235,7 +236,7 @@ class CameraTaskSpecAssembler(
 
     fun assemble(
         context: Context,
-        prefs: SharedPreferences,
+        prefs: DarkbagPreferences,
         request: TaskSpecAssemblyRequest,
         frameTimestampOverride: Long? = null
     ): CaptureTaskSpec {
@@ -267,25 +268,16 @@ class CameraTaskSpecAssembler(
             frameMetadata = frameMeta,
             renderRecipe = renderRecipe,
             timing = request.timing,
-            dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
-            rawOutputType = try {
-                prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
-            } catch (_: Exception) {
-                try {
-                    val s = prefs.getString(SettingsFragment.KEY_RAW_OUTPUT_TYPE, null)
-                    if (s != null && s.contains("Linear")) 1 else (s?.toIntOrNull() ?: 0)
-                } catch (_: Exception) {
-                    0
-                }
-            },
+            dngCompressionMode = prefs.dngCompressionMode,
+            rawOutputType = prefs.rawOutputFormatIndex,
             fusionMode = request.fusionModeOverride ?: resolveFusionModeInt(prefs),
             baseName = baseName,
             fullResJpgPath = fullResJpgFile.absolutePath,
             linearDngPath = linearDngFile.absolutePath,
-            saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true),
-            saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true),
-            jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null),
-            rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null),
+            saveJpg = prefs.saveJpg,
+            saveRaw = request.saveRawOverride ?: prefs.saveRaw,
+            jpgFolderUri = prefs.jpgStorageUri,
+            rawFolderUri = prefs.rawStorageUri,
             hfMetadata = request.hfMetadata?.copy(digitalGain = request.digitalGain),
             motionPhotoMp4Path = request.motionPhotoMp4Path,
             motionPhotoStillPtsUs = request.motionPhotoStillPtsUs,

@@ -9,9 +9,9 @@ import android.widget.Toast
 import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.CameraUiContainerBinding
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.modes.CaptureModeCoordinator
 import top.maary.darkbag.processor.LutSurfaceProcessor
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.ui.ProDialWheelView
 import top.maary.darkbag.viewmodel.CameraUiTier
@@ -63,11 +63,11 @@ interface CameraTierHost {
 class CameraTierController(
     private val host: CameraTierHost
 ) {
+    private val settingsRepository by lazy { SettingsRepository.getInstance(host.context) }
     var activeManualTab: String? = null
         private set
 
     fun initManualControls() {
-        val prefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val binding = host.binding ?: return
         binding.btnProMode?.visibility = View.GONE
 
@@ -76,7 +76,7 @@ class CameraTierController(
             dismissFloatingOverlays()
         }
 
-        host.isMultiCameraManualLinked = prefs.getBoolean("pref_multi_camera_manual_linked", true)
+        host.isMultiCameraManualLinked = settingsRepository.current().multiCameraManualLinked
 
         // Level 2: Pill Click Listeners (Toggles Level 3 Dial Panel)
         binding.pillFocus?.setOnClickListener { toggleManualTab("Focus") }
@@ -87,8 +87,7 @@ class CameraTierController(
         // Multi-Camera Sync Link Button
         binding.btnProLink?.setOnClickListener { v ->
             host.isMultiCameraManualLinked = !host.isMultiCameraManualLinked
-            val p = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            p.edit().putBoolean("pref_multi_camera_manual_linked", host.isMultiCameraManualLinked).apply()
+            settingsRepository.setMultiCameraManualLinked(host.isMultiCameraManualLinked)
             v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
             val msg = if (host.isMultiCameraManualLinked) {
                 host.context.getString(R.string.multi_camera_link_synced)
@@ -134,8 +133,7 @@ class CameraTierController(
 
     fun updateTierUi(tier: CameraUiTier = host.cameraViewModel.uiState.value.uiTier) {
         val binding = host.binding ?: return
-        val prefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, tier)
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(settingsRepository.current(), tier)
         val isAnyManual = host.isManualFocus || host.isManualIso || host.isManualShutter || host.currentEvIndex != 0
         CameraBentoDeckView.bindTierState(
             binding = binding,
@@ -207,15 +205,15 @@ class CameraTierController(
     }
 
     fun updateFocusPeakingState() {
-        val prefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val snapshot = settingsRepository.current()
         val currentTier = host.cameraViewModel.uiState.value.uiTier
-        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, currentTier)
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(snapshot, currentTier)
         val isBadgeVisible = spec.enableFocusPeaking
         val badge = host.binding?.btnFocusPeakingBadge
 
         badge?.visibility = if (isBadgeVisible) View.VISIBLE else View.GONE
         if (isBadgeVisible) {
-            val isActive = prefs.getBoolean(SettingsFragment.KEY_FOCUS_PEAKING_ACTIVE, true)
+            val isActive = snapshot.focusPeakingActive
             if (badge != null) {
                 CameraBentoDeckView.styleFocusPeakingBadge(badge, isActive)
             }
@@ -468,9 +466,8 @@ class CameraTierController(
             }
         } else {
             // Restore bento_film_row to View.VISIBLE if enabled in current tier spec
-            val prefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val uiTier = host.cameraViewModel.uiState.value.uiTier
-            val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, uiTier)
+            val spec = CameraBentoDeckView.resolveVisibilitySpec(settingsRepository.current(), uiTier)
             binding.bentoFilmRow?.visibility = if (spec.showFilmRow) View.VISIBLE else View.GONE
             CameraBentoDeckView.applyDynamicRowHeights(binding)
         }
@@ -635,14 +632,12 @@ class CameraTierController(
         val uiBinding = host.binding ?: return
         uiBinding.btnFocusPeakingBadge?.setOnClickListener { btn ->
             btn.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-            val prefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val currentState = prefs.getBoolean(SettingsFragment.KEY_FOCUS_PEAKING_ACTIVE, true)
-            prefs.edit().putBoolean(SettingsFragment.KEY_FOCUS_PEAKING_ACTIVE, !currentState).apply()
+            val currentState = settingsRepository.current().focusPeakingActive
+            settingsRepository.setFocusPeakingActive(!currentState)
             updateFocusPeakingState()
         }
 
-        val initialPrefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val savedTier = CameraUiTier.fromKey(initialPrefs.getString(CameraBentoDeckView.PREF_KEY_UI_TIER, CameraUiTier.FILM.key))
+        val savedTier = CameraUiTier.fromKey(settingsRepository.current().uiTier)
         host.cameraViewModel.setUiTier(savedTier)
         updateTierUi(savedTier)
 
@@ -657,11 +652,10 @@ class CameraTierController(
                 android.transition.TransitionManager.beginDelayedTransition(r, transition)
             }
             val nextTier = host.cameraViewModel.uiState.value.uiTier.next()
-            val tierPrefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            tierPrefs.edit().putString(CameraBentoDeckView.PREF_KEY_UI_TIER, nextTier.key).apply()
+            settingsRepository.setUiTier(nextTier.key)
             host.cameraViewModel.setUiTier(nextTier)
             updateTierUi(nextTier)
-            val nextSpec = CameraBentoDeckView.resolveVisibilitySpec(tierPrefs, nextTier)
+            val nextSpec = CameraBentoDeckView.resolveVisibilitySpec(settingsRepository.current(), nextTier)
             if (!nextSpec.showProModule && activeManualTab != null) {
                 host.cameraViewModel.setActiveManualTab(null)
                 updateBentoFolding(isDialOpen = false)
@@ -682,9 +676,8 @@ class CameraTierController(
         beforeApply: () -> Unit
     ) {
         val uiBinding = host.binding ?: return
-        val prefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val currentTier = host.cameraViewModel.uiState.value.uiTier
-        val spec = CameraBentoDeckView.resolveVisibilitySpec(prefs, currentTier)
+        val spec = CameraBentoDeckView.resolveVisibilitySpec(settingsRepository.current(), currentTier)
 
         val hasMultipleLenses = (uiBinding.lensControlsContainer?.childCount ?: 0) > 1
         val isAnyManual = host.isManualFocus || host.isManualIso || host.isManualShutter || host.currentEvIndex != 0

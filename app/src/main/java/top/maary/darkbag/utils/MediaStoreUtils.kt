@@ -15,7 +15,7 @@
  */
 
 package top.maary.darkbag.utils
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.SettingsRepository
 
 import android.content.ContentUris
 import android.content.Context
@@ -60,10 +60,11 @@ class MediaStoreUtils(private val context: Context) {
     }
 
     suspend fun getLatestAppImage(): Uri? = withContext(Dispatchers.IO) {
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val settingsRepository = SettingsRepository.getInstance(context)
+        val snapshot = settingsRepository.current()
 
         // 1. Check persisted last captured URI (most accurate and fast)
-        val lastUriStr = prefs.getString(SettingsFragment.KEY_LAST_CAPTURE_URI, null)
+        val lastUriStr = snapshot.lastCaptureUri
         if (lastUriStr != null) {
             val lastUri = Uri.parse(lastUriStr)
             if (verifyUriExists(context, lastUri) && isDarkbagAssetUri(context, lastUri)) {
@@ -73,8 +74,8 @@ class MediaStoreUtils(private val context: Context) {
 
         // 2. Search prioritized SAF folders across JPG and RAW (photos and videos)
         val safFolders = listOfNotNull(
-            prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null),
-            prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+            snapshot.jpgStorageUri,
+            snapshot.rawStorageUri
         ).distinct()
 
         val allSafFiles = mutableListOf<androidx.documentfile.provider.DocumentFile>()
@@ -93,14 +94,14 @@ class MediaStoreUtils(private val context: Context) {
 
         val latestSaf = allSafFiles.maxByOrNull { it.lastModified() }?.uri
         if (latestSaf != null) {
-            prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, latestSaf.toString()).apply()
+            settingsRepository.setLastCaptureUri(latestSaf.toString())
             return@withContext latestSaf
         }
 
         // 3. Fallback to MediaStore filtered by Pictures/Darkbag
         val latestMediaStore = getLatestMediaStoreImageFiltered(context)
         if (latestMediaStore != null) {
-            prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, latestMediaStore.toString()).apply()
+            settingsRepository.setLastCaptureUri(latestMediaStore.toString())
         }
         return@withContext latestMediaStore
     }

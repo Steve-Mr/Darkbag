@@ -5,7 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.fragment.app.FragmentManager
 import top.maary.darkbag.R
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.ui.BentoSelectionBottomSheet
 import top.maary.darkbag.ui.RawVideoSettingsBottomSheet
 import top.maary.darkbag.utils.CameraRepository
@@ -62,8 +62,8 @@ class SettingsSheetDispatcher(
 
     fun showTargetLogSheet(onLutIncompatible: (String) -> Unit) {
         val currentLog = viewModel.preferences.value.targetLog
-        val selectedIndex = SettingsFragment.LOG_CURVES.indexOf(currentLog).coerceAtLeast(0)
-        val logOptions = SettingsFragment.LOG_CURVES.map { curve ->
+        val selectedIndex = PreferenceKeys.LOG_CURVES.indexOf(currentLog).coerceAtLeast(0)
+        val logOptions = PreferenceKeys.LOG_CURVES.map { curve ->
             if (curve == "None") context.getString(R.string.pref_option_none) else curve
         }
         BentoSelectionBottomSheet.show(
@@ -73,7 +73,7 @@ class SettingsSheetDispatcher(
             selectedIndex = selectedIndex,
             badge = "LOG"
         ) { which ->
-            val selected = SettingsFragment.LOG_CURVES[which]
+            val selected = PreferenceKeys.LOG_CURVES[which]
             val activeLut = viewModel.preferences.value.activeLut.takeIf { it != "None" }
             val lutMgr = LutManager(context)
             if (activeLut != null && !lutMgr.isLutCompatibleWithLog(activeLut, selected)) {
@@ -86,7 +86,7 @@ class SettingsSheetDispatcher(
 
     fun showHdrFusionSheet() {
         val savedFusion = viewModel.preferences.value.hdrFusionMode
-        val selectedIndex = SettingsFragment.HDR_FUSION_MODES.indexOf(savedFusion).coerceAtLeast(0)
+        val selectedIndex = PreferenceKeys.HDR_FUSION_MODES.indexOf(savedFusion).coerceAtLeast(0)
         BentoSelectionBottomSheet.show(
             fragmentManager = fragmentManager,
             title = context.getString(R.string.pref_hdr_fusion_mode_title),
@@ -105,31 +105,31 @@ class SettingsSheetDispatcher(
                 context.getString(R.string.pref_fusion_classic_desc)
             )
         ) { which ->
-            viewModel.updateHdrFusionMode(SettingsFragment.HDR_FUSION_MODES[which])
+            viewModel.updateHdrFusionMode(PreferenceKeys.HDR_FUSION_MODES[which])
         }
     }
 
     fun showHdrBurstSheet() {
         val savedBurst = viewModel.preferences.value.hdrBurstCount.toString()
-        val selectedIndex = SettingsFragment.BURST_SIZES.indexOf(savedBurst).coerceAtLeast(0)
+        val selectedIndex = PreferenceKeys.BURST_SIZES.indexOf(savedBurst).coerceAtLeast(0)
         BentoSelectionBottomSheet.show(
             fragmentManager = fragmentManager,
             title = context.getString(R.string.pref_burst_frames),
-            options = SettingsFragment.BURST_SIZES.map { context.getString(R.string.pref_burst_frames_count_format, it) },
+            options = PreferenceKeys.BURST_SIZES.map { context.getString(R.string.pref_burst_frames_count_format, it) },
             selectedIndex = selectedIndex,
             badge = "BURST"
         ) { which ->
-            viewModel.updateHdrBurstCount(SettingsFragment.BURST_SIZES[which].toIntOrNull() ?: 5)
+            viewModel.updateHdrBurstCount(PreferenceKeys.BURST_SIZES[which].toIntOrNull() ?: 5)
         }
     }
 
     fun showUnderexposureSheet() {
         val saved = viewModel.preferences.value.hdrUnderexposureMode
-        val selectedIndex = SettingsFragment.HDR_UNDEREXPOSURE_MODES.indexOf(saved).coerceAtLeast(0)
+        val selectedIndex = PreferenceKeys.HDR_UNDEREXPOSURE_MODES.indexOf(saved).coerceAtLeast(0)
         BentoSelectionBottomSheet.show(
             fragmentManager = fragmentManager,
             title = context.getString(R.string.pref_hdr_underexposure),
-            options = SettingsFragment.HDR_UNDEREXPOSURE_MODES.map { mode ->
+            options = PreferenceKeys.HDR_UNDEREXPOSURE_MODES.map { mode ->
                 when {
                     mode == "Off" -> context.getString(R.string.pref_option_off)
                     mode.startsWith("Dynamic") -> context.getString(R.string.pref_option_dynamic)
@@ -139,16 +139,16 @@ class SettingsSheetDispatcher(
             selectedIndex = selectedIndex,
             badge = "EXPOSURE"
         ) { which ->
-            viewModel.updateHdrUnderexposureMode(SettingsFragment.HDR_UNDEREXPOSURE_MODES[which])
+            viewModel.updateHdrUnderexposureMode(PreferenceKeys.HDR_UNDEREXPOSURE_MODES[which])
         }
     }
 
     fun showColorEngineSheet() {
-        val savedIndex = viewModel.preferences.value.colorEngineMode.coerceIn(0, SettingsFragment.COLOR_ENGINE_MODES.size - 1)
+        val savedIndex = viewModel.preferences.value.colorEngineMode.coerceIn(0, PreferenceKeys.COLOR_ENGINE_MODES.size - 1)
         BentoSelectionBottomSheet.show(
             fragmentManager = fragmentManager,
             title = context.getString(R.string.pref_color_engine_mode),
-            options = SettingsFragment.COLOR_ENGINE_MODES,
+            options = PreferenceKeys.COLOR_ENGINE_MODES,
             selectedIndex = savedIndex,
             badge = "MATRIX"
         ) { which ->
@@ -158,11 +158,11 @@ class SettingsSheetDispatcher(
 
     fun showAntibandingSheet() {
         val saved = viewModel.preferences.value.antibandingMode
-        val selectedIndex = SettingsFragment.ANTIBANDING_MODES.indexOf(saved).coerceAtLeast(0)
+        val selectedIndex = PreferenceKeys.ANTIBANDING_MODES.indexOf(saved).coerceAtLeast(0)
         BentoSelectionBottomSheet.show(
             fragmentManager = fragmentManager,
             title = context.getString(R.string.pref_antibanding),
-            options = SettingsFragment.ANTIBANDING_MODES.map { mode ->
+            options = PreferenceKeys.ANTIBANDING_MODES.map { mode ->
                 when (mode) {
                     "Auto" -> context.getString(R.string.pref_option_auto)
                     "Off" -> context.getString(R.string.pref_option_off)
@@ -172,13 +172,13 @@ class SettingsSheetDispatcher(
             selectedIndex = selectedIndex,
             badge = "FLICKER"
         ) { which ->
-            viewModel.updateAntibandingMode(SettingsFragment.ANTIBANDING_MODES[which])
+            viewModel.updateAntibandingMode(PreferenceKeys.ANTIBANDING_MODES[which])
         }
     }
 
     fun showBurstStrategySheet() {
         val saved = viewModel.preferences.value.burstProcessingStrategy
-        val selectedIndex = SettingsFragment.BURST_PROCESSING_STRATEGIES.indexOf(saved).coerceAtLeast(0)
+        val selectedIndex = PreferenceKeys.BURST_PROCESSING_STRATEGIES.indexOf(saved).coerceAtLeast(0)
         BentoSelectionBottomSheet.show(
             fragmentManager = fragmentManager,
             title = context.getString(R.string.pref_burst_processing_strategy),
@@ -189,13 +189,13 @@ class SettingsSheetDispatcher(
             selectedIndex = selectedIndex,
             badge = "QUEUE"
         ) { which ->
-            viewModel.updateBurstProcessingStrategy(SettingsFragment.BURST_PROCESSING_STRATEGIES[which])
+            viewModel.updateBurstProcessingStrategy(PreferenceKeys.BURST_PROCESSING_STRATEGIES[which])
         }
     }
 
     fun showShutterLongPressSheet(onAudioPermissionNeeded: () -> Unit) {
         val saved = viewModel.preferences.value.shutterLongPressAction
-        val selectedIndex = SettingsFragment.SHUTTER_LONG_PRESS_OPTIONS.indexOf(saved).coerceAtLeast(0)
+        val selectedIndex = PreferenceKeys.SHUTTER_LONG_PRESS_OPTIONS.indexOf(saved).coerceAtLeast(0)
         BentoSelectionBottomSheet.show(
             fragmentManager = fragmentManager,
             title = context.getString(R.string.pref_shutter_long_press_action),
@@ -207,9 +207,9 @@ class SettingsSheetDispatcher(
             selectedIndex = selectedIndex,
             badge = "SHUTTER"
         ) { which ->
-            val selectedAction = SettingsFragment.SHUTTER_LONG_PRESS_OPTIONS[which]
+            val selectedAction = PreferenceKeys.SHUTTER_LONG_PRESS_OPTIONS[which]
             viewModel.updateShutterLongPressAction(selectedAction)
-            if (selectedAction == SettingsFragment.SHUTTER_LONG_PRESS_MP4 || selectedAction == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
+            if (selectedAction == PreferenceKeys.SHUTTER_LONG_PRESS_MP4 || selectedAction == PreferenceKeys.SHUTTER_LONG_PRESS_RAW_VIDEO) {
                 onAudioPermissionNeeded()
             }
         }
@@ -247,7 +247,7 @@ class SettingsSheetDispatcher(
     }
 
     fun showDngCompressionSheet() {
-        val savedIndex = viewModel.preferences.value.dngCompressionMode.coerceIn(0, SettingsFragment.DNG_COMPRESSION_MODES.size - 1)
+        val savedIndex = viewModel.preferences.value.dngCompressionMode.coerceIn(0, PreferenceKeys.DNG_COMPRESSION_MODES.size - 1)
         BentoSelectionBottomSheet.show(
             fragmentManager = fragmentManager,
             title = context.getString(R.string.pref_dng_compression),

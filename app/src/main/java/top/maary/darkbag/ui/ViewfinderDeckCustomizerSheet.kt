@@ -11,7 +11,8 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.databinding.SheetViewfinderCustomizerBinding
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.viewmodel.CameraUiTier
 
 /**
@@ -27,11 +28,10 @@ object ViewfinderDeckCustomizerSheet {
         val deckBinding = CameraUiContainerBinding.inflate(inflater, binding.previewDeckHost)
         dialog.setContentView(binding.root)
 
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        var activePreviewTier = CameraUiTier.fromKey(
-            prefs.getString(CameraBentoDeckView.PREF_KEY_UI_TIER, CameraUiTier.FILM.key)
-        )
-        val initialSpec = CameraBentoDeckView.resolveVisibilitySpec(prefs, activePreviewTier)
+        val settingsRepository = SettingsRepository.getInstance(context)
+        val initialSnapshot = settingsRepository.current()
+        var activePreviewTier = CameraUiTier.fromKey(initialSnapshot.uiTier)
+        val initialSpec = CameraBentoDeckView.resolveVisibilitySpec(initialSnapshot, activePreviewTier)
 
         fun buildCurrentSpec(): CameraBentoDeckView.DeckVisibilitySpec {
             return CameraBentoDeckView.DeckVisibilitySpec(
@@ -64,7 +64,7 @@ object ViewfinderDeckCustomizerSheet {
             CameraBentoDeckView.bindAuthenticPreview(
                 binding = deckBinding,
                 context = context,
-                prefs = prefs,
+                prefs = settingsRepository.current(),
                 spec = spec
             )
             binding.previewFocusPeakingBadge.visibility = if (spec.enableFocusPeaking) View.VISIBLE else View.GONE
@@ -72,18 +72,18 @@ object ViewfinderDeckCustomizerSheet {
 
         fun persistCurrentSwitchesAsCustom() {
             activePreviewTier = CameraUiTier.CUSTOM
-            prefs.edit()
-                .putBoolean(SettingsFragment.KEY_SHOW_LENS_CONTROLS, binding.switchLensControls.isChecked)
-                .putBoolean(SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, binding.switchCameraSwitch.isChecked)
-                .putBoolean(SettingsFragment.KEY_SHOW_SETTINGS_BUTTON, binding.switchSettingsButton.isChecked)
-                .putBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, binding.switchLutSwitcher.isChecked)
-                .putBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, binding.switchHdrPlus.isChecked)
-                .putBoolean(SettingsFragment.KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, binding.switchUnderexposure.isChecked)
-                .putBoolean(SettingsFragment.KEY_SHOW_MODE_SWITCH_BUTTON, binding.switchModeSwitch.isChecked)
-                .putBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, binding.switchManualControls.isChecked)
-                .putBoolean(SettingsFragment.KEY_EXP_FOCUS_PEAKING, binding.switchFocusPeaking.isChecked)
-                .putString(CameraBentoDeckView.PREF_KEY_UI_TIER, CameraUiTier.CUSTOM.key)
-                .apply()
+            settingsRepository.edit {
+                this[PreferenceKeys.SHOW_LENS_CONTROLS] = binding.switchLensControls.isChecked
+                this[PreferenceKeys.SHOW_CAMERA_SWITCH_BUTTON] = binding.switchCameraSwitch.isChecked
+                this[PreferenceKeys.SHOW_SETTINGS_BUTTON] = binding.switchSettingsButton.isChecked
+                this[PreferenceKeys.SHOW_LUT_SWITCHER] = binding.switchLutSwitcher.isChecked
+                this[PreferenceKeys.SHOW_HDR_PLUS_SWITCH] = binding.switchHdrPlus.isChecked
+                this[PreferenceKeys.SHOW_HDR_UNDEREXPOSURE_BUTTON] = binding.switchUnderexposure.isChecked
+                this[PreferenceKeys.SHOW_MODE_SWITCH_BUTTON] = binding.switchModeSwitch.isChecked
+                this[PreferenceKeys.MANUAL_CONTROLS] = binding.switchManualControls.isChecked
+                this[PreferenceKeys.EXP_FOCUS_PEAKING] = binding.switchFocusPeaking.isChecked
+                this[PreferenceKeys.UI_TIER] = CameraUiTier.CUSTOM.key
+            }
             updatePreview(animate = true)
             onUpdated()
         }
@@ -124,7 +124,7 @@ object ViewfinderDeckCustomizerSheet {
         fun applyTemplateFromTier(templateTier: CameraUiTier) {
             isBulkUpdating = true
             try {
-                val templateSpec = CameraBentoDeckView.resolveVisibilitySpec(prefs, templateTier)
+                val templateSpec = CameraBentoDeckView.resolveVisibilitySpec(settingsRepository.current(), templateTier)
                 binding.switchLensControls.isChecked = templateSpec.showLensControls
                 binding.switchCameraSwitch.isChecked = templateSpec.showCameraSwitch
                 binding.switchSettingsButton.isChecked = templateSpec.showSettingsButton

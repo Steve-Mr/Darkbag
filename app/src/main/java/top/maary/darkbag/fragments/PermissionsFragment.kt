@@ -19,7 +19,6 @@ package top.maary.darkbag.fragments
 import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.net.Uri
@@ -43,6 +42,8 @@ import kotlinx.coroutines.launch
 import top.maary.darkbag.MainActivity
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentPermissionsBinding
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.LocationHelper
 import top.maary.darkbag.utils.LutManager
 
@@ -59,7 +60,7 @@ class PermissionsFragment : Fragment() {
     private var _binding: FragmentPermissionsBinding? = null
     private val binding get() = _binding!!
 
-    private lateinit var prefs: SharedPreferences
+    private lateinit var settingsRepository: SettingsRepository
     private lateinit var lutManager: LutManager
 
     private var currentStep = 1
@@ -97,10 +98,10 @@ class PermissionsFragment : Fragment() {
         val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (fineGranted || coarseGranted) {
-            prefs.edit().putBoolean(SettingsFragment.KEY_SAVE_LOCATION, true).apply()
+            settingsRepository.setSaveLocationEnabled(true)
             binding.switchSaveLocation.isChecked = true
         } else {
-            prefs.edit().putBoolean(SettingsFragment.KEY_SAVE_LOCATION, false).apply()
+            settingsRepository.setSaveLocationEnabled(false)
             binding.switchSaveLocation.isChecked = false
             Toast.makeText(requireContext(), R.string.location_permission_denied, Toast.LENGTH_SHORT).show()
         }
@@ -126,11 +127,11 @@ class PermissionsFragment : Fragment() {
         if (uri == null) return@registerForActivityResult
         val importedFileName = lutManager.importLut(uri, selectedPairingLog)
         if (importedFileName != null) {
-            prefs.edit()
-                .putString(SettingsFragment.KEY_TARGET_LOG, selectedPairingLog)
-                .putString(SettingsFragment.KEY_ACTIVE_LUT, importedFileName)
-                .putBoolean(SettingsFragment.KEY_SAVE_JPG, true)
-                .apply()
+            settingsRepository.edit {
+                this[PreferenceKeys.TARGET_LOG] = selectedPairingLog
+                this[PreferenceKeys.ACTIVE_LUT] = importedFileName
+                this[PreferenceKeys.SAVE_JPG] = true
+            }
 
             binding.layoutPairingResult.visibility = View.VISIBLE
             binding.tvPairingDesc.text = getString(R.string.onboarding_recipe_imported_count, importedFileName, selectedPairingLog)
@@ -142,14 +143,17 @@ class PermissionsFragment : Fragment() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        settingsRepository = SettingsRepository.getInstance(requireContext())
         lutManager = LutManager(requireContext())
         forceOnboarding = arguments?.getBoolean("force_onboarding", false) ?: false
 
-        // Fast zero-delay routing for returning users who already completed onboarding
-        val isPlaygroundStartup = prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA) == SettingsFragment.STARTUP_PLAYGROUND
-        if (!forceOnboarding && prefs.getBoolean(SettingsFragment.KEY_ONBOARDING_COMPLETED, false) && (isPlaygroundStartup || hasPermissions(requireContext()))) {
-            routeStartup()
+        // Fast zero-delay routing for returning users when DataStore is already hydrated
+        if (!forceOnboarding && settingsRepository.isHydrated) {
+            val current = settingsRepository.current()
+            val isPlaygroundStartup = current.defaultStartupPage == PreferenceKeys.STARTUP_PLAYGROUND
+            if (current.onboardingCompleted && (isPlaygroundStartup || hasPermissions(requireContext()))) {
+                routeStartup()
+            }
         }
     }
 
@@ -170,6 +174,25 @@ class PermissionsFragment : Fragment() {
         setupBottomActionDock()
 
         goToStep(1)
+
+        if (!settingsRepository.isHydrated) {
+            viewLifecycleOwner.lifecycleScope.launch {
+                settingsRepository.awaitHydrated()
+                if (!isAdded) return@launch
+                val current = settingsRepository.current()
+                val isPlaygroundStartup = current.defaultStartupPage == PreferenceKeys.STARTUP_PLAYGROUND
+                if (!forceOnboarding && current.onboardingCompleted && (isPlaygroundStartup || hasPermissions(requireContext()))) {
+                    routeStartup()
+                    return@launch
+                }
+                if (_binding != null) {
+                    setupStep1StartupAndPermissions()
+                    setupStep2FormatsAndOptics()
+                    setupStep3RecipePairing()
+                    setupStep4ViewfinderTier()
+                }
+            }
+        }
     }
 
     private fun applyEdgeToEdgeInsets() {
@@ -198,7 +221,7 @@ class PermissionsFragment : Fragment() {
 
         binding.btnHeaderSkip.setOnClickListener {
             val cameraGranted = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-            if (!cameraGranted && prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA) == SettingsFragment.STARTUP_CAMERA) {
+            if (!cameraGranted && settingsRepository.current().defaultStartupPage == PreferenceKeys.STARTUP_CAMERA) {
                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
             } else {
                 finishOnboarding()
@@ -210,17 +233,17 @@ class PermissionsFragment : Fragment() {
     // Step 1: Startup Module & Permissions
     // =========================================================================
     private fun setupStep1StartupAndPermissions() {
-        val defaultStartup = prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA) ?: SettingsFragment.STARTUP_CAMERA
+        val defaultStartup = settingsRepository.current().defaultStartupPage
         updateStartupModuleCards(defaultStartup)
 
         binding.cardStartupCamera.setOnClickListener {
-            prefs.edit().putString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA).apply()
-            updateStartupModuleCards(SettingsFragment.STARTUP_CAMERA)
+            settingsRepository.setDefaultStartupPage(PreferenceKeys.STARTUP_CAMERA)
+            updateStartupModuleCards(PreferenceKeys.STARTUP_CAMERA)
         }
 
         binding.cardStartupPlayground.setOnClickListener {
-            prefs.edit().putString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_PLAYGROUND).apply()
-            updateStartupModuleCards(SettingsFragment.STARTUP_PLAYGROUND)
+            settingsRepository.setDefaultStartupPage(PreferenceKeys.STARTUP_PLAYGROUND)
+            updateStartupModuleCards(PreferenceKeys.STARTUP_PLAYGROUND)
         }
 
         binding.tilePermCamera.setOnClickListener {
@@ -262,7 +285,7 @@ class PermissionsFragment : Fragment() {
         val colorOnPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimaryContainer, colorPrimary)
         val colorOnTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnTertiaryContainer, colorTertiary)
 
-        val isCamera = selectedMode == SettingsFragment.STARTUP_CAMERA
+        val isCamera = selectedMode == PreferenceKeys.STARTUP_CAMERA
         updateCardSquircle(
             card = binding.cardStartupCamera,
             isSelected = isCamera,
@@ -326,8 +349,9 @@ class PermissionsFragment : Fragment() {
     // Step 2: Formats & Optics
     // =========================================================================
     private fun setupStep2FormatsAndOptics() {
-        binding.cbSaveJpg.isChecked = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
-        binding.cbSaveRaw.isChecked = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
+        val current = settingsRepository.current()
+        binding.cbSaveJpg.isChecked = current.saveJpg
+        binding.cbSaveRaw.isChecked = if (settingsRepository.hasExplicitKey(PreferenceKeys.SAVE_RAW)) current.saveRaw else true
 
         fun updateFormatCards() {
             var isJpg = binding.cbSaveJpg.isChecked
@@ -338,10 +362,10 @@ class PermissionsFragment : Fragment() {
                 binding.cbSaveJpg.isChecked = true
             }
 
-            prefs.edit()
-                .putBoolean(SettingsFragment.KEY_SAVE_JPG, isJpg)
-                .putBoolean(SettingsFragment.KEY_SAVE_RAW, isRaw)
-                .apply()
+            settingsRepository.edit {
+                this[PreferenceKeys.SAVE_JPG] = isJpg
+                this[PreferenceKeys.SAVE_RAW] = isRaw
+            }
 
             val colorPrimary = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
             val colorPrimaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
@@ -377,28 +401,19 @@ class PermissionsFragment : Fragment() {
         updateFormatCards()
 
         // 1.0x Focal length base (24mm, 28mm, 35mm)
-        val savedFocal = try {
-            prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm") ?: "24mm"
-        } catch (_: Exception) {
-            try {
-                val f = prefs.getFloat(SettingsFragment.KEY_DEFAULT_FOCAL_1X, 24f)
-                if (f > 0f) "${f.toInt()}mm" else "24mm"
-            } catch (_: Exception) {
-                "24mm"
-            }
-        }
+        val savedFocal = current.defaultFocal1xName ?: "24mm"
         updateFocalTiles(savedFocal)
 
         binding.tileFocal24.setOnClickListener {
-            prefs.edit().putString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm").apply()
+            settingsRepository.setDefaultFocal1x("24mm")
             updateFocalTiles("24mm")
         }
         binding.tileFocal28.setOnClickListener {
-            prefs.edit().putString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "28mm").apply()
+            settingsRepository.setDefaultFocal1x("28mm")
             updateFocalTiles("28mm")
         }
         binding.tileFocal35.setOnClickListener {
-            prefs.edit().putString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "35mm").apply()
+            settingsRepository.setDefaultFocal1x("35mm")
             updateFocalTiles("35mm")
         }
 
@@ -408,14 +423,13 @@ class PermissionsFragment : Fragment() {
             binding.cardMotionPhotoAudioHint.visibility = if (motionEnabled) View.VISIBLE else View.GONE
         }
 
-        val motionEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false)
-        binding.switchMotionPhoto.isChecked = motionEnabled
+        binding.switchMotionPhoto.isChecked = current.motionPhotoEnabled
         binding.switchMotionPhoto.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO, isChecked).apply()
+            settingsRepository.setMotionPhotoEnabled(isChecked)
             updateMotionPhotoAudioVisibility(isChecked)
         }
 
-        binding.switchMotionPhotoAudio.isChecked = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true)
+        binding.switchMotionPhotoAudio.isChecked = current.motionPhotoAudioEnabled
         binding.switchMotionPhotoAudio.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
                 if (ContextCompat.checkSelfPermission(
@@ -426,16 +440,16 @@ class PermissionsFragment : Fragment() {
                     audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
             }
-            prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, isChecked).apply()
+            settingsRepository.setMotionPhotoAudioEnabled(isChecked)
         }
-        updateMotionPhotoAudioVisibility(motionEnabled)
+        updateMotionPhotoAudioVisibility(current.motionPhotoEnabled)
 
-        val hasLoc = LocationHelper.hasPermission(requireContext()) && prefs.getBoolean(SettingsFragment.KEY_SAVE_LOCATION, false)
+        val hasLoc = LocationHelper.hasPermission(requireContext()) && current.saveLocationEnabled
         binding.switchSaveLocation.isChecked = hasLoc
         binding.switchSaveLocation.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
                 if (LocationHelper.hasPermission(requireContext())) {
-                    prefs.edit().putBoolean(SettingsFragment.KEY_SAVE_LOCATION, true).apply()
+                    settingsRepository.setSaveLocationEnabled(true)
                 } else {
                     val perms = mutableListOf(
                         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -447,7 +461,7 @@ class PermissionsFragment : Fragment() {
                     locationPermissionLauncher.launch(perms.toTypedArray())
                 }
             } else {
-                prefs.edit().putBoolean(SettingsFragment.KEY_SAVE_LOCATION, false).apply()
+                settingsRepository.setSaveLocationEnabled(false)
             }
         }
     }
@@ -509,9 +523,9 @@ class PermissionsFragment : Fragment() {
         }
 
         // Live preview switch
-        binding.switchLivePreview.isChecked = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, true)
+        binding.switchLivePreview.isChecked = settingsRepository.current().enableLutPreview
         binding.switchLivePreview.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, isChecked).apply()
+            settingsRepository.setLivePreview(isChecked)
         }
 
         updateLogButtonsState()
@@ -532,34 +546,34 @@ class PermissionsFragment : Fragment() {
             updateCardSquircle(binding.tileTierFilm, tier == "FILM", colorPrimaryContainer, colorPrimary, colorSurface, colorOutlineVariant)
             updateCardSquircle(binding.tileTierPro, tier == "PRO", colorPrimaryContainer, colorPrimary, colorSurface, colorOutlineVariant)
 
-            val editor = prefs.edit()
-            when (tier) {
-                "PS" -> {
-                    editor.putBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
-                    editor.putBoolean(SettingsFragment.KEY_EXP_FOCUS_PEAKING, false)
-                    editor.putBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, false)
-                    editor.putBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, false)
-                    editor.putBoolean(SettingsFragment.KEY_SHOW_MODE_SWITCH_BUTTON, false)
-                    binding.tvTierDesc.text = getString(R.string.onboarding_tier_ps_desc)
-                }
-                "FILM" -> {
-                    editor.putBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
-                    editor.putBoolean(SettingsFragment.KEY_EXP_FOCUS_PEAKING, false)
-                    editor.putBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, true)
-                    editor.putBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, true)
-                    editor.putBoolean(SettingsFragment.KEY_SHOW_MODE_SWITCH_BUTTON, true)
-                    binding.tvTierDesc.text = getString(R.string.onboarding_tier_film_desc)
-                }
-                "PRO" -> {
-                    editor.putBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, true)
-                    editor.putBoolean(SettingsFragment.KEY_EXP_FOCUS_PEAKING, true)
-                    editor.putBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, true)
-                    editor.putBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, true)
-                    editor.putBoolean(SettingsFragment.KEY_SHOW_MODE_SWITCH_BUTTON, true)
-                    binding.tvTierDesc.text = getString(R.string.onboarding_tier_pro_desc)
+            settingsRepository.edit {
+                when (tier) {
+                    "PS" -> {
+                        this[PreferenceKeys.MANUAL_CONTROLS] = false
+                        this[PreferenceKeys.EXP_FOCUS_PEAKING] = false
+                        this[PreferenceKeys.SHOW_LUT_SWITCHER] = false
+                        this[PreferenceKeys.SHOW_HDR_PLUS_SWITCH] = false
+                        this[PreferenceKeys.SHOW_MODE_SWITCH_BUTTON] = false
+                        binding.tvTierDesc.text = getString(R.string.onboarding_tier_ps_desc)
+                    }
+                    "FILM" -> {
+                        this[PreferenceKeys.MANUAL_CONTROLS] = false
+                        this[PreferenceKeys.EXP_FOCUS_PEAKING] = false
+                        this[PreferenceKeys.SHOW_LUT_SWITCHER] = true
+                        this[PreferenceKeys.SHOW_HDR_PLUS_SWITCH] = true
+                        this[PreferenceKeys.SHOW_MODE_SWITCH_BUTTON] = true
+                        binding.tvTierDesc.text = getString(R.string.onboarding_tier_film_desc)
+                    }
+                    "PRO" -> {
+                        this[PreferenceKeys.MANUAL_CONTROLS] = true
+                        this[PreferenceKeys.EXP_FOCUS_PEAKING] = true
+                        this[PreferenceKeys.SHOW_LUT_SWITCHER] = true
+                        this[PreferenceKeys.SHOW_HDR_PLUS_SWITCH] = true
+                        this[PreferenceKeys.SHOW_MODE_SWITCH_BUTTON] = true
+                        binding.tvTierDesc.text = getString(R.string.onboarding_tier_pro_desc)
+                    }
                 }
             }
-            editor.apply()
         }
 
         binding.tileTierPs.setOnClickListener { updateUiTierSelection("PS") }
@@ -568,22 +582,22 @@ class PermissionsFragment : Fragment() {
 
         // Shutter Hold Action Toggle
         fun updateShutterHoldText() {
-            val currentAction = prefs.getString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, SettingsFragment.SHUTTER_LONG_PRESS_MP4)
+            val currentAction = settingsRepository.current().shutterLongPressAction
             binding.tvShutterHoldValue.text = when (currentAction) {
-                SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO -> "RAW Video"
-                SettingsFragment.SHUTTER_LONG_PRESS_DISABLED -> "Disabled"
+                PreferenceKeys.SHUTTER_LONG_PRESS_RAW_VIDEO -> "RAW Video"
+                PreferenceKeys.SHUTTER_LONG_PRESS_DISABLED -> "Disabled"
                 else -> "Standard MP4"
             }
         }
 
         binding.tileShutterHoldAction.setOnClickListener {
-            val currentAction = prefs.getString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, SettingsFragment.SHUTTER_LONG_PRESS_MP4)
+            val currentAction = settingsRepository.current().shutterLongPressAction
             val nextAction = when (currentAction) {
-                SettingsFragment.SHUTTER_LONG_PRESS_MP4 -> SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO
-                SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO -> SettingsFragment.SHUTTER_LONG_PRESS_DISABLED
-                else -> SettingsFragment.SHUTTER_LONG_PRESS_MP4
+                PreferenceKeys.SHUTTER_LONG_PRESS_MP4 -> PreferenceKeys.SHUTTER_LONG_PRESS_RAW_VIDEO
+                PreferenceKeys.SHUTTER_LONG_PRESS_RAW_VIDEO -> PreferenceKeys.SHUTTER_LONG_PRESS_DISABLED
+                else -> PreferenceKeys.SHUTTER_LONG_PRESS_MP4
             }
-            prefs.edit().putString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, nextAction).apply()
+            settingsRepository.setShutterLongPressAction(nextAction)
             updateShutterHoldText()
         }
 
@@ -596,12 +610,12 @@ class PermissionsFragment : Fragment() {
             }
         }
 
-        val useInternalViewer = prefs.getBoolean(SettingsFragment.KEY_USE_INTERNAL_VIEWER, true)
+        val useInternalViewer = settingsRepository.current().useInternalViewer
         binding.switchUseInternalViewer.isChecked = useInternalViewer
         updateViewerDescription(useInternalViewer)
 
         binding.switchUseInternalViewer.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(SettingsFragment.KEY_USE_INTERNAL_VIEWER, isChecked).apply()
+            settingsRepository.setUseInternalViewer(isChecked)
             updateViewerDescription(isChecked)
         }
 
@@ -669,7 +683,7 @@ class PermissionsFragment : Fragment() {
     }
 
     private fun finishOnboarding() {
-        prefs.edit().putBoolean(SettingsFragment.KEY_ONBOARDING_COMPLETED, true).apply()
+        settingsRepository.setOnboardingCompleted(true)
         routeStartup()
     }
 
@@ -710,8 +724,8 @@ class PermissionsFragment : Fragment() {
             }
 
             // If no specific intent, check default startup page preference
-            val defaultStartup = prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA)
-            if (defaultStartup == SettingsFragment.STARTUP_PLAYGROUND) {
+            val defaultStartup = settingsRepository.current().defaultStartupPage
+            if (defaultStartup == PreferenceKeys.STARTUP_PLAYGROUND) {
                 navController.navigate(PermissionsFragmentDirections.actionPermissionsToPlaygroundGallery())
             } else {
                 navController.navigate(PermissionsFragmentDirections.actionPermissionsToCamera())

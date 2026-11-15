@@ -2,7 +2,6 @@ package top.maary.darkbag.camera.delegate
 
 import android.app.ActivityManager
 import android.content.Context
-import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
@@ -24,7 +23,6 @@ import top.maary.darkbag.camera.dispatch.CameraMultiCaptureDispatcher
 import top.maary.darkbag.camera.session.CameraHardwareStreamController
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.databinding.FragmentCameraBinding
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.modes.CaptureModeCoordinator
@@ -33,6 +31,9 @@ import top.maary.darkbag.modes.ModeExecutionContext
 import top.maary.darkbag.pipeline.sink.CaptureSink
 import top.maary.darkbag.processor.HdrPlusRequestManager
 import top.maary.darkbag.processor.LutSurfaceProcessor
+import top.maary.darkbag.repository.DarkbagPreferences
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.utils.DualLensPairPreference
 import top.maary.darkbag.utils.HalfFrameManager
@@ -95,8 +96,8 @@ class CameraModeController(
     private var lastMemInfoTime = 0L
     private val cachedMemInfo = ActivityManager.MemoryInfo()
 
-    private val prefs: SharedPreferences
-        get() = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+    private val settingsRepo: SettingsRepository
+        get() = SettingsRepository.getInstance(host.hostContext)
 
     /** Active coordinator's mode, falling back to (and activating) the persisted mode. */
     val effectiveMode: CaptureMode
@@ -118,21 +119,24 @@ class CameraModeController(
 
     /** Validates the persisted mode against current prefs/hardware, persists and activates it. */
     fun resolveActiveCaptureMode(): CaptureMode {
-        val prefs = prefs
-        val isHalfFramePref = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
-        val canUseMultiCam = canUseMultiCamera(prefs)
-        val isMultiCamPref = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false) ||
-            prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
+        val current = settingsRepo.current()
+        val isHalfFramePref = current.halfFrameMode
+        val canUseMultiCam = canUseMultiCamera(current)
+        val isMultiCamPref = current.multiCameraModeEnabled || current.multiCameraForceEnable
 
-        val savedModeKey = prefs.getString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, null)
+        val hasExplicitMode = settingsRepo.hasExplicitKey(PreferenceKeys.ACTIVE_CAPTURE_MODE)
+        val savedModeKey = if (hasExplicitMode) current.activeCaptureMode else null
         val requestedMode = if (savedModeKey != null) {
             CaptureMode.fromKey(savedModeKey) ?: CaptureMode.NORMAL
         } else {
             when {
                 isMultiCamPref && canUseMultiCam && !isHalfFramePref -> CaptureMode.MULTI_CAMERA
                 isHalfFramePref -> {
-                    val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
-                    if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) CaptureMode.HALF_FRAME_TB else CaptureMode.HALF_FRAME_SBS
+                    if (current.halfFrameLayout == PreferenceKeys.HALF_FRAME_LAYOUT_TB) {
+                        CaptureMode.HALF_FRAME_TB
+                    } else {
+                        CaptureMode.HALF_FRAME_SBS
+                    }
                 }
                 else -> CaptureMode.NORMAL
             }
@@ -144,40 +148,41 @@ class CameraModeController(
             else -> CaptureMode.NORMAL
         }
         if (savedModeKey != validatedMode.key) {
-            prefs.edit().putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, validatedMode.key).apply()
+            settingsRepo.setActiveCaptureMode(validatedMode.key)
         }
         updateActiveCoordinator(validatedMode)
         return validatedMode
     }
 
-    private fun canUseMultiCamera(prefs: SharedPreferences): Boolean {
-        val forceEnable = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
-        val isMultiCamPref = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
+    private fun canUseMultiCamera(current: DarkbagPreferences): Boolean {
+        val forceEnable = current.multiCameraForceEnable
+        val isMultiCamPref = current.multiCameraModeEnabled
         return (isMultiCamPref || forceEnable) && MultiCameraHelper.isMultiCameraSupported(host.hostContext, forceEnable)
     }
 
     /** Advances to the next enabled mode (Normal → Half-frame SBS/TB → Multi-camera → Normal). */
     fun cycleCaptureMode() {
         if (host.isBurstActive) return
-        val prefs = prefs
+        val current = settingsRepo.current()
         val currentMode = resolveActiveCaptureMode()
         val availableModes = mutableListOf(CaptureMode.NORMAL)
-        if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)) {
+        if (current.halfFrameMode) {
             availableModes += CaptureMode.HALF_FRAME_SBS
             availableModes += CaptureMode.HALF_FRAME_TB
         }
-        if (canUseMultiCamera(prefs)) availableModes += CaptureMode.MULTI_CAMERA
+        if (canUseMultiCamera(current)) availableModes += CaptureMode.MULTI_CAMERA
 
         val index = availableModes.indexOf(currentMode)
         val nextMode = availableModes[if (index != -1 && index < availableModes.size - 1) index + 1 else 0]
 
-        val editor = prefs.edit().putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, nextMode.key)
-        when (nextMode) {
-            CaptureMode.HALF_FRAME_SBS -> editor.putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
-            CaptureMode.HALF_FRAME_TB -> editor.putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_TB)
-            else -> Unit
+        settingsRepo.edit {
+            this[PreferenceKeys.ACTIVE_CAPTURE_MODE] = nextMode.key
+            when (nextMode) {
+                CaptureMode.HALF_FRAME_SBS -> this[PreferenceKeys.HALF_FRAME_LAYOUT] = PreferenceKeys.HALF_FRAME_LAYOUT_SBS
+                CaptureMode.HALF_FRAME_TB -> this[PreferenceKeys.HALF_FRAME_LAYOUT] = PreferenceKeys.HALF_FRAME_LAYOUT_TB
+                else -> Unit
+            }
         }
-        editor.apply()
 
         updateActiveCoordinator(nextMode)
         host.onCaptureModeCycled(currentMode != nextMode)
@@ -209,7 +214,7 @@ class CameraModeController(
 
     /** Falls back to Normal mode and refreshes the mode tile (multi-camera unsupported / failed). */
     private fun fallBackToNormalMode() {
-        prefs.edit().putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, CaptureMode.NORMAL.key).apply()
+        settingsRepo.setActiveCaptureMode(CaptureMode.NORMAL.key)
         updateActiveCoordinator(CaptureMode.NORMAL)
         host.cameraUiContainerBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
     }
@@ -217,7 +222,7 @@ class CameraModeController(
     /** Opens the logical multi-camera session; returns false when the device cannot do it. */
     fun bindMultiCameraSession(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false
-        val prefs = prefs
+        val current = settingsRepo.current()
         val logicalInfo = MultiCameraHelper.getLogicalMultiCameraInfo(host.hostContext)
         if (logicalInfo == null) {
             Log.w(TAG, "Multi-camera requested but not supported on device, disabling multi-camera mode")
@@ -225,9 +230,9 @@ class CameraModeController(
             return false
         }
         Log.d(TAG, "Binding Multi-Camera Session with logical camera: ${logicalInfo.logicalCameraId}")
-        val countPref = MultiCameraCountPreference.fromKey(prefs.getString(SettingsFragment.KEY_MULTI_CAMERA_COUNT_PREF, null))
-        val pairPref = DualLensPairPreference.fromKey(prefs.getString(SettingsFragment.KEY_MULTI_CAMERA_DUAL_PAIR, null))
-        val saveRaw = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_SAVE_RAW, false)
+        val countPref = MultiCameraCountPreference.fromKey(current.multiCameraCountPref)
+        val pairPref = DualLensPairPreference.fromKey(current.multiCameraDualPair)
+        val saveRaw = current.multiCameraSaveRaw
 
         host.lifecycleScope.launch(Dispatchers.Main) {
             parts.stream.closeCamera2()
@@ -282,18 +287,15 @@ class CameraModeController(
     private val executionContext: ModeExecutionContext by lazy {
         object : ModeExecutionContext {
             override val context: Context get() = host.hostContext
-            override val preferences: SharedPreferences get() = prefs
+            override val settingsRepository: SettingsRepository get() = settingsRepo
             override val isHdrPlusEnabled: Boolean get() = host.isHdrPlusEnabled
             override val isRawSupported: Boolean get() = host.isRawSupported
             override val deviceOrientationDegrees: Int get() = host.deviceOrientationDegrees
 
             override fun canTriggerCapture(): Boolean {
                 if (host.isBurstActive) return false
-                val strategy = prefs.getString(
-                    SettingsFragment.KEY_BURST_PROCESSING_STRATEGY,
-                    SettingsFragment.BURST_STRATEGY_BALANCED
-                )
-                val maxQueue = if (strategy == SettingsFragment.BURST_STRATEGY_AGGRESSIVE) 8 else 3
+                val strategy = settingsRepo.current().burstProcessingStrategy
+                val maxQueue = if (strategy == PreferenceKeys.BURST_STRATEGY_AGGRESSIVE) 8 else 3
                 val memInfo = getThrottledMemoryInfo(host.hostContext)
                 if (HdrPlusRequestManager.canAcceptNewTask(maxQueue, host.hostContext, memInfo)) return true
                 val pending = HdrPlusRequestManager.pendingTasksCount.value

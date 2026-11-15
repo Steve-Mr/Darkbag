@@ -29,12 +29,15 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.NavOptions
 import androidx.navigation.fragment.NavHostFragment
 import top.maary.darkbag.databinding.ActivityMainBinding
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.ShareUtils
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,6 +73,13 @@ class MainActivity : AppCompatActivity() {
         setContentView(activityMainBinding.root)
 
         setupFloatingToolbar()
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                SettingsRepository.getInstance(this@MainActivity).preferences.collect {
+                    updateFloatingToolbarVisibility()
+                }
+            }
+        }
         if (savedInstanceState == null) {
             handleIntent(intent)
         }
@@ -141,9 +151,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateFloatingToolbarVisibility() {
-        val prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
-        val enablePlayground = prefs.getBoolean(SettingsFragment.KEY_ENABLE_PLAYGROUND, true)
+        val current = SettingsRepository.getInstance(this).current()
+        val enableCamera = current.enableCamera
+        val enablePlayground = current.enablePlayground
 
         val toolbarLayout = activityMainBinding.floatingToolbar
         val btnCamera = activityMainBinding.floatingToolbarButtonCamera
@@ -194,9 +204,10 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     // Fallback to default destination if no valid DNG file was imported
                     if (navController.currentDestination?.id == R.id.permissions_fragment) {
-                        val prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                        val defaultStartup = prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA)
-                        if (defaultStartup == SettingsFragment.STARTUP_PLAYGROUND) {
+                        val settingsRepo = SettingsRepository.getInstance(this@MainActivity)
+                        settingsRepo.awaitHydrated()
+                        val defaultStartup = settingsRepo.current().defaultStartupPage
+                        if (defaultStartup == PreferenceKeys.STARTUP_PLAYGROUND) {
                             navController.navigate(R.id.playground_gallery_fragment)
                         } else {
                             navController.navigate(R.id.camera_fragment)

@@ -3,7 +3,6 @@ package top.maary.darkbag.fragments
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -103,6 +102,7 @@ import top.maary.darkbag.processor.HdrPlusStreamingBurst
 import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.processor.StreamingBufferPool
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.ExposureUtils
@@ -240,13 +240,14 @@ class CameraFragment : Fragment(),
         get() = cameraViewModel.uiState.value.isHdrPlusEnabled
     override var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null
 
+    private val settingsRepository by lazy { SettingsRepository.getInstance(requireContext()) }
+
     private val _locationHelper by lazy { LocationHelper(requireContext()) }
     override val locationHelper: LocationHelper get() = _locationHelper
 
     override val shouldMirror: Boolean
         get() = lensFacing == CameraCharacteristics.LENS_FACING_FRONT &&
-                requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                    .getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
+                settingsRepository.current().mirrorFrontCamera
 
     override var isBurstActive = false
     override var burstStartTime: Long = 0L
@@ -448,7 +449,7 @@ class CameraFragment : Fragment(),
             get() = this@CameraFragment.pendingVfSnapshot
             set(v) { this@CameraFragment.pendingVfSnapshot = v }
 
-        override fun readScopedHalfFrameState(prefs: SharedPreferences, requireFileForStep1: Boolean) {
+        override fun readScopedHalfFrameState(requireFileForStep1: Boolean) {
             halfFrameStateController.readState(requireFileForStep1)
         }
     }
@@ -547,8 +548,8 @@ class CameraFragment : Fragment(),
         motionPhotoController.updateEncoder()
     }
 
-    override fun triggerAutoBurst(prefs: SharedPreferences) {
-        pipelineDispatcher.triggerAutoBurst(prefs)
+    override fun triggerAutoBurst() {
+        pipelineDispatcher.triggerAutoBurst()
     }
 
     override fun ensureActiveCoordinator(): CaptureModeCoordinator? {
@@ -599,7 +600,6 @@ class CameraFragment : Fragment(),
     }
 
     override fun writeScopedHalfFrameStep(
-        prefs: SharedPreferences,
         step: Int,
         captureTimeMillis: Long?,
         digitalGain: Float,
@@ -665,7 +665,7 @@ class CameraFragment : Fragment(),
         }
 
         hdrPlusController.updateHdrPlusConstraints()
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val currentPrefs = settingsRepository.current()
         val previousMode = activeCoordinator?.mode
         val activeMode = modeController.resolveActiveCaptureMode()
 
@@ -682,13 +682,13 @@ class CameraFragment : Fragment(),
             }
         }
 
-        if (prefs.getBoolean(SettingsFragment.KEY_SAVE_LOCATION, false)) {
+        if (currentPrefs.saveLocationEnabled) {
             locationHelper.startListening()
         } else {
             locationHelper.stopListening()
         }
 
-        val savedTier = CameraUiTier.fromKey(prefs.getString(CameraBentoDeckView.PREF_KEY_UI_TIER, CameraUiTier.FILM.key))
+        val savedTier = CameraUiTier.fromKey(currentPrefs.uiTier)
         if (cameraViewModel.uiState.value.uiTier != savedTier) {
             cameraViewModel.setUiTier(savedTier)
             tierController.updateTierUi(savedTier)
@@ -755,7 +755,6 @@ class CameraFragment : Fragment(),
         _fragmentCameraBinding = FragmentCameraBinding.bind(view)
 
         ColorProcessor.warmupGpuAsync(requireContext())
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
         val onBackPressedCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -810,7 +809,7 @@ class CameraFragment : Fragment(),
                         if (event.targetUri != null) {
                             withContext(Dispatchers.Main) {
                                 imageRepository.invalidateCache()
-                                prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, event.targetUri).apply()
+                                settingsRepository.setLastCaptureUri(event.targetUri)
                                 thumbnailController.setGalleryThumbnail(event.targetUri)
                                 overlayController.updateProcessingAnimationUi()
                             }
@@ -818,6 +817,35 @@ class CameraFragment : Fragment(),
                     } catch (e: Exception) {
                         Log.e(TAG, "Background UI update failed for ${event.baseName}", e)
                     }
+                }
+            }
+        }
+
+        if (!settingsRepository.isHydrated) {
+            viewLifecycleOwner.ownerLifecycleScope.launch {
+                settingsRepository.awaitHydrated()
+                if (!isAdded || _fragmentCameraBinding == null) return@launch
+                hdrPlusController.restorePersistedState()
+                val hydratedPrefs = settingsRepository.current()
+                val previousMode = activeCoordinator?.mode
+                val activeMode = modeController.resolveActiveCaptureMode()
+                val savedTier = CameraUiTier.fromKey(hydratedPrefs.uiTier)
+                if (cameraViewModel.uiState.value.uiTier != savedTier) {
+                    cameraViewModel.setUiTier(savedTier)
+                    tierController.updateTierUi(savedTier)
+                }
+                if (hydratedPrefs.saveLocationEnabled) {
+                    locationHelper.startListening()
+                } else {
+                    locationHelper.stopListening()
+                }
+                halfFrameStateController.readState(requireFileForStep1 = true)
+                updateCameraUi()
+                overlayController.updateHalfFrameUI()
+                cameraUiContainerBinding?.modeSwitchButton?.let { modeController.updateModeSwitchIcon(it) }
+                applyUIVisibility()
+                if (previousMode != activeMode) {
+                    bindCameraUseCases()
                 }
             }
         }
@@ -1078,8 +1106,5 @@ class CameraFragment : Fragment(),
 
     companion object {
         private const val TAG = "CameraFragment"
-        const val KEY_SELECTED_LENS_ID = "selected_lens_sensor_id"
-        const val KEY_LENS_FACING = "lens_facing"
-        const val KEY_HDR_PLUS_ENABLED = "hdr_plus_enabled"
     }
 }

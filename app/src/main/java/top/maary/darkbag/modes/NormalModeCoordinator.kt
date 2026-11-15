@@ -1,6 +1,5 @@
 package top.maary.darkbag.modes
 
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.CaptureTimingMode
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.pipeline.sink.DirectMediaStoreSink
@@ -26,8 +25,7 @@ class NormalModeCoordinator(
     override fun onShutterTriggered(timing: StandardTimingTracker) {
         if (!host.canTriggerCapture()) return
 
-        val prefs = host.preferences
-        val motionEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false)
+        val motionEnabled = host.settingsRepository.current().motionPhotoEnabled
         if (motionEnabled) {
             host.triggerMotionPhotoSnapshot(timing.shutterClick)
         }

@@ -17,7 +17,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.CameraUiContainerBinding
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.LutManager
 import java.io.File
 import kotlin.math.roundToInt
@@ -35,15 +36,14 @@ class ColorRecipeSyncAndIsolationTest {
         themedContext = android.view.ContextThemeWrapper(app, R.style.AppTheme)
         lutManager = LutManager(themedContext)
         lutManager.lutDir.listFiles()?.forEach { it.delete() }
-        val prefs = themedContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().commit()
+        SettingsRepository.resetForTest(themedContext)
+        SettingsRepository.getInstance(themedContext).awaitHydratedBlocking()
     }
 
     @After
     fun tearDown() {
         lutManager.lutDir.listFiles()?.forEach { it.delete() }
-        val prefs = themedContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().commit()
+        SettingsRepository.resetForTest(themedContext)
     }
 
     @Test
@@ -99,11 +99,11 @@ class ColorRecipeSyncAndIsolationTest {
     @Test
     fun testColorRecipeBottomSheet_DoesNotPolluteOrReadCameraPrefs() {
         // Set camera global preferences to F-Log2 and Fuji_ProNeg.cube
-        val prefs = themedContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString(SettingsFragment.KEY_TARGET_LOG, "F-Log2")
-            .putString(SettingsFragment.KEY_ACTIVE_LUT, "Fuji_ProNeg.cube")
-            .commit()
+        val repo = SettingsRepository.getInstance(themedContext)
+        repo.edit {
+            this[PreferenceKeys.TARGET_LOG] = "F-Log2"
+            this[PreferenceKeys.ACTIVE_LUT] = "Fuji_ProNeg.cube"
+        }
 
         // Viewer/Playground opens sheet with initialLog = "None" and initialLut = null
         var selectedLogResult: String? = null
@@ -120,8 +120,8 @@ class ColorRecipeSyncAndIsolationTest {
         }
 
         // Camera preferences must remain completely untouched!
-        assertEquals("F-Log2", prefs.getString(SettingsFragment.KEY_TARGET_LOG, null))
-        assertEquals("Fuji_ProNeg.cube", prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null))
+        assertEquals("F-Log2", repo.current().targetLog)
+        assertEquals("Fuji_ProNeg.cube", repo.current().activeLut)
 
         // Dismiss sheet
         dialog.dismiss()
@@ -132,8 +132,8 @@ class ColorRecipeSyncAndIsolationTest {
         assertNull(selectedLutResult)
 
         // Camera preferences are still strictly untouched after dismissal!
-        assertEquals("F-Log2", prefs.getString(SettingsFragment.KEY_TARGET_LOG, null))
-        assertEquals("Fuji_ProNeg.cube", prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null))
+        assertEquals("F-Log2", repo.current().targetLog)
+        assertEquals("Fuji_ProNeg.cube", repo.current().activeLut)
     }
 
     @Test

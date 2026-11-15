@@ -12,7 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.SettingsRepository
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
@@ -25,17 +25,16 @@ class LutManagerLogBindingTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        SettingsRepository.resetForTest(context)
+        SettingsRepository.getInstance(context).awaitHydratedBlocking()
         lutManager = LutManager(context)
         lutManager.lutDir.listFiles()?.forEach { it.delete() }
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().commit()
     }
 
     @After
     fun tearDown() {
         lutManager.lutDir.listFiles()?.forEach { it.delete() }
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().commit()
+        SettingsRepository.resetForTest(context)
     }
 
     @Test

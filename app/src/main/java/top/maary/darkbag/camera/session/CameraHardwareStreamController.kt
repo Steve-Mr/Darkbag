@@ -30,8 +30,8 @@ import kotlinx.coroutines.sync.withLock
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.databinding.FragmentCameraBinding
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.processor.LutSurfaceProcessor
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.LensInfo
@@ -121,8 +121,7 @@ class CameraHardwareStreamController(
             evRange = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE),
             isRawSupported = map?.getOutputFormats()?.contains(ImageFormat.RAW_SENSOR) == true,
             isOisSupported = availableOis != null && availableOis.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON),
-            isHdrOisEnabledPref = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(SettingsFragment.KEY_HDR_PLUS_OIS, true)
+            isHdrOisEnabledPref = SettingsRepository.getInstance(host.hostContext).current().hdrPlusOis
         )
     }
 

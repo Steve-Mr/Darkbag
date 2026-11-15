@@ -9,7 +9,6 @@ import androidx.appcompat.widget.PopupMenu
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.pipeline.darkroom.DarkroomRenderEngine
@@ -17,6 +16,8 @@ import top.maary.darkbag.pipeline.darkroom.model.DarkroomRenderSpec
 import top.maary.darkbag.pipeline.darkroom.model.RenderOutputFormat
 import top.maary.darkbag.pipeline.darkroom.sink.MediaStoreExportSink
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.HalfFrameManager
 
 class MediaStoreViewerStrategy : ViewerMediaStrategy {
@@ -53,8 +54,7 @@ class MediaStoreViewerStrategy : ViewerMediaStrategy {
                 return@withContext saveRawVideoEdit(context, group, finalConfig, isReplacement, repository)
             }
 
-            val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+            val jpgFolderUri = SettingsRepository.getInstance(context).current().jpgStorageUri
 
             val mediaStoreSink = MediaStoreExportSink(
                 baseName = group.baseName,
@@ -123,7 +123,7 @@ class MediaStoreViewerStrategy : ViewerMediaStrategy {
                                 if (readBytes > 0) {
                                     val bmp = android.graphics.Bitmap.createBitmap(header.width, header.height, android.graphics.Bitmap.Config.ARGB_8888)
                                     val targetLogIndex = if (config.log != null && config.log != "None") {
-                                        SettingsFragment.LOG_CURVES.indexOf(config.log).takeIf { it >= 0 } ?: -1
+                                        PreferenceKeys.LOG_CURVES.indexOf(config.log).takeIf { it >= 0 } ?: -1
                                     } else -1
 
                                     val lutManager = top.maary.darkbag.utils.LutManager(context)
@@ -183,8 +183,7 @@ class MediaStoreViewerStrategy : ViewerMediaStrategy {
                                         "${rootBaseName}_edited_$editTimestamp"
                                     }
                                     val targetUri = if (isReplacement) group.jpgUri else null
-                                    val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                                        .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+                                    val jpgFolderUri = SettingsRepository.getInstance(context).current().jpgStorageUri
 
                                     val captureMetadata = group.jpgUri?.let { repository.getCaptureMetadata(it) }
 

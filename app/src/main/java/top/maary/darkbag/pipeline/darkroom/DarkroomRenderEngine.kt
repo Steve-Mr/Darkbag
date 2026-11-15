@@ -8,7 +8,6 @@ import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.BasicAdjustments
 import top.maary.darkbag.pipeline.composer.HalfFrameComposer
 import top.maary.darkbag.pipeline.darkroom.model.DarkroomRenderResult
@@ -48,7 +47,7 @@ object DarkroomRenderEngine {
         try {
             val logName = spec.editConfig.log
             val logIndex = if (logName != null && logName != "None") {
-                SettingsFragment.LOG_CURVES.indexOf(logName).takeIf { it >= 0 } ?: 0
+                top.maary.darkbag.repository.PreferenceKeys.LOG_CURVES.indexOf(logName).takeIf { it >= 0 } ?: 0
             } else {
                 0
             }

@@ -20,9 +20,10 @@ import kotlinx.coroutines.launch
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.databinding.FragmentCameraBinding
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.processor.LutSurfaceProcessor
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.ui.ColorRecipeBottomSheet
 import top.maary.darkbag.utils.ExposureUtils
@@ -110,11 +111,8 @@ class CameraLutController(
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val prefs = host.hostContext.getSharedPreferences(
-                SettingsFragment.PREFS_NAME,
-                Context.MODE_PRIVATE
-            )
-            val currentName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+            val settingsRepository = SettingsRepository.getInstance(host.hostContext)
+            val currentName = settingsRepository.current().activeLut.takeIf { it != "None" }
 
             val colorOnSurface = MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface)
             val colorPrimary = MaterialColors.getColor(holder.itemView, android.R.attr.colorPrimary)
@@ -127,7 +125,7 @@ class CameraLutController(
                 holder.text.text = holder.itemView.context.getString(R.string.lut_none)
                 if (currentName == null) holder.text.setTextColor(colorPrimary)
                 holder.itemView.setOnClickListener {
-                    prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                    settingsRepository.setActiveLut(null, null)
                     val logName = host.cameraViewModel.uiState.value.activeLogName
                     host.cameraViewModel.updateColorRecipe(logName, "None")
                     updateLiveLut(logName, null)
@@ -144,7 +142,7 @@ class CameraLutController(
                 holder.text.text = file.nameWithoutExtension
                 if (currentName == file.name) holder.text.setTextColor(colorPrimary)
                 holder.itemView.setOnClickListener {
-                    prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, file.name).apply()
+                    settingsRepository.setActiveLut(file.name, null)
                     val logName = host.cameraViewModel.uiState.value.activeLogName
                     host.cameraViewModel.updateColorRecipe(logName, file.name)
                     updateLiveLut(logName, file.name)
@@ -170,8 +168,7 @@ class CameraLutController(
 
     fun updateUnderexposureButton() {
         val btn = host.cameraUiContainerBinding?.flashButton ?: return
-        val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val mode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+        val mode = SettingsRepository.getInstance(host.hostContext).current().hdrUnderexposureMode
 
         btn.text = null
         val iconRes = when {
@@ -186,14 +183,14 @@ class CameraLutController(
     }
 
     fun cycleUnderexposureMode() {
-        val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val currentMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
-        val modes = SettingsFragment.HDR_UNDEREXPOSURE_MODES
+        val settingsRepository = SettingsRepository.getInstance(host.hostContext)
+        val currentMode = settingsRepository.current().hdrUnderexposureMode
+        val modes = PreferenceKeys.HDR_UNDEREXPOSURE_MODES
         val currentIndex = modes.indexOf(currentMode)
         val nextIndex = (currentIndex + 1) % modes.size
         val nextMode = modes[nextIndex]
 
-        prefs.edit().putString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, nextMode).apply()
+        settingsRepository.setHdrUnderexposureMode(nextMode)
         updateUnderexposureButton()
 
         // Update lastHdrPlusConfig to reflect new mode immediately for the next shot
@@ -204,10 +201,11 @@ class CameraLutController(
         targetLogName: String = host.cameraViewModel.uiState.value.activeLogName,
         activeLutName: String? = host.cameraViewModel.uiState.value.activeLutName.takeIf { !it.equals("None", ignoreCase = true) }
     ) {
-        val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val settingsRepository = SettingsRepository.getInstance(host.hostContext)
+        val snapshot = settingsRepository.current()
         val cleanLutName = activeLutName?.takeIf { !it.equals("None", ignoreCase = true) }
-        val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
-        val isPreviewEnabled = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, true)
+        val targetLogIndex = PreferenceKeys.LOG_CURVES.indexOf(targetLogName)
+        val isPreviewEnabled = snapshot.enableLutPreview
 
         host.cameraUiContainerBinding?.let { CameraBentoDeckView.bindRecipeRow(it, targetLogName, cleanLutName) }
 
@@ -227,7 +225,7 @@ class CameraLutController(
                 }
             }
             if (isActive) {
-                val engineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
+                val engineMode = settingsRepository.current().colorEngineMode
                 proc.updateColorEngineMode(engineMode)
                 proc.updateLut(lutData, size, targetLogIndex)
             }
@@ -243,15 +241,14 @@ class CameraLutController(
             initialLog = currentLog,
             initialLut = currentLut
         ) { logName, lutName ->
-            val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val editor = prefs.edit()
-            editor.putString(SettingsFragment.KEY_TARGET_LOG, logName)
-            if (lutName == null || lutName.equals("None", ignoreCase = true)) {
-                editor.remove(SettingsFragment.KEY_ACTIVE_LUT)
-            } else {
-                editor.putString(SettingsFragment.KEY_ACTIVE_LUT, lutName)
+            SettingsRepository.getInstance(host.hostContext).edit {
+                this[PreferenceKeys.TARGET_LOG] = logName
+                if (lutName == null || lutName.equals("None", ignoreCase = true)) {
+                    remove(PreferenceKeys.ACTIVE_LUT)
+                } else {
+                    this[PreferenceKeys.ACTIVE_LUT] = lutName
+                }
             }
-            editor.apply()
 
             host.cameraViewModel.updateColorRecipe(logName, lutName ?: "None")
         }
@@ -259,7 +256,7 @@ class CameraLutController(
 
     fun showLogSelectionMenu() {
         val items = mutableListOf("← Back" to true)
-        SettingsFragment.LOG_CURVES.forEach { log ->
+        PreferenceKeys.LOG_CURVES.forEach { log ->
             items.add(log to true)
         }
 
@@ -267,16 +264,17 @@ class CameraLutController(
             if (position == 0) {
                 showLutMenu()
             } else {
-                val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                val editor = prefs.edit()
-                editor.putString(SettingsFragment.KEY_TARGET_LOG, selectedLog)
-                val currentLut = if (selectedLog == host.hostContext.getString(R.string.lut_none)) {
-                    editor.remove(SettingsFragment.KEY_ACTIVE_LUT)
-                    null
-                } else {
-                    prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+                val settingsRepository = SettingsRepository.getInstance(host.hostContext)
+                var currentLut: String? = null
+                settingsRepository.edit {
+                    this[PreferenceKeys.TARGET_LOG] = selectedLog
+                    if (selectedLog == host.hostContext.getString(R.string.lut_none)) {
+                        remove(PreferenceKeys.ACTIVE_LUT)
+                        currentLut = null
+                    } else {
+                        currentLut = this[PreferenceKeys.ACTIVE_LUT]
+                    }
                 }
-                editor.apply()
 
                 host.cameraViewModel.updateColorRecipe(selectedLog, currentLut ?: "None")
                 updateLiveLut(selectedLog, currentLut)
@@ -296,13 +294,13 @@ class CameraLutController(
             if (position == 0) {
                 showLutMenu()
             } else {
-                val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val settingsRepository = SettingsRepository.getInstance(host.hostContext)
                 val newLut = if (position == 1) {
-                    prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                    settingsRepository.setActiveLut(null, null)
                     null
                 } else {
                     val filename = luts[position - 2].name
-                    prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, filename).apply()
+                    settingsRepository.setActiveLut(filename, null)
                     filename
                 }
                 val currentLog = host.cameraViewModel.uiState.value.activeLogName
@@ -364,9 +362,9 @@ class CameraLutController(
         uiBinding.bentoLogButton?.setOnClickListener(openColorRecipeSheet)
         uiBinding.lutSwitcherButton?.setOnClickListener(openColorRecipeSheet)
 
-        val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
-        val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
+        val snapshot = SettingsRepository.getInstance(host.hostContext).current()
+        val activeLutName = snapshot.activeLut.takeIf { it != "None" }
+        val targetLogName = snapshot.targetLog
         host.cameraViewModel.updateColorRecipe(targetLogName, activeLutName ?: "None")
         CameraBentoDeckView.bindRecipeRow(uiBinding, targetLogName, activeLutName)
         CameraBentoDeckView.applyDynamicRowHeights(uiBinding)

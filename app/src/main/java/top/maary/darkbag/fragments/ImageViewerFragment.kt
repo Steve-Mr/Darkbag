@@ -34,6 +34,7 @@ import top.maary.darkbag.pipeline.darkroom.model.RenderOutputFormat
 import top.maary.darkbag.pipeline.darkroom.sink.BitmapPreviewSink
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.ZoomableImageView
 import top.maary.darkbag.viewer.bento.ViewerBentoDeckCoordinator
 import top.maary.darkbag.viewer.deletion.ViewerDeletionController
@@ -166,8 +167,7 @@ open class ImageViewerFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        isMotionPhotoAutoPlay = prefs.getBoolean(KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY, true)
+        isMotionPhotoAutoPlay = SettingsRepository.getInstance(requireContext()).current().viewerMotionPhotoAutoPlay
 
         repository = ImageRepository(requireContext())
         lutManager = top.maary.darkbag.utils.LutManager(requireContext())
@@ -788,7 +788,7 @@ open class ImageViewerFragment : Fragment() {
 
     protected fun handleMotionPhotoIndicatorTapped(position: Int) {
         isMotionPhotoAutoPlay = !isMotionPhotoAutoPlay
-        requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY, isMotionPhotoAutoPlay).apply()
+        SettingsRepository.getInstance(requireContext()).setViewerMotionPhotoAutoPlay(isMotionPhotoAutoPlay)
         updateFormatBentoRow()
         view?.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
         adapter.setMotionPhotoAutoPlayEnabled(isMotionPhotoAutoPlay)
@@ -1057,7 +1057,6 @@ open class ImageViewerFragment : Fragment() {
     }
 
     companion object {
-        const val KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY = "viewer_motion_photo_auto_play"
         val LOOK_DOT_COLORS = ViewerBentoDeckCoordinator.LOOK_DOT_COLORS
 
         private const val MENU_DETAILS = 1

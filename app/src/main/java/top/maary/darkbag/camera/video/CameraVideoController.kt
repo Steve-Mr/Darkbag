@@ -25,11 +25,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.CameraUiContainerBinding
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.rawvideo.RawVideoNative
 import top.maary.darkbag.rawvideo.RawVideoSessionManager
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.DarkbagIdentity
 import top.maary.darkbag.utils.ImageSaver
@@ -91,13 +92,13 @@ class CameraVideoController(
         val reader = host.rawImageReader ?: return
 
         val chars = CameraRepository.getCharacteristics(host.camera2Manager, device.id)
-        val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val currentPrefs = SettingsRepository.getInstance(host.hostContext).current()
 
-        val targetFpsStr = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_FPS, "24") ?: "24"
+        val targetFpsStr = currentPrefs.rawVideoFps
         val targetFps = targetFpsStr.toFloatOrNull() ?: 24.0f
-        val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
-        val activeLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
-        val rawResPref = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_RESOLUTION, SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION) ?: SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION
+        val activeLut = currentPrefs.activeLut.takeIf { it != "None" }
+        val activeLog = currentPrefs.targetLog
+        val rawResPref = currentPrefs.rawVideoResolution
         val downsampleMode = when {
             rawResPref.contains("1080p") -> RawVideoNative.DOWNSAMPLE_BINNING_1080P
             rawResPref.contains("2K Open Gate") || (rawResPref.contains("4:3") && !rawResPref.contains("Max")) -> RawVideoNative.DOWNSAMPLE_BINNING_2K_OPEN_GATE_4_3
@@ -242,9 +243,10 @@ class CameraVideoController(
         host.showProcessingAnimation()
 
         val appContext = host.hostContext.applicationContext
-        val prefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
-        val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+        val settingsRepository = SettingsRepository.getInstance(appContext)
+        val currentPrefs = settingsRepository.current()
+        val rawFolderUri = currentPrefs.rawStorageUri
+        val jpgFolderUri = currentPrefs.jpgStorageUri
 
         host.lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -267,7 +269,7 @@ class CameraVideoController(
                 )
 
                 if (savedUri != null) {
-                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString()).apply()
+                    settingsRepository.setLastCaptureUri(savedUri.toString())
                     host.imageRepository.invalidateCache()
                     withContext(Dispatchers.Main) {
                         host.updateCurrentThumbnail(savedUri)
@@ -335,8 +337,8 @@ class CameraVideoController(
         mp4VideoRecorder = null
 
         val appContext = host.hostContext.applicationContext
-        val prefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val mediaFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+        val settingsRepository = SettingsRepository.getInstance(appContext)
+        val mediaFolderUri = settingsRepository.current().jpgStorageUri
 
         host.lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -357,7 +359,7 @@ class CameraVideoController(
                 )
 
                 if (savedUri != null) {
-                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString()).apply()
+                    settingsRepository.setLastCaptureUri(savedUri.toString())
                     host.imageRepository.invalidateCache()
                     withContext(Dispatchers.Main) {
                         host.updateCurrentThumbnail(savedUri)
@@ -391,11 +393,11 @@ class CameraVideoController(
         onShowRationale: (() -> Unit) -> Unit,
         onLaunchPermissionRequest: () -> Unit
     ) {
-        if (action != SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO && action != SettingsFragment.SHUTTER_LONG_PRESS_MP4) {
+        if (action != PreferenceKeys.SHUTTER_LONG_PRESS_RAW_VIDEO && action != PreferenceKeys.SHUTTER_LONG_PRESS_MP4) {
             return
         }
         val startRecording = {
-            if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) startRawVideoRecording() else startMp4VideoRecording()
+            if (action == PreferenceKeys.SHUTTER_LONG_PRESS_RAW_VIDEO) startRawVideoRecording() else startMp4VideoRecording()
         }
         when {
             isAudioGranted -> startRecording()

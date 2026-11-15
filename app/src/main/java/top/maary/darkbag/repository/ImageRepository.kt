@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import org.json.JSONArray
 import org.json.JSONObject
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.utils.DarkbagIdentity
@@ -70,13 +69,12 @@ class ImageRepository(
 
         return withContext(Dispatchers.IO) {
             val groups = mutableMapOf<String, ImageGroupBuilder>()
-            val prefs =
-                context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val currentPrefs = SettingsRepository.getInstance(context).current()
 
             // 1. Scan prioritized SAF folders
             val safFolders = listOf(
-                prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null) to "jpg",
-                prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null) to "dng"
+                currentPrefs.jpgStorageUri to "jpg",
+                currentPrefs.rawStorageUri to "dng"
             )
 
             for ((folderUri, _) in safFolders) {
@@ -99,7 +97,7 @@ class ImageRepository(
     }
 
     fun getGroupedImagesFlow(initialUri: String? = null): Flow<List<ImageGroup>> = flow {
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val currentPrefs = SettingsRepository.getInstance(context).current()
         val groups = mutableMapOf<String, ImageGroupBuilder>()
 
         // Pre-populate with cached metadata if available (Stale-While-Revalidate)
@@ -123,8 +121,8 @@ class ImageRepository(
             emitCurrent()
         }
 
-        val safJpgUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-        val safRawUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+        val safJpgUri = currentPrefs.jpgStorageUri
+        val safRawUri = currentPrefs.rawStorageUri
 
         // Stage 1: Fast concurrent scan of MediaStore + SAF Folders in parallel
         coroutineScope {

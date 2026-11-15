@@ -130,7 +130,7 @@ class CameraBentoDeckView @JvmOverloads constructor(
 
     companion object {
 
-        const val PREF_KEY_UI_TIER = "pref_camera_bento_ui_tier"
+        const val PREF_KEY_UI_TIER = top.maary.darkbag.repository.PreferenceKeys.KEY_UI_TIER
 
         @JvmStatic
         fun resolveScreenTier(resources: Resources): BentoScreenTier {
@@ -378,7 +378,7 @@ class CameraBentoDeckView @JvmOverloads constructor(
          */
         @JvmStatic
         fun resolveVisibilitySpec(
-            prefs: android.content.SharedPreferences,
+            prefs: top.maary.darkbag.repository.DarkbagPreferences,
             tier: CameraUiTier
         ): DeckVisibilitySpec {
             return when (tier) {
@@ -423,16 +423,16 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 )
                 CameraUiTier.CUSTOM -> DeckVisibilitySpec(
                     tier = tier,
-                    showProModule = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_MANUAL_CONTROLS, false),
-                    showLogAndLut = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_LUT_SWITCHER, true),
-                    showHdrPlusPill = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, true),
-                    showUnderexposure = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, true),
+                    showProModule = prefs.enableManualControls,
+                    showLogAndLut = prefs.showLutSwitcher,
+                    showHdrPlusPill = prefs.showHdrPlusSwitch,
+                    showUnderexposure = prefs.showHdrUnderexposureButton,
                     showMotionPhoto = true,
-                    showModeSwitch = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_MODE_SWITCH_BUTTON, true),
-                    showLensControls = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_LENS_CONTROLS, true),
-                    showCameraSwitch = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, true),
-                    showSettingsButton = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_SETTINGS_BUTTON, true),
-                    enableFocusPeaking = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_EXP_FOCUS_PEAKING, false)
+                    showModeSwitch = prefs.showModeSwitchButton,
+                    showLensControls = prefs.showLensControls,
+                    showCameraSwitch = prefs.showCameraSwitchButton,
+                    showSettingsButton = prefs.showSettingsButton,
+                    enableFocusPeaking = prefs.expFocusPeaking
                 )
             }
         }
@@ -759,7 +759,7 @@ class CameraBentoDeckView @JvmOverloads constructor(
         fun bindAuthenticPreview(
             binding: CameraUiContainerBinding,
             context: Context,
-            prefs: android.content.SharedPreferences,
+            prefs: top.maary.darkbag.repository.DarkbagPreferences,
             spec: DeckVisibilitySpec
         ) {
             val density = context.resources.displayMetrics.density
@@ -832,11 +832,7 @@ class CameraBentoDeckView @JvmOverloads constructor(
             )
 
             // Resolve active capture mode for authentic mode color reactivity
-            val savedModeKey = prefs.getString(
-                top.maary.darkbag.fragments.SettingsFragment.KEY_ACTIVE_CAPTURE_MODE,
-                CaptureMode.NORMAL.key
-            )
-            val activeMode = CaptureMode.fromKey(savedModeKey) ?: CaptureMode.NORMAL
+            val activeMode = CaptureMode.fromKey(prefs.activeCaptureMode) ?: CaptureMode.NORMAL
             binding.bottomIslandCard?.let { styleDeckCard(it, activeMode) }
 
             // Row A: Pro Telemetry Bar (AF, ISO, SEC, EV)
@@ -860,19 +856,16 @@ class CameraBentoDeckView @JvmOverloads constructor(
             binding.btnProLink?.let { styleBentoProLink(it, isLinked = true) }
 
             // Row B: Film Recipe & Quick Switches
-            val targetLogName = prefs.getString(top.maary.darkbag.fragments.SettingsFragment.KEY_TARGET_LOG, "F-Log2")
-                ?.takeIf { !it.equals("None", ignoreCase = true) } ?: "F-Log2"
-            val activeLutName = prefs.getString(top.maary.darkbag.fragments.SettingsFragment.KEY_ACTIVE_LUT, null)
-                ?.takeIf { !it.equals("None", ignoreCase = true) } ?: "Classic Neg"
+            val targetLogName = prefs.targetLog
+                .takeIf { !it.equals("None", ignoreCase = true) } ?: "F-Log2"
+            val activeLutName = prefs.activeLut
+                .takeIf { !it.equals("None", ignoreCase = true) } ?: "Classic Neg"
             bindRecipeRow(binding, targetLogName, activeLutName)
 
-            val isHdrPlus = prefs.getBoolean(top.maary.darkbag.fragments.CameraFragment.KEY_HDR_PLUS_ENABLED, true)
+            val isHdrPlus = prefs.hdrPlusEnabled
             styleHdrPlusTile(binding, isHdrPlus)
 
-            val underexposureMode = prefs.getString(
-                top.maary.darkbag.fragments.SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE,
-                "Dynamic (Experimental)"
-            ) ?: "Dynamic (Experimental)"
+            val underexposureMode = prefs.hdrUnderexposureMode
             binding.flashButton?.let { btn ->
                 btn.text = null
                 val iconRes = when {
@@ -886,7 +879,7 @@ class CameraBentoDeckView @JvmOverloads constructor(
                 styleBentoToggleTile(btn, isActive = underexposureMode != "Off", isTertiaryAccent = false)
             }
 
-            val isMotionPhoto = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_MOTION_PHOTO, false)
+            val isMotionPhoto = prefs.motionPhotoEnabled
             binding.motionPhotoButton?.let { btn ->
                 btn.setIconResource(
                     if (isMotionPhoto) top.maary.darkbag.R.drawable.ic_motion_photo_on

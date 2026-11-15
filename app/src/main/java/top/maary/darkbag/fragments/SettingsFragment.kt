@@ -2,13 +2,9 @@ package top.maary.darkbag.fragments
 
 import android.content.Context
 import android.content.Intent
-import android.content.SharedPreferences
-import android.graphics.ImageFormat
-import android.hardware.camera2.CameraCharacteristics
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.util.Size
 import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
@@ -32,6 +28,7 @@ import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentSettingsBinding
 import top.maary.darkbag.fragments.settings.SettingsBentoDelegate
 import top.maary.darkbag.fragments.settings.SettingsSheetDispatcher
+import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.ui.ViewfinderDeckCustomizerSheet
 import top.maary.darkbag.utils.CacheManager
@@ -49,7 +46,6 @@ class SettingsFragment : Fragment() {
     private val binding get() = _binding!!
     private val settingsViewModel: SettingsViewModel by viewModels()
     private lateinit var cameraRepository: CameraRepository
-    private lateinit var prefs: SharedPreferences
 
     private lateinit var bentoDelegate: SettingsBentoDelegate
     private lateinit var sheetDispatcher: SettingsSheetDispatcher
@@ -107,7 +103,6 @@ class SettingsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         val ctx = requireContext()
-        prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         cameraRepository = CameraRepository(ctx)
         bentoDelegate = SettingsBentoDelegate(ctx, cameraRepository)
         sheetDispatcher = SettingsSheetDispatcher(childFragmentManager, ctx, cameraRepository, settingsViewModel)
@@ -271,29 +266,29 @@ class SettingsFragment : Fragment() {
     private fun setupStartupSettings() {
         binding.cardStartupCamera.setOnClickListener {
             if (settingsViewModel.preferences.value.enableCamera) {
-                settingsViewModel.updateDefaultStartupPage(STARTUP_CAMERA)
+                settingsViewModel.updateDefaultStartupPage(PreferenceKeys.STARTUP_CAMERA)
             }
         }
 
         binding.cardStartupPlayground.setOnClickListener {
             if (settingsViewModel.preferences.value.enablePlayground) {
-                settingsViewModel.updateDefaultStartupPage(STARTUP_PLAYGROUND)
+                settingsViewModel.updateDefaultStartupPage(PreferenceKeys.STARTUP_PLAYGROUND)
             }
         }
 
         binding.switchEnableCamera.setOnCheckedChangeListener { _, isChecked ->
             if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
             settingsViewModel.updateEnableCamera(isChecked)
-            if (!isChecked && settingsViewModel.preferences.value.defaultStartupPage == STARTUP_CAMERA) {
-                settingsViewModel.updateDefaultStartupPage(STARTUP_PLAYGROUND)
+            if (!isChecked && settingsViewModel.preferences.value.defaultStartupPage == PreferenceKeys.STARTUP_CAMERA) {
+                settingsViewModel.updateDefaultStartupPage(PreferenceKeys.STARTUP_PLAYGROUND)
             }
         }
 
         binding.switchEnablePlayground.setOnCheckedChangeListener { _, isChecked ->
             if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
             settingsViewModel.updateEnablePlayground(isChecked)
-            if (!isChecked && settingsViewModel.preferences.value.defaultStartupPage == STARTUP_PLAYGROUND) {
-                settingsViewModel.updateDefaultStartupPage(STARTUP_CAMERA)
+            if (!isChecked && settingsViewModel.preferences.value.defaultStartupPage == PreferenceKeys.STARTUP_PLAYGROUND) {
+                settingsViewModel.updateDefaultStartupPage(PreferenceKeys.STARTUP_CAMERA)
             }
         }
     }
@@ -620,215 +615,5 @@ class SettingsFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
-    }
-
-    companion object {
-        const val PREFS_NAME = "camera_settings"
-        const val KEY_TARGET_LOG = "target_log"
-        const val KEY_LUT_URI = "lut_uri"
-        const val KEY_ACTIVE_LUT = "active_lut_filename"
-        const val KEY_SAVE_JPG = "save_jpg"
-        const val KEY_USE_GPU = "use_gpu"
-        const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
-        const val KEY_ENABLE_LUT_PREVIEW = "enable_lut_preview"
-        const val KEY_DEFAULT_LENS_ID = "default_lens_id"
-        const val KEY_DEFAULT_FOCAL_1X = "default_focal_1x"
-        const val KEY_ANTIBANDING = "antibanding_mode"
-        const val KEY_FLASH_MODE = "flash_mode"
-        const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
-        const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
-        const val KEY_BURST_PROCESSING_STRATEGY = "burst_processing_strategy"
-        const val BURST_STRATEGY_BALANCED = "Balanced (Smooth UI)"
-        const val BURST_STRATEGY_AGGRESSIVE = "Rapid Burst (Maximum Shots)"
-        val BURST_PROCESSING_STRATEGIES = listOf(BURST_STRATEGY_BALANCED, BURST_STRATEGY_AGGRESSIVE)
-        const val KEY_HDR_FUSION_MODE = "hdr_fusion_mode"
-        const val HDR_FUSION_AUTO = "Auto (Spatial / Sabre Zoom)"
-        const val HDR_FUSION_SPATIAL_RCD = "Spatial Merge + RCD"
-        const val HDR_FUSION_SABRE = "Sabre (Super-Resolution)"
-        const val HDR_FUSION_CLASSIC = "Classic HDR+ (Wiener)"
-        val HDR_FUSION_MODES = listOf(
-            HDR_FUSION_AUTO,
-            HDR_FUSION_SPATIAL_RCD,
-            HDR_FUSION_SABRE,
-            HDR_FUSION_CLASSIC
-        )
-        const val KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON = "show_hdr_underexposure_button"
-        const val KEY_SHOW_HDR_PLUS_SWITCH = "show_hdr_plus_switch"
-        const val KEY_USE_INTERNAL_VIEWER = "use_internal_viewer"
-        const val KEY_EXTERNAL_VIEWER_PACKAGE = "external_viewer_package"
-        const val KEY_EXTERNAL_VIEWER_NAME = "external_viewer_name"
-        const val KEY_SHOW_SETTINGS_BUTTON = "show_settings_button"
-        const val KEY_SHOW_CAMERA_SWITCH_BUTTON = "show_camera_switch_button"
-        const val KEY_SHOW_MODE_SWITCH_BUTTON = "show_mode_switch_button"
-        const val KEY_SHOW_LENS_CONTROLS = "show_lens_controls"
-        const val KEY_SHOW_LUT_SWITCHER = "show_lut_switcher"
-        const val KEY_MIRROR_FRONT_CAMERA = "mirror_front_camera"
-        const val KEY_HDR_PLUS_OIS = "hdr_plus_ois_enabled"
-        const val KEY_FORCE_60FPS = "force_60fps"
-        const val KEY_DEBUG_ENABLED = "debug_enabled"
-        const val KEY_MOTION_PHOTO = "motion_photo_enabled"
-        const val KEY_MOTION_PHOTO_AUDIO = "motion_photo_audio_enabled"
-        const val KEY_SAVE_LOCATION = "save_location_enabled"
-        const val KEY_SAVE_RAW = "save_raw"
-        const val KEY_RAW_OUTPUT_TYPE = "raw_output_type"
-        val RAW_OUTPUT_TYPES = listOf("Bayer CFA RAW (~12MB, Default)", "Linear RGB RAW (~50MB)")
-        const val KEY_DNG_COMPRESSION_MODE = "dng_compression_mode"
-        val DNG_COMPRESSION_MODES = listOf("Lossless JPEG (Default)", "Uncompressed")
-        const val KEY_JPG_STORAGE_URI = "jpg_storage_uri"
-        const val KEY_JPG_STORAGE_URI_NAME = "jpg_storage_uri_name"
-        const val KEY_RAW_STORAGE_URI = "raw_storage_uri"
-        const val KEY_RAW_STORAGE_URI_NAME = "raw_storage_uri_name"
-        const val KEY_LAST_CAPTURE_URI = "last_capture_uri"
-        const val KEY_HALF_FRAME_MODE = "half_frame_mode"
-        const val KEY_HALF_FRAME_LAYOUT = "half_frame_layout"
-        const val KEY_HALF_FRAME_DOWNSAMPLE = "half_frame_downsample"
-        const val KEY_HALF_FRAME_STEP = "half_frame_step"
-        const val KEY_HALF_FRAME_TEMP_PATH = "half_frame_temp_path"
-        const val KEY_HALF_FRAME_DATE_STAMP = "half_frame_date_stamp"
-        const val KEY_HALF_FRAME_LIGHT_LEAK = "half_frame_light_leak"
-        const val KEY_HALF_FRAME_AUTO_BURST = "half_frame_auto_burst"
-        const val KEY_HALF_FRAME_SAVE_JPG = "half_frame_save_jpg"
-        const val KEY_HALF_FRAME_SAVE_RAW = "half_frame_save_raw"
-        const val KEY_HALF_FRAME_BASE_NAME = "half_frame_base_name"
-        const val KEY_ACTIVE_CAPTURE_MODE = "active_capture_mode"
-        const val MODE_NORMAL = "normal"
-        const val MODE_HALF_FRAME_SBS = "half_frame_sbs"
-        const val MODE_HALF_FRAME_TB = "half_frame_tb"
-        const val MODE_MULTI_CAMERA = "multi_camera"
-
-        const val KEY_MULTI_CAMERA_MODE = "multi_camera_mode_enabled"
-        const val KEY_MULTI_CAMERA_FORCE_ENABLE = "multi_camera_force_enable"
-        const val KEY_MULTI_CAMERA_COUNT_PREF = "multi_camera_count_pref"
-        const val KEY_MULTI_CAMERA_DUAL_PAIR = "multi_camera_dual_pair"
-        const val KEY_MULTI_CAMERA_SAVE_RAW = "multi_camera_save_raw"
-
-        const val KEY_DEFAULT_STARTUP = "default_startup_page"
-        const val STARTUP_CAMERA = "camera"
-        const val STARTUP_PLAYGROUND = "playground"
-
-        const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
-
-        const val KEY_ENABLE_CAMERA = "enable_camera"
-        const val KEY_ENABLE_PLAYGROUND = "enable_playground"
-        const val KEY_SHOW_FLOATING_TOOLBAR = "show_floating_toolbar"
-        const val KEY_EXP_FOCUS_PEAKING = "exp_focus_peaking"
-        const val KEY_FOCUS_PEAKING_ACTIVE = "pref_focus_peaking_active"
-        const val KEY_COLOR_ENGINE_MODE = "color_engine_mode"
-        const val KEY_GALLERY_COLUMNS_PORTRAIT = "gallery_columns_portrait"
-        const val KEY_GALLERY_COLUMNS_LANDSCAPE = "gallery_columns_landscape"
-        const val KEY_GALLERY_WATERFALL = "gallery_waterfall"
-        const val KEY_PLAYGROUND_COLUMNS = "playground_columns"
-
-        const val KEY_SHUTTER_LONG_PRESS_ACTION = "shutter_long_press_action"
-        const val SHUTTER_LONG_PRESS_MP4 = "Standard MP4 (Default)"
-        const val SHUTTER_LONG_PRESS_RAW_VIDEO = "RAW Video (Bayer 10-bit)"
-        const val SHUTTER_LONG_PRESS_DISABLED = "Disabled"
-        val SHUTTER_LONG_PRESS_OPTIONS = listOf(
-            SHUTTER_LONG_PRESS_MP4,
-            SHUTTER_LONG_PRESS_RAW_VIDEO,
-            SHUTTER_LONG_PRESS_DISABLED
-        )
-
-        const val KEY_RAW_VIDEO_FPS = "raw_video_fps"
-        val RAW_VIDEO_FPS_OPTIONS = listOf("24", "30", "60")
-
-        const val KEY_RAW_VIDEO_RESOLUTION = "raw_video_resolution"
-        const val DEFAULT_RAW_VIDEO_RESOLUTION = "Max Native (4:3)"
-        val RAW_VIDEO_RESOLUTION_OPTIONS = listOf("Max Native (4:3)", "2K Open Gate (4:3)", "4K UHD (16:9)", "1080p (16:9)")
-
-        fun selectRawVideoSize(preference: String, availableSizes: Array<android.util.Size>): android.util.Size {
-            if (availableSizes.isEmpty()) {
-                return android.util.Size(4000, 3000)
-            }
-            return when {
-                preference.contains("1080p") -> {
-                    val exact = availableSizes.find { it.width == 1920 && it.height == 1080 }
-                    if (exact != null) {
-                        exact
-                    } else {
-                        val candidate16x9 = availableSizes
-                            .filter { it.width <= 1920 && kotlin.math.abs((it.width.toFloat() / it.height.toFloat()) - (16.0f / 9.0f)) < 0.05f }
-                            .maxByOrNull { it.width * it.height }
-                        candidate16x9
-                            ?: availableSizes.minByOrNull { kotlin.math.abs(it.width * it.height - 1920 * 1080) }
-                            ?: (availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000))
-                    }
-                }
-                preference.contains("4K") -> {
-                    val exact = availableSizes.find { it.width == 3840 && it.height == 2160 }
-                    if (exact != null) {
-                        exact
-                    } else {
-                        val candidate16x9 = availableSizes
-                            .filter { kotlin.math.abs((it.width.toFloat() / it.height.toFloat()) - (16.0f / 9.0f)) < 0.05f }
-                            .minByOrNull { kotlin.math.abs(it.width * it.height - 3840 * 2160) }
-                        candidate16x9
-                            ?: availableSizes.minByOrNull { kotlin.math.abs(it.width * it.height - 3840 * 2160) }
-                            ?: (availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000))
-                    }
-                }
-                preference.contains("2K Open Gate") || preference.contains("Max Native") -> {
-                    availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
-                }
-                else -> {
-                    availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
-                }
-            }
-        }
-
-        val COLOR_ENGINE_MODES = listOf(
-            "Khronos PBR Neutral",
-            "Natural Filmic (Leica/Hasselblad)",
-            "Sony Uchimura (GT7, Default)",
-            "Legacy ACES Filmic (Original)"
-        )
-
-        val FOCAL_LENGTHS = listOf("24", "28", "35")
-        val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
-        val BURST_SIZES = listOf("3", "4", "5", "6", "7", "8")
-        val HDR_UNDEREXPOSURE_MODES = listOf("Off", "-1 EV", "-2 EV", "Dynamic (Experimental)")
-
-        const val HALF_FRAME_LAYOUT_SBS = "Side-by-side"
-        const val HALF_FRAME_LAYOUT_TB = "Top-bottom"
-        val HALF_FRAME_LAYOUTS = listOf(HALF_FRAME_LAYOUT_SBS, HALF_FRAME_LAYOUT_TB)
-
-        val LOG_CURVES = listOf(
-            "None",
-            "Arri LogC3",
-            "F-Log",
-            "F-Log2",
-            "F-Log2 C",
-            "S-Log3",
-            "S-Log3.Cine",
-            "V-Log",
-            "Canon Log 2",
-            "Canon Log 3",
-            "N-Log",
-            "D-Log",
-            "Log3G10"
-        )
-    }
-
-    object HardwareCapabilities {
-        fun getMaxSupportedFps(chars: CameraCharacteristics?): Int {
-            if (chars == null) return 30
-            val ranges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return 30
-            return ranges.maxOfOrNull { it.upper } ?: 30
-        }
-
-        fun is4kCropSupported(chars: CameraCharacteristics?): Boolean {
-            if (chars == null) return false
-            val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return false
-            val rawSizes = map.getOutputSizes(ImageFormat.RAW_SENSOR) ?: return false
-            val maxRaw = rawSizes.maxByOrNull { it.width * it.height } ?: return false
-            return maxRaw.width >= 3840 && maxRaw.height >= 2160
-        }
-
-        fun getMaxRawSize(chars: CameraCharacteristics?): Size? {
-            if (chars == null) return null
-            val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return null
-            val rawSizes = map.getOutputSizes(ImageFormat.RAW_SENSOR) ?: return null
-            return rawSizes.maxByOrNull { it.width * it.height }
-        }
     }
 }

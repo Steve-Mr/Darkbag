@@ -1,7 +1,6 @@
 package top.maary.darkbag.camera.delegate
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.content.res.Configuration
 import android.view.View
@@ -10,9 +9,10 @@ import androidx.constraintlayout.widget.ConstraintSet
 import kotlin.math.roundToInt
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.databinding.FragmentCameraBinding
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.modes.CaptureModeCoordinator
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.viewmodel.CameraViewModel
 
@@ -27,7 +27,7 @@ interface CameraOverlayHost {
     var isHalfFrameUiAnimating: Boolean
     var pendingVfSnapshot: Bitmap?
 
-    fun readScopedHalfFrameState(prefs: SharedPreferences, requireFileForStep1: Boolean = false)
+    fun readScopedHalfFrameState(requireFileForStep1: Boolean = false)
 }
 
 /**
@@ -158,12 +158,12 @@ class CameraOverlayController(
     fun updateHalfFrameUI(animate: Boolean = false) {
         val uiBinding = host.cameraUiContainerBinding ?: return
         val vfBinding = host.fragmentCameraBinding ?: return
-        val prefs = host.context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val settingsRepository = SettingsRepository.getInstance(host.context)
 
         // Post all updates to the viewfinder to avoid requestLayout() during layout pass
         vfBinding.viewFinder.post {
             val isEnabled = host.activeCoordinator?.mode?.isHalfFrame == true
-            host.readScopedHalfFrameState(prefs)
+            host.readScopedHalfFrameState()
             host.cameraViewModel.setHalfFrameStep(host.halfFrameStep)
             uiBinding.cameraCaptureButton?.setHalfFrameState(isEnabled, host.halfFrameStep)
             uiBinding.bottomIslandCard?.let { card ->
@@ -229,8 +229,8 @@ class CameraOverlayController(
             vfBinding.viewFinder.scaleX = scale
             vfBinding.viewFinder.scaleY = scale
 
-            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
-            val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUT_TB
+            val layout = settingsRepository.current().halfFrameLayout
+            val isTopBottom = layout == PreferenceKeys.HALF_FRAME_LAYOUT_TB
 
             val baseShift = if (host.halfFrameStep == 0) -shift else shift
             val targetShift = if (isTopBottom) -baseShift else baseShift
