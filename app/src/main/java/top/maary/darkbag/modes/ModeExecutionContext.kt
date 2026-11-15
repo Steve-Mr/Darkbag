@@ -1,11 +1,11 @@
 package top.maary.darkbag.modes
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.graphics.Bitmap
 import kotlinx.coroutines.CompletableDeferred
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.pipeline.sink.CaptureSink
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.HalfFrameManager
 
 /**
@@ -14,7 +14,7 @@ import top.maary.darkbag.utils.HalfFrameManager
  */
 interface ModeExecutionContext {
     val context: Context
-    val preferences: SharedPreferences
+    val settingsRepository: SettingsRepository
     val isHdrPlusEnabled: Boolean
     val isRawSupported: Boolean
     val deviceOrientationDegrees: Int

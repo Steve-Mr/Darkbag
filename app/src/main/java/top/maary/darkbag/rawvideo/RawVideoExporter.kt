@@ -17,10 +17,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.DarkbagIdentity
 import top.maary.darkbag.utils.ImageSaver
 import top.maary.darkbag.utils.LutManager
@@ -73,12 +74,9 @@ object RawVideoExporter {
         exportType: FrameExportType
     ): Pair<Uri?, Uri?> = withContext(Dispatchers.IO) {
         try {
-            val prefs = context.getSharedPreferences(
-                SettingsFragment.PREFS_NAME,
-                Context.MODE_PRIVATE
-            )
-            val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-            val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+            val currentPrefs = SettingsRepository.getInstance(context).current()
+            val jpgFolderUri = currentPrefs.jpgStorageUri
+            val rawFolderUri = currentPrefs.rawStorageUri
 
             // 1. Read source DNG bytes
             val dngBytes = context.contentResolver.openInputStream(frameDngUri)?.use { it.readBytes() }
@@ -146,7 +144,7 @@ object RawVideoExporter {
             // 3. Export Graded JPG if requested
             if (exportType == FrameExportType.GRADED_JPG_ONLY || exportType == FrameExportType.RAW_AND_GRADED_PAIR) {
                 val targetLogIndex = if (editConfig?.log != null && editConfig.log != "None") {
-                    SettingsFragment.LOG_CURVES.indexOf(editConfig.log).takeIf { it >= 0 } ?: 0
+                    PreferenceKeys.LOG_CURVES.indexOf(editConfig.log).takeIf { it >= 0 } ?: 0
                 } else 0
 
                 val lutManager = LutManager(context)
@@ -737,7 +735,7 @@ object RawVideoExporter {
                 var lastPtsUs = -1L
 
                 val targetLogIndex = if (editConfig?.log != null && editConfig.log != "None") {
-                    top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(editConfig.log).takeIf { it >= 0 } ?: -1
+                    PreferenceKeys.LOG_CURVES.indexOf(editConfig.log).takeIf { it >= 0 } ?: -1
                 } else -1
 
                 val lutManager = top.maary.darkbag.utils.LutManager(context)
@@ -1220,7 +1218,7 @@ object RawVideoExporter {
                 var lastPtsUs = -1L
 
                 val targetLogIndex = if (editConfig?.log != null && editConfig.log != "None") {
-                    top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(editConfig.log).takeIf { it >= 0 } ?: -1
+                    PreferenceKeys.LOG_CURVES.indexOf(editConfig.log).takeIf { it >= 0 } ?: -1
                 } else -1
 
                 val lutManager = top.maary.darkbag.utils.LutManager(context)

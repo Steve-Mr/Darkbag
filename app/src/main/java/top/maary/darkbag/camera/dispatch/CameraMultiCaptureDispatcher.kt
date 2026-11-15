@@ -25,11 +25,12 @@ import top.maary.darkbag.camera.MultiCameraCaptureResult
 import top.maary.darkbag.camera.MultiCameraManualConfig
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.databinding.FragmentCameraBinding
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.processor.HdrPlusRequestManager
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.ImageSaver
 import top.maary.darkbag.utils.LutManager
@@ -109,8 +110,7 @@ class CameraMultiCaptureDispatcher(
         host.showProcessingAnimation()
 
         val orientation = host.getCombinedOrientation()
-        val prefs = host.hostContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val saveRaw = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_SAVE_RAW, false)
+        val saveRaw = SettingsRepository.getInstance(host.hostContext).current().multiCameraSaveRaw
         val isHdrPlusActive = host.isHdrPlusEnabled && host.isRawSupported
 
         val manualConfig = MultiCameraManualConfig(
@@ -185,21 +185,22 @@ class CameraMultiCaptureDispatcher(
 
         try {
             val appContext = host.hostContext.applicationContext
-            val prefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-            val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+            val settingsRepository = SettingsRepository.getInstance(appContext)
+            val snapshot = settingsRepository.current()
+            val jpgFolderUri = snapshot.jpgStorageUri
+            val rawFolderUri = snapshot.rawStorageUri
 
             var primarySavedUri: Uri? = null
 
-            val currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
-            val currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None") ?: "None"
-            val logIndex = SettingsFragment.LOG_CURVES.indexOf(currentLog)
+            val currentLog = snapshot.targetLog
+            val currentLut = snapshot.activeLut
+            val logIndex = PreferenceKeys.LOG_CURVES.indexOf(currentLog)
             val lutPath = if (currentLut != "None" && currentLut.isNotBlank()) {
                 val f = File(host.lutManager.lutDir, currentLut)
                 if (f.exists()) f.absolutePath else null
             } else null
 
-            val colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
+            val colorEngineMode = snapshot.colorEngineMode
             val currentEditConfig = top.maary.darkbag.models.EditConfig(
                 log = currentLog,
                 lut = currentLut,
@@ -334,7 +335,7 @@ class CameraMultiCaptureDispatcher(
             withContext(Dispatchers.Main) {
                 if (primarySavedUri != null) {
                     host.imageRepository.invalidateCache()
-                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, primarySavedUri.toString()).apply()
+                    settingsRepository.setLastCaptureUri(primarySavedUri.toString())
                     host.setGalleryThumbnail(primarySavedUri.toString())
                 }
             }

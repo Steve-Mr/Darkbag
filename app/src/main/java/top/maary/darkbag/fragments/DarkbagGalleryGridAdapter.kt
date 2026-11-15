@@ -755,7 +755,7 @@ class DarkbagGalleryGridAdapter(
                                     val read = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, directBuf)
                                     if (read > 0) {
                                         val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
-                                            top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
+                                            top.maary.darkbag.repository.PreferenceKeys.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
                                         } else -1
                                         val lutManager = top.maary.darkbag.utils.LutManager(context)
                                         val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None") {

@@ -20,7 +20,6 @@ import com.google.android.material.progressindicator.LinearProgressIndicator
 import kotlinx.coroutines.*
 import top.maary.darkbag.R
 import top.maary.darkbag.fragments.RawVideoExportSheet
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.pipeline.darkroom.DarkroomRenderEngine
@@ -31,6 +30,7 @@ import top.maary.darkbag.pipeline.darkroom.sink.ShareFileSink
 import top.maary.darkbag.provider.DarkbagDocumentsProvider
 import top.maary.darkbag.rawvideo.RawVideoExporter
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.HalfFrameManager
 import top.maary.darkbag.utils.ImageSaver
 import top.maary.darkbag.viewer.strategy.ViewerMediaStrategy
@@ -103,8 +103,7 @@ class ViewerExportCoordinator(
         onComplete: suspend (baseName: String) -> Unit
     ) {
         val uri = group.rawVideoUri ?: return
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val rawFolderUriStr = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+        val rawFolderUriStr = SettingsRepository.getInstance(context).current().rawStorageUri
         val clipName = "CDNG_${group.baseName}"
 
         val isUserCancelled = AtomicBoolean(false)
@@ -250,8 +249,7 @@ class ViewerExportCoordinator(
         onComplete: suspend (baseName: String) -> Unit
     ) {
         val uri = group.rawVideoUri ?: return
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val mediaFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+        val mediaFolderUri = SettingsRepository.getInstance(context).current().jpgStorageUri
         val tempMp4File = File(context.cacheDir, "${group.baseName}_graded.mp4")
 
         val isUserCancelled = AtomicBoolean(false)

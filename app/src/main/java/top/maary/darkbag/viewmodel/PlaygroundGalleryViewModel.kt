@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import top.maary.darkbag.R
 import top.maary.darkbag.models.PlaygroundItem
 import top.maary.darkbag.repository.PlaygroundRepository
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.bento.BentoContainerRole
 import java.io.File
 
@@ -65,15 +66,11 @@ sealed class PlaygroundUserIntent {
  */
 class PlaygroundGalleryViewModel @JvmOverloads constructor(
     application: Application,
-    private val repository: PlaygroundRepository = PlaygroundRepository(application)
+    private val repository: PlaygroundRepository = PlaygroundRepository(application),
+    private val settingsRepository: SettingsRepository = SettingsRepository.getInstance(application)
 ) : AndroidViewModel(application) {
 
-    private val prefs = application.getSharedPreferences(
-        top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME,
-        android.content.Context.MODE_PRIVATE
-    )
-
-    private val initialCols = prefs.getInt(top.maary.darkbag.fragments.SettingsFragment.KEY_PLAYGROUND_COLUMNS, 2)
+    private val initialCols = settingsRepository.current().playgroundColumns
 
     private val _uiState = MutableStateFlow(PlaygroundGalleryUiState(columnCount = initialCols))
     val uiState = _uiState.asStateFlow()
@@ -250,7 +247,7 @@ class PlaygroundGalleryViewModel @JvmOverloads constructor(
     fun toggleLayout() {
         _uiState.update { state ->
             val nextCols = if (state.columnCount == 2) 3 else 2
-            prefs.edit().putInt(top.maary.darkbag.fragments.SettingsFragment.KEY_PLAYGROUND_COLUMNS, nextCols).apply()
+            settingsRepository.setPlaygroundColumns(nextCols)
             state.copy(columnCount = nextCols)
         }
     }

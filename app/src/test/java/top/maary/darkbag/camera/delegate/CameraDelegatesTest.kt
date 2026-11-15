@@ -17,10 +17,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.modes.CaptureModeCoordinator
 import top.maary.darkbag.processor.LutSurfaceProcessor
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.ProDialWheelView
 import top.maary.darkbag.viewmodel.CameraUiTier
 import top.maary.darkbag.viewmodel.CameraViewModel
@@ -30,7 +30,6 @@ import top.maary.darkbag.viewmodel.CameraViewModel
 class CameraDelegatesTest {
 
     private lateinit var context: Context
-    private lateinit var prefs: SharedPreferences
 
     class MockGestureHost : CameraGestureHost {
         override var isFloatingOverlayOpen: Boolean = false
@@ -54,8 +53,7 @@ class CameraDelegatesTest {
     }
 
     class MockTierHost(
-        override val context: Context,
-        val preferences: SharedPreferences
+        override val context: Context
     ) : CameraTierHost {
         override val binding = null
         override val rootViewGroup: ViewGroup? = null
@@ -106,8 +104,8 @@ class CameraDelegatesTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
+        SettingsRepository.resetForTest(context)
+        SettingsRepository.getInstance(context).awaitHydratedBlocking()
     }
 
     @Test
@@ -126,7 +124,7 @@ class CameraDelegatesTest {
 
     @Test
     fun testCameraTierController_Formatters() {
-        val host = MockTierHost(context, prefs)
+        val host = MockTierHost(context)
         val controller = CameraTierController(host)
 
         // Focus distance formatting
@@ -149,7 +147,7 @@ class CameraDelegatesTest {
 
     @Test
     fun testCameraTierController_DialItemBuilders() {
-        val host = MockTierHost(context, prefs)
+        val host = MockTierHost(context)
         val controller = CameraTierController(host)
 
         val shutterItems = controller.buildShutterDialItems(Range(125_000L, 1_000_000_000L))
@@ -172,7 +170,7 @@ class CameraDelegatesTest {
 
     @Test
     fun testCameraTierController_HandleDialSelection() {
-        val host = MockTierHost(context, prefs)
+        val host = MockTierHost(context)
         val controller = CameraTierController(host)
 
         // Simulate Focus tab active

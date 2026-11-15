@@ -35,6 +35,8 @@ import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentPlaygroundGalleryBinding
 import top.maary.darkbag.databinding.ItemPlaygroundImageBinding
 import top.maary.darkbag.models.PlaygroundItem
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.bento.BentoContainerRole
 import top.maary.darkbag.ui.bento.BentoTrayCard
 import top.maary.darkbag.viewmodel.PlaygroundEffect
@@ -94,16 +96,16 @@ class PlaygroundGalleryFragment : Fragment() {
             insets
         }
 
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val showToolbar = prefs.getBoolean(SettingsFragment.KEY_SHOW_FLOATING_TOOLBAR, false)
-        val defaultStartup = prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA)
-        val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
+        val currentPrefs = SettingsRepository.getInstance(requireContext()).current()
+        val showToolbar = currentPrefs.showFloatingToolbar
+        val defaultStartup = currentPrefs.defaultStartupPage
+        val enableCamera = currentPrefs.enableCamera
 
         val onBackPressedCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (viewModel.uiState.value.isSelectionMode) {
                     viewModel.processIntent(PlaygroundUserIntent.ClearSelection)
-                } else if (enableCamera && defaultStartup == SettingsFragment.STARTUP_CAMERA) {
+                } else if (enableCamera && defaultStartup == PreferenceKeys.STARTUP_CAMERA) {
                     if (!findNavController().navigateUp()) {
                         requireActivity().finishAfterTransition()
                     }
@@ -114,7 +116,7 @@ class PlaygroundGalleryFragment : Fragment() {
         }
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, onBackPressedCallback)
 
-        if (!showToolbar && defaultStartup == SettingsFragment.STARTUP_CAMERA && enableCamera) {
+        if (!showToolbar && defaultStartup == PreferenceKeys.STARTUP_CAMERA && enableCamera) {
             binding.toolbar.setNavigationIcon(R.drawable.ic_back)
             binding.toolbar.setNavigationOnClickListener {
                 requireActivity().onBackPressedDispatcher.onBackPressed()
@@ -285,8 +287,7 @@ class PlaygroundGalleryFragment : Fragment() {
         (binding.playgroundBentoDock as? BentoTrayCard)?.setContainerRole(state.containerRole, animated = true)
         (binding.playgroundTopBentoCard as? BentoTrayCard)?.setContainerRole(state.containerRole, animated = true)
 
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
+        val enableCamera = SettingsRepository.getInstance(requireContext()).current().enableCamera
         binding.btnPlaygroundBack.visibility = if (enableCamera || state.isSelectionMode || findNavController().previousBackStackEntry != null) View.VISIBLE else View.GONE
         binding.btnPlaygroundBack.setIconResource(if (state.isSelectionMode) R.drawable.ic_close else R.drawable.ic_back)
 

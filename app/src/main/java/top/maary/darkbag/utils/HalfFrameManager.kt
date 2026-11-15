@@ -1,19 +1,19 @@
 package top.maary.darkbag.utils
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.provider.DarkbagDocumentsProvider
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import java.io.File
 import java.io.FileOutputStream
 
 class HalfFrameManager(private val context: Context) {
-    private val prefs: SharedPreferences = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+    private val settingsRepository = SettingsRepository.getInstance(context)
     private val sessionStore = HalfFrameSessionStore(context)
 
     data class Metadata(
@@ -44,22 +44,22 @@ class HalfFrameManager(private val context: Context) {
         get() = sessionStore.currentProfile() != HalfFrameSessionStore.PROFILE_NORMAL
 
     val layout: String
-        get() = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS) ?: SettingsFragment.HALF_FRAME_LAYOUT_SBS
+        get() = settingsRepository.current().halfFrameLayout
 
     val downsample: Boolean
-        get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, true)
+        get() = settingsRepository.current().halfFrameDownsample
 
     val dateStamp: Boolean
-        get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false)
+        get() = settingsRepository.current().halfFrameDateStamp
 
     val lightLeak: Boolean
-        get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)
+        get() = settingsRepository.current().halfFrameLightLeak
 
     val saveJpg: Boolean
         get() = true // Mandatory for half-frame mode
 
     val saveRaw: Boolean
-        get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_SAVE_RAW, false)
+        get() = settingsRepository.current().halfFrameSaveRaw
 
     /**
      * Handles the captured JPG.
@@ -120,7 +120,7 @@ class HalfFrameManager(private val context: Context) {
             val partnerBaseName = metadata?.frame1BaseName ?: session.baseName
             val dateStampEnabled = metadata?.dateStamp ?: dateStamp
             val activeLayout = if (activeProfile == HalfFrameSessionStore.PROFILE_HALF_TOP)
-                SettingsFragment.HALF_FRAME_LAYOUT_TB else SettingsFragment.HALF_FRAME_LAYOUT_SBS
+                PreferenceKeys.HALF_FRAME_LAYOUT_TB else PreferenceKeys.HALF_FRAME_LAYOUT_SBS
 
             if (isFastPath) {
                 // Perform fast stitching for immediate thumbnail feedback

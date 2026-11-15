@@ -19,10 +19,11 @@ import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.fragments.CameraFragmentDirections
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.modes.CaptureModeCoordinator
 import top.maary.darkbag.rawvideo.RawVideoNative
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.LutManager
 import top.maary.darkbag.utils.MediaStoreUtils
 import java.io.File
@@ -141,7 +142,7 @@ class CameraThumbnailController(private val host: CameraThumbnailHost) {
                 val read = RawVideoNative.nativeReadFrame(handle, 0, LongArray(3), buf)
                 if (read <= 0) return@use null
                 val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
-                    SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
+                    PreferenceKeys.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
                 } else -1
                 val lutDir = LutManager(host.hostContext).lutDir
                 val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None") {
@@ -187,8 +188,8 @@ class CameraThumbnailController(private val host: CameraThumbnailHost) {
             host.lifecycleScope.launch {
                 val uri = currentThumbnailUri ?: mediaStoreUtils.getLatestAppImage() ?: return@launch
                 val context = host.hostContext
-                val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                val useInternalViewer = prefs.getBoolean(SettingsFragment.KEY_USE_INTERNAL_VIEWER, true)
+                val currentPrefs = SettingsRepository.getInstance(context).current()
+                val useInternalViewer = currentPrefs.useInternalViewer
                 var externalViewerStarted = false
                 if (!useInternalViewer) {
                     try {
@@ -196,7 +197,7 @@ class CameraThumbnailController(private val host: CameraThumbnailHost) {
                             setDataAndType(uri, "image/*")
                             addCategory(Intent.CATEGORY_DEFAULT)
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            prefs.getString(SettingsFragment.KEY_EXTERNAL_VIEWER_PACKAGE, "")
+                            currentPrefs.externalViewerPackage
                                 ?.takeIf { it.isNotEmpty() }?.let { setPackage(it) }
                         }
                         context.startActivity(intent)

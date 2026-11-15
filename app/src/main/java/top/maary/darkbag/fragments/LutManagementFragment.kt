@@ -1,8 +1,6 @@
 package top.maary.darkbag.fragments
 
 import android.app.AlertDialog
-import android.content.Context
-import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -31,6 +29,8 @@ import com.google.android.material.card.MaterialCardView
 import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentLutManagementBinding
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.BentoSelectionBottomSheet
 import top.maary.darkbag.utils.LutManager
 import java.io.File
@@ -42,7 +42,7 @@ class LutManagementFragment : Fragment() {
     private val binding get() = _binding!!
 
     private lateinit var lutManager: LutManager
-    private lateinit var prefs: SharedPreferences
+    private lateinit var settingsRepository: SettingsRepository
     private lateinit var adapter: LutManagementAdapter
 
     private var pendingImportLog: String? = null
@@ -115,7 +115,7 @@ class LutManagementFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         lutManager = LutManager(requireContext())
-        prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        settingsRepository = SettingsRepository.getInstance(requireContext())
 
         applyEdgeToEdgeInsets()
         setupHeaderActions()
@@ -272,10 +272,10 @@ class LutManagementFragment : Fragment() {
             lutManager.setAssociatedLog(file.name, newLogToSet)
 
             // If currently active, sync target log safely using toTargetLogPreference
-            val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+            val activeLut = settingsRepository.current().activeLut.takeIf { it != "None" }
             if (file.name == activeLut && newLogToSet != LutManager.LOG_UNIVERSAL) {
                 val targetPrefLog = lutManager.toTargetLogPreference(newLogToSet)
-                prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, targetPrefLog).apply()
+                settingsRepository.setTargetLog(targetPrefLog)
             }
             updateList()
         }
@@ -283,7 +283,7 @@ class LutManagementFragment : Fragment() {
 
     private fun updateList() {
         val allItems = lutManager.getAllLutItems()
-        val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+        val activeLut = settingsRepository.current().activeLut.takeIf { it != "None" }
 
         // 1. Filter dataset according to selectedCategoryFilter
         val filteredList = when (selectedCategoryFilter) {
@@ -459,14 +459,14 @@ class LutManagementFragment : Fragment() {
             // 3. Click Listeners
             holder.card.setOnClickListener {
                 if (isActive) {
-                    prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                    settingsRepository.setActiveLut(null, null)
                 } else {
-                    val editor = prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, item.name)
-                    if (!assocLog.isNullOrEmpty() && assocLog != LutManager.LOG_UNIVERSAL) {
-                        val targetPrefLog = lutManager.toTargetLogPreference(assocLog)
-                        editor.putString(SettingsFragment.KEY_TARGET_LOG, targetPrefLog)
+                    settingsRepository.edit {
+                        this[PreferenceKeys.ACTIVE_LUT] = item.name
+                        if (!assocLog.isNullOrEmpty() && assocLog != LutManager.LOG_UNIVERSAL) {
+                            this[PreferenceKeys.TARGET_LOG] = lutManager.toTargetLogPreference(assocLog)
+                        }
                     }
-                    editor.apply()
                 }
                 updateList()
             }
@@ -507,8 +507,8 @@ class LutManagementFragment : Fragment() {
             .setPositiveButton(android.R.string.ok) { _, _ ->
                 val newName = input.text.toString()
                 if (lutManager.renameLut(file, newName)) {
-                    if (prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null) == file.name) {
-                        prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, "$newName.cube").apply()
+                    if (settingsRepository.current().activeLut == file.name) {
+                        settingsRepository.setActiveLut("$newName.cube", null)
                     }
                     updateList()
                 } else {
@@ -525,8 +525,8 @@ class LutManagementFragment : Fragment() {
             .setMessage(getString(R.string.lut_delete_message, file.nameWithoutExtension))
             .setPositiveButton(R.string.btn_delete) { _, _ ->
                 if (lutManager.deleteLut(file)) {
-                    if (prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null) == file.name) {
-                        prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                    if (settingsRepository.current().activeLut == file.name) {
+                        settingsRepository.setActiveLut(null, null)
                     }
                     updateList()
                 }

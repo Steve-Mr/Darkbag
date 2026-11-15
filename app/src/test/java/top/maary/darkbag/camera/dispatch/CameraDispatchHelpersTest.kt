@@ -21,10 +21,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.pipeline.model.CaptureTaskSpec
 import top.maary.darkbag.pipeline.sink.CaptureSink
+import top.maary.darkbag.repository.DarkbagPreferences
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.DarkbagIdentity
 import top.maary.darkbag.utils.HalfFrameManager
 import top.maary.darkbag.utils.HalfFrameSessionStore
@@ -36,7 +38,6 @@ import top.maary.darkbag.utils.LocationHelper
 class CameraDispatchHelpersTest {
 
     private lateinit var context: Context
-    private lateinit var prefs: SharedPreferences
     private lateinit var cameraManager: CameraManager
     private lateinit var captureResults: MutableMap<Long, TotalCaptureResult>
     private lateinit var captureResultFlow: MutableSharedFlow<TotalCaptureResult>
@@ -46,8 +47,8 @@ class CameraDispatchHelpersTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
+        SettingsRepository.resetForTest(context)
+        SettingsRepository.getInstance(context).awaitHydratedBlocking()
         cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         captureResults = mutableMapOf()
         captureResultFlow = MutableSharedFlow(replay = 1)
@@ -155,12 +156,9 @@ class CameraDispatchHelpersTest {
         assertEquals(1.0f, assembler.resolveEffectiveZoom(normalLens, presetLens), 0.001f)
         assertEquals(1.5f, assembler.resolveEffectiveZoom(null, null, defaultZoom = 1.5f), 0.001f)
 
-        prefs.edit().putString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_SPATIAL_RCD).apply()
-        assertEquals(1, assembler.resolveFusionModeInt(prefs))
-        prefs.edit().putString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_SABRE).apply()
-        assertEquals(2, assembler.resolveFusionModeInt(prefs))
-        prefs.edit().putString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_CLASSIC).apply()
-        assertEquals(3, assembler.resolveFusionModeInt(prefs))
+        assertEquals(1, assembler.resolveFusionModeInt(DarkbagPreferences(hdrFusionMode = PreferenceKeys.HDR_FUSION_SPATIAL_RCD)))
+        assertEquals(2, assembler.resolveFusionModeInt(DarkbagPreferences(hdrFusionMode = PreferenceKeys.HDR_FUSION_SABRE)))
+        assertEquals(3, assembler.resolveFusionModeInt(DarkbagPreferences(hdrFusionMode = PreferenceKeys.HDR_FUSION_CLASSIC)))
     }
 
     @Test
@@ -206,17 +204,17 @@ class CameraDispatchHelpersTest {
             frame1DigitalGain = 1.25f,
             flareType = 1
         )
-        prefs.edit()
-            .putString(SettingsFragment.KEY_TARGET_LOG, "LogC")
-            .putString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_SABRE)
-            .putInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 1)
-            .apply()
+        val customPrefs = DarkbagPreferences(
+            targetLog = "LogC",
+            hdrFusionMode = PreferenceKeys.HDR_FUSION_SABRE,
+            dngCompressionMode = 1
+        )
 
         val calib = extractor.extractSensorCalibration(null, null, null)
         val captureMeta = CaptureMetadata(iso = 200, exposureTime = 10_000_000L, dateTimeOriginal = 123456789L)
         val spec = assembler.assemble(
             context = context,
-            prefs = prefs,
+            prefs = customPrefs,
             request = TaskSpecAssemblyRequest(
                 width = 4000,
                 height = 3000,

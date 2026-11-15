@@ -26,7 +26,8 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.R
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.LutManager
 import kotlin.math.roundToInt
 
@@ -156,12 +157,13 @@ object ColorRecipeBottomSheet {
         val dialog = BottomSheetDialog(context)
         val density = context.resources.displayMetrics.density
 
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val startLog = initialLog ?: (prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None")
+        val settingsRepository = SettingsRepository.getInstance(context)
+        val snapshot = settingsRepository.current()
+        val startLog = initialLog ?: snapshot.targetLog
         val startLut = if (initialLog != null || initialLut != null) {
             initialLut?.takeIf { it != "None" }
         } else {
-            prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+            snapshot.activeLut.takeIf { it != "None" }
         }
         val session = RecipeSelectionSession(
             initialLog = startLog,
@@ -536,16 +538,16 @@ object ColorRecipeBottomSheet {
                 btn.setOnClickListener {
                     val logChanged = session.selectLut(entry)
                     if (persistToPrefs) {
-                        val editor = prefs.edit()
-                        if (session.currentLut == null) {
-                            editor.remove(SettingsFragment.KEY_ACTIVE_LUT)
-                        } else {
-                            editor.putString(SettingsFragment.KEY_ACTIVE_LUT, session.currentLut)
+                        settingsRepository.edit {
+                            if (session.currentLut == null) {
+                                remove(PreferenceKeys.ACTIVE_LUT)
+                            } else {
+                                this[PreferenceKeys.ACTIVE_LUT] = session.currentLut!!
+                            }
+                            if (logChanged) {
+                                this[PreferenceKeys.TARGET_LOG] = session.currentLog
+                            }
                         }
-                        if (logChanged) {
-                            editor.putString(SettingsFragment.KEY_TARGET_LOG, session.currentLog)
-                        }
-                        editor.apply()
                     }
                     if (logChanged) {
                         updateLogButtonsUi()
@@ -559,7 +561,7 @@ object ColorRecipeBottomSheet {
         lutRecyclerView.adapter = lutAdapter
 
         // Populate BASE LOG CURVE buttons
-        SettingsFragment.LOG_CURVES.forEach { logName ->
+        PreferenceKeys.LOG_CURVES.forEach { logName ->
             val logBtn = MaterialButton(
                 context,
                 null,
@@ -583,11 +585,12 @@ object ColorRecipeBottomSheet {
                     val lutReset = session.selectLog(logName)
                     onLogExplicitlyChanged?.invoke(true)
                     if (persistToPrefs) {
-                        val editor = prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, session.currentLog)
-                        if (lutReset) {
-                            editor.remove(SettingsFragment.KEY_ACTIVE_LUT)
+                        settingsRepository.edit {
+                            this[PreferenceKeys.TARGET_LOG] = session.currentLog
+                            if (lutReset) {
+                                remove(PreferenceKeys.ACTIVE_LUT)
+                            }
                         }
-                        editor.apply()
                     }
                     if (lutReset) {
                         val msg = context.getString(R.string.lut_reset_incompatible_toast, session.currentLog)
@@ -609,10 +612,10 @@ object ColorRecipeBottomSheet {
             session.reset()
             onLogExplicitlyChanged?.invoke(true)
             if (persistToPrefs) {
-                prefs.edit()
-                    .putString(SettingsFragment.KEY_TARGET_LOG, "None")
-                    .remove(SettingsFragment.KEY_ACTIVE_LUT)
-                    .apply()
+                settingsRepository.edit {
+                    this[PreferenceKeys.TARGET_LOG] = "None"
+                    remove(PreferenceKeys.ACTIVE_LUT)
+                }
             }
             reloadLutEntries()
             onRecipeSelected("None", null)

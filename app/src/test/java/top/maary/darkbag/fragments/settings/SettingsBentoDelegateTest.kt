@@ -13,8 +13,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentSettingsBinding
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.repository.DarkbagPreferences
+import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.utils.CameraRepository
 
 @RunWith(RobolectricTestRunner::class)
@@ -45,8 +45,8 @@ class SettingsBentoDelegateTest {
             saveRaw = true,
             enableLutPreview = true,
             hdrBurstCount = 6,
-            hdrFusionMode = SettingsFragment.HDR_FUSION_SABRE,
-            burstProcessingStrategy = SettingsFragment.BURST_STRATEGY_AGGRESSIVE,
+            hdrFusionMode = PreferenceKeys.HDR_FUSION_SABRE,
+            burstProcessingStrategy = PreferenceKeys.BURST_STRATEGY_AGGRESSIVE,
             colorEngineMode = 2,
             motionPhotoEnabled = true,
             motionPhotoAudioEnabled = true,
@@ -80,11 +80,11 @@ class SettingsBentoDelegateTest {
 
     @Test
     fun testUpdateStartupCards() {
-        delegate.updateStartupCards(binding, SettingsFragment.STARTUP_CAMERA, enableCamera = true, enablePlayground = true)
+        delegate.updateStartupCards(binding, PreferenceKeys.STARTUP_CAMERA, enableCamera = true, enablePlayground = true)
         assertEquals(true, binding.switchEnableCamera.isChecked)
         assertEquals(true, binding.switchEnablePlayground.isChecked)
 
-        delegate.updateStartupCards(binding, SettingsFragment.STARTUP_PLAYGROUND, enableCamera = true, enablePlayground = true)
+        delegate.updateStartupCards(binding, PreferenceKeys.STARTUP_PLAYGROUND, enableCamera = true, enablePlayground = true)
         assertEquals(true, binding.switchEnableCamera.isChecked)
     }
 }

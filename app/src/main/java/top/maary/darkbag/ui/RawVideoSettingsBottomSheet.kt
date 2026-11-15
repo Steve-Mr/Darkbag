@@ -17,7 +17,9 @@ import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.BottomSheetRawVideoSettingsBinding
 import top.maary.darkbag.databinding.ItemBentoSelectionOptionBinding
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.CameraHardwareCapabilities
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 
 /**
  * RawVideoSettingsBottomSheet provides a unified Bento bottom sheet for selecting
@@ -47,7 +49,7 @@ class RawVideoSettingsBottomSheet : BottomSheetDialogFragment() {
     }
 
     private fun setupFpsButtons() {
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val settingsRepository = SettingsRepository.getInstance(requireContext())
         val cameraManager = requireContext().getSystemService(Context.CAMERA_SERVICE) as? CameraManager
         val backCameraChars = try {
             val backId = cameraManager?.cameraIdList?.firstOrNull { id ->
@@ -59,8 +61,8 @@ class RawVideoSettingsBottomSheet : BottomSheetDialogFragment() {
             null
         }
 
-        val maxHardwareFps = SettingsFragment.HardwareCapabilities.getMaxSupportedFps(backCameraChars)
-        val savedFps = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_FPS, "24") ?: "24"
+        val maxHardwareFps = CameraHardwareCapabilities.getMaxSupportedFps(backCameraChars)
+        val savedFps = settingsRepository.current().rawVideoFps
 
         fun updateFpsStyles(currentFps: String) {
             val fpsList = listOf(
@@ -110,7 +112,7 @@ class RawVideoSettingsBottomSheet : BottomSheetDialogFragment() {
                     if (!isSupported) {
                         Toast.makeText(requireContext(), getString(R.string.raw_video_option_unsupported_suffix, "$fpsStr FPS"), Toast.LENGTH_SHORT).show()
                     }
-                    prefs.edit().putString(SettingsFragment.KEY_RAW_VIDEO_FPS, fpsStr).apply()
+                    settingsRepository.setRawVideoFps(fpsStr)
                     updateFpsStyles(fpsStr)
                     onSettingsChangedListener?.invoke()
                 }
@@ -121,7 +123,7 @@ class RawVideoSettingsBottomSheet : BottomSheetDialogFragment() {
     }
 
     private fun setupResolutionCards() {
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val settingsRepository = SettingsRepository.getInstance(requireContext())
         val cameraManager = requireContext().getSystemService(Context.CAMERA_SERVICE) as? CameraManager
         val backCameraChars = try {
             val backId = cameraManager?.cameraIdList?.firstOrNull { id ->
@@ -133,9 +135,8 @@ class RawVideoSettingsBottomSheet : BottomSheetDialogFragment() {
             null
         }
 
-        val is4kSupported = SettingsFragment.HardwareCapabilities.is4kCropSupported(backCameraChars)
-        val savedRes = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_RESOLUTION, SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION)
-            ?: SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION
+        val is4kSupported = CameraHardwareCapabilities.is4kCropSupported(backCameraChars)
+        val savedRes = settingsRepository.current().rawVideoResolution
 
         val container = binding.containerResolutionOptions
         container.removeAllViews()
@@ -165,7 +166,7 @@ class RawVideoSettingsBottomSheet : BottomSheetDialogFragment() {
 
         fun renderCards(currentRes: String) {
             container.removeAllViews()
-            SettingsFragment.RAW_VIDEO_RESOLUTION_OPTIONS.forEach { resOption ->
+            PreferenceKeys.RAW_VIDEO_RESOLUTION_OPTIONS.forEach { resOption ->
                 val itemBinding = ItemBentoSelectionOptionBinding.inflate(inflater, container, false)
                 val isSelected = (resOption == currentRes)
                 val isSupported = !resOption.contains("4K") || is4kSupported
@@ -199,7 +200,7 @@ class RawVideoSettingsBottomSheet : BottomSheetDialogFragment() {
                     if (!isSupported) {
                         Toast.makeText(requireContext(), getString(R.string.raw_video_option_unsupported_suffix, resOption), Toast.LENGTH_SHORT).show()
                     }
-                    prefs.edit().putString(SettingsFragment.KEY_RAW_VIDEO_RESOLUTION, resOption).apply()
+                    settingsRepository.setRawVideoResolution(resOption)
                     renderCards(resOption)
                     onSettingsChangedListener?.invoke()
                 }

@@ -1,25 +1,18 @@
 package top.maary.darkbag.calibration
 
 import android.content.Context
-import android.content.SharedPreferences
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.DarkbagDataStoreProvider
+import top.maary.darkbag.repository.PreferenceKeys
 
 /**
- * Thread-safe persistent repository for custom lens calibration profiles.
+ * Thread-safe persistent repository for custom lens calibration profiles backed by Jetpack DataStore.
  */
 class LensCalibrationStore(private val context: Context) {
-    private val prefs: SharedPreferences by lazy {
-        context.applicationContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+    private val store by lazy {
+        DarkbagDataStoreProvider.getStore(context.applicationContext ?: context)
     }
 
     companion object {
-        private const val PREFIX = "custom_lens_calibration_"
-        private const val KEY_ENABLED_SUFFIX = "_enabled"
-        private const val KEY_K1_SUFFIX = "_k1"
-        private const val KEY_K2_SUFFIX = "_k2"
-        private const val KEY_FOCAL_SUFFIX = "_focal"
-        private const val KEY_CALIBRATED_LENSES = "custom_lens_calibration_all_lenses"
-
         @Volatile
         private var instance: LensCalibrationStore? = null
 
@@ -31,13 +24,14 @@ class LensCalibrationStore(private val context: Context) {
     }
 
     fun getCalibration(lensId: String): CustomLensCalibration? {
-        val allLenses = prefs.getStringSet(KEY_CALIBRATED_LENSES, emptySet()) ?: emptySet()
+        val snapshot = store.current()
+        val allLenses = snapshot[PreferenceKeys.CALIBRATED_LENSES] ?: emptySet()
         if (!allLenses.contains(lensId)) return null
 
-        val k1 = prefs.getFloat(PREFIX + lensId + KEY_K1_SUFFIX, 0f)
-        val k2 = prefs.getFloat(PREFIX + lensId + KEY_K2_SUFFIX, 0f)
-        val focal = prefs.getFloat(PREFIX + lensId + KEY_FOCAL_SUFFIX, 0f)
-        val enabled = prefs.getBoolean(PREFIX + lensId + KEY_ENABLED_SUFFIX, true)
+        val k1 = snapshot[PreferenceKeys.lensCalibrationK1Key(lensId)] ?: 0f
+        val k2 = snapshot[PreferenceKeys.lensCalibrationK2Key(lensId)] ?: 0f
+        val focal = snapshot[PreferenceKeys.lensCalibrationFocalKey(lensId)] ?: 0f
+        val enabled = snapshot[PreferenceKeys.lensCalibrationEnabledKey(lensId)] ?: true
 
         return CustomLensCalibration(
             lensId = lensId,
@@ -49,29 +43,27 @@ class LensCalibrationStore(private val context: Context) {
     }
 
     fun saveCalibration(calibration: CustomLensCalibration) {
-        val allLenses = prefs.getStringSet(KEY_CALIBRATED_LENSES, emptySet())?.toMutableSet() ?: mutableSetOf()
-        allLenses.add(calibration.lensId)
-
-        prefs.edit()
-            .putStringSet(KEY_CALIBRATED_LENSES, allLenses)
-            .putFloat(PREFIX + calibration.lensId + KEY_K1_SUFFIX, calibration.k1)
-            .putFloat(PREFIX + calibration.lensId + KEY_K2_SUFFIX, calibration.k2)
-            .putFloat(PREFIX + calibration.lensId + KEY_FOCAL_SUFFIX, calibration.focalLength)
-            .putBoolean(PREFIX + calibration.lensId + KEY_ENABLED_SUFFIX, calibration.isEnabled)
-            .apply()
+        store.updateAsync { mutable ->
+            val allLenses = mutable[PreferenceKeys.CALIBRATED_LENSES]?.toMutableSet() ?: mutableSetOf()
+            allLenses.add(calibration.lensId)
+            mutable[PreferenceKeys.CALIBRATED_LENSES] = allLenses
+            mutable[PreferenceKeys.lensCalibrationK1Key(calibration.lensId)] = calibration.k1
+            mutable[PreferenceKeys.lensCalibrationK2Key(calibration.lensId)] = calibration.k2
+            mutable[PreferenceKeys.lensCalibrationFocalKey(calibration.lensId)] = calibration.focalLength
+            mutable[PreferenceKeys.lensCalibrationEnabledKey(calibration.lensId)] = calibration.isEnabled
+        }
     }
 
     fun removeCalibration(lensId: String) {
-        val allLenses = prefs.getStringSet(KEY_CALIBRATED_LENSES, emptySet())?.toMutableSet() ?: mutableSetOf()
-        allLenses.remove(lensId)
-
-        prefs.edit()
-            .putStringSet(KEY_CALIBRATED_LENSES, allLenses)
-            .remove(PREFIX + lensId + KEY_K1_SUFFIX)
-            .remove(PREFIX + lensId + KEY_K2_SUFFIX)
-            .remove(PREFIX + lensId + KEY_FOCAL_SUFFIX)
-            .remove(PREFIX + lensId + KEY_ENABLED_SUFFIX)
-            .apply()
+        store.updateAsync { mutable ->
+            val allLenses = mutable[PreferenceKeys.CALIBRATED_LENSES]?.toMutableSet() ?: mutableSetOf()
+            allLenses.remove(lensId)
+            mutable[PreferenceKeys.CALIBRATED_LENSES] = allLenses
+            mutable.remove(PreferenceKeys.lensCalibrationK1Key(lensId))
+            mutable.remove(PreferenceKeys.lensCalibrationK2Key(lensId))
+            mutable.remove(PreferenceKeys.lensCalibrationFocalKey(lensId))
+            mutable.remove(PreferenceKeys.lensCalibrationEnabledKey(lensId))
+        }
     }
 
     fun setEnabled(lensId: String, enabled: Boolean) {
@@ -80,7 +72,7 @@ class LensCalibrationStore(private val context: Context) {
     }
 
     fun getAllCalibrations(): List<CustomLensCalibration> {
-        val allLenses = prefs.getStringSet(KEY_CALIBRATED_LENSES, emptySet()) ?: emptySet()
+        val allLenses = store.current()[PreferenceKeys.CALIBRATED_LENSES] ?: emptySet()
         return allLenses.mapNotNull { getCalibration(it) }
     }
 }

@@ -14,6 +14,7 @@ import top.maary.darkbag.fragments.GallerySelectedItem
 import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.models.MultiCameraLensItem
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.bento.BentoContainerRole
 import top.maary.darkbag.utils.GalleryLayoutState
 
@@ -92,16 +93,13 @@ sealed class DarkroomGalleryUserIntent {
  */
 class DarkroomGalleryViewModel @JvmOverloads constructor(
     application: Application,
-    private val repository: ImageRepository = ImageRepository(application)
+    private val repository: ImageRepository = ImageRepository(application),
+    private val settingsRepository: SettingsRepository = SettingsRepository.getInstance(application)
 ) : AndroidViewModel(application) {
 
-    private val prefs = application.getSharedPreferences(
-        top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME,
-        android.content.Context.MODE_PRIVATE
-    )
-
-    private val initialWaterfall = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_GALLERY_WATERFALL, false)
-    private val initialCols = prefs.getInt(top.maary.darkbag.fragments.SettingsFragment.KEY_GALLERY_COLUMNS_PORTRAIT, 3)
+    private val initialSnapshot = settingsRepository.current()
+    private val initialWaterfall = initialSnapshot.galleryWaterfall
+    private val initialCols = initialSnapshot.galleryColumnsPortrait
 
     private val _uiState = MutableStateFlow(
         DarkroomGalleryUiState(
@@ -261,15 +259,11 @@ class DarkroomGalleryViewModel @JvmOverloads constructor(
         _uiState.update { state ->
             val currentLayout = GalleryLayoutState(state.columnCount, state.isWaterfallMode)
             val nextLayout = currentLayout.cycle(isLandscape)
-            prefs.edit().apply {
-                putBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_GALLERY_WATERFALL, nextLayout.isWaterfallMode)
-                if (isLandscape) {
-                    putInt(top.maary.darkbag.fragments.SettingsFragment.KEY_GALLERY_COLUMNS_LANDSCAPE, nextLayout.columnCount)
-                } else {
-                    putInt(top.maary.darkbag.fragments.SettingsFragment.KEY_GALLERY_COLUMNS_PORTRAIT, nextLayout.columnCount)
-                }
-                apply()
-            }
+            settingsRepository.setGalleryLayout(
+                isLandscape = isLandscape,
+                columns = nextLayout.columnCount,
+                isWaterfall = nextLayout.isWaterfallMode
+            )
             state.copy(
                 columnCount = nextLayout.columnCount,
                 isWaterfallMode = nextLayout.isWaterfallMode
@@ -278,11 +272,12 @@ class DarkroomGalleryViewModel @JvmOverloads constructor(
     }
 
     fun syncOrientation(isLandscape: Boolean) {
-        val savedWaterfall = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_GALLERY_WATERFALL, false)
+        val current = settingsRepository.current()
+        val savedWaterfall = current.galleryWaterfall
         val savedCols = if (isLandscape) {
-            prefs.getInt(top.maary.darkbag.fragments.SettingsFragment.KEY_GALLERY_COLUMNS_LANDSCAPE, 4)
+            current.galleryColumnsLandscape
         } else {
-            prefs.getInt(top.maary.darkbag.fragments.SettingsFragment.KEY_GALLERY_COLUMNS_PORTRAIT, 3)
+            current.galleryColumnsPortrait
         }
         _uiState.update { state ->
             state.copy(

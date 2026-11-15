@@ -9,8 +9,8 @@ import com.google.android.material.color.MaterialColors
 import com.google.android.material.shape.ShapeAppearanceModel
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentSettingsBinding
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.repository.DarkbagPreferences
+import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.ui.bento.BentoContainerRole
 import top.maary.darkbag.utils.CameraRepository
@@ -104,10 +104,10 @@ class SettingsBentoDelegate(
 
         // 5. HDR+ Fusion Mode
         val fusionDisplay = when (state.hdrFusionMode) {
-            SettingsFragment.HDR_FUSION_SABRE -> context.getString(R.string.pref_fusion_sabre)
-            SettingsFragment.HDR_FUSION_SPATIAL_RCD -> context.getString(R.string.pref_fusion_spatial)
-            SettingsFragment.HDR_FUSION_CLASSIC -> context.getString(R.string.pref_fusion_classic)
-            SettingsFragment.HDR_FUSION_AUTO -> context.getString(R.string.pref_fusion_auto)
+            PreferenceKeys.HDR_FUSION_SABRE -> context.getString(R.string.pref_fusion_sabre)
+            PreferenceKeys.HDR_FUSION_SPATIAL_RCD -> context.getString(R.string.pref_fusion_spatial)
+            PreferenceKeys.HDR_FUSION_CLASSIC -> context.getString(R.string.pref_fusion_classic)
+            PreferenceKeys.HDR_FUSION_AUTO -> context.getString(R.string.pref_fusion_auto)
             else -> state.hdrFusionMode
         }
         binding.btnMenuHdrFusionMode.text = CameraBentoDeckView.formatProTelemetry(
@@ -144,13 +144,13 @@ class SettingsBentoDelegate(
         )
 
         // 8. Color Engine Mode
-        val cIdx = state.colorEngineMode.coerceIn(0, SettingsFragment.COLOR_ENGINE_MODES.size - 1)
+        val cIdx = state.colorEngineMode.coerceIn(0, PreferenceKeys.COLOR_ENGINE_MODES.size - 1)
         val ceName = when (cIdx) {
             0 -> "Khronos Neutral"
             1 -> "Natural Filmic"
             2 -> "Sony Uchimura"
             3 -> "Legacy ACES"
-            else -> SettingsFragment.COLOR_ENGINE_MODES[cIdx]
+            else -> PreferenceKeys.COLOR_ENGINE_MODES[cIdx]
         }
         binding.btnMenuColorEngine.text = CameraBentoDeckView.formatProTelemetry(
             label = context.getString(R.string.pref_color_engine_label),
@@ -175,7 +175,7 @@ class SettingsBentoDelegate(
         )
 
         // 10. Burst Strategy
-        val bsDisplay = if (state.burstProcessingStrategy == SettingsFragment.BURST_STRATEGY_BALANCED) {
+        val bsDisplay = if (state.burstProcessingStrategy == PreferenceKeys.BURST_STRATEGY_BALANCED) {
             context.getString(R.string.pref_burst_strategy_balanced)
         } else {
             context.getString(R.string.pref_burst_strategy_rapid)
@@ -190,15 +190,15 @@ class SettingsBentoDelegate(
 
         // 11. Shutter Long-Press
         val slpDisplay = when (state.shutterLongPressAction) {
-            SettingsFragment.SHUTTER_LONG_PRESS_MP4 -> context.getString(R.string.pref_shutter_action_mp4)
-            SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO -> context.getString(R.string.pref_shutter_action_raw_video)
+            PreferenceKeys.SHUTTER_LONG_PRESS_MP4 -> context.getString(R.string.pref_shutter_action_mp4)
+            PreferenceKeys.SHUTTER_LONG_PRESS_RAW_VIDEO -> context.getString(R.string.pref_shutter_action_raw_video)
             else -> context.getString(R.string.pref_option_disabled)
         }
         binding.btnMenuShutterLongPress.text = CameraBentoDeckView.formatProTelemetry(
             label = context.getString(R.string.pref_shutter_hold_label),
             value = slpDisplay,
             isTabActive = false,
-            isValueManual = state.shutterLongPressAction != SettingsFragment.SHUTTER_LONG_PRESS_DISABLED,
+            isValueManual = state.shutterLongPressAction != PreferenceKeys.SHUTTER_LONG_PRESS_DISABLED,
             context = context
         )
 
@@ -397,7 +397,7 @@ class SettingsBentoDelegate(
         val radius10dp = (10f * density).toInt()
         val radius14dp = (14f * density).toInt()
 
-        val isCameraActive = defaultStartup == SettingsFragment.STARTUP_CAMERA
+        val isCameraActive = defaultStartup == PreferenceKeys.STARTUP_CAMERA
 
         binding.cardStartupCamera.radius = (if (isCameraActive) radius10dp else radius14dp).toFloat()
         binding.cardStartupCamera.setCardBackgroundColor(ColorStateList.valueOf(if (isCameraActive) colorPrimaryContainer else colorSurface))
