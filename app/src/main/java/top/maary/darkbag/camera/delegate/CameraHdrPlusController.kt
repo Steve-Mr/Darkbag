@@ -40,7 +40,15 @@ class CameraHdrPlusController(
 
     /** Seeds the flash flag and HDR+ state from preferences (call once when the view is created). */
     fun restorePersistedState() {
-        host.isFlashEnabled = prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
+        host.isFlashEnabled = try {
+            prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
+        } catch (_: Exception) {
+            try {
+                prefs.getString(SettingsFragment.KEY_FLASH_MODE, "off")?.equals("on", ignoreCase = true) ?: false
+            } catch (_: Exception) {
+                false
+            }
+        }
         host.cameraViewModel.setHdrPlusEnabled(prefs.getBoolean(CameraFragment.KEY_HDR_PLUS_ENABLED, true))
     }
 

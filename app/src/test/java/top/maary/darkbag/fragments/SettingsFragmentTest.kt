@@ -636,6 +636,15 @@ class SettingsFragmentTest {
 
     @Test
     fun testSettingsFragmentLifecycleAttachmentAndViewModelResolution() {
+        val appContext = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean(SettingsFragment.KEY_FLASH_MODE, true)
+            .putInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 1)
+            .putInt(SettingsFragment.KEY_HDR_BURST_COUNT, 6)
+            .putString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "28mm")
+            .commit()
+
         val activity = org.robolectric.Robolectric.buildActivity(androidx.fragment.app.FragmentActivity::class.java).setup().get()
         activity.setTheme(top.maary.darkbag.R.style.AppTheme)
         val fragment = SettingsFragment()

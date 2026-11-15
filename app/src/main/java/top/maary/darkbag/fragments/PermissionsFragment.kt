@@ -377,7 +377,16 @@ class PermissionsFragment : Fragment() {
         updateFormatCards()
 
         // 1.0x Focal length base (24mm, 28mm, 35mm)
-        val savedFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm") ?: "24mm"
+        val savedFocal = try {
+            prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm") ?: "24mm"
+        } catch (_: Exception) {
+            try {
+                val f = prefs.getFloat(SettingsFragment.KEY_DEFAULT_FOCAL_1X, 24f)
+                if (f > 0f) "${f.toInt()}mm" else "24mm"
+            } catch (_: Exception) {
+                "24mm"
+            }
+        }
         updateFocalTiles(savedFocal)
 
         binding.tileFocal24.setOnClickListener {

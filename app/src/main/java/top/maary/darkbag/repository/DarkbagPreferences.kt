@@ -18,6 +18,7 @@ data class DarkbagPreferences(
     val defaultFocal1x: Float = 0f,
     val antibandingMode: String = "Auto",
     val flashMode: String = "off",
+    val flashEnabled: Boolean = false,
     val hdrBurstCount: Int = 5,
     val hdrFusionMode: String = SettingsFragment.HDR_FUSION_AUTO,
     val burstProcessingStrategy: String = SettingsFragment.BURST_STRATEGY_BALANCED,

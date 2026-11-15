@@ -209,6 +209,33 @@ class CameraPhaseCControllersTest {
         assertTrue(beforeMode != afterMode)
     }
 
+    @Test
+    fun testHdrPlusController_restoreWithLegacyStringFlashMode() {
+        prefs.edit()
+            .putString(SettingsFragment.KEY_FLASH_MODE, "on")
+            .apply()
+
+        val megaHost = FakeMegaHost()
+        val lutController = CameraLutController(megaHost)
+        val lensController = CameraLensController(megaHost)
+        val controller = CameraHdrPlusController(megaHost, lutController, lensController)
+
+        controller.restorePersistedState()
+        assertTrue(megaHost.isFlashEnabled)
+    }
+
+    @Test
+    fun testLensController_withFloatDefaultFocal1xDoesNotCrash() {
+        prefs.edit()
+            .putFloat(SettingsFragment.KEY_DEFAULT_FOCAL_1X, 28f)
+            .apply()
+
+        val megaHost = FakeMegaHost()
+        val lensController = CameraLensController(megaHost)
+        lensController.initLensControls()
+        assertNotNull(lensController)
+    }
+
     // -------------------------------------------------------------------------
     // CameraMotionPhotoController tests
     // -------------------------------------------------------------------------
