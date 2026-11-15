@@ -20,69 +20,30 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import top.maary.darkbag.R
 import top.maary.darkbag.camera.ConcurrentFrontCameraManager
-import top.maary.darkbag.camera.MultiCameraCaptureManager
 import top.maary.darkbag.camera.MultiCameraCaptureResult
 import top.maary.darkbag.camera.MultiCameraManualConfig
-import top.maary.darkbag.databinding.CameraUiContainerBinding
-import top.maary.darkbag.databinding.FragmentCameraBinding
+import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
+import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
+import top.maary.darkbag.camera.delegate.CameraUiHost
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.processor.HdrPlusRequestManager
-import top.maary.darkbag.repository.ImageRepository
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.ImageSaver
-import top.maary.darkbag.utils.LutManager
 import top.maary.darkbag.utils.MultiCameraHelper
-import top.maary.darkbag.viewmodel.CameraViewModel
 import java.io.File
 import java.io.FileOutputStream
-
-/**
- * Host contract for multi-camera capture operations.
- */
-interface CameraMultiCaptureHost {
-    val hostContext: Context
-    val lifecycleScope: CoroutineScope
-    val multiCameraManager: MultiCameraCaptureManager?
-    var concurrentFrontCameraManager: ConcurrentFrontCameraManager?
-    val imageRepository: ImageRepository
-    val lutManager: LutManager
-    val cameraViewModel: CameraViewModel
-    val cameraUiContainerBinding: CameraUiContainerBinding?
-    val fragmentCameraBinding: FragmentCameraBinding?
-    val processingSemaphore: Semaphore
-    val isHdrPlusEnabled: Boolean
-    val isRawSupported: Boolean
-    val isMultiCameraManualLinked: Boolean
-    val isManualFocus: Boolean
-    val currentFocusDistance: Float
-    val isManualIso: Boolean
-    val currentIso: Int
-    val isManualShutter: Boolean
-    val currentExposureTime: Long
-    val currentEvIndex: Int
-    val focusMeteringRegion: MeteringRectangle?
-    val exposureMeteringRegion: MeteringRectangle?
-    var isFrontPipActive: Boolean
-    var isBurstActive: Boolean
-
-    fun getCombinedOrientation(): Int
-    fun showShutterBlackout()
-    fun showProcessingAnimation()
-    fun hideProcessingAnimation()
-    fun resetBurstUi()
-    fun setGalleryThumbnail(filename: String?)
-    fun updateProInfoBar()
-}
 
 /**
  * Dispatcher managing multi-camera concurrent lens triggering,
  * concurrent front/back preview pipelines, and parallel frame persistence.
  */
 class CameraMultiCaptureDispatcher(
-    private val host: CameraMultiCaptureHost
+    private val env: CameraEnvironmentHost,
+    private val ui: CameraUiHost,
+    private val coordinator: CameraCoordinatorHost
 ) {
     companion object {
         private const val TAG = "CameraMultiCapture"
@@ -90,45 +51,45 @@ class CameraMultiCaptureDispatcher(
 
     fun takeMultiCameraPicture(timing: StandardTimingTracker? = null) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            host.isBurstActive = false
-            host.cameraViewModel.setBurstActive(false)
-            host.lifecycleScope.launch(Dispatchers.Main) { host.resetBurstUi() }
-            host.processingSemaphore.release()
+            env.runtimeState.isBurstActive = false
+            env.cameraViewModel.setBurstActive(false)
+            env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
+            env.runtimeState.processingSemaphore.release()
             return
         }
 
-        val manager = host.multiCameraManager ?: run {
-            host.isBurstActive = false
-            host.cameraViewModel.setBurstActive(false)
-            host.lifecycleScope.launch(Dispatchers.Main) { host.resetBurstUi() }
-            host.processingSemaphore.release()
+        val manager = env.sessionArbiter.multiCameraManager ?: run {
+            env.runtimeState.isBurstActive = false
+            env.cameraViewModel.setBurstActive(false)
+            env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
+            env.runtimeState.processingSemaphore.release()
             return
         }
 
-        host.showShutterBlackout()
+        ui.showShutterBlackout()
         HdrPlusRequestManager.onTaskStarted()
-        host.showProcessingAnimation()
+        ui.showProcessingAnimation()
 
-        val orientation = host.getCombinedOrientation()
-        val saveRaw = SettingsRepository.getInstance(host.hostContext).current().multiCameraSaveRaw
-        val isHdrPlusActive = host.isHdrPlusEnabled && host.isRawSupported
+        val orientation = coordinator.getCombinedOrientation()
+        val saveRaw = SettingsRepository.getInstance(env.hostContext).current().multiCameraSaveRaw
+        val isHdrPlusActive = env.isHdrPlusEnabled && env.runtimeState.isRawSupported
 
         val manualConfig = MultiCameraManualConfig(
-            isLinked = host.isMultiCameraManualLinked,
-            isManualFocus = host.isManualFocus,
-            focusDistance = host.currentFocusDistance,
-            isManualIso = host.isManualIso,
-            iso = host.currentIso,
-            isManualShutter = host.isManualShutter,
-            exposureTimeNanos = host.currentExposureTime,
-            evIndex = host.currentEvIndex,
-            focusMeteringRegion = host.focusMeteringRegion,
-            exposureMeteringRegion = host.exposureMeteringRegion
+            isLinked = env.runtimeState.isMultiCameraManualLinked,
+            isManualFocus = env.runtimeState.isManualFocus,
+            focusDistance = env.runtimeState.currentFocusDistance,
+            isManualIso = env.runtimeState.isManualIso,
+            iso = env.runtimeState.currentIso,
+            isManualShutter = env.runtimeState.isManualShutter,
+            exposureTimeNanos = env.runtimeState.currentExposureTime,
+            evIndex = env.runtimeState.currentEvIndex,
+            focusMeteringRegion = env.runtimeState.focusMeteringRegion,
+            exposureMeteringRegion = env.runtimeState.exposureMeteringRegion
         )
 
         val frontJpegDeferred = CompletableDeferred<ByteArray?>()
-        if (host.isFrontPipActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            host.concurrentFrontCameraManager?.captureFrontJpeg(orientation, manualConfig) { data ->
+        if (env.runtimeState.isFrontPipActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            env.sessionArbiter.concurrentFrontCameraManager?.captureFrontJpeg(orientation, manualConfig) { data ->
                 frontJpegDeferred.complete(data)
             }
         } else {
@@ -142,12 +103,12 @@ class CameraMultiCaptureDispatcher(
             onResult = { result ->
                 timing?.recordFrameArrival()
                 timing?.recordShutterReady()
-                host.lifecycleScope.launch(Dispatchers.Main) {
-                    host.isBurstActive = false
-                    host.cameraViewModel.setBurstActive(false)
-                    host.resetBurstUi()
+                env.lifecycleScope.launch(Dispatchers.Main) {
+                    env.runtimeState.isBurstActive = false
+                    env.cameraViewModel.setBurstActive(false)
+                    ui.resetBurstUi()
                 }
-                host.lifecycleScope.launch(Dispatchers.IO) {
+                env.lifecycleScope.launch(Dispatchers.IO) {
                     val frontJpeg = withTimeoutOrNull(2000L) { frontJpegDeferred.await() }
                     processAndSaveMultiCameraResult(result, saveRaw, frontJpeg, timing)
                 }
@@ -155,13 +116,13 @@ class CameraMultiCaptureDispatcher(
             onError = { errorMsg ->
                 Log.e(TAG, "Multi-camera capture error: $errorMsg")
                 HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = false)
-                host.lifecycleScope.launch(Dispatchers.Main) {
-                    host.processingSemaphore.release()
-                    host.resetBurstUi()
-                    host.hideProcessingAnimation()
+                env.lifecycleScope.launch(Dispatchers.Main) {
+                    env.runtimeState.processingSemaphore.release()
+                    ui.resetBurstUi()
+                    ui.hideProcessingAnimation()
                     Toast.makeText(
-                        host.hostContext,
-                        host.hostContext.getString(R.string.error_multi_camera_capture_failed, errorMsg),
+                        env.hostContext,
+                        env.hostContext.getString(R.string.error_multi_camera_capture_failed, errorMsg),
                         Toast.LENGTH_SHORT
                     ).show()
                 }
@@ -184,7 +145,7 @@ class CameraMultiCaptureDispatcher(
         }
 
         try {
-            val appContext = host.hostContext.applicationContext
+            val appContext = env.hostContext.applicationContext
             val settingsRepository = SettingsRepository.getInstance(appContext)
             val snapshot = settingsRepository.current()
             val jpgFolderUri = snapshot.jpgStorageUri
@@ -196,7 +157,7 @@ class CameraMultiCaptureDispatcher(
             val currentLut = snapshot.activeLut
             val logIndex = PreferenceKeys.LOG_CURVES.indexOf(currentLog)
             val lutPath = if (currentLut != "None" && currentLut.isNotBlank()) {
-                val f = File(host.lutManager.lutDir, currentLut)
+                val f = File(env.lutManager.lutDir, currentLut)
                 if (f.exists()) f.absolutePath else null
             } else null
 
@@ -334,9 +295,9 @@ class CameraMultiCaptureDispatcher(
 
             withContext(Dispatchers.Main) {
                 if (primarySavedUri != null) {
-                    host.imageRepository.invalidateCache()
+                    env.imageRepository.invalidateCache()
                     settingsRepository.setLastCaptureUri(primarySavedUri.toString())
-                    host.setGalleryThumbnail(primarySavedUri.toString())
+                    ui.setGalleryThumbnail(primarySavedUri.toString())
                 }
             }
             notifyForegroundFinished()
@@ -361,63 +322,63 @@ class CameraMultiCaptureDispatcher(
                 }
             }
             HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = foregroundFinished)
-            host.processingSemaphore.release()
+            env.runtimeState.processingSemaphore.release()
             withContext(Dispatchers.Main) {
-                host.cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                host.resetBurstUi()
-                host.hideProcessingAnimation()
+                ui.cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                ui.resetBurstUi()
+                ui.hideProcessingAnimation()
             }
         }
     }
 
     fun toggleFrontPipInMultiCameraMode() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || !MultiCameraHelper.isConcurrentFrontBackSupported(host.hostContext)) {
-            Toast.makeText(host.hostContext, R.string.concurrent_front_camera_unsupported, Toast.LENGTH_SHORT).show()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || !MultiCameraHelper.isConcurrentFrontBackSupported(env.hostContext)) {
+            Toast.makeText(env.hostContext, R.string.concurrent_front_camera_unsupported, Toast.LENGTH_SHORT).show()
             return
         }
 
-        val binding = host.fragmentCameraBinding ?: return
+        val binding = ui.fragmentCameraBinding ?: return
         val pipContainer = binding.pipContainer ?: return
         val pipViewFinder = binding.pipViewFinder ?: return
-        val switchBtn = host.cameraUiContainerBinding?.cameraSwitchButtonAlt ?: return
+        val switchBtn = ui.cameraUiContainerBinding?.cameraSwitchButtonAlt ?: return
 
-        host.isFrontPipActive = !host.isFrontPipActive
-        if (host.isFrontPipActive) {
+        env.runtimeState.isFrontPipActive = !env.runtimeState.isFrontPipActive
+        if (env.runtimeState.isFrontPipActive) {
             pipContainer.visibility = View.VISIBLE
             val onPrimary = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorOnPrimaryContainer)
             val primaryContainer = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorPrimaryContainer)
             switchBtn.iconTint = ColorStateList.valueOf(onPrimary)
             switchBtn.backgroundTintList = ColorStateList.valueOf(primaryContainer)
 
-            if (host.concurrentFrontCameraManager == null) {
-                host.concurrentFrontCameraManager = ConcurrentFrontCameraManager(
-                    host.hostContext,
-                    host.lifecycleScope
+            if (env.sessionArbiter.concurrentFrontCameraManager == null) {
+                env.sessionArbiter.concurrentFrontCameraManager = ConcurrentFrontCameraManager(
+                    env.hostContext,
+                    env.lifecycleScope
                 ).apply {
                     onFailedListener = { error ->
-                        host.lifecycleScope.launch(Dispatchers.Main) {
+                        env.lifecycleScope.launch(Dispatchers.Main) {
                             Log.e(TAG, "Front PiP camera failed: $error")
-                            host.isFrontPipActive = false
+                            env.runtimeState.isFrontPipActive = false
                             pipContainer.visibility = View.GONE
                             val onSurface = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorOnSurface)
                             val surfaceContainer = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorSurfaceContainerHighest)
                             switchBtn.iconTint = ColorStateList.valueOf(onSurface)
                             switchBtn.backgroundTintList = ColorStateList.valueOf(surfaceContainer)
-                            Toast.makeText(host.hostContext, R.string.concurrent_front_camera_unsupported, Toast.LENGTH_SHORT).show()
+                            Toast.makeText(env.hostContext, R.string.concurrent_front_camera_unsupported, Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
             }
 
             if (pipViewFinder.isAvailable) {
-                host.lifecycleScope.launch {
-                    host.concurrentFrontCameraManager?.startFrontPreview(pipViewFinder)
+                env.lifecycleScope.launch {
+                    env.sessionArbiter.concurrentFrontCameraManager?.startFrontPreview(pipViewFinder)
                 }
             } else {
                 pipViewFinder.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
-                        host.lifecycleScope.launch {
-                            host.concurrentFrontCameraManager?.startFrontPreview(pipViewFinder)
+                        env.lifecycleScope.launch {
+                            env.sessionArbiter.concurrentFrontCameraManager?.startFrontPreview(pipViewFinder)
                         }
                     }
                     override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
@@ -432,10 +393,10 @@ class CameraMultiCaptureDispatcher(
             switchBtn.iconTint = ColorStateList.valueOf(onSurface)
             switchBtn.backgroundTintList = ColorStateList.valueOf(surfaceContainer)
 
-            host.lifecycleScope.launch {
-                host.concurrentFrontCameraManager?.stop()
+            env.lifecycleScope.launch {
+                env.sessionArbiter.concurrentFrontCameraManager?.stop()
             }
         }
-        host.updateProInfoBar()
+        ui.updateProInfoBar()
     }
 }

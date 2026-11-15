@@ -9,6 +9,7 @@ import android.util.Log
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
+import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
 import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.processor.SensorCalibrationHelper
 import top.maary.darkbag.repository.SettingsRepository
@@ -35,14 +36,14 @@ class CameraCaptureMetadataExtractor(
     private val currentLensProvider: () -> LensInfo?,
     private val isHdrPlusEnabledProvider: () -> Boolean
 ) {
-    constructor(host: CameraCapturePipelineHost) : this(
-        context = host.hostContext,
-        camera2Manager = host.camera2Manager,
-        captureResults = host.captureResults,
-        captureResultFlow = host.captureResultFlow,
-        locationHelper = host.locationHelper,
-        currentLensProvider = { host.currentLens },
-        isHdrPlusEnabledProvider = { host.cameraViewModel.uiState.value.isHdrPlusEnabled }
+    constructor(env: CameraEnvironmentHost) : this(
+        context = env.hostContext,
+        camera2Manager = env.camera2Manager,
+        captureResults = env.runtimeState.captureResults,
+        captureResultFlow = env.runtimeState.captureResultFlow,
+        locationHelper = env.locationHelper,
+        currentLensProvider = { env.runtimeState.currentLens },
+        isHdrPlusEnabledProvider = { env.cameraViewModel.uiState.value.isHdrPlusEnabled }
     )
 
     suspend fun findCaptureResult(timestamp: Long, tolerance: Long = DEFAULT_TOLERANCE_NS): TotalCaptureResult? {

@@ -24,58 +24,26 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
-import top.maary.darkbag.databinding.CameraUiContainerBinding
-import top.maary.darkbag.processor.LutSurfaceProcessor
+import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
+import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
+import top.maary.darkbag.camera.delegate.CameraUiHost
 import top.maary.darkbag.rawvideo.RawVideoNative
-import top.maary.darkbag.rawvideo.RawVideoSessionManager
-import top.maary.darkbag.repository.ImageRepository
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.DarkbagIdentity
 import top.maary.darkbag.utils.ImageSaver
-import top.maary.darkbag.utils.LensInfo
 import top.maary.darkbag.video.Mp4VideoRecorder
 import java.io.File
-
-/**
- * Host contract for video recording.
- */
-interface CameraVideoHost {
-    val hostContext: Context
-    val lifecycleScope: CoroutineScope
-    val camera2Manager: CameraManager
-    val camera2Device: CameraDevice?
-    val camera2Session: android.hardware.camera2.CameraCaptureSession?
-    val camera2PreviewSurface: Surface?
-    val camera2Handler: Handler?
-    val rawImageReader: ImageReader?
-    val analysisImageReader: ImageReader?
-    val lutProcessor: LutSurfaceProcessor?
-    val cameraUiContainerBinding: CameraUiContainerBinding?
-    val imageRepository: ImageRepository
-    val rawVideoSessionManager: RawVideoSessionManager
-    val currentLens: LensInfo?
-    val isManualExposure: Boolean
-    val deviceOrientationDegrees: Int
-    val captureResults: Map<Long, TotalCaptureResult>
-    var isVideoSaving: Boolean
-
-    fun getCombinedOrientation(): Int
-    fun applyManualSettingsToRequest(request: CaptureRequest.Builder)
-    fun handleCaptureResult(result: TotalCaptureResult)
-    fun updateCurrentThumbnail(uri: Uri?)
-    fun showProcessingAnimation()
-    fun hideProcessingAnimation()
-    fun updateMotionPhotoEncoder()
-}
 
 /**
  * Controller managing RAW DNG-sequence video and MP4 video recording,
  * recording state transitions, audio permission dialogues, and disk serialization.
  */
 class CameraVideoController(
-    private val host: CameraVideoHost
+    private val env: CameraEnvironmentHost,
+    private val ui: CameraUiHost,
+    private val coordinator: CameraCoordinatorHost
 ) {
     companion object {
         private const val TAG = "CameraVideoController"
@@ -84,15 +52,15 @@ class CameraVideoController(
     private var mp4VideoRecorder: Mp4VideoRecorder? = null
 
     val isRecording: Boolean
-        get() = host.rawVideoSessionManager.recording || (mp4VideoRecorder?.recording == true)
+        get() = env.runtimeState.rawVideoSessionManager.recording || (mp4VideoRecorder?.recording == true)
 
     fun startRawVideoRecording() {
-        val device = host.camera2Device ?: return
-        val session = host.camera2Session ?: return
-        val reader = host.rawImageReader ?: return
+        val device = env.sessionArbiter.camera2Device ?: return
+        val session = env.sessionArbiter.camera2Session ?: return
+        val reader = env.sessionArbiter.rawImageReader ?: return
 
-        val chars = CameraRepository.getCharacteristics(host.camera2Manager, device.id)
-        val currentPrefs = SettingsRepository.getInstance(host.hostContext).current()
+        val chars = CameraRepository.getCharacteristics(env.camera2Manager, device.id)
+        val currentPrefs = SettingsRepository.getInstance(env.hostContext).current()
 
         val targetFpsStr = currentPrefs.rawVideoFps
         val targetFps = targetFpsStr.toFloatOrNull() ?: 24.0f
@@ -108,21 +76,21 @@ class CameraVideoController(
 
         val timestamp = System.currentTimeMillis()
         val baseName = DarkbagIdentity.prefixedBaseName("RAWVID_${timestamp}")
-        val tempDir = File(host.hostContext.cacheDir, "rawvideo")
+        val tempDir = File(env.hostContext.cacheDir, "rawvideo")
         tempDir.mkdirs()
         val tempFile = File(tempDir, "${baseName}.rawvid")
 
-        val lastResult = host.captureResults.values.lastOrNull()
-        val combinedOrientation = host.getCombinedOrientation()
-        host.rawVideoSessionManager.onLowStorageCallback = {
+        val lastResult = env.runtimeState.captureResults.values.lastOrNull()
+        val combinedOrientation = coordinator.getCombinedOrientation()
+        env.runtimeState.rawVideoSessionManager.onLowStorageCallback = {
             Handler(Looper.getMainLooper()).post {
-                if (host.rawVideoSessionManager.recording) {
-                    Toast.makeText(host.hostContext, host.hostContext.getString(R.string.toast_low_storage_recording_stopped), Toast.LENGTH_LONG).show()
+                if (env.runtimeState.rawVideoSessionManager.recording) {
+                    Toast.makeText(env.hostContext, env.hostContext.getString(R.string.toast_low_storage_recording_stopped), Toast.LENGTH_LONG).show()
                     stopRawVideoRecording()
                 }
             }
         }
-        val success = host.rawVideoSessionManager.startRecording(
+        val success = env.runtimeState.rawVideoSessionManager.startRecording(
             outputPath = tempFile.absolutePath,
             characteristics = chars,
             initialResult = lastResult,
@@ -145,24 +113,24 @@ class CameraVideoController(
         val frameDurationNs = (1_000_000_000L / targetFps).toLong()
 
         if (success) {
-            host.cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
-            host.cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
+            ui.cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
+            ui.cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
 
             reader.setOnImageAvailableListener({ r ->
                 val image = try { r.acquireNextImage() } catch (e: Exception) { r.acquireLatestImage() } ?: return@setOnImageAvailableListener
-                val res = host.captureResults.values.lastOrNull()
-                host.rawVideoSessionManager.onRawImageAvailable(image, res)
-            }, host.camera2Handler)
+                val res = env.runtimeState.captureResults.values.lastOrNull()
+                env.runtimeState.rawVideoSessionManager.onRawImageAvailable(image, res)
+            }, env.sessionArbiter.camera2Handler)
 
-            val cameraHandler = host.camera2Handler
+            val cameraHandler = env.sessionArbiter.camera2Handler
             val submitRecordRequest: () -> Unit = {
                 try {
                     val request = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
-                    host.camera2PreviewSurface?.let { request.addTarget(it) }
+                    env.sessionArbiter.camera2PreviewSurface?.let { request.addTarget(it) }
                     request.addTarget(reader.surface)
-                    val isMainLens = host.currentLens == null || (host.currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
+                    val isMainLens = env.runtimeState.currentLens == null || (env.runtimeState.currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
                     if (isMainLens) {
-                        host.analysisImageReader?.surface?.let { request.addTarget(it) }
+                        env.sessionArbiter.analysisImageReader?.surface?.let { request.addTarget(it) }
                     }
 
                     // 1. Lock Target FPS range for AE to enforce frame rate and AE exposure ceiling
@@ -175,10 +143,10 @@ class CameraVideoController(
                     request.set(CaptureRequest.SENSOR_FRAME_DURATION, frameDurationNs)
 
                     // 3. Apply manual exposure settings if active
-                    host.applyManualSettingsToRequest(request)
+                    coordinator.applyManualSettingsToRequest(request)
 
                     // 4. Shutter speed safety clamp: in manual exposure mode, exposure time must NOT exceed frameDurationNs
-                    if (host.isManualExposure) {
+                    if (env.runtimeState.isManualExposure) {
                         val currentExp = request.get(CaptureRequest.SENSOR_EXPOSURE_TIME)
                         if (currentExp != null && currentExp > frameDurationNs) {
                             request.set(CaptureRequest.SENSOR_EXPOSURE_TIME, frameDurationNs)
@@ -188,7 +156,7 @@ class CameraVideoController(
 
                     session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                            host.handleCaptureResult(result)
+                            coordinator.handleCaptureResult(result)
                         }
                     }, cameraHandler)
                 } catch (e: Exception) {
@@ -204,28 +172,28 @@ class CameraVideoController(
     }
 
     fun stopRawVideoRecording() {
-        host.cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(false)
-        host.cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
+        ui.cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(false)
+        ui.cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
 
-        host.rawImageReader?.setOnImageAvailableListener(null, null)
+        env.sessionArbiter.rawImageReader?.setOnImageAvailableListener(null, null)
 
-        val device = host.camera2Device
-        val session = host.camera2Session
-        val surface = host.camera2PreviewSurface
-        val cameraHandler = host.camera2Handler
+        val device = env.sessionArbiter.camera2Device
+        val session = env.sessionArbiter.camera2Session
+        val surface = env.sessionArbiter.camera2PreviewSurface
+        val cameraHandler = env.sessionArbiter.camera2Handler
         if (device != null && session != null && surface != null) {
             val restorePreviewRequest: () -> Unit = {
                 try {
                     val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                     request.addTarget(surface)
-                    val isMainLens = host.currentLens == null || (host.currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
+                    val isMainLens = env.runtimeState.currentLens == null || (env.runtimeState.currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
                     if (isMainLens) {
-                        host.analysisImageReader?.surface?.let { request.addTarget(it) }
+                        env.sessionArbiter.analysisImageReader?.surface?.let { request.addTarget(it) }
                     }
-                    host.applyManualSettingsToRequest(request)
+                    coordinator.applyManualSettingsToRequest(request)
                     session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                            host.handleCaptureResult(result)
+                            coordinator.handleCaptureResult(result)
                         }
                     }, cameraHandler)
                 } catch (e: Exception) {
@@ -239,18 +207,18 @@ class CameraVideoController(
             }
         }
 
-        host.isVideoSaving = true
-        host.showProcessingAnimation()
+        env.runtimeState.isVideoSaving = true
+        ui.showProcessingAnimation()
 
-        val appContext = host.hostContext.applicationContext
+        val appContext = env.hostContext.applicationContext
         val settingsRepository = SettingsRepository.getInstance(appContext)
         val currentPrefs = settingsRepository.current()
         val rawFolderUri = currentPrefs.rawStorageUri
         val jpgFolderUri = currentPrefs.jpgStorageUri
 
-        host.lifecycleScope.launch(Dispatchers.IO) {
+        env.lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val result = host.rawVideoSessionManager.stopRecording()
+                val result = env.runtimeState.rawVideoSessionManager.stopRecording()
                 if (result == null) {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(appContext, appContext.getString(R.string.toast_recording_too_short), Toast.LENGTH_SHORT).show()
@@ -270,10 +238,10 @@ class CameraVideoController(
 
                 if (savedUri != null) {
                     settingsRepository.setLastCaptureUri(savedUri.toString())
-                    host.imageRepository.invalidateCache()
+                    env.imageRepository.invalidateCache()
                     withContext(Dispatchers.Main) {
-                        host.updateCurrentThumbnail(savedUri)
-                        val photoViewButton = host.cameraUiContainerBinding?.photoViewButton
+                        ui.updateCurrentThumbnail(savedUri)
+                        val photoViewButton = ui.cameraUiContainerBinding?.photoViewButton
                         if (photoViewButton != null && thumbnail != null) {
                             photoViewButton.visibility = View.VISIBLE
                             photoViewButton.alpha = 1f
@@ -289,8 +257,8 @@ class CameraVideoController(
                 Log.e(TAG, "Error saving raw video", e)
             } finally {
                 withContext(Dispatchers.Main) {
-                    host.isVideoSaving = false
-                    host.hideProcessingAnimation()
+                    env.runtimeState.isVideoSaving = false
+                    ui.hideProcessingAnimation()
                 }
             }
         }
@@ -299,48 +267,48 @@ class CameraVideoController(
     fun startMp4VideoRecording() {
         val timestamp = System.currentTimeMillis()
         val baseName = DarkbagIdentity.prefixedBaseName("VID_${timestamp}")
-        val tempDir = File(host.hostContext.cacheDir, "video")
+        val tempDir = File(env.hostContext.cacheDir, "video")
         tempDir.mkdirs()
         val tempFile = File(tempDir, "${baseName}.mp4")
 
-        val recorder = Mp4VideoRecorder(host.hostContext)
-        val videoSurface = recorder.prepare(tempFile, 1080, 1920, 30, host.deviceOrientationDegrees) ?: run {
+        val recorder = Mp4VideoRecorder(env.hostContext)
+        val videoSurface = recorder.prepare(tempFile, 1080, 1920, 30, env.runtimeState.deviceOrientationDegrees) ?: run {
             Log.e(TAG, "Failed to prepare Mp4VideoRecorder")
             return
         }
 
-        host.lutProcessor?.setEncoderSurface(videoSurface, 1080, 1920)
+        env.sessionArbiter.lutProcessor?.setEncoderSurface(videoSurface, 1080, 1920)
 
         if (!recorder.start()) {
             Log.e(TAG, "Failed to start Mp4VideoRecorder")
-            host.lutProcessor?.setEncoderSurface(null, 0, 0)
+            env.sessionArbiter.lutProcessor?.setEncoderSurface(null, 0, 0)
             recorder.release()
             return
         }
 
         mp4VideoRecorder = recorder
-        host.cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
-        host.cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
+        ui.cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
+        ui.cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
     }
 
     fun stopMp4VideoRecording() {
-        host.cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(false)
-        host.cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
+        ui.cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(false)
+        ui.cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
 
-        host.lutProcessor?.setEncoderSurface(null, 0, 0)
-        host.updateMotionPhotoEncoder()
+        env.sessionArbiter.lutProcessor?.setEncoderSurface(null, 0, 0)
+        coordinator.updateMotionPhotoEncoder()
 
-        host.isVideoSaving = true
-        host.showProcessingAnimation()
+        env.runtimeState.isVideoSaving = true
+        ui.showProcessingAnimation()
 
         val recorder = mp4VideoRecorder
         mp4VideoRecorder = null
 
-        val appContext = host.hostContext.applicationContext
+        val appContext = env.hostContext.applicationContext
         val settingsRepository = SettingsRepository.getInstance(appContext)
         val mediaFolderUri = settingsRepository.current().jpgStorageUri
 
-        host.lifecycleScope.launch(Dispatchers.IO) {
+        env.lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val result = recorder?.stop()
                 if (result == null) {
@@ -360,10 +328,10 @@ class CameraVideoController(
 
                 if (savedUri != null) {
                     settingsRepository.setLastCaptureUri(savedUri.toString())
-                    host.imageRepository.invalidateCache()
+                    env.imageRepository.invalidateCache()
                     withContext(Dispatchers.Main) {
-                        host.updateCurrentThumbnail(savedUri)
-                        val photoViewButton = host.cameraUiContainerBinding?.photoViewButton
+                        ui.updateCurrentThumbnail(savedUri)
+                        val photoViewButton = ui.cameraUiContainerBinding?.photoViewButton
                         if (photoViewButton != null && thumbnail != null) {
                             photoViewButton.visibility = View.VISIBLE
                             photoViewButton.alpha = 1f
@@ -379,8 +347,8 @@ class CameraVideoController(
                 Log.e(TAG, "Error saving mp4 video", e)
             } finally {
                 withContext(Dispatchers.Main) {
-                    host.isVideoSaving = false
-                    host.hideProcessingAnimation()
+                    env.runtimeState.isVideoSaving = false
+                    ui.hideProcessingAnimation()
                 }
             }
         }
@@ -408,7 +376,7 @@ class CameraVideoController(
 
 
     fun handleShutterLongPressReleased() {
-        if (host.rawVideoSessionManager.recording) {
+        if (env.runtimeState.rawVideoSessionManager.recording) {
             stopRawVideoRecording()
         } else if (mp4VideoRecorder?.recording == true) {
             stopMp4VideoRecording()
@@ -416,7 +384,7 @@ class CameraVideoController(
     }
 
     fun showAudioPermissionSettingsDialog() {
-        val ctx = host.hostContext
+        val ctx = env.hostContext
         MaterialAlertDialogBuilder(ctx)
             .setTitle(R.string.dialog_mic_permission_title)
             .setMessage(R.string.dialog_mic_permission_denied_message)
@@ -438,7 +406,7 @@ class CameraVideoController(
         onRequestPermission: () -> Unit,
         onContinueSilent: () -> Unit
     ) {
-        val ctx = host.hostContext
+        val ctx = env.hostContext
         MaterialAlertDialogBuilder(ctx)
             .setTitle(R.string.dialog_mic_permission_title)
             .setMessage(R.string.dialog_mic_permission_message)
@@ -449,5 +417,13 @@ class CameraVideoController(
                 onContinueSilent()
             }
             .show()
+    }
+
+    fun onStop() {
+        if (env.runtimeState.rawVideoSessionManager.recording) {
+            stopRawVideoRecording()
+        } else if (mp4VideoRecorder?.recording == true) {
+            stopMp4VideoRecording()
+        }
     }
 }
