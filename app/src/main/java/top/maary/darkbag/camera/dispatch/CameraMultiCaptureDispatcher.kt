@@ -54,7 +54,6 @@ class CameraMultiCaptureDispatcher(
             env.runtimeState.isBurstActive = false
             env.cameraViewModel.setBurstActive(false)
             env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
-            env.runtimeState.processingSemaphore.release()
             return
         }
 
@@ -62,7 +61,6 @@ class CameraMultiCaptureDispatcher(
             env.runtimeState.isBurstActive = false
             env.cameraViewModel.setBurstActive(false)
             env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
-            env.runtimeState.processingSemaphore.release()
             return
         }
 
@@ -117,7 +115,6 @@ class CameraMultiCaptureDispatcher(
                 Log.e(TAG, "Multi-camera capture error: $errorMsg")
                 HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = false)
                 env.lifecycleScope.launch(Dispatchers.Main) {
-                    env.runtimeState.processingSemaphore.release()
                     ui.resetBurstUi()
                     ui.hideProcessingAnimation()
                     Toast.makeText(
@@ -322,7 +319,6 @@ class CameraMultiCaptureDispatcher(
                 }
             }
             HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = foregroundFinished)
-            env.runtimeState.processingSemaphore.release()
             withContext(Dispatchers.Main) {
                 ui.cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
                 ui.resetBurstUi()

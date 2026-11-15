@@ -20,7 +20,6 @@ import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.sync.Semaphore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -321,10 +320,6 @@ class CameraPhaseCControllersTest {
         controller.resetBurstUi()
         assertFalse(gateway.runtimeState.isBurstActive)
         assertTrue(uiBinding.cameraCaptureButton!!.isEnabled)
-
-        gateway.simulatedPermits = 0
-        controller.resetBurstUi()
-        assertFalse(uiBinding.cameraCaptureButton!!.isEnabled)
 
         controller.onDestroy()
         focusController.onDestroy()
@@ -769,7 +764,6 @@ class CameraPhaseCControllersTest {
         var modeCycledFlag: Boolean? = null
         var modeControllerRef: CameraModeController? = null
         var audioRationaleChecked = false
-        var simulatedPermits = 3
         var activeCoordinatorOverride: CaptureModeCoordinator? = null
         var effectiveModeOverride: CaptureMode? = null
 
@@ -780,14 +774,7 @@ class CameraPhaseCControllersTest {
         override val cameraViewModel: CameraViewModel get() = viewModel
         override val camera2Manager: CameraManager =
             themedContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        override val runtimeState = CameraRuntimeStateHolder(
-            object : Semaphore {
-                override val availablePermits: Int get() = simulatedPermits
-                override suspend fun acquire() {}
-                override fun release() {}
-                override fun tryAcquire(): Boolean = simulatedPermits > 0
-            }
-        ).apply {
+        override val runtimeState = CameraRuntimeStateHolder().apply {
             isoRange = Range(50, 3200)
             exposureTimeRange = Range(1000L, 1_000_000_000L)
             minFocusDistance = 10f

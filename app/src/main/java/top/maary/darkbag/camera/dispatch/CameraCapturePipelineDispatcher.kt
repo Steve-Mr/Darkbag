@@ -323,7 +323,6 @@ class CameraCapturePipelineDispatcher(
         env.runtimeState.isBurstActive = false
         env.cameraViewModel.setBurstActive(false)
         env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
-        env.runtimeState.processingSemaphore.release()
     }
 
     private fun recordCaptureResult(result: TotalCaptureResult) {

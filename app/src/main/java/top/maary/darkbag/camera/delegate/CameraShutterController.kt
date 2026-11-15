@@ -109,7 +109,7 @@ class CameraShutterController(
         ui.cameraUiContainerBinding?.cameraCaptureButton?.apply {
             setProgress(0f)
             stopRotation()
-            isEnabled = env.runtimeState.processingSemaphore.availablePermits > 0
+            isEnabled = true
         }
         env.runtimeState.isBurstActive = false
         focusMeteringController.unlockFocusAndMetering()

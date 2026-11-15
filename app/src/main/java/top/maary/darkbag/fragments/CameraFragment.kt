@@ -34,7 +34,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
 import top.maary.darkbag.MainActivity
 import top.maary.darkbag.MainApplication
 import top.maary.darkbag.R
@@ -92,15 +91,8 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
             settingsRepository.current().mirrorFrontCamera
 
     override val runtimeState: CameraRuntimeStateHolder by lazy {
-        val appContext = context?.applicationContext
-        val maxConcurrent = if (appContext != null) {
-            val strategy = SettingsRepository.getInstance(appContext).current().burstProcessingStrategy
-            if (strategy == PreferenceKeys.BURST_STRATEGY_AGGRESSIVE) 8 else 3
-        } else {
-            3
-        }
-        CameraRuntimeStateHolder(Semaphore(maxConcurrent)).apply {
-            if (appContext != null) {
+        CameraRuntimeStateHolder().apply {
+            context?.applicationContext?.let { appContext ->
                 lensFacing = SettingsRepository.getInstance(appContext).current().lensFacing
                     ?: CameraCharacteristics.LENS_FACING_BACK
             }

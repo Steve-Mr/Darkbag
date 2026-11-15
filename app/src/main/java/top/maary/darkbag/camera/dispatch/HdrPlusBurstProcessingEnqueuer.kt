@@ -137,7 +137,6 @@ internal class HdrPlusBurstProcessingEnqueuer(
             } finally {
                 burstResult.frames.forEach { it.close() }
                 if (!isHdrPlusSuccess) HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
-                env.runtimeState.processingSemaphore.release()
                 env.lifecycleScope.launch(Dispatchers.Main) {
                     ui.resetBurstUi()
                     if (!isHdrPlusSuccess) ui.hideProcessingAnimation()
@@ -258,7 +257,6 @@ internal class HdrPlusBurstProcessingEnqueuer(
                     Toast.makeText(appContext, appContext.getString(R.string.toast_hdr_failed_fallback), Toast.LENGTH_SHORT).show()
                 }
             } finally {
-                env.runtimeState.processingSemaphore.release()
                 env.lifecycleScope.launch(Dispatchers.Main) {
                     ui.resetBurstUi()
                     if (!isHdrPlusSuccess) ui.hideProcessingAnimation()
@@ -354,7 +352,6 @@ internal class HdrPlusBurstProcessingEnqueuer(
                 Log.e(TAG, "Failed to save JPEG fallback", e)
             } finally {
                 HdrPlusRequestManager.onTaskFinished()
-                env.runtimeState.processingSemaphore.release()
                 withContext(Dispatchers.Main) {
                     ui.resetBurstUi()
                     ui.cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true

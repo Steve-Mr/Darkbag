@@ -16,7 +16,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Semaphore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -73,14 +72,13 @@ class CameraPipelineExecutorsTest {
         dispatcher.takeSinglePictureCamera2()
         Shadows.shadowOf(Looper.getMainLooper()).idle()
         assertFalse(gateway.runtimeState.isBurstActive)
-        assertEquals(1, gateway.releaseCount)
         assertTrue(gateway.resetBurstUiCount >= 1)
 
         gateway.runtimeState.isBurstActive = true
         dispatcher.triggerHdrPlusBurstCamera2()
         Shadows.shadowOf(Looper.getMainLooper()).idle()
         assertFalse(gateway.runtimeState.isBurstActive)
-        assertEquals(2, gateway.releaseCount)
+        assertTrue(gateway.resetBurstUiCount >= 2)
     }
 
     @Test
@@ -138,13 +136,13 @@ class CameraPipelineExecutorsTest {
             burstResult = emptyBurst,
             digitalGain = 1.0f
         )
-        // Empty frames triggers IndexOutOfBoundsException caught in try/catch -> releases semaphore & resets UI
+        // Empty frames triggers IndexOutOfBoundsException caught in try/catch -> resets UI
         val deadline = System.currentTimeMillis() + 1000L
-        while (gateway.releaseCount < 1 && System.currentTimeMillis() < deadline) {
+        while (gateway.resetBurstUiCount < 1 && System.currentTimeMillis() < deadline) {
             Thread.sleep(10)
         }
         Shadows.shadowOf(Looper.getMainLooper()).idle()
-        assertTrue(gateway.releaseCount >= 1)
+        assertTrue(gateway.resetBurstUiCount >= 1)
     }
 
     private inner class FakeGateway :
@@ -152,7 +150,6 @@ class CameraPipelineExecutorsTest {
         CameraUiHost,
         CameraCoordinatorHost {
 
-        var releaseCount = 0
         var resetBurstUiCount = 0
 
         override val hostContext: Context get() = context
@@ -162,14 +159,7 @@ class CameraPipelineExecutorsTest {
         override val cameraViewModel: CameraViewModel get() = viewModel
         override val camera2Manager: CameraManager =
             context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        override val runtimeState = CameraRuntimeStateHolder(
-            object : Semaphore {
-                override val availablePermits: Int get() = 1
-                override suspend fun acquire() {}
-                override fun release() { releaseCount++ }
-                override fun tryAcquire(): Boolean = true
-            }
-        ).apply {
+        override val runtimeState = CameraRuntimeStateHolder().apply {
             isoRange = Range(100, 3200)
             exposureTimeRange = Range(1000L, 1_000_000_000L)
             isRawSupported = true

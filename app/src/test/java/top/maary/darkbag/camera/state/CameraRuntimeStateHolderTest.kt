@@ -27,7 +27,6 @@ class CameraRuntimeStateHolderTest {
         assertFalse(state.hasAnyManualOverride)
         assertFalse(state.hasFocusMeteringLock)
         assertFalse(state.isProcessing)
-        assertEquals(3, state.processingSemaphore.availablePermits)
     }
 
     @Test
