@@ -1,6 +1,5 @@
 package top.maary.darkbag.camera.delegate
 
-import android.content.Context
 import android.graphics.Color
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -8,67 +7,31 @@ import android.view.ViewGroup
 import android.widget.Toast
 import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.R
-import top.maary.darkbag.databinding.CameraUiContainerBinding
-import top.maary.darkbag.modes.CaptureModeCoordinator
-import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.ui.ProDialWheelView
 import top.maary.darkbag.viewmodel.CameraUiTier
-import top.maary.darkbag.viewmodel.CameraViewModel
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
-
-interface CameraTierHost {
-    val context: Context
-    val binding: CameraUiContainerBinding?
-    val rootViewGroup: ViewGroup?
-    val activeCoordinator: CaptureModeCoordinator?
-    val cameraViewModel: CameraViewModel
-    val lutProcessor: LutSurfaceProcessor?
-    val isFrontPipActive: Boolean
-    val hasMultipleAvailableLenses: Boolean
-    val hasMultiCameraManager: Boolean
-    val minFocusDistance: Float
-    val isoRange: android.util.Range<Int>?
-    val exposureTimeRange: android.util.Range<Long>?
-    val evRange: android.util.Range<Int>?
-
-    var currentFocusDistance: Float
-    var liveFocusDistance: Float
-    var isManualFocus: Boolean
-
-    var currentIso: Int
-    var liveIso: Int
-    var isManualIso: Boolean
-
-    var currentExposureTime: Long
-    var liveExposureTime: Long
-    var isManualShutter: Boolean
-
-    var currentEvIndex: Int
-    var isMultiCameraManualLinked: Boolean
-    var hasFocusMeteringLock: Boolean
-
-    fun applyCameraControls()
-    fun clearFocusMetering()
-    fun clearExposureMetering()
-}
 
 /**
  * Manages Bento camera tier switching (P&S / FILM / PRO),
  * manual parameter pills, Level 3 dial wheel interactions, and PRO telemetry.
  */
 class CameraTierController(
-    private val host: CameraTierHost
+    private val env: CameraEnvironmentHost,
+    private val ui: CameraUiHost,
+    private val coordinator: CameraCoordinatorHost
 ) {
-    private val settingsRepository by lazy { SettingsRepository.getInstance(host.context) }
-    var activeManualTab: String? = null
-        private set
+    private val settingsRepository by lazy { SettingsRepository.getInstance(env.hostContext) }
+
+    val activeManualTab: String?
+        get() = env.runtimeState.activeManualTab
 
     fun initManualControls() {
-        val binding = host.binding ?: return
+        val binding = ui.cameraUiContainerBinding ?: return
+        val state = env.runtimeState
         binding.btnProMode?.visibility = View.GONE
 
         // Dismiss touch overlay
@@ -76,7 +39,7 @@ class CameraTierController(
             dismissFloatingOverlays()
         }
 
-        host.isMultiCameraManualLinked = settingsRepository.current().multiCameraManualLinked
+        state.isMultiCameraManualLinked = settingsRepository.current().multiCameraManualLinked
 
         // Level 2: Pill Click Listeners (Toggles Level 3 Dial Panel)
         binding.pillFocus?.setOnClickListener { toggleManualTab("Focus") }
@@ -86,15 +49,15 @@ class CameraTierController(
 
         // Multi-Camera Sync Link Button
         binding.btnProLink?.setOnClickListener { v ->
-            host.isMultiCameraManualLinked = !host.isMultiCameraManualLinked
-            settingsRepository.setMultiCameraManualLinked(host.isMultiCameraManualLinked)
+            state.isMultiCameraManualLinked = !state.isMultiCameraManualLinked
+            settingsRepository.setMultiCameraManualLinked(state.isMultiCameraManualLinked)
             v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
-            val msg = if (host.isMultiCameraManualLinked) {
-                host.context.getString(R.string.multi_camera_link_synced)
+            val msg = if (state.isMultiCameraManualLinked) {
+                env.hostContext.getString(R.string.multi_camera_link_synced)
             } else {
-                host.context.getString(R.string.multi_camera_link_primary_only)
+                env.hostContext.getString(R.string.multi_camera_link_primary_only)
             }
-            Toast.makeText(host.context, msg, Toast.LENGTH_SHORT).show()
+            Toast.makeText(env.hostContext, msg, Toast.LENGTH_SHORT).show()
             updateProInfoBar()
         }
 
@@ -112,17 +75,17 @@ class CameraTierController(
 
         // Focus Extras
         binding.btnFocusNear?.setOnClickListener {
-            host.currentFocusDistance = host.minFocusDistance
-            host.isManualFocus = true
-            host.applyCameraControls()
+            state.currentFocusDistance = state.minFocusDistance
+            state.isManualFocus = true
+            coordinator.applyCameraControls()
             updateDialPanel()
             updateProInfoBar()
         }
 
         binding.btnFocusFar?.setOnClickListener {
-            host.currentFocusDistance = 0.0f
-            host.isManualFocus = true
-            host.applyCameraControls()
+            state.currentFocusDistance = 0.0f
+            state.isManualFocus = true
+            coordinator.applyCameraControls()
             updateDialPanel()
             updateProInfoBar()
         }
@@ -131,14 +94,13 @@ class CameraTierController(
         updateTierUi()
     }
 
-    fun updateTierUi(tier: CameraUiTier = host.cameraViewModel.uiState.value.uiTier) {
-        val binding = host.binding ?: return
+    fun updateTierUi(tier: CameraUiTier = env.cameraViewModel.uiState.value.uiTier) {
+        val binding = ui.cameraUiContainerBinding ?: return
         val spec = CameraBentoDeckView.resolveVisibilitySpec(settingsRepository.current(), tier)
-        val isAnyManual = host.isManualFocus || host.isManualIso || host.isManualShutter || host.currentEvIndex != 0
         CameraBentoDeckView.bindTierState(
             binding = binding,
             tier = tier,
-            isAnyManual = isAnyManual,
+            isAnyManual = env.runtimeState.hasAnyManualOverride,
             hasActiveManualTab = activeManualTab != null,
             visibilitySpec = spec
         )
@@ -147,8 +109,8 @@ class CameraTierController(
     }
 
     fun toggleManualTab(tab: String) {
-        val binding = host.binding ?: return
-        val root = host.rootViewGroup
+        val binding = ui.cameraUiContainerBinding ?: return
+        val root = ui.rootViewGroup
         if (root != null) {
             val transition = android.transition.AutoTransition().apply {
                 duration = 200
@@ -157,18 +119,16 @@ class CameraTierController(
             android.transition.TransitionManager.beginDelayedTransition(root, transition)
         }
         if (activeManualTab == tab) {
-            // Collapse dial
-            activeManualTab = null
-            host.cameraViewModel.setActiveManualTab(null)
+            env.runtimeState.activeManualTab = null
+            env.cameraViewModel.setActiveManualTab(null)
             binding.manualControlsRoot?.visibility = View.GONE
             binding.touchOverlay?.visibility = View.GONE
             updateBentoFolding(isDialOpen = false)
             updateFocusPeakingState()
             updateProInfoBar()
         } else {
-            // Open dial
-            activeManualTab = tab
-            host.cameraViewModel.setActiveManualTab(tab)
+            env.runtimeState.activeManualTab = tab
+            env.cameraViewModel.setActiveManualTab(tab)
             binding.manualControlsRoot?.visibility = View.VISIBLE
             binding.dialPanel?.visibility = View.VISIBLE
             binding.touchOverlay?.visibility = View.VISIBLE
@@ -180,9 +140,9 @@ class CameraTierController(
     }
 
     fun dismissFloatingOverlays() {
-        val binding = host.binding ?: return
+        val binding = ui.cameraUiContainerBinding ?: return
         if (activeManualTab != null) {
-            val root = host.rootViewGroup
+            val root = ui.rootViewGroup
             if (root != null) {
                 val transition = android.transition.AutoTransition().apply {
                     duration = 200
@@ -190,8 +150,8 @@ class CameraTierController(
                 }
                 android.transition.TransitionManager.beginDelayedTransition(root, transition)
             }
-            activeManualTab = null
-            host.cameraViewModel.setActiveManualTab(null)
+            env.runtimeState.activeManualTab = null
+            env.cameraViewModel.setActiveManualTab(null)
             binding.manualControlsRoot?.visibility = View.GONE
             binding.touchOverlay?.visibility = View.GONE
             updateBentoFolding(isDialOpen = false)
@@ -206,10 +166,10 @@ class CameraTierController(
 
     fun updateFocusPeakingState() {
         val snapshot = settingsRepository.current()
-        val currentTier = host.cameraViewModel.uiState.value.uiTier
+        val currentTier = env.cameraViewModel.uiState.value.uiTier
         val spec = CameraBentoDeckView.resolveVisibilitySpec(snapshot, currentTier)
         val isBadgeVisible = spec.enableFocusPeaking
-        val badge = host.binding?.btnFocusPeakingBadge
+        val badge = ui.cameraUiContainerBinding?.btnFocusPeakingBadge
 
         badge?.visibility = if (isBadgeVisible) View.VISIBLE else View.GONE
         if (isBadgeVisible) {
@@ -217,75 +177,78 @@ class CameraTierController(
             if (badge != null) {
                 CameraBentoDeckView.styleFocusPeakingBadge(badge, isActive)
             }
-            host.lutProcessor?.setFocusPeakingEnabled(isActive)
+            env.sessionArbiter.lutProcessor?.setFocusPeakingEnabled(isActive)
         } else {
-            host.lutProcessor?.setFocusPeakingEnabled(false)
+            env.sessionArbiter.lutProcessor?.setFocusPeakingEnabled(false)
         }
     }
 
     fun handleDialSelection(item: ProDialWheelView.DialItem) {
-        val binding = host.binding
+        val binding = ui.cameraUiContainerBinding
+        val state = env.runtimeState
         when (activeManualTab) {
             "Focus" -> {
-                host.currentFocusDistance = item.rawValue.toFloat()
-                host.isManualFocus = true
-                binding?.tvDialTargetValue?.text = formatFocusDist(host.currentFocusDistance)
+                state.currentFocusDistance = item.rawValue.toFloat()
+                state.isManualFocus = true
+                binding?.tvDialTargetValue?.text = formatFocusDist(state.currentFocusDistance)
                 updateFocusPeakingState()
             }
             "ISO" -> {
-                host.currentIso = item.rawValue.toInt()
-                host.isManualIso = true
-                binding?.tvDialTargetValue?.text = "${host.currentIso}"
+                state.currentIso = item.rawValue.toInt()
+                state.isManualIso = true
+                binding?.tvDialTargetValue?.text = "${state.currentIso}"
             }
             "Shutter" -> {
-                host.currentExposureTime = item.rawValue.toLong()
-                host.isManualShutter = true
-                binding?.tvDialTargetValue?.text = formatShutterTime(host.currentExposureTime)
+                state.currentExposureTime = item.rawValue.toLong()
+                state.isManualShutter = true
+                binding?.tvDialTargetValue?.text = formatShutterTime(state.currentExposureTime)
             }
             "EV" -> {
-                host.currentEvIndex = item.rawValue.toInt()
-                binding?.tvDialTargetValue?.text = formatEvVal(host.currentEvIndex)
+                state.currentEvIndex = item.rawValue.toInt()
+                binding?.tvDialTargetValue?.text = formatEvVal(state.currentEvIndex)
             }
         }
-        host.applyCameraControls()
+        coordinator.applyCameraControls()
         updateProInfoBar()
     }
 
     fun resetCurrentManualParameter() {
+        val state = env.runtimeState
         when (activeManualTab) {
             "Focus" -> {
-                host.isManualFocus = false
-                host.clearFocusMetering()
+                state.isManualFocus = false
+                state.focusMeteringRegion = null
                 updateFocusPeakingState()
             }
             "ISO" -> {
-                host.isManualIso = false
-                host.clearExposureMetering()
+                state.isManualIso = false
+                state.exposureMeteringRegion = null
             }
             "Shutter" -> {
-                host.isManualShutter = false
-                host.clearExposureMetering()
+                state.isManualShutter = false
+                state.exposureMeteringRegion = null
             }
             "EV" -> {
-                host.currentEvIndex = 0
-                host.clearExposureMetering()
+                state.currentEvIndex = 0
+                state.exposureMeteringRegion = null
             }
         }
-        host.applyCameraControls()
+        coordinator.applyCameraControls()
         updateDialPanel()
         updateProInfoBar()
     }
 
     fun updateDialPanel() {
-        val binding = host.binding ?: return
+        val binding = ui.cameraUiContainerBinding ?: return
         val wheel = binding.dialWheelView ?: return
+        val state = env.runtimeState
         binding.focusExtras?.visibility = if (activeManualTab == "Focus") View.VISIBLE else View.GONE
 
         when (activeManualTab) {
             "Focus" -> {
                 binding.tvDialTargetLabel?.text = "FOCUS"
-                val items = buildFocusDialItems(host.minFocusDistance)
-                val targetVal = if (host.isManualFocus) host.currentFocusDistance else 0.0f
+                val items = buildFocusDialItems(state.minFocusDistance)
+                val targetVal = if (state.isManualFocus) state.currentFocusDistance else 0.0f
                 var closestIndex = 0
                 var minDiff = Double.MAX_VALUE
                 items.forEachIndexed { i, it ->
@@ -296,12 +259,12 @@ class CameraTierController(
                     }
                 }
                 wheel.setItems(items, closestIndex)
-                binding.tvDialTargetValue?.text = if (host.isManualFocus) formatFocusDist(host.currentFocusDistance) else "AUTO (${formatFocusDist(host.liveFocusDistance)})"
+                binding.tvDialTargetValue?.text = if (state.isManualFocus) formatFocusDist(state.currentFocusDistance) else "AUTO (${formatFocusDist(state.liveFocusDistance)})"
             }
             "ISO" -> {
                 binding.tvDialTargetLabel?.text = "ISO"
-                val items = buildIsoDialItems(host.isoRange)
-                val targetVal = if (host.isManualIso) host.currentIso else host.liveIso
+                val items = buildIsoDialItems(state.isoRange)
+                val targetVal = if (state.isManualIso) state.currentIso else state.liveIso
                 var closestIndex = 0
                 var minDiff = Double.MAX_VALUE
                 items.forEachIndexed { i, it ->
@@ -312,12 +275,12 @@ class CameraTierController(
                     }
                 }
                 wheel.setItems(items, closestIndex)
-                binding.tvDialTargetValue?.text = if (host.isManualIso) "${host.currentIso}" else "AUTO (${host.liveIso})"
+                binding.tvDialTargetValue?.text = if (state.isManualIso) "${state.currentIso}" else "AUTO (${state.liveIso})"
             }
             "Shutter" -> {
                 binding.tvDialTargetLabel?.text = "SHUTTER"
-                val items = buildShutterDialItems(host.exposureTimeRange)
-                val targetVal = if (host.isManualShutter) host.currentExposureTime else host.liveExposureTime
+                val items = buildShutterDialItems(state.exposureTimeRange)
+                val targetVal = if (state.isManualShutter) state.currentExposureTime else state.liveExposureTime
                 var closestIndex = 0
                 var minDiff = Double.MAX_VALUE
                 items.forEachIndexed { i, it ->
@@ -328,22 +291,22 @@ class CameraTierController(
                     }
                 }
                 wheel.setItems(items, closestIndex)
-                binding.tvDialTargetValue?.text = if (host.isManualShutter) formatShutterTime(host.currentExposureTime) else "AUTO (${formatShutterTime(host.liveExposureTime)})"
+                binding.tvDialTargetValue?.text = if (state.isManualShutter) formatShutterTime(state.currentExposureTime) else "AUTO (${formatShutterTime(state.liveExposureTime)})"
             }
             "EV" -> {
                 binding.tvDialTargetLabel?.text = "EV"
-                val items = buildEvDialItems(host.evRange)
+                val items = buildEvDialItems(state.evRange)
                 var closestIndex = 0
                 var minDiff = Double.MAX_VALUE
                 items.forEachIndexed { i, it ->
-                    val diff = abs(it.rawValue - host.currentEvIndex)
+                    val diff = abs(it.rawValue - state.currentEvIndex)
                     if (diff < minDiff) {
                         minDiff = diff
                         closestIndex = i
                     }
                 }
                 wheel.setItems(items, closestIndex)
-                binding.tvDialTargetValue?.text = formatEvVal(host.currentEvIndex)
+                binding.tvDialTargetValue?.text = formatEvVal(state.currentEvIndex)
             }
         }
     }
@@ -354,21 +317,22 @@ class CameraTierController(
         if (isUpdatingProInfoBar) return
         isUpdatingProInfoBar = true
         try {
-            val binding = host.binding ?: return
+            val binding = ui.cameraUiContainerBinding ?: return
+            val state = env.runtimeState
             val primaryColor = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, Color.parseColor("#FFD54F"))
             val onSurfaceColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface, Color.WHITE)
             val onSurfaceVariantColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.LTGRAY)
-            val density = host.context.resources.displayMetrics.density
+            val density = env.hostContext.resources.displayMetrics.density
 
             // Focus
-            val isFocusLocked = !host.isManualFocus && host.hasFocusMeteringLock
+            val isFocusLocked = !state.isManualFocus && state.hasFocusMeteringLock
             val focusLabel = when {
-                host.isManualFocus -> "MF"
+                state.isManualFocus -> "MF"
                 isFocusLocked -> "AF-L"
                 else -> "AF"
             }
-            val isFocusManualOrLocked = host.isManualFocus || isFocusLocked
-            val focusVal = if (host.isManualFocus) formatFocusDist(host.currentFocusDistance) else formatFocusDist(host.liveFocusDistance)
+            val isFocusManualOrLocked = state.isManualFocus || isFocusLocked
+            val focusVal = if (state.isManualFocus) formatFocusDist(state.currentFocusDistance) else formatFocusDist(state.liveFocusDistance)
             binding.pillFocus?.let { pill ->
                 val isTabActive = activeManualTab == "Focus"
                 CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isFocusManualOrLocked)
@@ -377,34 +341,36 @@ class CameraTierController(
 
             // ISO
             val isoLabel = "ISO"
-            val isoVal = if (host.isManualIso) "${host.currentIso}" else "${host.liveIso}"
+            val isoVal = if (state.isManualIso) "${state.currentIso}" else "${state.liveIso}"
             binding.pillIso?.let { pill ->
                 val isTabActive = activeManualTab == "ISO"
-                CameraBentoDeckView.styleBentoProPill(pill, isTabActive, host.isManualIso)
-                pill.text = CameraBentoDeckView.formatProTelemetry(isoLabel, isoVal, isTabActive, host.isManualIso, pill.context)
+                CameraBentoDeckView.styleBentoProPill(pill, isTabActive, state.isManualIso)
+                pill.text = CameraBentoDeckView.formatProTelemetry(isoLabel, isoVal, isTabActive, state.isManualIso, pill.context)
             }
 
             // Shutter
             val shutterLabel = "SEC"
-            val shutterVal = if (host.isManualShutter) formatShutterTime(host.currentExposureTime) else formatShutterTime(host.liveExposureTime)
+            val shutterVal = if (state.isManualShutter) formatShutterTime(state.currentExposureTime) else formatShutterTime(state.liveExposureTime)
             binding.pillShutter?.let { pill ->
                 val isTabActive = activeManualTab == "Shutter"
-                CameraBentoDeckView.styleBentoProPill(pill, isTabActive, host.isManualShutter)
-                pill.text = CameraBentoDeckView.formatProTelemetry(shutterLabel, shutterVal, isTabActive, host.isManualShutter, pill.context)
+                CameraBentoDeckView.styleBentoProPill(pill, isTabActive, state.isManualShutter)
+                pill.text = CameraBentoDeckView.formatProTelemetry(shutterLabel, shutterVal, isTabActive, state.isManualShutter, pill.context)
             }
 
             // EV
             val evLabel = "EV"
-            val evVal = if (host.currentEvIndex == 0) "0.0" else String.format(Locale.US, "%+d", host.currentEvIndex)
+            val evVal = if (state.currentEvIndex == 0) "0.0" else String.format(Locale.US, "%+d", state.currentEvIndex)
             binding.pillEv?.let { pill ->
                 val isTabActive = activeManualTab == "EV"
-                val isManualEv = host.currentEvIndex != 0
+                val isManualEv = state.currentEvIndex != 0
                 CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isManualEv)
                 pill.text = CameraBentoDeckView.formatProTelemetry(evLabel, evVal, isTabActive, isManualEv, pill.context)
             }
 
             // Multi-Camera Link Button (Only visible if coordinator supports link or front PiP is active)
-            val isMultiCamActive = (host.activeCoordinator?.supportsProLink() == true) || host.isFrontPipActive || (host.hasMultipleAvailableLenses && host.hasMultiCameraManager)
+            val isMultiCamActive = (coordinator.activeCoordinator?.supportsProLink() == true) ||
+                state.isFrontPipActive ||
+                (state.availableLenses.size > 1 && env.sessionArbiter.multiCameraManager != null)
             binding.btnProLink?.visibility = if (isMultiCamActive) View.VISIBLE else View.GONE
             (binding.pillEv?.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
                 val targetMarginEnd = if (isMultiCamActive) (5f * density).roundToInt() else 0
@@ -414,15 +380,15 @@ class CameraTierController(
                 }
             }
             binding.btnProLink?.let { linkBtn ->
-                CameraBentoDeckView.styleBentoProLink(linkBtn, host.isMultiCameraManualLinked)
+                CameraBentoDeckView.styleBentoProLink(linkBtn, state.isMultiCameraManualLinked)
             }
 
             // Sync manual flags to ViewModel & update tier button styling
-            host.cameraViewModel.updateManualFlags(
-                isManualFocus = host.isManualFocus,
-                isManualIso = host.isManualIso,
-                isManualShutter = host.isManualShutter,
-                isProLinked = host.isMultiCameraManualLinked
+            env.cameraViewModel.updateManualFlags(
+                isManualFocus = state.isManualFocus,
+                isManualIso = state.isManualIso,
+                isManualShutter = state.isManualShutter,
+                isProLinked = state.isMultiCameraManualLinked
             )
             updateTierUi()
 
@@ -436,15 +402,13 @@ class CameraTierController(
     }
 
     fun updateBentoFolding(isDialOpen: Boolean) {
-        val binding = host.binding ?: return
-        val density = host.context.resources.displayMetrics.density
-        val tier = CameraBentoDeckView.resolveScreenTier(host.context.resources)
+        val binding = ui.cameraUiContainerBinding ?: return
+        val density = env.hostContext.resources.displayMetrics.density
+        val tier = CameraBentoDeckView.resolveScreenTier(env.hostContext.resources)
         val isCompact = tier == CameraBentoDeckView.BentoScreenTier.COMPACT
 
         if (isDialOpen) {
-            // Collapse bento_film_row to View.GONE (reclaims vertical space!)
             binding.bentoFilmRow?.visibility = View.GONE
-            // Compact lens_control_row height: 34dp on compact, 42dp on standard/tall
             val lensHeightDp = if (isCompact) 34 else 42
             binding.lensControlRow?.let { v ->
                 val lp = v.layoutParams
@@ -454,7 +418,6 @@ class CameraTierController(
                     v.layoutParams = lp
                 }
             }
-            // Compact bento_shutter_row height: 64dp on compact, 72dp on standard/tall
             val shutterHeightDp = if (isCompact) 64 else 72
             binding.bentoShutterRow?.let { v ->
                 val lp = v.layoutParams
@@ -465,8 +428,7 @@ class CameraTierController(
                 }
             }
         } else {
-            // Restore bento_film_row to View.VISIBLE if enabled in current tier spec
-            val uiTier = host.cameraViewModel.uiState.value.uiTier
+            val uiTier = env.cameraViewModel.uiState.value.uiTier
             val spec = CameraBentoDeckView.resolveVisibilitySpec(settingsRepository.current(), uiTier)
             binding.bentoFilmRow?.visibility = if (spec.showFilmRow) View.VISIBLE else View.GONE
             CameraBentoDeckView.applyDynamicRowHeights(binding)
@@ -485,8 +447,9 @@ class CameraTierController(
     }
 
     fun formatFocusDist(dist: Float): String {
+        val minDist = env.runtimeState.minFocusDistance
         return if (dist <= 0.001f) "∞"
-        else if (host.minFocusDistance > 0 && dist >= host.minFocusDistance * 0.95f) "Macro"
+        else if (minDist > 0 && dist >= minDist * 0.95f) "Macro"
         else {
             val meters = 1.0f / dist
             if (meters < 1.0f) String.format(Locale.US, "%.0fcm", meters * 100f)
@@ -629,7 +592,7 @@ class CameraTierController(
         onVisibilityRefresh: () -> Unit,
         onLensRefresh: () -> Unit
     ) {
-        val uiBinding = host.binding ?: return
+        val uiBinding = ui.cameraUiContainerBinding ?: return
         uiBinding.btnFocusPeakingBadge?.setOnClickListener { btn ->
             btn.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             val currentState = settingsRepository.current().focusPeakingActive
@@ -638,12 +601,12 @@ class CameraTierController(
         }
 
         val savedTier = CameraUiTier.fromKey(settingsRepository.current().uiTier)
-        host.cameraViewModel.setUiTier(savedTier)
+        env.cameraViewModel.setUiTier(savedTier)
         updateTierUi(savedTier)
 
         uiBinding.btnBentoTier?.setOnClickListener { v ->
             v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-            val r = host.rootViewGroup
+            val r = ui.rootViewGroup
             if (r != null) {
                 val transition = android.transition.AutoTransition().apply {
                     duration = 200
@@ -651,13 +614,13 @@ class CameraTierController(
                 }
                 android.transition.TransitionManager.beginDelayedTransition(r, transition)
             }
-            val nextTier = host.cameraViewModel.uiState.value.uiTier.next()
+            val nextTier = env.cameraViewModel.uiState.value.uiTier.next()
             settingsRepository.setUiTier(nextTier.key)
-            host.cameraViewModel.setUiTier(nextTier)
+            env.cameraViewModel.setUiTier(nextTier)
             updateTierUi(nextTier)
             val nextSpec = CameraBentoDeckView.resolveVisibilitySpec(settingsRepository.current(), nextTier)
             if (!nextSpec.showProModule && activeManualTab != null) {
-                host.cameraViewModel.setActiveManualTab(null)
+                env.cameraViewModel.setActiveManualTab(null)
                 updateBentoFolding(isDialOpen = false)
                 updateFocusPeakingState()
                 updateProInfoBar()
@@ -675,12 +638,12 @@ class CameraTierController(
         isHdrPlusEnabled: Boolean,
         beforeApply: () -> Unit
     ) {
-        val uiBinding = host.binding ?: return
-        val currentTier = host.cameraViewModel.uiState.value.uiTier
+        val uiBinding = ui.cameraUiContainerBinding ?: return
+        val currentTier = env.cameraViewModel.uiState.value.uiTier
         val spec = CameraBentoDeckView.resolveVisibilitySpec(settingsRepository.current(), currentTier)
 
         val hasMultipleLenses = (uiBinding.lensControlsContainer?.childCount ?: 0) > 1
-        val isAnyManual = host.isManualFocus || host.isManualIso || host.isManualShutter || host.currentEvIndex != 0
+        val isAnyManual = env.runtimeState.hasAnyManualOverride
 
         beforeApply()
 

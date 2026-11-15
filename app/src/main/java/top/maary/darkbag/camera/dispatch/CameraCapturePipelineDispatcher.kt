@@ -30,12 +30,13 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.MainApplication
 import top.maary.darkbag.R
-import top.maary.darkbag.databinding.CameraUiContainerBinding
+import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
+import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
+import top.maary.darkbag.camera.delegate.CameraUiHost
 import top.maary.darkbag.fragments.BurstResult
 import top.maary.darkbag.fragments.HdrPlusBurst
 import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.models.StandardTimingTracker
-import top.maary.darkbag.modes.CaptureModeCoordinator
 import top.maary.darkbag.pipeline.sink.CaptureSink
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.processor.HdrPlusProcessingService
@@ -44,7 +45,6 @@ import top.maary.darkbag.processor.HdrPlusRequestManager
 import top.maary.darkbag.processor.HdrPlusStreamingBurst
 import top.maary.darkbag.processor.SensorCalibrationHelper
 import top.maary.darkbag.processor.StreamingBurstResult
-import top.maary.darkbag.repository.ImageRepository
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.CameraRepository
@@ -52,8 +52,6 @@ import top.maary.darkbag.utils.ExposureUtils
 import top.maary.darkbag.utils.HalfFrameManager
 import top.maary.darkbag.utils.ImageSaver
 import top.maary.darkbag.utils.LensInfo
-import top.maary.darkbag.utils.LocationHelper
-import top.maary.darkbag.viewmodel.CameraViewModel
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -63,66 +61,21 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.pow
 
 /**
- * Host contract for computational photography capture & pipeline dispatching.
- */
-interface CameraCapturePipelineHost {
-    val hostContext: Context
-    val lifecycleScope: CoroutineScope
-    val camera2Manager: CameraManager
-    val camera2Device: CameraDevice?
-    val camera2Session: android.hardware.camera2.CameraCaptureSession?
-    val camera2PreviewSurface: Surface?
-    val camera2Handler: Handler?
-    val rawImageReader: ImageReader?
-    val cameraViewModel: CameraViewModel
-    val cameraUiContainerBinding: CameraUiContainerBinding?
-    val activeCoordinator: CaptureModeCoordinator?
-    val imageRepository: ImageRepository
-    val locationHelper: LocationHelper
-    val currentLens: LensInfo?
-    val isoRange: Range<Int>?
-    val exposureTimeRange: Range<Long>?
-    val lastClippingRatio: Double
-    val isManualIso: Boolean
-    val isManualShutter: Boolean
-    val isManualExposure: Boolean
-    val currentIso: Int
-    val currentExposureTime: Long
-    val currentEvIndex: Int
-    val shouldMirror: Boolean
-    val captureResultFlow: SharedFlow<TotalCaptureResult>
-    val captureResults: MutableMap<Long, TotalCaptureResult>
-    val processingSemaphore: Semaphore
-    var isBurstActive: Boolean
-    var burstStartTime: Long
-    var hdrPlusStreamingBurstHelper: HdrPlusStreamingBurst?
-    var pendingMotionPhotoTask: CompletableDeferred<Pair<String?, Long>>?
-
-    fun getCombinedOrientation(): Int
-    fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean = false)
-    fun writeScopedHalfFrameStep(step: Int, captureTimeMillis: Long? = null, digitalGain: Float = 1.0f, flareType: Int = -1)
-    fun getDigitalGainAndUpdateStep(timestamp: Long, isFrame1Trigger: Boolean, shutterClick: Long?): Float
-    fun resetBurstUi()
-    fun showProcessingAnimation()
-    fun hideProcessingAnimation()
-    fun setGalleryThumbnail(filename: String?)
-    fun triggerAutoBurst()
-}
-
-/**
  * Dispatcher coordinating single-shot and burst Camera2 captures, raw frame buffer management,
  * metadata aggregation via [CameraCaptureMetadataExtractor], spec assembly via [CameraTaskSpecAssembler],
  * and scheduling requests to the background computational photography pipeline.
  */
 class CameraCapturePipelineDispatcher(
-    private val host: CameraCapturePipelineHost
+    private val env: CameraEnvironmentHost,
+    private val ui: CameraUiHost,
+    private val coordinator: CameraCoordinatorHost
 ) {
     companion object {
         private const val TAG = "CameraCapturePipeline"
         private const val FILENAME = "yyyy-MM-dd-HH-mm-ss-SSS"
     }
 
-    val metadataExtractor = CameraCaptureMetadataExtractor(host)
+    val metadataExtractor = CameraCaptureMetadataExtractor(env)
     val specAssembler = CameraTaskSpecAssembler(metadataExtractor)
 
     private val processingChannel = Channel<RawImageHolder>(2)
@@ -132,7 +85,7 @@ class CameraCapturePipelineDispatcher(
         if (processingChannelJob == null || processingChannelJob?.isActive != true) {
             processingChannelJob = applicationScope.launch(Dispatchers.IO) {
                 for (holder in processingChannel) {
-                    processImageAsync(host.hostContext.applicationContext, holder)
+                    processImageAsync(env.hostContext.applicationContext, holder)
                 }
             }
         }
@@ -144,11 +97,11 @@ class CameraCapturePipelineDispatcher(
     }
 
     fun triggerAutoBurst() {
-        val autoBurst = SettingsRepository.getInstance(host.hostContext).current().halfFrameAutoBurst
+        val autoBurst = SettingsRepository.getInstance(env.hostContext).current().halfFrameAutoBurst
         if (autoBurst) {
-            host.lifecycleScope.launch(Dispatchers.Main) {
+            env.lifecycleScope.launch(Dispatchers.Main) {
                 delay(800)
-                host.cameraUiContainerBinding?.cameraCaptureButton?.simulateClick()
+                ui.cameraUiContainerBinding?.cameraCaptureButton?.simulateClick()
             }
         }
     }
@@ -159,25 +112,25 @@ class CameraCapturePipelineDispatcher(
         isFrame1Trigger: Boolean = false,
         hfMetadata: HalfFrameManager.Metadata? = null
     ) {
-        val appContext = host.hostContext.applicationContext
-        val device = host.camera2Device ?: run { abortCapture(); return }
-        val session = host.camera2Session ?: run { abortCapture(); return }
-        val reader = host.rawImageReader ?: run { abortCapture(); return }
-        val handler = host.camera2Handler ?: run { abortCapture(); return }
+        val appContext = env.hostContext.applicationContext
+        val device = env.sessionArbiter.camera2Device ?: run { abortCapture(); return }
+        val session = env.sessionArbiter.camera2Session ?: run { abortCapture(); return }
+        val reader = env.sessionArbiter.rawImageReader ?: run { abortCapture(); return }
+        val handler = env.sessionArbiter.camera2Handler ?: run { abortCapture(); return }
 
         HdrPlusRequestManager.onTaskStarted()
         var taskStarted = true
 
-        val capturedLens = host.currentLens
+        val capturedLens = env.runtimeState.currentLens
         val capturedZoom = specAssembler.resolveEffectiveZoom(capturedLens, null)
-        val capturedOrientation = host.getCombinedOrientation()
+        val capturedOrientation = coordinator.getCombinedOrientation()
         val capturedLensId = capturedLens?.id
 
         try {
             val request = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
             request.addTarget(reader.surface)
             request.set(CaptureRequest.JPEG_ORIENTATION, capturedOrientation)
-            host.applyManualSettingsToRequest(request)
+            coordinator.applyManualSettingsToRequest(request)
 
             reader.setOnImageAvailableListener({ r ->
                 timing?.recordFrameArrival()
@@ -192,7 +145,7 @@ class CameraCapturePipelineDispatcher(
                 }
                 try {
                     if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
-                        val digitalGain = host.getDigitalGainAndUpdateStep(
+                        val digitalGain = coordinator.getDigitalGainAndUpdateStep(
                             image.timestamp,
                             isFrame1Trigger,
                             timing?.shutterClick
@@ -239,7 +192,7 @@ class CameraCapturePipelineDispatcher(
             session.capture(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureStarted(session: android.hardware.camera2.CameraCaptureSession, request: CaptureRequest, timestamp: Long, frameNumber: Long) {
                     if (isFrame1Trigger) {
-                        host.triggerAutoBurst()
+                        coordinator.triggerAutoBurst()
                     }
                 }
 
@@ -259,19 +212,19 @@ class CameraCapturePipelineDispatcher(
 
     private fun onSingleFrameAccepted(timing: StandardTimingTracker?, isFrame1Trigger: Boolean) {
         timing?.recordShutterReady()
-        host.isBurstActive = false
-        host.cameraViewModel.setBurstActive(false)
-        host.lifecycleScope.launch(Dispatchers.Main) { host.resetBurstUi() }
+        env.runtimeState.isBurstActive = false
+        env.cameraViewModel.setBurstActive(false)
+        env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
         if (!isFrame1Trigger) {
-            host.showProcessingAnimation()
+            ui.showProcessingAnimation()
         }
     }
 
     private fun abortCapture() {
-        host.isBurstActive = false
-        host.cameraViewModel.setBurstActive(false)
-        host.lifecycleScope.launch(Dispatchers.Main) { host.resetBurstUi() }
-        host.processingSemaphore.release()
+        env.runtimeState.isBurstActive = false
+        env.cameraViewModel.setBurstActive(false)
+        env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
+        env.runtimeState.processingSemaphore.release()
     }
 
     fun triggerHdrPlusBurstCamera2(
@@ -280,45 +233,45 @@ class CameraCapturePipelineDispatcher(
         hfMetadata: HalfFrameManager.Metadata? = null,
         timing: StandardTimingTracker? = null
     ) {
-        val appContext = host.hostContext.applicationContext
-        val device = host.camera2Device ?: run { abortCapture(); return }
-        val session = host.camera2Session ?: run { abortCapture(); return }
-        val reader = host.rawImageReader ?: run { abortCapture(); return }
-        val handler = host.camera2Handler ?: run { abortCapture(); return }
+        val appContext = env.hostContext.applicationContext
+        val device = env.sessionArbiter.camera2Device ?: run { abortCapture(); return }
+        val session = env.sessionArbiter.camera2Session ?: run { abortCapture(); return }
+        val reader = env.sessionArbiter.rawImageReader ?: run { abortCapture(); return }
+        val handler = env.sessionArbiter.camera2Handler ?: run { abortCapture(); return }
 
-        host.isBurstActive = true
+        env.runtimeState.isBurstActive = true
         val captureStartTime = hfMetadata?.captureTimeMillis ?: System.currentTimeMillis()
-        host.burstStartTime = captureStartTime
+        env.runtimeState.burstStartTime = captureStartTime
         val isTaskStarted = AtomicBoolean(false)
         val currentPrefs = SettingsRepository.getInstance(appContext).current()
 
         try {
-            val result = host.captureResultFlow.replayCache.lastOrNull()
+            val result = env.runtimeState.captureResultFlow.replayCache.lastOrNull()
             val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
             val curTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
-            val validIsoRange = host.isoRange ?: Range(100, 3200)
-            val validTimeRange = host.exposureTimeRange ?: Range(1000L, 1_000_000_000L)
+            val validIsoRange = env.runtimeState.isoRange ?: Range(100, 3200)
+            val validTimeRange = env.runtimeState.exposureTimeRange ?: Range(1000L, 1_000_000_000L)
             val underexposureMode = currentPrefs.hdrUnderexposureMode
 
             val config = ExposureUtils.calculateHdrPlusExposure(
-                curIso, curTime, validIsoRange, validTimeRange, underexposureMode, host.lastClippingRatio
+                curIso, curTime, validIsoRange, validTimeRange, underexposureMode, env.runtimeState.lastClippingRatio
             )
-            val burstIso = if (host.isManualIso) host.currentIso else config.iso
-            val burstTime = if (host.isManualShutter) host.currentExposureTime else config.exposureTime
-            val burstGain = if (host.isManualExposure) {
-                if (host.currentEvIndex != 0) (2.0).pow(host.currentEvIndex.toDouble() / 3.0).toFloat() else 1.0f
+            val burstIso = if (env.runtimeState.isManualIso) env.runtimeState.currentIso else config.iso
+            val burstTime = if (env.runtimeState.isManualShutter) env.runtimeState.currentExposureTime else config.exposureTime
+            val burstGain = if (env.runtimeState.isManualExposure) {
+                if (env.runtimeState.currentEvIndex != 0) (2.0).pow(env.runtimeState.currentEvIndex.toDouble() / 3.0).toFloat() else 1.0f
             } else {
                 config.digitalGain
             }
             val burstSize = currentPrefs.hdrBurstCount
 
             if (isFrame1Trigger) {
-                host.writeScopedHalfFrameStep(1, captureStartTime, digitalGain = burstGain, flareType = hfMetadata?.flareType ?: -1)
+                coordinator.writeScopedHalfFrameStep(1, captureStartTime, digitalGain = burstGain, flareType = hfMetadata?.flareType ?: -1)
             }
 
-            val capturedLens = host.currentLens
+            val capturedLens = env.runtimeState.currentLens
             val burstLensId = capturedLens?.id ?: "0"
-            val burstChars = CameraRepository.getCharacteristics(host.camera2Manager, burstLensId)
+            val burstChars = CameraRepository.getCharacteristics(env.camera2Manager, burstLensId)
             val burstSensorOrientation = burstChars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
             val whiteLevel = burstChars.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
             val blackLevelPattern = metadataExtractor.extractBlackLevelPattern(burstChars)
@@ -334,7 +287,7 @@ class CameraCapturePipelineDispatcher(
             val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
             val noiseProfileFlat = metadataExtractor.extractNoiseProfile(result)
 
-            val combinedOrientation = host.getCombinedOrientation()
+            val combinedOrientation = coordinator.getCombinedOrientation()
             val fusionModeInt = specAssembler.resolveFusionModeInt(currentPrefs)
             val currentZoom = specAssembler.resolveEffectiveZoom(capturedLens, null)
 
@@ -356,7 +309,7 @@ class CameraCapturePipelineDispatcher(
             )
             if (sessionHandle == 0L) {
                 Log.e(TAG, "Failed to create native streaming session")
-                if (isFrame1Trigger) host.writeScopedHalfFrameStep(0)
+                if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
                 notifySinkFailureAsync(
                     appContext, sink, hfMetadata,
                     RuntimeException("Native streaming session creation failed"),
@@ -409,24 +362,24 @@ class CameraCapturePipelineDispatcher(
                     if (isTaskStarted.compareAndSet(true, false)) {
                         HdrPlusRequestManager.onTaskFinished()
                     }
-                    if (isFrame1Trigger) host.writeScopedHalfFrameStep(0)
+                    if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
                     notifySinkFailureAsync(appContext, sink, hfMetadata, error, timestamp = captureStartTime)
-                    host.isBurstActive = false
-                    host.cameraViewModel.setBurstActive(false)
-                    host.hdrPlusStreamingBurstHelper = null
-                    host.processingSemaphore.release()
-                    host.lifecycleScope.launch(Dispatchers.Main) {
-                        host.hideProcessingAnimation()
-                        host.resetBurstUi()
+                    env.runtimeState.isBurstActive = false
+                    env.cameraViewModel.setBurstActive(false)
+                    env.runtimeState.hdrPlusStreamingBurstHelper = null
+                    env.runtimeState.processingSemaphore.release()
+                    env.lifecycleScope.launch(Dispatchers.Main) {
+                        ui.hideProcessingAnimation()
+                        ui.resetBurstUi()
                     }
                 }
             )
-            host.hdrPlusStreamingBurstHelper = burstHelper
+            env.runtimeState.hdrPlusStreamingBurstHelper = burstHelper
 
-            host.lifecycleScope.launch(Dispatchers.Main) {
-                host.cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
-                host.cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
-                host.cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
+            env.lifecycleScope.launch(Dispatchers.Main) {
+                ui.cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
+                ui.cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
+                ui.cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
             }
 
             val burstRequests = buildBurstRequests(
@@ -440,32 +393,32 @@ class CameraCapturePipelineDispatcher(
             )
 
             val framesCaptured = AtomicInteger(0)
-            val watchdog = host.lifecycleScope.launch(Dispatchers.Main) {
+            val watchdog = env.lifecycleScope.launch(Dispatchers.Main) {
                 delay(8000)
                 val capturedCount = framesCaptured.get()
-                if (host.isBurstActive && capturedCount < burstSize) {
+                if (env.runtimeState.isBurstActive && capturedCount < burstSize) {
                     Log.e(TAG, "Burst capture timed out! Captured $capturedCount/$burstSize frames.")
-                    host.isBurstActive = false
-                    host.resetBurstUi()
+                    env.runtimeState.isBurstActive = false
+                    ui.resetBurstUi()
                     if (capturedCount > 0) {
                         Log.i(TAG, "Flushing partial burst ($capturedCount frames) to background worker.")
                         if (isTaskStarted.compareAndSet(false, true)) HdrPlusRequestManager.onTaskStarted()
-                        if (!isFrame1Trigger && host.cameraUiContainerBinding?.processingProgress?.visibility != View.VISIBLE) {
-                            host.showProcessingAnimation()
+                        if (!isFrame1Trigger && ui.cameraUiContainerBinding?.processingProgress?.visibility != View.VISIBLE) {
+                            ui.showProcessingAnimation()
                         }
                         burstHelper.flush()
                     } else {
                         if (isTaskStarted.compareAndSet(true, false)) HdrPlusRequestManager.onTaskFinished()
-                        if (isFrame1Trigger) host.writeScopedHalfFrameStep(0)
+                        if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
                         notifySinkFailureAsync(
                             appContext, sink, hfMetadata,
                             RuntimeException("Burst capture timed out with 0 frames"),
                             timestamp = captureStartTime
                         )
                         burstHelper.abort()
-                        host.hdrPlusStreamingBurstHelper = null
-                        host.processingSemaphore.release()
-                        host.hideProcessingAnimation()
+                        env.runtimeState.hdrPlusStreamingBurstHelper = null
+                        env.runtimeState.processingSemaphore.release()
+                        ui.hideProcessingAnimation()
                     }
                 }
             }
@@ -502,22 +455,22 @@ class CameraCapturePipelineDispatcher(
                 if (frameAccepted) {
                     timing?.recordFrameArrival()
                     val count = framesCaptured.incrementAndGet()
-                    host.lifecycleScope.launch(Dispatchers.Main) {
-                        host.cameraUiContainerBinding?.cameraCaptureButton?.setProgress(count.toFloat() / burstSize)
+                    env.lifecycleScope.launch(Dispatchers.Main) {
+                        ui.cameraUiContainerBinding?.cameraCaptureButton?.setProgress(count.toFloat() / burstSize)
                     }
                     if (count >= burstSize) {
                         watchdog.cancel()
                         timing?.captureCallback = System.currentTimeMillis()
                         timing?.recordShutterReady()
-                        host.lifecycleScope.launch(Dispatchers.Main) {
+                        env.lifecycleScope.launch(Dispatchers.Main) {
                             if (isTaskStarted.compareAndSet(false, true)) HdrPlusRequestManager.onTaskStarted()
-                            host.isBurstActive = false
-                            host.cameraViewModel.setBurstActive(false)
-                            host.resetBurstUi()
-                            if (!isFrame1Trigger && host.cameraUiContainerBinding?.processingProgress?.visibility != View.VISIBLE) {
-                                host.showProcessingAnimation()
+                            env.runtimeState.isBurstActive = false
+                            env.cameraViewModel.setBurstActive(false)
+                            ui.resetBurstUi()
+                            if (!isFrame1Trigger && ui.cameraUiContainerBinding?.processingProgress?.visibility != View.VISIBLE) {
+                                ui.showProcessingAnimation()
                             }
-                            if (isFrame1Trigger) host.triggerAutoBurst()
+                            if (isFrame1Trigger) coordinator.triggerAutoBurst()
                         }
                     }
                 }
@@ -531,14 +484,14 @@ class CameraCapturePipelineDispatcher(
         } catch (e: Exception) {
             Log.e(TAG, "Camera2 burst failed", e)
             if (isTaskStarted.compareAndSet(true, false)) HdrPlusRequestManager.onTaskFinished()
-            if (isFrame1Trigger) host.writeScopedHalfFrameStep(0)
+            if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
             notifySinkFailureAsync(appContext, sink, hfMetadata, e, timestamp = captureStartTime)
-            host.isBurstActive = false
-            host.cameraViewModel.setBurstActive(false)
-            host.hdrPlusStreamingBurstHelper?.abort()
-            host.hdrPlusStreamingBurstHelper = null
-            host.processingSemaphore.release()
-            host.lifecycleScope.launch(Dispatchers.Main) { host.resetBurstUi() }
+            env.runtimeState.isBurstActive = false
+            env.cameraViewModel.setBurstActive(false)
+            env.runtimeState.hdrPlusStreamingBurstHelper?.abort()
+            env.runtimeState.hdrPlusStreamingBurstHelper = null
+            env.runtimeState.processingSemaphore.release()
+            env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
         }
     }
 
@@ -551,7 +504,7 @@ class CameraCapturePipelineDispatcher(
         burstTime: Long,
         burstSize: Int
     ): List<CaptureRequest> {
-        val previewSurface = host.camera2PreviewSurface
+        val previewSurface = env.sessionArbiter.camera2PreviewSurface
         val lscModes = chars.get(CameraCharacteristics.STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES)
         val supportsLsc = lscModes != null && lscModes.contains(CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)
         return List(burstSize) {
@@ -559,7 +512,7 @@ class CameraCapturePipelineDispatcher(
                 addTarget(reader.surface)
                 if (previewSurface != null && previewSurface.isValid) addTarget(previewSurface)
                 set(CaptureRequest.JPEG_ORIENTATION, combinedOrientation)
-                host.applyManualSettingsToRequest(this, true)
+                coordinator.applyManualSettingsToRequest(this, true)
                 if (supportsLsc) {
                     set(CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE, CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)
                 }
@@ -574,9 +527,9 @@ class CameraCapturePipelineDispatcher(
     private fun recordCaptureResult(result: TotalCaptureResult) {
         val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
         if (timestamp != null) {
-            host.captureResults[timestamp] = result
+            env.runtimeState.captureResults[timestamp] = result
         }
-        (host.captureResultFlow as? MutableSharedFlow)?.tryEmit(result)
+        (env.runtimeState.captureResultFlow as? MutableSharedFlow)?.tryEmit(result)
     }
 
     fun copyAndroidImageToHolder(
@@ -596,7 +549,7 @@ class CameraCapturePipelineDispatcher(
         val height = image.height
 
         val sensorOrientation = try {
-            CameraRepository.getCharacteristics(host.camera2Manager, physicalId ?: "0")
+            CameraRepository.getCharacteristics(env.camera2Manager, physicalId ?: "0")
                 .get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         } catch (_: Exception) {
             0
@@ -663,10 +616,10 @@ class CameraCapturePipelineDispatcher(
         capturedLens: LensInfo? = null,
         zoomFactor: Float = 1.0f
     ) {
-        val effectiveLens = capturedLens ?: host.currentLens
-        val currentZoom = specAssembler.resolveEffectiveZoom(capturedLens, host.currentLens, zoomFactor)
-        val combinedOrientation = host.getCombinedOrientation()
-        val appContext = host.hostContext.applicationContext
+        val effectiveLens = capturedLens ?: env.runtimeState.currentLens
+        val currentZoom = specAssembler.resolveEffectiveZoom(capturedLens, env.runtimeState.currentLens, zoomFactor)
+        val combinedOrientation = coordinator.getCombinedOrientation()
+        val appContext = env.hostContext.applicationContext
 
         (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
             var isHdrPlusSuccess = false
@@ -678,7 +631,7 @@ class CameraCapturePipelineDispatcher(
                 val height = frames[0].height
                 val result = metadataExtractor.findCaptureResult(frames[0].timestamp)
                 val targetCharId = activePhysicalId(result) ?: frames[0].physicalId ?: effectiveLens?.id ?: "0"
-                val chars = CameraRepository.getCharacteristics(host.camera2Manager, targetCharId)
+                val chars = CameraRepository.getCharacteristics(env.camera2Manager, targetCharId)
 
                 val whiteLevel = chars.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
                 val blackLevelPattern = metadataExtractor.extractBlackLevelPattern(chars)
@@ -706,8 +659,8 @@ class CameraCapturePipelineDispatcher(
                 notifyQueuedOnMain(appContext, R.string.toast_hdr_queued)
 
                 val (motionMp4Path, motionStillPtsUs) = specAssembler.awaitPendingMotionPhoto(
-                    pendingTaskProvider = { host.pendingMotionPhotoTask },
-                    clearPendingTask = { host.pendingMotionPhotoTask = null }
+                    pendingTaskProvider = { env.runtimeState.pendingMotionPhotoTask },
+                    clearPendingTask = { env.runtimeState.pendingMotionPhotoTask = null }
                 )
                 val (latchedLsc, latchedRows, latchedCols) = metadataExtractor.findLatestLensShadingMap(result)
                 val settingsRepo = SettingsRepository.getInstance(appContext)
@@ -722,7 +675,7 @@ class CameraCapturePipelineDispatcher(
                         height = height,
                         orientation = combinedOrientation,
                         zoomFactor = currentZoom,
-                        mirror = host.shouldMirror,
+                        mirror = env.shouldMirror,
                         isSingleFrame = false,
                         isHdrPlus = true,
                         targetCharId = targetCharId,
@@ -766,10 +719,10 @@ class CameraCapturePipelineDispatcher(
                 if (!isHdrPlusSuccess) {
                     HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
                 }
-                host.processingSemaphore.release()
-                host.lifecycleScope.launch(Dispatchers.Main) {
-                    host.resetBurstUi()
-                    if (!isHdrPlusSuccess) host.hideProcessingAnimation()
+                env.runtimeState.processingSemaphore.release()
+                env.lifecycleScope.launch(Dispatchers.Main) {
+                    ui.resetBurstUi()
+                    if (!isHdrPlusSuccess) ui.hideProcessingAnimation()
                 }
             }
         }
@@ -779,11 +732,11 @@ class CameraCapturePipelineDispatcher(
         streamingResult: StreamingBurstResult,
         burstContext: StreamingBurstCaptureContext
     ) {
-        val effectiveLens = burstContext.capturedLens ?: host.currentLens
+        val effectiveLens = burstContext.capturedLens ?: env.runtimeState.currentLens
         val currentZoom = specAssembler.resolveEffectiveZoom(
-            burstContext.capturedLens, host.currentLens, burstContext.zoomFactor
+            burstContext.capturedLens, env.runtimeState.currentLens, burstContext.zoomFactor
         )
-        val appContext = host.hostContext.applicationContext
+        val appContext = env.hostContext.applicationContext
 
         (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
             var isHdrPlusSuccess = false
@@ -817,8 +770,8 @@ class CameraCapturePipelineDispatcher(
                 notifyQueuedOnMain(appContext, R.string.toast_hdr_queued)
 
                 val (motionMp4Path, motionStillPtsUs) = specAssembler.awaitPendingMotionPhoto(
-                    pendingTaskProvider = { host.pendingMotionPhotoTask },
-                    clearPendingTask = { host.pendingMotionPhotoTask = null }
+                    pendingTaskProvider = { env.runtimeState.pendingMotionPhotoTask },
+                    clearPendingTask = { env.runtimeState.pendingMotionPhotoTask = null }
                 )
 
                 var effectiveLsc = burstContext.lensShadingMapData
@@ -841,7 +794,7 @@ class CameraCapturePipelineDispatcher(
                         height = burstContext.height,
                         orientation = burstContext.combinedOrientation,
                         zoomFactor = currentZoom,
-                        mirror = host.shouldMirror,
+                        mirror = env.shouldMirror,
                         isSingleFrame = false,
                         isHdrPlus = true,
                         targetCharId = burstContext.targetCharId,
@@ -906,10 +859,10 @@ class CameraCapturePipelineDispatcher(
                     Toast.makeText(appContext, appContext.getString(R.string.toast_hdr_failed_fallback), Toast.LENGTH_SHORT).show()
                 }
             } finally {
-                host.processingSemaphore.release()
-                host.lifecycleScope.launch(Dispatchers.Main) {
-                    host.resetBurstUi()
-                    if (!isHdrPlusSuccess) host.hideProcessingAnimation()
+                env.runtimeState.processingSemaphore.release()
+                env.lifecycleScope.launch(Dispatchers.Main) {
+                    ui.resetBurstUi()
+                    if (!isHdrPlusSuccess) ui.hideProcessingAnimation()
                 }
             }
         }
@@ -925,9 +878,9 @@ class CameraCapturePipelineDispatcher(
                 val targetCharId = activePhysicalId(captureResult)
                     ?: image.physicalId
                     ?: image.capturedLens?.id
-                    ?: host.currentLens?.id
+                    ?: env.runtimeState.currentLens?.id
                     ?: "0"
-                val chars = CameraRepository.getCharacteristics(host.camera2Manager, targetCharId)
+                val chars = CameraRepository.getCharacteristics(env.camera2Manager, targetCharId)
 
                 val whiteLevel = chars.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
                 val blackLevelPattern = metadataExtractor.extractBlackLevelPattern(chars)
@@ -951,14 +904,14 @@ class CameraCapturePipelineDispatcher(
                     capturedLens = image.capturedLens
                 )
 
-                notifyQueuedOnMain(host.hostContext, R.string.toast_processing_queued)
+                notifyQueuedOnMain(env.hostContext, R.string.toast_processing_queued)
 
                 var motionMp4Path = image.motionPhotoMp4Path
                 var motionStillPtsUs = image.motionPhotoStillPtsUs
-                if (motionMp4Path == null && host.pendingMotionPhotoTask != null) {
+                if (motionMp4Path == null && env.runtimeState.pendingMotionPhotoTask != null) {
                     val (path, pts) = specAssembler.awaitPendingMotionPhoto(
-                        pendingTaskProvider = { host.pendingMotionPhotoTask },
-                        clearPendingTask = { host.pendingMotionPhotoTask = null }
+                        pendingTaskProvider = { env.runtimeState.pendingMotionPhotoTask },
+                        clearPendingTask = { env.runtimeState.pendingMotionPhotoTask = null }
                     )
                     motionMp4Path = path
                     motionStillPtsUs = pts
@@ -980,7 +933,7 @@ class CameraCapturePipelineDispatcher(
                         height = image.height,
                         orientation = image.combinedOrientation,
                         zoomFactor = image.zoomRatio,
-                        mirror = host.shouldMirror,
+                        mirror = env.shouldMirror,
                         isSingleFrame = true,
                         isHdrPlus = false,
                         fusionModeOverride = 0,
@@ -1065,8 +1018,8 @@ class CameraCapturePipelineDispatcher(
         halfFrameMetadata: HalfFrameManager.Metadata? = null,
         captureMetadata: CaptureMetadata? = null
     ) {
-        val appContext = host.hostContext.applicationContext
-        val mirror = host.shouldMirror
+        val appContext = env.hostContext.applicationContext
+        val mirror = env.shouldMirror
 
         (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
             try {
@@ -1078,8 +1031,8 @@ class CameraCapturePipelineDispatcher(
                 val jpgFolderUri = settingsRepository.current().jpgStorageUri
 
                 val (motionMp4Path, motionStillPtsUs) = specAssembler.awaitPendingMotionPhoto(
-                    pendingTaskProvider = { host.pendingMotionPhotoTask },
-                    clearPendingTask = { host.pendingMotionPhotoTask = null }
+                    pendingTaskProvider = { env.runtimeState.pendingMotionPhotoTask },
+                    clearPendingTask = { env.runtimeState.pendingMotionPhotoTask = null }
                 )
 
                 val uri = ImageSaver.saveProcessedImage(
@@ -1100,23 +1053,23 @@ class CameraCapturePipelineDispatcher(
                 )
                 withContext(Dispatchers.Main) {
                     if (uri != null) {
-                        host.imageRepository.invalidateCache()
+                        env.imageRepository.invalidateCache()
                         settingsRepository.setLastCaptureUri(uri.toString())
-                        host.setGalleryThumbnail(uri.toString())
-                    } else if (host.activeCoordinator?.shouldClearThumbnailOnCapture() == true) {
-                        host.setGalleryThumbnail(null)
+                        ui.setGalleryThumbnail(uri.toString())
+                    } else if (coordinator.activeCoordinator?.shouldClearThumbnailOnCapture() == true) {
+                        ui.setGalleryThumbnail(null)
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to save JPEG fallback", e)
             } finally {
                 HdrPlusRequestManager.onTaskFinished()
-                host.processingSemaphore.release()
+                env.runtimeState.processingSemaphore.release()
                 withContext(Dispatchers.Main) {
-                    host.resetBurstUi()
-                    host.cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                    if (host.activeCoordinator?.keepsProcessingAnimationActive() != true) {
-                        host.hideProcessingAnimation()
+                    ui.resetBurstUi()
+                    ui.cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                    if (coordinator.activeCoordinator?.keepsProcessingAnimationActive() != true) {
+                        ui.hideProcessingAnimation()
                     }
                 }
             }
@@ -1132,8 +1085,8 @@ class CameraCapturePipelineDispatcher(
     private suspend fun notifyQueuedOnMain(toastContext: Context, toastResId: Int) {
         withContext(Dispatchers.Main) {
             Toast.makeText(toastContext, toastContext.getString(toastResId), Toast.LENGTH_SHORT).show()
-            if (host.activeCoordinator?.shouldClearThumbnailOnCapture() == true) {
-                host.setGalleryThumbnail(null)
+            if (coordinator.activeCoordinator?.shouldClearThumbnailOnCapture() == true) {
+                ui.setGalleryThumbnail(null)
             }
         }
     }

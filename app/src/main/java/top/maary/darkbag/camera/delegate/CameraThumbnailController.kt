@@ -1,27 +1,21 @@
 package top.maary.darkbag.camera.delegate
 
-import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.view.View
 import android.widget.Toast
-import androidx.fragment.app.FragmentActivity
 import androidx.navigation.Navigation
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.resource.bitmap.DownsampleStrategy
 import com.bumptech.glide.request.RequestOptions
 import com.bumptech.glide.signature.ObjectKey
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
-import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.fragments.CameraFragmentDirections
-import top.maary.darkbag.modes.CaptureModeCoordinator
 import top.maary.darkbag.rawvideo.RawVideoNative
-import top.maary.darkbag.repository.ImageRepository
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.LutManager
@@ -29,24 +23,16 @@ import top.maary.darkbag.utils.MediaStoreUtils
 import java.io.File
 import java.nio.ByteBuffer
 
-/** Host contract for the gallery thumbnail controller. */
-interface CameraThumbnailHost {
-    val hostContext: Context
-    val hostActivity: FragmentActivity?
-    val lifecycleScope: CoroutineScope
-    val cameraUiContainerBinding: CameraUiContainerBinding?
-    val activeCoordinator: CaptureModeCoordinator?
-    val imageRepository: ImageRepository
-    val isProcessing: Boolean
-}
-
 /**
  * Owns the gallery thumbnail: the "latest capture" URI/timestamp ordering rule, asynchronous
  * Glide / RAW-video frame decoding, and photo-view tap / long-press navigation.
  */
-class CameraThumbnailController(private val host: CameraThumbnailHost) {
-
-    private val mediaStoreUtils by lazy { MediaStoreUtils(host.hostContext) }
+class CameraThumbnailController(
+    private val env: CameraEnvironmentHost,
+    private val ui: CameraUiHost,
+    private val coordinator: CameraCoordinatorHost
+) {
+    private val mediaStoreUtils by lazy { MediaStoreUtils(env.hostContext) }
 
     var currentThumbnailUri: Uri? = null
         private set
@@ -67,18 +53,19 @@ class CameraThumbnailController(private val host: CameraThumbnailHost) {
 
     /** Loads the latest app image off the UI thread, shows it, and warms the viewer cache. */
     fun loadLatestThumbnail() {
-        host.lifecycleScope.launch {
+        env.lifecycleScope.launch {
             val thumbnailUri = mediaStoreUtils.getLatestAppImage()
             updateCurrentThumbnail(thumbnailUri)
             setGalleryThumbnail(thumbnailUri?.toString())
-            kotlin.runCatching { host.imageRepository.getGroupedImages() }
+            kotlin.runCatching { env.imageRepository.getGroupedImages() }
         }
     }
 
     fun setGalleryThumbnail(filename: String?) {
-        val photoViewButton = host.cameraUiContainerBinding?.photoViewButton ?: return
+        val photoViewButton = ui.cameraUiContainerBinding?.photoViewButton ?: return
         photoViewButton.post {
-            val shouldHide = (host.activeCoordinator?.shouldHideGalleryThumbnail() == true) || host.isProcessing
+            val shouldHide = (coordinator.activeCoordinator?.shouldHideGalleryThumbnail() == true) ||
+                env.runtimeState.isProcessing
             if (filename == null) {
                 updateCurrentThumbnail(null)
                 photoViewButton.setImageDrawable(null)
@@ -93,7 +80,7 @@ class CameraThumbnailController(private val host: CameraThumbnailHost) {
             if (!shouldHide) photoViewButton.alpha = 1f
             photoViewButton.setPadding(0, 0, 0, 0)
 
-            host.lifecycleScope.launch(Dispatchers.Main) {
+            env.lifecycleScope.launch(Dispatchers.Main) {
                 val uri = try { Uri.parse(filename) } catch (_: Exception) { null }
                 val isRawVid = filename.endsWith(".rawvid", ignoreCase = true) ||
                     uri?.toString()?.endsWith(".rawvid", ignoreCase = true) == true
@@ -106,7 +93,7 @@ class CameraThumbnailController(private val host: CameraThumbnailHost) {
                 }
                 val (loadTarget, lastModified) = withContext(Dispatchers.IO) {
                     val lm = try {
-                        mediaStoreUtils.getFileLastModified(host.hostContext, Uri.parse(filename))
+                        mediaStoreUtils.getFileLastModified(env.hostContext, Uri.parse(filename))
                     } catch (e: Exception) {
                         File(filename).let { if (it.exists()) it.lastModified() else 0L }
                     }
@@ -114,7 +101,7 @@ class CameraThumbnailController(private val host: CameraThumbnailHost) {
                     val target: Any = if (file.exists()) file else filename
                     Pair(target, lm)
                 }
-                val thumbSizePx = host.hostContext.resources.getDimensionPixelSize(R.dimen.round_button_medium)
+                val thumbSizePx = env.hostContext.resources.getDimensionPixelSize(R.dimen.round_button_medium)
                 Glide.with(photoViewButton)
                     .load(loadTarget)
                     .override(thumbSizePx, thumbSizePx)
@@ -128,7 +115,7 @@ class CameraThumbnailController(private val host: CameraThumbnailHost) {
 
     /** Decodes frame 0 of a .rawvid file into a small preview bitmap (IO thread only). */
     private fun decodeRawVideoThumbnail(uri: Uri): Bitmap? = try {
-        host.hostContext.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+        env.hostContext.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
             val handle = RawVideoNative.nativeOpenReaderFd(pfd.fd)
             if (handle == 0L) return@use null
             try {
@@ -144,7 +131,7 @@ class CameraThumbnailController(private val host: CameraThumbnailHost) {
                 val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
                     PreferenceKeys.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
                 } else -1
-                val lutDir = LutManager(host.hostContext).lutDir
+                val lutDir = LutManager(env.hostContext).lutDir
                 val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None") {
                     File(lutDir, header.activeLutName).takeIf { it.exists() }?.absolutePath
                 } else null
@@ -175,9 +162,9 @@ class CameraThumbnailController(private val host: CameraThumbnailHost) {
 
     /** Wires the photo-view button: tap opens the viewer, long-press opens the darkroom gallery. */
     fun bindPhotoViewButton() {
-        val button = host.cameraUiContainerBinding?.photoViewButton ?: return
+        val button = ui.cameraUiContainerBinding?.photoViewButton ?: return
         button.setOnLongClickListener {
-            val activity = host.hostActivity ?: return@setOnLongClickListener false
+            val activity = env.hostActivity ?: return@setOnLongClickListener false
             val nav = Navigation.findNavController(activity, R.id.fragment_container)
             if (nav.currentDestination?.id == R.id.camera_fragment) {
                 nav.navigate(CameraFragmentDirections.actionCameraToDarkroomGallery(initialUri = currentThumbnailUri?.toString()))
@@ -185,9 +172,9 @@ class CameraThumbnailController(private val host: CameraThumbnailHost) {
             true
         }
         button.setOnClickListener {
-            host.lifecycleScope.launch {
+            env.lifecycleScope.launch {
                 val uri = currentThumbnailUri ?: mediaStoreUtils.getLatestAppImage() ?: return@launch
-                val context = host.hostContext
+                val context = env.hostContext
                 val currentPrefs = SettingsRepository.getInstance(context).current()
                 val useInternalViewer = currentPrefs.useInternalViewer
                 var externalViewerStarted = false
@@ -207,7 +194,7 @@ class CameraThumbnailController(private val host: CameraThumbnailHost) {
                     }
                 }
                 if (useInternalViewer || !externalViewerStarted) {
-                    val activity = host.hostActivity ?: return@launch
+                    val activity = env.hostActivity ?: return@launch
                     Navigation.findNavController(activity, R.id.fragment_container)
                         .navigate(CameraFragmentDirections.actionCameraToImageViewer(uri.toString()))
                 }

@@ -1,12 +1,10 @@
 package top.maary.darkbag.camera.delegate
 
-import android.content.Context
 import android.graphics.Matrix
 import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
-import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureFailure
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
@@ -17,64 +15,27 @@ import android.os.Looper
 import android.util.Log
 import android.view.Surface
 import android.view.View
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import top.maary.darkbag.R
-import top.maary.darkbag.databinding.FragmentCameraBinding
 import top.maary.darkbag.utils.CameraRepository
 import kotlin.coroutines.resume
-
-/**
- * Host contract for focus and metering control.
- */
-interface CameraFocusMeteringHost {
-    val hostContext: Context
-    val lifecycleScope: CoroutineScope
-    val fragmentCameraBinding: FragmentCameraBinding?
-    val camera2Device: CameraDevice?
-    val camera2Session: CameraCaptureSession?
-    val camera2PreviewSurface: Surface?
-    val camera2Handler: Handler?
-    val camera2Manager: CameraManager
-    val lensFacing: Int
-    val displayRotation: Int
-    val isManualFocus: Boolean
-    val isManualExposure: Boolean
-    val captureResultFlow: SharedFlow<TotalCaptureResult>
-    var focusMeteringRegion: MeteringRectangle?
-    var exposureMeteringRegion: MeteringRectangle?
-    var currentFocusDistance: Float
-
-    val activePreviewDevice: CameraDevice? get() = camera2Device
-    val activePreviewSession: CameraCaptureSession? get() = camera2Session
-    val activePreviewSurface: Surface? get() = camera2PreviewSurface
-    val activePreviewHandler: Handler? get() = camera2Handler
-    val activePreviewPhysicalCharacteristics: CameraCharacteristics? get() = null
-
-    fun applyCameraControls()
-    fun applyManualSettingsToRequest(builder: CaptureRequest.Builder)
-    fun applyPreviewZoomAndCropToRequest(builder: CaptureRequest.Builder) {}
-    fun updateProInfoBar()
-    fun updateDialPanel()
-}
 
 /**
  * Controller responsible for autofocus (AF) and autoexposure (AE) tap-to-focus triggers,
  * AF-L lock state transitions, focus ring visual animations, and manual focus synchronization.
  */
 class CameraFocusMeteringController(
-    private val host: CameraFocusMeteringHost,
+    private val env: CameraEnvironmentHost,
+    private val ui: CameraUiHost,
+    private val coordinator: CameraCoordinatorHost,
     private val gestureDelegate: CameraGestureDelegate
 ) {
     companion object {
@@ -91,14 +52,12 @@ class CameraFocusMeteringController(
         tapToFocusJob?.cancel()
         tapToFocusJob = null
 
-        val hadState = host.focusMeteringRegion != null || host.exposureMeteringRegion != null
-        host.focusMeteringRegion = null
-        host.exposureMeteringRegion = null
+        val hadState = env.runtimeState.clearMeteringRegions()
 
         val uiAction = {
             hideFocusRingUnlock()
             if (hadState) {
-                host.updateProInfoBar()
+                ui.updateProInfoBar()
             }
         }
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -109,18 +68,15 @@ class CameraFocusMeteringController(
     }
 
     fun unlockFocusAndMetering() {
-        val hadFocusLock = host.focusMeteringRegion != null || host.exposureMeteringRegion != null
-        if (!hadFocusLock) return
+        val state = env.runtimeState
+        if (!state.clearMeteringRegions()) return
 
         tapToFocusJob?.cancel()
         tapToFocusJob = null
 
-        host.focusMeteringRegion = null
-        host.exposureMeteringRegion = null
-
         val uiAction = {
             hideFocusRingUnlock()
-            host.updateProInfoBar()
+            ui.updateProInfoBar()
         }
         if (Looper.myLooper() == Looper.getMainLooper()) {
             uiAction()
@@ -128,22 +84,23 @@ class CameraFocusMeteringController(
             Handler(Looper.getMainLooper()).post(uiAction)
         }
 
-        val handler = host.activePreviewHandler
+        val arbiter = env.sessionArbiter
+        val handler = arbiter.activePreviewHandler
         val cameraAction = {
-            val device = host.activePreviewDevice
-            val session = host.activePreviewSession
-            val surface = host.activePreviewSurface
+            val device = arbiter.activePreviewDevice
+            val session = arbiter.activePreviewSession
+            val surface = arbiter.activePreviewSurface
             if (device != null && session != null && surface != null && handler != null) {
                 try {
-                    if (!host.isManualFocus) {
+                    if (!state.isManualFocus) {
                         val cancelRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                         cancelRequest.addTarget(surface)
-                        host.applyManualSettingsToRequest(cancelRequest)
-                        host.applyPreviewZoomAndCropToRequest(cancelRequest)
+                        coordinator.applyManualSettingsToRequest(cancelRequest)
+                        arbiter.applyPreviewZoomAndCropToRequest(cancelRequest)
                         cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
                         session.capture(cancelRequest.build(), null, handler)
                     }
-                    host.applyCameraControls()
+                    coordinator.applyCameraControls()
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to unlock focus and metering", e)
                 }
@@ -157,19 +114,21 @@ class CameraFocusMeteringController(
     }
 
     fun triggerTapToFocusCamera2(x: Float, y: Float) {
-        val device = host.activePreviewDevice ?: return
-        val session = host.activePreviewSession ?: return
-        val surface = host.activePreviewSurface ?: return
-        val handler = host.activePreviewHandler ?: return
+        val arbiter = env.sessionArbiter
+        val state = env.runtimeState
+        val device = arbiter.activePreviewDevice ?: return
+        val session = arbiter.activePreviewSession ?: return
+        val surface = arbiter.activePreviewSurface ?: return
+        val handler = arbiter.activePreviewHandler ?: return
 
         tapToFocusJob?.cancel()
-        tapToFocusJob = host.lifecycleScope.launch(Dispatchers.Default) {
+        tapToFocusJob = env.lifecycleScope.launch(Dispatchers.Default) {
             try {
-                val characteristics = CameraRepository.getCharacteristics(host.camera2Manager, device.id)
+                val characteristics = CameraRepository.getCharacteristics(env.camera2Manager, device.id)
                 val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
                 val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return@launch
 
-                val effectiveAfChars = host.activePreviewPhysicalCharacteristics ?: characteristics
+                val effectiveAfChars = arbiter.activePreviewPhysicalCharacteristics ?: characteristics
                 val afModes = effectiveAfChars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)
                 val maxAfRegions = effectiveAfChars.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF)
                 val afSupported = (afModes == null || afModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO)) &&
@@ -178,38 +137,38 @@ class CameraFocusMeteringController(
                 val maxAeRegions = characteristics.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE)
                 val aeRegionsSupported = maxAeRegions == null || maxAeRegions > 0
 
-                val lastResult = host.captureResultFlow.replayCache.lastOrNull()
+                val lastResult = state.captureResultFlow.replayCache.lastOrNull()
                 val cropRegion = sanitizeCropRegion(lastResult?.get(CaptureResult.SCALER_CROP_REGION), activeArray)
 
                 val region = getMeteringRectangle(
                     x, y,
-                    host.fragmentCameraBinding?.viewFinderStage?.width ?: 0,
-                    host.fragmentCameraBinding?.viewFinderStage?.height ?: 0,
+                    ui.fragmentCameraBinding?.viewFinderStage?.width ?: 0,
+                    ui.fragmentCameraBinding?.viewFinderStage?.height ?: 0,
                     sensorOrientation,
-                    host.lensFacing,
+                    state.lensFacing,
                     cropRegion
                 )
 
-                host.focusMeteringRegion = if (afSupported) region else null
-                if (!host.isManualExposure && aeRegionsSupported) {
-                    host.exposureMeteringRegion = region
+                state.focusMeteringRegion = if (afSupported) region else null
+                if (!state.isManualExposure && aeRegionsSupported) {
+                    state.exposureMeteringRegion = region
                 }
 
                 // 1. Show scanning visual feedback immediately on UI
                 withContext(Dispatchers.Main) {
                     showFocusRingScanning(x, y)
-                    host.updateProInfoBar()
+                    ui.updateProInfoBar()
                 }
 
                 if (!afSupported) {
                     withContext(Dispatchers.Main) {
-                        host.applyCameraControls()
-                        if (host.exposureMeteringRegion != null) {
+                        coordinator.applyCameraControls()
+                        if (state.exposureMeteringRegion != null) {
                             showFocusRingLocked()
                         } else {
                             hideFocusRingUnlock()
                         }
-                        host.updateProInfoBar()
+                        ui.updateProInfoBar()
                     }
                     return@launch
                 }
@@ -217,8 +176,8 @@ class CameraFocusMeteringController(
                 // 2. Submit cancel request cleanly and suspend until processed by HAL
                 val cancelRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                 cancelRequest.addTarget(surface)
-                host.applyManualSettingsToRequest(cancelRequest)
-                host.applyPreviewZoomAndCropToRequest(cancelRequest)
+                coordinator.applyManualSettingsToRequest(cancelRequest)
+                arbiter.applyPreviewZoomAndCropToRequest(cancelRequest)
                 cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
 
                 suspendCancellableCoroutine<Unit> { cont ->
@@ -251,7 +210,7 @@ class CameraFocusMeteringController(
 
                 // 3. Update repeating request with AF_MODE_AUTO and updated metering regions
                 withContext(Dispatchers.Main) {
-                    host.applyCameraControls()
+                    coordinator.applyCameraControls()
                 }
 
                 ensureActive()
@@ -259,13 +218,13 @@ class CameraFocusMeteringController(
                 // 4. Submit trigger request (CONTROL_AF_TRIGGER_START)
                 val triggerRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                 triggerRequest.addTarget(surface)
-                host.applyManualSettingsToRequest(triggerRequest)
-                host.applyPreviewZoomAndCropToRequest(triggerRequest)
+                coordinator.applyManualSettingsToRequest(triggerRequest)
+                arbiter.applyPreviewZoomAndCropToRequest(triggerRequest)
                 triggerRequest.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(region))
-                if (!host.isManualExposure && aeRegionsSupported) {
+                if (!state.isManualExposure && aeRegionsSupported) {
                     triggerRequest.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(region))
                 }
-                if (host.isManualFocus) {
+                if (state.isManualFocus) {
                     triggerRequest.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
                 }
                 triggerRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
@@ -281,7 +240,7 @@ class CameraFocusMeteringController(
                             ) {
                                 super.onCaptureCompleted(session, request, result)
                                 triggerFrameNumber = result.frameNumber
-                                if (host.isManualFocus) {
+                                if (state.isManualFocus) {
                                     syncManualFocusAfterTap(triggerFrameNumber)
                                 }
                                 if (cont.isActive) cont.resume(true)
@@ -303,18 +262,18 @@ class CameraFocusMeteringController(
 
                 ensureActive()
                 if (!triggerSucceeded) {
-                    host.focusMeteringRegion = null
+                    state.focusMeteringRegion = null
                     withContext(Dispatchers.Main) {
                         showFocusRingFailed()
-                        host.updateProInfoBar()
+                        ui.updateProInfoBar()
                     }
                     return@launch
                 }
 
                 // 5. Await AF convergence (FOCUSED_LOCKED or NOT_FOCUSED_LOCKED)
-                if (!host.isManualFocus) {
+                if (!state.isManualFocus) {
                     val convergenceResult = withTimeoutOrNull(3500L) {
-                        host.captureResultFlow.first { res ->
+                        state.captureResultFlow.first { res ->
                             val afState = res.get(CaptureResult.CONTROL_AF_STATE)
                             res.frameNumber >= triggerFrameNumber && (
                                 afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
@@ -332,14 +291,13 @@ class CameraFocusMeteringController(
                     withContext(Dispatchers.Main) {
                         if (isFocused) {
                             showFocusRingLocked()
-                            host.updateProInfoBar()
+                            ui.updateProInfoBar()
                         } else {
                             showFocusRingFailed()
                         }
                     }
                 }
             } catch (e: CancellationException) {
-                // Ignore cancellation
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Camera2 tap to focus trigger failed", e)
@@ -351,35 +309,37 @@ class CameraFocusMeteringController(
     }
 
     fun showFocusRingScanning(x: Float, y: Float) {
-        val binding = host.fragmentCameraBinding ?: return
-        val size = host.hostContext.resources.getDimension(R.dimen.focus_ring_size)
+        val binding = ui.fragmentCameraBinding ?: return
+        val size = env.hostContext.resources.getDimension(R.dimen.focus_ring_size)
         gestureDelegate.showFocusRingScanning(binding, x, y, size)
     }
 
     fun showFocusRingLocked() {
-        val binding = host.fragmentCameraBinding ?: return
-        val hasAnyLock = host.focusMeteringRegion != null || host.exposureMeteringRegion != null
+        val binding = ui.fragmentCameraBinding ?: return
+        val state = env.runtimeState
+        val hasAnyLock = state.focusMeteringRegion != null || state.exposureMeteringRegion != null
         gestureDelegate.showFocusRingLocked(binding, hasAnyLock)
-        if (host.focusMeteringRegion == null) {
+        if (state.focusMeteringRegion == null) {
             binding.focusLockBadge.animate().cancel()
             binding.focusLockBadge.visibility = View.GONE
         }
     }
 
     fun showFocusRingFailed() {
-        val binding = host.fragmentCameraBinding ?: return
+        val binding = ui.fragmentCameraBinding ?: return
         gestureDelegate.showFocusRingFailed(binding)
     }
 
     fun hideFocusRingUnlock() {
-        val binding = host.fragmentCameraBinding ?: return
+        val binding = ui.fragmentCameraBinding ?: return
         gestureDelegate.hideFocusRingUnlock(binding)
     }
 
     fun syncManualFocusAfterTap(minFrameNumber: Long = -1L) {
-        host.lifecycleScope.launch(Dispatchers.Default) {
+        val state = env.runtimeState
+        env.lifecycleScope.launch(Dispatchers.Default) {
             withTimeoutOrNull(3000) {
-                host.captureResultFlow.first { res ->
+                state.captureResultFlow.first { res ->
                     val afState = res.get(CaptureResult.CONTROL_AF_STATE)
                     res.frameNumber >= minFrameNumber && (
                         afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
@@ -389,11 +349,11 @@ class CameraFocusMeteringController(
             }?.let { res ->
                 val dist = res.get(CaptureResult.LENS_FOCUS_DISTANCE)
                 if (dist != null) {
-                    host.currentFocusDistance = dist
+                    state.currentFocusDistance = dist
                     withContext(Dispatchers.Main) {
-                        host.applyCameraControls()
-                        host.updateDialPanel()
-                        host.updateProInfoBar()
+                        coordinator.applyCameraControls()
+                        ui.updateDialPanel()
+                        ui.updateProInfoBar()
                     }
                 }
             }
@@ -418,7 +378,7 @@ class CameraFocusMeteringController(
         val normalizedX = (x / safeWidth).coerceIn(0f, 1f)
         val normalizedY = (y / safeHeight).coerceIn(0f, 1f)
 
-        val displayRotation = when (host.displayRotation) {
+        val displayRotation = when (env.displayRotation) {
             Surface.ROTATION_90 -> 90
             Surface.ROTATION_180 -> 180
             Surface.ROTATION_270 -> 270

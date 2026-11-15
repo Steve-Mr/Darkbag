@@ -852,6 +852,11 @@ class LutSurfaceProcessor {
     }
 
     private fun releaseGl() {
+        try {
+            inputSurfaceTexture?.release()
+        } catch (_: Exception) {
+        }
+        inputSurfaceTexture = null
         if (program != 0) {
             GLES30.glDeleteProgram(program)
             program = 0

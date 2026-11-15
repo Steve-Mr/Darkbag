@@ -1,19 +1,13 @@
 package top.maary.darkbag.camera.delegate
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.content.res.Configuration
-import android.graphics.Bitmap
-import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.MeteringRectangle
-import android.media.ImageReader
 import android.net.Uri
-import android.os.Handler
 import android.util.Range
 import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
@@ -23,11 +17,9 @@ import android.view.ViewGroup
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.fragment.app.FragmentActivity
 import androidx.test.core.app.ApplicationProvider
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.sync.Semaphore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -40,30 +32,22 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import top.maary.darkbag.R
-import top.maary.darkbag.camera.ConcurrentFrontCameraManager
 import top.maary.darkbag.camera.MultiCameraCaptureManager
 import top.maary.darkbag.camera.dispatch.CameraCapturePipelineDispatcher
-import top.maary.darkbag.camera.dispatch.CameraCapturePipelineHost
 import top.maary.darkbag.camera.dispatch.CameraMultiCaptureDispatcher
-import top.maary.darkbag.camera.dispatch.CameraMultiCaptureHost
-import top.maary.darkbag.camera.session.Camera2SessionController
 import top.maary.darkbag.camera.session.CameraHardwareStreamController
-import top.maary.darkbag.camera.session.CameraHardwareStreamHost
+import top.maary.darkbag.camera.session.CameraSessionArbiter
+import top.maary.darkbag.camera.state.CameraRuntimeStateHolder
 import top.maary.darkbag.camera.video.CameraVideoController
-import top.maary.darkbag.camera.video.CameraVideoHost
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.databinding.FragmentCameraBinding
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.modes.CaptureModeCoordinator
-import top.maary.darkbag.processor.HdrPlusStreamingBurst
-import top.maary.darkbag.processor.LutSurfaceProcessor
-import top.maary.darkbag.rawvideo.RawVideoSessionManager
 import top.maary.darkbag.repository.ImageRepository
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.CameraRepository
-import top.maary.darkbag.utils.ExposureUtils
 import top.maary.darkbag.utils.HalfFrameSessionStore
 import top.maary.darkbag.utils.LensInfo
 import top.maary.darkbag.utils.LocationHelper
@@ -100,15 +84,13 @@ class CameraPhaseCControllersTest {
 
     @Test
     fun testHalfFrameStateController_readWriteAndReset() {
-        val host = FakeHalfFrameHost()
-        val controller = CameraHalfFrameStateController(host)
+        val gateway = FakeCameraGateway()
+        val controller = CameraHalfFrameStateController(gateway)
 
-        // Initially step 0
         controller.readState(requireFileForStep1 = true)
         assertEquals(0, controller.step)
         assertNull(controller.tempPath)
 
-        // Write step 1 with active timestamp
         val now = System.currentTimeMillis()
         controller.writeStep(1, captureTimeMillis = now, digitalGain = 1.75f, flareType = 2)
         assertEquals(1, controller.step)
@@ -118,11 +100,9 @@ class CameraPhaseCControllersTest {
         assertEquals(1.75f, stored.digitalGain, 0.001f)
         assertEquals(2, stored.flareType)
 
-        // Strict read when temp file doesn't exist resets step back to 0
         controller.readState(requireFileForStep1 = true)
         assertEquals(0, controller.step)
 
-        // Non-strict write followed by explicit reset clears session
         controller.writeStep(1, captureTimeMillis = now, digitalGain = 2.0f, flareType = 1)
         assertEquals(1, controller.step)
         controller.writeStep(0)
@@ -133,12 +113,12 @@ class CameraPhaseCControllersTest {
 
     @Test
     fun testHalfFrameStateController_digitalGainAndStepCommit() {
-        val host = FakeHalfFrameHost().apply {
-            isHdrPlusEnabledFlag = false
-            isoRangeVal = Range(50, 3200)
-            exposureTimeRangeVal = Range(1000L, 1_000_000_000L)
+        val gateway = FakeCameraGateway().apply {
+            viewModel.setHdrPlusEnabled(false)
+            runtimeState.isoRange = Range(50, 3200)
+            runtimeState.exposureTimeRange = Range(1000L, 1_000_000_000L)
         }
-        val controller = CameraHalfFrameStateController(host)
+        val controller = CameraHalfFrameStateController(gateway)
         val gain = controller.getDigitalGainAndUpdateStep(
             timestamp = 5000L,
             isFrame1Trigger = true,
@@ -161,13 +141,13 @@ class CameraPhaseCControllersTest {
             this[PreferenceKeys.HDR_PLUS_ENABLED] = false
         }
 
-        val megaHost = FakeMegaHost()
-        val lutController = CameraLutController(megaHost)
-        val lensController = CameraLensController(megaHost)
-        val controller = CameraHdrPlusController(megaHost, lutController, lensController)
+        val gateway = FakeCameraGateway()
+        val lutController = CameraLutController(gateway, gateway, gateway)
+        val lensController = CameraLensController(gateway, gateway, gateway)
+        val controller = CameraHdrPlusController(gateway, gateway, gateway, lutController, lensController)
 
         controller.restorePersistedState()
-        assertTrue(megaHost.isFlashEnabled)
+        assertTrue(gateway.runtimeState.isFlashEnabled)
         assertFalse(viewModel.uiState.value.isHdrPlusEnabled)
 
         controller.bindHdrPlusControls()
@@ -175,34 +155,30 @@ class CameraPhaseCControllersTest {
         controller.updateHdrPlusUi()
         assertFalse(uiBinding.hdrPlusSwitch!!.isChecked)
 
-        // Clicking hdrPlusPill toggles hdrPlusSwitch when visible
         uiBinding.hdrPlusPill?.performClick()
         assertTrue(uiBinding.hdrPlusSwitch!!.isChecked)
         assertTrue(viewModel.uiState.value.isHdrPlusEnabled)
         assertTrue(SettingsRepository.getInstance(themedContext).current().hdrPlusEnabled)
 
-        // Enabling HDR+ clears flash
-        assertFalse(megaHost.isFlashEnabled)
-        assertTrue(megaHost.applyCameraControlsCalled)
+        assertFalse(gateway.runtimeState.isFlashEnabled)
+        assertTrue(gateway.applyCameraControlsCalled)
     }
 
     @Test
     fun testHdrPlusController_flashButtonBranchesByHdrState() {
-        val megaHost = FakeMegaHost()
-        val lutController = CameraLutController(megaHost)
-        val lensController = CameraLensController(megaHost)
-        val controller = CameraHdrPlusController(megaHost, lutController, lensController)
+        val gateway = FakeCameraGateway()
+        val lutController = CameraLutController(gateway, gateway, gateway)
+        val lensController = CameraLensController(gateway, gateway, gateway)
+        val controller = CameraHdrPlusController(gateway, gateway, gateway, lutController, lensController)
 
-        // When HDR+ is disabled, clicking flashButton toggles flash mode
         val repo = SettingsRepository.getInstance(themedContext)
         viewModel.setHdrPlusEnabled(false)
-        megaHost.isFlashEnabled = false
+        gateway.runtimeState.isFlashEnabled = false
         controller.bindFlashButton()
         uiBinding.flashButton?.performClick()
-        assertTrue(megaHost.isFlashEnabled)
+        assertTrue(gateway.runtimeState.isFlashEnabled)
         assertTrue(repo.current().flashEnabled)
 
-        // When HDR+ is enabled, clicking flashButton cycles underexposure mode instead
         viewModel.setHdrPlusEnabled(true)
         val beforeMode = repo.current().hdrUnderexposureMode
         uiBinding.flashButton?.performClick()
@@ -219,13 +195,13 @@ class CameraPhaseCControllersTest {
             .commit()
         SettingsRepository.getInstance(themedContext).awaitHydratedBlocking()
 
-        val megaHost = FakeMegaHost()
-        val lutController = CameraLutController(megaHost)
-        val lensController = CameraLensController(megaHost)
-        val controller = CameraHdrPlusController(megaHost, lutController, lensController)
+        val gateway = FakeCameraGateway()
+        val lutController = CameraLutController(gateway, gateway, gateway)
+        val lensController = CameraLensController(gateway, gateway, gateway)
+        val controller = CameraHdrPlusController(gateway, gateway, gateway, lutController, lensController)
 
         controller.restorePersistedState()
-        assertTrue(megaHost.isFlashEnabled)
+        assertTrue(gateway.runtimeState.isFlashEnabled)
     }
 
     @Test
@@ -237,8 +213,8 @@ class CameraPhaseCControllersTest {
             .commit()
         SettingsRepository.getInstance(themedContext).awaitHydratedBlocking()
 
-        val megaHost = FakeMegaHost()
-        val lensController = CameraLensController(megaHost)
+        val gateway = FakeCameraGateway()
+        val lensController = CameraLensController(gateway, gateway, gateway)
         lensController.initLensControls()
         assertNotNull(lensController)
     }
@@ -249,17 +225,15 @@ class CameraPhaseCControllersTest {
 
     @Test
     fun testMotionPhotoController_visibilityAndToggle() {
-        val host = FakeMotionHost()
-        val controller = CameraMotionPhotoController(host)
+        val gateway = FakeCameraGateway()
+        val controller = CameraMotionPhotoController(gateway, gateway, gateway)
 
-        // In POINT_AND_SHOOT tier, film row is hidden -> motionPhotoButton is GONE
         viewModel.setUiTier(CameraUiTier.POINT_AND_SHOOT)
         controller.updateButton()
         assertEquals(View.GONE, uiBinding.motionPhotoButton?.visibility)
 
-        // In FILM tier with NORMAL mode, button is VISIBLE and toggles prefs
         viewModel.setUiTier(CameraUiTier.FILM)
-        host.effectiveCaptureMode = CaptureMode.NORMAL
+        gateway.effectiveModeOverride = CaptureMode.NORMAL
         controller.bindButton()
         assertEquals(View.VISIBLE, uiBinding.motionPhotoButton?.visibility)
         assertFalse(controller.isEnabled)
@@ -269,8 +243,7 @@ class CameraPhaseCControllersTest {
         assertTrue(SettingsRepository.getInstance(themedContext).current().motionPhotoEnabled)
         assertTrue(viewModel.uiState.value.isMotionPhotoEnabled)
 
-        // Switching to HALF_FRAME_SBS hides button because half-frame doesn't support motion photo
-        host.effectiveCaptureMode = CaptureMode.HALF_FRAME_SBS
+        gateway.effectiveModeOverride = CaptureMode.HALF_FRAME_SBS
         controller.updateButton()
         assertEquals(View.GONE, uiBinding.motionPhotoButton?.visibility)
     }
@@ -287,8 +260,8 @@ class CameraPhaseCControllersTest {
         activity.setContentView(fragmentBinding.root)
         ShadowLooperHelper.runMainLooperIdle()
 
-        val host = FakeThumbnailHost()
-        val controller = CameraThumbnailController(host)
+        val gateway = FakeCameraGateway()
+        val controller = CameraThumbnailController(gateway, gateway, gateway)
 
         controller.setGalleryThumbnail(null)
         ShadowLooperHelper.runMainLooperIdle()
@@ -300,8 +273,7 @@ class CameraPhaseCControllersTest {
         assertEquals(testUri, controller.currentThumbnailUri)
         assertEquals(View.VISIBLE, uiBinding.photoViewButton?.visibility)
 
-        // When processing, button becomes INVISIBLE instead of VISIBLE/GONE
-        host.isProcessing = true
+        gateway.runtimeState.isVideoSaving = true
         controller.setGalleryThumbnail(null)
         ShadowLooperHelper.runMainLooperIdle()
         assertEquals(View.INVISIBLE, uiBinding.photoViewButton?.visibility)
@@ -313,58 +285,51 @@ class CameraPhaseCControllersTest {
 
     @Test
     fun testShutterController_clickLongPressAndReset() {
-        val megaHost = FakeMegaHost()
-        val overlayController = CameraOverlayController(FakeOverlayHost())
-        val gestureDelegate = CameraGestureDelegate(themedContext, FakeGestureHost())
-        val focusController = CameraFocusMeteringController(megaHost, gestureDelegate)
-        val videoController = CameraVideoController(megaHost)
-        val controller = CameraShutterController(megaHost, overlayController, focusController, videoController)
+        val gateway = FakeCameraGateway()
+        val overlayController = CameraOverlayController(gateway, gateway, gateway)
+        val gestureDelegate = CameraGestureDelegate(themedContext, gateway)
+        val focusController = CameraFocusMeteringController(gateway, gateway, gateway, gestureDelegate)
+        val videoController = CameraVideoController(gateway, gateway, gateway)
+        val controller = CameraShutterController(gateway, gateway, gateway, overlayController, focusController, videoController)
 
         val stubCoordinator = StubCoordinator(CaptureMode.NORMAL)
-        megaHost.activeCoordinator = stubCoordinator
+        gateway.activeCoordinatorOverride = stubCoordinator
         controller.bindShutter()
 
-        // Normal click dispatches to coordinator.onShutterTriggered
         uiBinding.cameraCaptureButton?.performClick()
         assertEquals(1, stubCoordinator.shutterTriggerCount)
 
-        // Long press consumed by coordinator does not escalate to video recording
         stubCoordinator.consumeLongPress = true
         uiBinding.cameraCaptureButton?.onLongPressHoldStarted?.invoke()
         assertEquals(1, stubCoordinator.longPressCount)
 
-        // Long press not consumed by coordinator does NOT start recording when supportsLongPressVideo is false
         stubCoordinator.consumeLongPress = false
         stubCoordinator.allowLongPressVideo = false
         uiBinding.cameraCaptureButton?.onLongPressHoldStarted?.invoke()
         assertEquals(2, stubCoordinator.longPressCount)
-        assertFalse(megaHost.audioRationaleChecked)
+        assertFalse(gateway.audioRationaleChecked)
 
-        // When supportsLongPressVideo is true and coordinator does not consume, long press proceeds to video recording path
         stubCoordinator.allowLongPressVideo = true
         uiBinding.cameraCaptureButton?.onLongPressHoldStarted?.invoke()
-        assertTrue(megaHost.audioRationaleChecked)
+        assertTrue(gateway.audioRationaleChecked)
 
-        // Dot rotation delegates to coordinator
-        megaHost.deviceOrientationDegrees = 90
+        gateway.runtimeState.deviceOrientationDegrees = 90
         stubCoordinator.dotRotation = -90f
         assertEquals(-90f, controller.getDotTargetRotation(), 0.001f)
 
-        // resetBurstUi enables button when semaphore permits > 0, disables when 0
-        megaHost.isBurstActive = true
+        gateway.runtimeState.isBurstActive = true
         controller.resetBurstUi()
-        assertFalse(megaHost.isBurstActive)
+        assertFalse(gateway.runtimeState.isBurstActive)
         assertTrue(uiBinding.cameraCaptureButton!!.isEnabled)
 
-        megaHost.simulatedPermits = 0
+        gateway.simulatedPermits = 0
         controller.resetBurstUi()
         assertFalse(uiBinding.cameraCaptureButton!!.isEnabled)
 
-        // onDestroy cleanly releases orientation listener & animators
         controller.onDestroy()
         focusController.onDestroy()
-        CameraLutController(megaHost).onDestroy()
-        CameraLensController(megaHost).onDestroy()
+        CameraLutController(gateway, gateway, gateway).onDestroy()
+        CameraLensController(gateway, gateway, gateway).onDestroy()
     }
 
     // -------------------------------------------------------------------------
@@ -373,21 +338,23 @@ class CameraPhaseCControllersTest {
 
     @Test
     fun testModeController_resolveAndCycleModes() {
-        val megaHost = FakeMegaHost()
-        val overlayController = CameraOverlayController(FakeOverlayHost())
-        val gestureDelegate = CameraGestureDelegate(themedContext, FakeGestureHost())
-        val focusController = CameraFocusMeteringController(megaHost, gestureDelegate)
-        val videoController = CameraVideoController(megaHost)
-        val shutterController = CameraShutterController(megaHost, overlayController, focusController, videoController)
-        val thumbnailController = CameraThumbnailController(megaHost)
-        val motionController = CameraMotionPhotoController(megaHost)
-        val pipelineDispatcher = CameraCapturePipelineDispatcher(megaHost)
-        val multiCaptureDispatcher = CameraMultiCaptureDispatcher(megaHost)
-        val streamController = CameraHardwareStreamController(megaHost)
-        val lensController = CameraLensController(megaHost)
+        val gateway = FakeCameraGateway()
+        val overlayController = CameraOverlayController(gateway, gateway, gateway)
+        val gestureDelegate = CameraGestureDelegate(themedContext, gateway)
+        val focusController = CameraFocusMeteringController(gateway, gateway, gateway, gestureDelegate)
+        val videoController = CameraVideoController(gateway, gateway, gateway)
+        val shutterController = CameraShutterController(gateway, gateway, gateway, overlayController, focusController, videoController)
+        val thumbnailController = CameraThumbnailController(gateway, gateway, gateway)
+        val motionController = CameraMotionPhotoController(gateway, gateway, gateway)
+        val pipelineDispatcher = CameraCapturePipelineDispatcher(gateway, gateway, gateway)
+        val multiCaptureDispatcher = CameraMultiCaptureDispatcher(gateway, gateway, gateway)
+        val streamController = CameraHardwareStreamController(gateway, gateway, gateway)
+        val lensController = CameraLensController(gateway, gateway, gateway)
 
         val modeController = CameraModeController(
-            megaHost,
+            gateway,
+            gateway,
+            gateway,
             CameraModeCollaborators(
                 overlay = overlayController,
                 shutter = shutterController,
@@ -401,18 +368,15 @@ class CameraPhaseCControllersTest {
             )
         )
 
-        megaHost.modeControllerRef = modeController
+        gateway.modeControllerRef = modeController
 
-        // Default resolves to NORMAL
         assertEquals(CaptureMode.NORMAL, modeController.resolveActiveCaptureMode())
         assertFalse(modeController.isHalfFrameActive)
 
-        // Stale HALF_FRAME_SBS preference without KEY_HALF_FRAME_MODE falls back to NORMAL
         val repo = SettingsRepository.getInstance(themedContext)
         repo.setActiveCaptureMode(CaptureMode.HALF_FRAME_SBS.key)
         assertEquals(CaptureMode.NORMAL, modeController.resolveActiveCaptureMode())
 
-        // Enabling half-frame with cleared saved mode resolves HALF_FRAME_SBS and cycles SBS -> TB -> NORMAL
         repo.edit {
             remove(PreferenceKeys.ACTIVE_CAPTURE_MODE)
             this[PreferenceKeys.HALF_FRAME_MODE] = true
@@ -422,13 +386,12 @@ class CameraPhaseCControllersTest {
 
         modeController.cycleCaptureMode()
         assertEquals(CaptureMode.HALF_FRAME_TB, modeController.effectiveMode)
-        assertTrue(megaHost.modeCycledFlag == true)
+        assertTrue(gateway.modeCycledFlag == true)
 
         modeController.cycleCaptureMode()
         assertEquals(CaptureMode.NORMAL, modeController.effectiveMode)
 
-        // Burst active blocks mode cycling
-        megaHost.isBurstActive = true
+        gateway.runtimeState.isBurstActive = true
         modeController.cycleCaptureMode()
         assertEquals(CaptureMode.NORMAL, modeController.effectiveMode)
         ShadowLooperHelper.runMainLooperIdle()
@@ -436,70 +399,66 @@ class CameraPhaseCControllersTest {
 
     @Test
     fun testFocusMeteringController_clearAndShowRingBehavior() {
-        val megaHost = FakeMegaHost()
-        val gestureDelegate = CameraGestureDelegate(themedContext, FakeGestureHost())
-        val focusController = CameraFocusMeteringController(megaHost, gestureDelegate)
+        val gateway = FakeCameraGateway()
+        val gestureDelegate = CameraGestureDelegate(themedContext, gateway)
+        val focusController = CameraFocusMeteringController(gateway, gateway, gateway, gestureDelegate)
 
-        // Default activePreview* properties fall back to single-camera properties
-        assertEquals(megaHost.camera2Device, megaHost.activePreviewDevice)
-        assertEquals(megaHost.camera2Session, megaHost.activePreviewSession)
-        assertEquals(megaHost.camera2PreviewSurface, megaHost.activePreviewSurface)
-        assertEquals(megaHost.camera2Handler, megaHost.activePreviewHandler)
-        assertNull(megaHost.activePreviewPhysicalCharacteristics)
+        assertEquals(gateway.sessionArbiter.camera2Device, gateway.sessionArbiter.activePreviewDevice)
+        assertEquals(gateway.sessionArbiter.camera2Session, gateway.sessionArbiter.activePreviewSession)
+        assertEquals(gateway.sessionArbiter.camera2PreviewSurface, gateway.sessionArbiter.activePreviewSurface)
+        assertEquals(gateway.sessionArbiter.camera2Handler, gateway.sessionArbiter.activePreviewHandler)
+        assertNull(gateway.sessionArbiter.activePreviewPhysicalCharacteristics)
 
-        // AE-only lock does not display AF-L badge
         val rect = MeteringRectangle(100, 100, 200, 200, MeteringRectangle.METERING_WEIGHT_MAX)
-        megaHost.focusMeteringRegion = null
-        megaHost.exposureMeteringRegion = rect
+        gateway.runtimeState.focusMeteringRegion = null
+        gateway.runtimeState.exposureMeteringRegion = rect
         focusController.showFocusRingLocked()
         assertEquals(View.GONE, fragmentBinding.focusLockBadge.visibility)
 
-        // AF+AE lock displays AF-L badge
-        megaHost.focusMeteringRegion = rect
+        gateway.runtimeState.focusMeteringRegion = rect
         focusController.showFocusRingLocked()
         assertEquals(View.VISIBLE, fragmentBinding.focusLockBadge.visibility)
 
-        // clearFocusAndMeteringState resets regions and updates PRO bar once when state existed
         focusController.clearFocusAndMeteringState()
         ShadowLooperHelper.runMainLooperIdle()
-        assertNull(megaHost.focusMeteringRegion)
-        assertNull(megaHost.exposureMeteringRegion)
-        assertEquals(1, megaHost.updateProInfoBarCount)
+        assertNull(gateway.runtimeState.focusMeteringRegion)
+        assertNull(gateway.runtimeState.exposureMeteringRegion)
+        assertEquals(1, gateway.updateProInfoBarCount)
 
-        // Calling again when empty does not redundantly trigger PRO bar update
         focusController.clearFocusAndMeteringState()
         ShadowLooperHelper.runMainLooperIdle()
-        assertEquals(1, megaHost.updateProInfoBarCount)
+        assertEquals(1, gateway.updateProInfoBarCount)
 
-        // unlockFocusAndMetering clears active regions and updates PRO bar
-        megaHost.focusMeteringRegion = rect
-        megaHost.exposureMeteringRegion = rect
+        gateway.runtimeState.focusMeteringRegion = rect
+        gateway.runtimeState.exposureMeteringRegion = rect
         focusController.unlockFocusAndMetering()
         ShadowLooperHelper.runMainLooperIdle()
-        assertNull(megaHost.focusMeteringRegion)
-        assertNull(megaHost.exposureMeteringRegion)
-        assertEquals(2, megaHost.updateProInfoBarCount)
+        assertNull(gateway.runtimeState.focusMeteringRegion)
+        assertNull(gateway.runtimeState.exposureMeteringRegion)
+        assertEquals(2, gateway.updateProInfoBarCount)
 
         focusController.onDestroy()
     }
 
     @Test
     fun testMultiCamera_lensSwitchClearsFocusLock_andManualConfigCarriesMeteringRegions() {
-        val megaHost = FakeMegaHost()
-        val overlayController = CameraOverlayController(FakeOverlayHost())
-        val gestureDelegate = CameraGestureDelegate(themedContext, FakeGestureHost())
-        val focusController = CameraFocusMeteringController(megaHost, gestureDelegate)
-        val videoController = CameraVideoController(megaHost)
-        val shutterController = CameraShutterController(megaHost, overlayController, focusController, videoController)
-        val thumbnailController = CameraThumbnailController(megaHost)
-        val motionController = CameraMotionPhotoController(megaHost)
-        val pipelineDispatcher = CameraCapturePipelineDispatcher(megaHost)
-        val multiCaptureDispatcher = CameraMultiCaptureDispatcher(megaHost)
-        val streamController = CameraHardwareStreamController(megaHost)
-        val lensController = CameraLensController(megaHost)
+        val gateway = FakeCameraGateway()
+        val overlayController = CameraOverlayController(gateway, gateway, gateway)
+        val gestureDelegate = CameraGestureDelegate(themedContext, gateway)
+        val focusController = CameraFocusMeteringController(gateway, gateway, gateway, gestureDelegate)
+        val videoController = CameraVideoController(gateway, gateway, gateway)
+        val shutterController = CameraShutterController(gateway, gateway, gateway, overlayController, focusController, videoController)
+        val thumbnailController = CameraThumbnailController(gateway, gateway, gateway)
+        val motionController = CameraMotionPhotoController(gateway, gateway, gateway)
+        val pipelineDispatcher = CameraCapturePipelineDispatcher(gateway, gateway, gateway)
+        val multiCaptureDispatcher = CameraMultiCaptureDispatcher(gateway, gateway, gateway)
+        val streamController = CameraHardwareStreamController(gateway, gateway, gateway)
+        val lensController = CameraLensController(gateway, gateway, gateway)
 
         val modeController = CameraModeController(
-            megaHost,
+            gateway,
+            gateway,
+            gateway,
             CameraModeCollaborators(
                 overlay = overlayController,
                 shutter = shutterController,
@@ -512,11 +471,11 @@ class CameraPhaseCControllersTest {
                 focus = focusController
             )
         )
-        megaHost.modeControllerRef = modeController
+        gateway.modeControllerRef = modeController
 
         val rect = MeteringRectangle(50, 50, 150, 150, MeteringRectangle.METERING_WEIGHT_MAX)
-        megaHost.focusMeteringRegion = rect
-        megaHost.exposureMeteringRegion = rect
+        gateway.runtimeState.focusMeteringRegion = rect
+        gateway.runtimeState.exposureMeteringRegion = rect
 
         modeController.updateActiveCoordinator(CaptureMode.MULTI_CAMERA)
         val coordinator = modeController.activeCoordinator
@@ -536,9 +495,9 @@ class CameraPhaseCControllersTest {
         assertTrue(coordinator!!.onLensSelected(sampleLens))
         ShadowLooperHelper.runMainLooperIdle()
 
-        assertNull(megaHost.focusMeteringRegion)
-        assertNull(megaHost.exposureMeteringRegion)
-        assertEquals(1, megaHost.updateProInfoBarCount)
+        assertNull(gateway.runtimeState.focusMeteringRegion)
+        assertNull(gateway.runtimeState.exposureMeteringRegion)
+        assertEquals(1, gateway.updateProInfoBarCount)
 
         val config = top.maary.darkbag.camera.MultiCameraManualConfig(
             focusMeteringRegion = rect,
@@ -553,21 +512,18 @@ class CameraPhaseCControllersTest {
 
     @Test
     fun testFocusMeteringController_sanitizeCropRegion_validatesBounds() {
-        val megaHost = FakeMegaHost()
-        val gestureDelegate = CameraGestureDelegate(themedContext, FakeGestureHost())
-        val focusController = CameraFocusMeteringController(megaHost, gestureDelegate)
+        val gateway = FakeCameraGateway()
+        val gestureDelegate = CameraGestureDelegate(themedContext, gateway)
+        val focusController = CameraFocusMeteringController(gateway, gateway, gateway, gestureDelegate)
 
         val activeArray = android.graphics.Rect(0, 0, 3264, 2448)
 
-        // Null or empty crop falls back to activeArray
         assertEquals(activeArray, focusController.sanitizeCropRegion(null, activeArray))
         assertEquals(activeArray, focusController.sanitizeCropRegion(android.graphics.Rect(0, 0, 0, 0), activeArray))
 
-        // Oversized stale crop from a larger previous sensor falls back to activeArray
         val oversized = android.graphics.Rect(0, 0, 4000, 3000)
         assertEquals(activeArray, focusController.sanitizeCropRegion(oversized, activeArray))
 
-        // Valid zoomed sub-crop within activeArray is preserved
         val validSubCrop = android.graphics.Rect(408, 306, 2856, 2142)
         assertEquals(validSubCrop, focusController.sanitizeCropRegion(validSubCrop, activeArray))
 
@@ -613,12 +569,10 @@ class CameraPhaseCControllersTest {
             standalonePrimaryId = "0"
         )
 
-        // Switching primary selection to 0.6x in CONCURRENT_STANDALONE keeps preview on standalonePrimaryPhysicalId ("0")
         manager.setPrimaryPreviewLens(uwLens)
         assertEquals("0", manager.resolveActivePreviewPhysicalId())
         assertTrue(manager.getActivePreviewPhysicalCharacteristics() === wideChars)
 
-        // In NATIVE_LOGICAL mode, switching primary lens updates active preview characteristics to 0.6x
         val logicalInfo = standaloneInfo.copy(
             isLogicalMultiCamera = true,
             hardwareType = top.maary.darkbag.utils.MultiCameraHardwareType.NATIVE_LOGICAL
@@ -633,7 +587,6 @@ class CameraPhaseCControllersTest {
         assertEquals("2", manager.resolveActivePreviewPhysicalId())
         assertTrue(manager.getActivePreviewPhysicalCharacteristics() === uwChars)
 
-        // Metering regions only route to isMeteringPrimary (standalone primary "0"), even when unlinked
         val region = MeteringRectangle(100, 100, 200, 200, MeteringRectangle.METERING_WEIGHT_MAX)
         val manualConfig = top.maary.darkbag.camera.MultiCameraManualConfig(
             isLinked = false,
@@ -665,7 +618,8 @@ class CameraPhaseCControllersTest {
 
     @Test
     fun testOverlayController_updateViewFinderConstraintsAndAspectRatio() {
-        val overlayController = CameraOverlayController(FakeOverlayHost())
+        val gateway = FakeCameraGateway()
+        val overlayController = CameraOverlayController(gateway, gateway, gateway)
 
         overlayController.syncViewFinderAspectRatio(isPortraitBounds = true)
         val lpPortrait = fragmentBinding.viewFinderContainer.layoutParams as ConstraintLayout.LayoutParams
@@ -683,14 +637,45 @@ class CameraPhaseCControllersTest {
         assertTrue(fragmentBinding.viewFinderContainer.clipToOutline)
     }
 
+    @Test
+    fun testOverlayController_updateHalfFrameUI_preservesMultiCameraContainerRole() {
+        val activity = org.robolectric.Robolectric.buildActivity(FragmentActivity::class.java)
+            .create().start().resume().visible().get()
+        activity.setTheme(R.style.AppTheme)
+        activity.setContentView(fragmentBinding.root)
+        ShadowLooperHelper.runMainLooperIdle()
+
+        val gateway = FakeCameraGateway()
+        val overlayController = CameraOverlayController(gateway, gateway, gateway)
+        val card = uiBinding.bottomIslandCard as top.maary.darkbag.ui.bento.BentoTrayCard
+
+        gateway.activeCoordinatorOverride = StubCoordinator(CaptureMode.MULTI_CAMERA)
+        gateway.effectiveModeOverride = CaptureMode.MULTI_CAMERA
+        overlayController.updateHalfFrameUI()
+        ShadowLooperHelper.runMainLooperIdle()
+        assertEquals(top.maary.darkbag.ui.bento.BentoContainerRole.SECONDARY_CONTAINER, card.containerRole)
+
+        gateway.activeCoordinatorOverride = StubCoordinator(CaptureMode.HALF_FRAME_SBS)
+        gateway.effectiveModeOverride = CaptureMode.HALF_FRAME_SBS
+        overlayController.updateHalfFrameUI()
+        ShadowLooperHelper.runMainLooperIdle()
+        assertEquals(top.maary.darkbag.ui.bento.BentoContainerRole.TERTIARY_CONTAINER, card.containerRole)
+
+        gateway.activeCoordinatorOverride = StubCoordinator(CaptureMode.NORMAL)
+        gateway.effectiveModeOverride = CaptureMode.NORMAL
+        overlayController.updateHalfFrameUI()
+        ShadowLooperHelper.runMainLooperIdle()
+        assertEquals(top.maary.darkbag.ui.bento.BentoContainerRole.SURFACE_CONTAINER, card.containerRole)
+    }
+
     // -------------------------------------------------------------------------
     // CameraTierController tests
     // -------------------------------------------------------------------------
 
     @Test
     fun testTierController_bindTierControls_noRecursion() {
-        val megaHost = FakeMegaHost()
-        val tierController = CameraTierController(megaHost)
+        val gateway = FakeCameraGateway()
+        val tierController = CameraTierController(gateway, gateway, gateway)
         var visibilityRefreshed = false
         var lensRefreshed = false
 
@@ -699,11 +684,9 @@ class CameraPhaseCControllersTest {
             onLensRefresh = { lensRefreshed = true }
         )
 
-        // Verifies no StackOverflowError during bindTierControls
         assertEquals(CameraUiTier.FILM, viewModel.uiState.value.uiTier)
         assertNotNull(uiBinding.btnBentoTier)
 
-        // Switching tier via btnBentoTier click
         uiBinding.btnBentoTier?.performClick()
         ShadowLooperHelper.runMainLooperIdle()
 
@@ -714,10 +697,9 @@ class CameraPhaseCControllersTest {
 
     @Test
     fun testTierController_updateTierUi_and_updateProInfoBar_noStackOverflow() {
-        val megaHost = FakeMegaHost()
-        val tierController = CameraTierController(megaHost)
+        val gateway = FakeCameraGateway()
+        val tierController = CameraTierController(gateway, gateway, gateway)
 
-        // Repeated mutual calls should complete cleanly without StackOverflowError
         viewModel.setUiTier(CameraUiTier.PRO)
         tierController.updateTierUi(CameraUiTier.PRO)
         tierController.updateProInfoBar()
@@ -735,11 +717,11 @@ class CameraPhaseCControllersTest {
 
     @Test
     fun testTierController_manualFlags_syncToViewModel() {
-        val megaHost = FakeMegaHost()
-        val tierController = CameraTierController(megaHost)
-        megaHost.isManualFocus = true
-        megaHost.isManualIso = true
-        megaHost.currentIso = 800
+        val gateway = FakeCameraGateway()
+        val tierController = CameraTierController(gateway, gateway, gateway)
+        gateway.runtimeState.isManualFocus = true
+        gateway.runtimeState.isManualIso = true
+        gateway.runtimeState.currentIso = 800
 
         tierController.updateProInfoBar()
 
@@ -748,66 +730,13 @@ class CameraPhaseCControllersTest {
     }
 
     // =========================================================================
-    // Test Doubles
+    // Test Doubles (using the 3 consolidated gateways)
     // =========================================================================
 
     private object ShadowLooperHelper {
         fun runMainLooperIdle() {
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
         }
-    }
-
-    private inner class FakeHalfFrameHost : CameraHalfFrameStateHost {
-        override val hostContext: Context get() = themedContext
-        override val isHdrPlusEnabled: Boolean get() = isHdrPlusEnabledFlag
-        var isHdrPlusEnabledFlag = false
-        override val isoRange: Range<Int>? get() = isoRangeVal
-        var isoRangeVal: Range<Int>? = Range(50, 3200)
-        override val exposureTimeRange: Range<Long>? get() = exposureTimeRangeVal
-        var exposureTimeRangeVal: Range<Long>? = Range(1000L, 1_000_000_000L)
-        override val lastClippingRatio: Double = 0.0
-        override val captureResults: MutableMap<Long, TotalCaptureResult> = mutableMapOf()
-        override val captureResultFlow = MutableSharedFlow<TotalCaptureResult>(replay = 1)
-    }
-
-    private inner class FakeMotionHost : CameraMotionPhotoHost {
-        override val hostContext: Context get() = themedContext
-        override val isHostAdded: Boolean = true
-        override val cameraViewModel: CameraViewModel get() = viewModel
-        override val cameraUiContainerBinding: CameraUiContainerBinding get() = uiBinding
-        override val lutProcessor: LutSurfaceProcessor? = null
-        override var effectiveCaptureMode: CaptureMode = CaptureMode.NORMAL
-        override var pendingMotionPhotoTask: CompletableDeferred<Pair<String?, Long>>? = null
-    }
-
-    private inner class FakeThumbnailHost : CameraThumbnailHost {
-        override val hostContext: Context get() = themedContext
-        override val hostActivity: FragmentActivity? = null
-        override val lifecycleScope: CoroutineScope get() = testScope
-        override val cameraUiContainerBinding: CameraUiContainerBinding get() = uiBinding
-        override val activeCoordinator: CaptureModeCoordinator? = null
-        override val imageRepository: ImageRepository = ImageRepository(themedContext)
-        override var isProcessing: Boolean = false
-    }
-
-    private inner class FakeOverlayHost : CameraOverlayHost {
-        override val context: Context get() = themedContext
-        override val fragmentCameraBinding: FragmentCameraBinding get() = fragmentBinding
-        override val cameraUiContainerBinding: CameraUiContainerBinding get() = uiBinding
-        override val activeCoordinator: CaptureModeCoordinator? = null
-        override val cameraViewModel: CameraViewModel get() = viewModel
-        override val isProcessing: Boolean = false
-        override val halfFrameStep: Int = 0
-        override var isHalfFrameUiAnimating: Boolean = false
-        override var pendingVfSnapshot: Bitmap? = null
-        override fun readScopedHalfFrameState(requireFileForStep1: Boolean) {}
-    }
-
-    private class FakeGestureHost : CameraGestureHost {
-        override var isFloatingOverlayOpen: Boolean = false
-        override fun dismissFloatingOverlays() {}
-        override fun triggerTapToFocus(x: Float, y: Float) {}
-        override fun unlockFocusAndMetering() {}
     }
 
     private class StubCoordinator(override val mode: CaptureMode) : CaptureModeCoordinator {
@@ -830,20 +759,10 @@ class CameraPhaseCControllersTest {
         override fun getShutterDotRotation(deviceOrientationDegrees: Int): Float = dotRotation
     }
 
-    private inner class FakeMegaHost :
-        CameraHdrPlusHost,
-        CameraLutHost,
-        CameraLensHost,
-        CameraFocusMeteringHost,
-        CameraVideoHost,
-        CameraShutterHost,
-        CameraModeHost,
-        CameraThumbnailHost,
-        CameraMotionPhotoHost,
-        CameraCapturePipelineHost,
-        CameraMultiCaptureHost,
-        CameraHardwareStreamHost,
-        CameraTierHost {
+    private inner class FakeCameraGateway :
+        CameraEnvironmentHost,
+        CameraUiHost,
+        CameraCoordinatorHost {
 
         var applyCameraControlsCalled = false
         var updateProInfoBarCount = 0
@@ -851,126 +770,83 @@ class CameraPhaseCControllersTest {
         var modeControllerRef: CameraModeController? = null
         var audioRationaleChecked = false
         var simulatedPermits = 3
+        var activeCoordinatorOverride: CaptureModeCoordinator? = null
+        var effectiveModeOverride: CaptureMode? = null
 
         override val hostContext: Context get() = themedContext
         override val hostActivity: FragmentActivity? = null
         override val isHostAdded: Boolean = true
         override val lifecycleScope: CoroutineScope get() = testScope
         override val cameraViewModel: CameraViewModel get() = viewModel
-        override val camera2Manager: CameraManager = themedContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        override val sessionController = Camera2SessionController()
-        override val camera2Device: CameraDevice? = null
-        override val camera2Session: CameraCaptureSession? = null
-        override var camera2PreviewSurface: Surface? = null
-        override val camera2Handler: Handler? = null
-        override var rawImageReader: ImageReader? = null
-        override var analysisImageReader: ImageReader? = null
+        override val camera2Manager: CameraManager =
+            themedContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        override val runtimeState = CameraRuntimeStateHolder(
+            object : Semaphore {
+                override val availablePermits: Int get() = simulatedPermits
+                override suspend fun acquire() {}
+                override fun release() {}
+                override fun tryAcquire(): Boolean = simulatedPermits > 0
+            }
+        ).apply {
+            isoRange = Range(50, 3200)
+            exposureTimeRange = Range(1000L, 1_000_000_000L)
+            minFocusDistance = 10f
+            evRange = Range(-4, 4)
+            isRawSupported = true
+        }
+        override val sessionArbiter = CameraSessionArbiter(camera2Manager, runtimeState)
+        override val cameraRepository = CameraRepository(themedContext)
+        override val imageRepository = ImageRepository(themedContext)
+        override val lutManager = LutManager(themedContext)
+        override val locationHelper = LocationHelper(themedContext)
+        override val displayRotation: Int = Surface.ROTATION_0
+        override val shouldMirror: Boolean = false
+
         override val fragmentCameraBinding: FragmentCameraBinding get() = fragmentBinding
         override val cameraUiContainerBinding: CameraUiContainerBinding get() = uiBinding
-        override var activeCoordinator: CaptureModeCoordinator? = null
-            get() = modeControllerRef?.activeCoordinator ?: field
-        override val effectiveCaptureMode: CaptureMode
-            get() = modeControllerRef?.effectiveMode ?: activeCoordinator?.mode ?: CaptureMode.NORMAL
-        override val lutManager: LutManager = LutManager(themedContext)
-        override val lutProcessor: LutSurfaceProcessor? = null
-        override val cameraRepository: CameraRepository = CameraRepository(themedContext)
-        override val imageRepository: ImageRepository = ImageRepository(themedContext)
-        override val locationHelper: LocationHelper = LocationHelper(themedContext)
-        override val rawVideoSessionManager = RawVideoSessionManager()
-        override var multiCameraManager: MultiCameraCaptureManager? = null
-        override var concurrentFrontCameraManager: ConcurrentFrontCameraManager? = null
-        override var availableLenses: List<LensInfo> = emptyList()
-        override var currentLens: LensInfo? = null
-        override var lensFacing: Int = CameraCharacteristics.LENS_FACING_BACK
-        override val displayRotation: Int = Surface.ROTATION_0
-        override var isFlashEnabled: Boolean = false
-        override val isHdrPlusEnabled: Boolean get() = viewModel.uiState.value.isHdrPlusEnabled
-        override var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null
-        override val context: Context get() = themedContext
-        override val binding: CameraUiContainerBinding get() = uiBinding
         override val rootViewGroup: ViewGroup? get() = fragmentBinding.root as? ViewGroup
-        override val hasMultipleAvailableLenses: Boolean get() = availableLenses.size > 1
-        override val hasMultiCameraManager: Boolean get() = multiCameraManager != null
-        override val minFocusDistance: Float = 10f
-        override val evRange: Range<Int>? = Range(-4, 4)
-        override var hasFocusMeteringLock: Boolean = false
+        override val isFloatingOverlayOpen: Boolean = false
 
-        override val isOisSupported: Boolean = false
-        override val isHdrOisEnabledPref: Boolean = true
-        override val isRawSupported: Boolean = true
-        override var isManualFocus: Boolean = false
-        override var isManualIso: Boolean = false
-        override var isManualShutter: Boolean = false
-        override val isManualExposure: Boolean = false
-        override var currentFocusDistance: Float = 0f
-        override var liveFocusDistance: Float = 0f
-        override var currentIso: Int = 100
-        override var liveIso: Int = 100
-        override var currentExposureTime: Long = 10_000_000L
-        override var liveExposureTime: Long = 10_000_000L
-        override var currentEvIndex: Int = 0
-        override val isoRange: Range<Int>? = Range(50, 3200)
-        override val exposureTimeRange: Range<Long>? = Range(1000L, 1_000_000_000L)
-        override var lastClippingRatio: Double = 0.0
-        override val shouldMirror: Boolean = false
-        override var focusMeteringRegion: MeteringRectangle? = null
-        override var exposureMeteringRegion: MeteringRectangle? = null
-        override val captureResults: MutableMap<Long, TotalCaptureResult> = mutableMapOf()
-        override val captureResultFlow = MutableSharedFlow<TotalCaptureResult>(replay = 1)
-        override val activeManualTab: String? = null
-        override val processingSemaphore: Semaphore = object : Semaphore {
-            override val availablePermits: Int get() = simulatedPermits
-            override suspend fun acquire() {}
-            override fun release() {}
-            override fun tryAcquire(): Boolean = simulatedPermits > 0
-        }
-        override var isBurstActive: Boolean = false
-        override var burstStartTime: Long = 0L
-        override var isSwitchingLens: Boolean = false
-        override var camera2RetryCount: Int = 0
-        override var lastTelemetryUpdateMs: Long = 0L
-        override var hdrPlusStreamingBurstHelper: HdrPlusStreamingBurst? = null
-        override var pendingMotionPhotoTask: CompletableDeferred<Pair<String?, Long>>? = null
-        override var pendingVfSnapshot: Bitmap? = null
-        override var isFrontPipActive: Boolean = false
-        override var isMultiCameraManualLinked: Boolean = true
-        override val isProcessing: Boolean = false
-        override var isVideoSaving: Boolean = false
-        override var transientLensLabel: String? = null
-        override var deviceOrientationDegrees: Int = 0
+        override val activeCoordinator: CaptureModeCoordinator?
+            get() = modeControllerRef?.activeCoordinator ?: activeCoordinatorOverride
+        override val effectiveCaptureMode: CaptureMode
+            get() = effectiveModeOverride ?: modeControllerRef?.effectiveMode ?: activeCoordinator?.mode ?: CaptureMode.NORMAL
+        override val halfFrameStep: Int = 0
 
-        override fun applyCameraControls() { applyCameraControlsCalled = true }
-        override fun dismissFloatingOverlays() {}
-        override fun bindCameraUseCases() {}
-        override fun applyManualSettingsToRequest(request: CaptureRequest.Builder) {}
-        override fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean) {}
-        override fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder) {}
-        override fun handleCaptureResult(result: TotalCaptureResult) {}
-        override fun applyUIVisibility() {}
-        override fun updateProInfoBar() { updateProInfoBarCount++ }
-        override fun updateDialPanel() {}
-        override fun ensureActiveCoordinator(): CaptureModeCoordinator? = activeCoordinator
-        override fun showShutterBlackout() {}
-        override fun updateCurrentThumbnail(uri: Uri?) {}
-        override fun showProcessingAnimation() {}
-        override fun hideProcessingAnimation() {}
-        override fun updateMotionPhotoEncoder() {}
-        override fun getCombinedOrientation(): Int = 0
-        override fun writeScopedHalfFrameStep(step: Int, captureTimeMillis: Long?, digitalGain: Float, flareType: Int) {}
-        override fun getDigitalGainAndUpdateStep(timestamp: Long, isFrame1Trigger: Boolean, shutterClick: Long?): Float = 1.0f
-        override fun resetBurstUi() {}
-        override fun setGalleryThumbnail(filename: String?) {}
-        override fun triggerAutoBurst() {}
         override fun shouldShowAudioPermissionRationale(): Boolean {
             audioRationaleChecked = true
             return false
         }
         override fun requestAudioPermission() {}
-        override fun onCaptureModeCycled(modeChanged: Boolean) { modeCycledFlag = modeChanged }
-        override fun clearFocusMetering() {}
-        override fun clearExposureMetering() {}
+
+        override fun applyUIVisibility() {}
+        override fun dismissFloatingOverlays() {}
+        override fun updateProInfoBar() { updateProInfoBarCount++ }
+        override fun updateDialPanel() {}
         override fun formatFocusDist(dist: Float): String = "∞"
         override fun formatShutterTime(nanos: Long): String = "1/100s"
+        override fun showShutterBlackout() {}
+        override fun showProcessingAnimation() {}
+        override fun hideProcessingAnimation() {}
+        override fun resetBurstUi() {}
+        override fun updateCurrentThumbnail(uri: Uri?) {}
+        override fun setGalleryThumbnail(filename: String?) {}
         override fun onSessionConfigured() {}
+        override fun triggerTapToFocus(x: Float, y: Float) {}
+        override fun unlockFocusAndMetering() {}
+
+        override fun ensureActiveCoordinator(): CaptureModeCoordinator? = activeCoordinator
+        override fun bindCameraUseCases() {}
+        override fun applyCameraControls() { applyCameraControlsCalled = true }
+        override fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean) {}
+        override fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder) {}
+        override fun handleCaptureResult(result: TotalCaptureResult) {}
+        override fun getCombinedOrientation(): Int = 0
+        override fun updateMotionPhotoEncoder() {}
+        override fun triggerAutoBurst() {}
+        override fun onCaptureModeCycled(modeChanged: Boolean) { modeCycledFlag = modeChanged }
+        override fun readScopedHalfFrameState(requireFileForStep1: Boolean) {}
+        override fun writeScopedHalfFrameStep(step: Int, captureTimeMillis: Long?, digitalGain: Float, flareType: Int) {}
+        override fun getDigitalGainAndUpdateStep(timestamp: Long, isFrame1Trigger: Boolean, shutterClick: Long?): Float = 1.0f
     }
 }

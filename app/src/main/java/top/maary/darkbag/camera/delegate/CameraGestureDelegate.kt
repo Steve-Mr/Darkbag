@@ -7,18 +7,7 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.OvershootInterpolator
-import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentCameraBinding
-
-/**
- * Host contract for camera touch gesture events.
- */
-interface CameraGestureHost {
-    val isFloatingOverlayOpen: Boolean
-    fun dismissFloatingOverlays()
-    fun triggerTapToFocus(x: Float, y: Float)
-    fun unlockFocusAndMetering()
-}
 
 /**
  * Manages viewfinder touch gestures (tap-to-focus, double-tap unlock) and
@@ -26,27 +15,27 @@ interface CameraGestureHost {
  */
 class CameraGestureDelegate(
     private val context: Context,
-    private val host: CameraGestureHost
+    private val ui: CameraUiHost
 ) {
     fun setupTapToFocus(stageView: View) {
         val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
 
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                if (host.isFloatingOverlayOpen) {
-                    host.dismissFloatingOverlays()
+                if (ui.isFloatingOverlayOpen) {
+                    ui.dismissFloatingOverlays()
                     return true
                 }
-                host.triggerTapToFocus(e.x, e.y)
+                ui.triggerTapToFocus(e.x, e.y)
                 return true
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                if (host.isFloatingOverlayOpen) {
-                    host.dismissFloatingOverlays()
+                if (ui.isFloatingOverlayOpen) {
+                    ui.dismissFloatingOverlays()
                     return true
                 }
-                host.unlockFocusAndMetering()
+                ui.unlockFocusAndMetering()
                 return true
             }
         })

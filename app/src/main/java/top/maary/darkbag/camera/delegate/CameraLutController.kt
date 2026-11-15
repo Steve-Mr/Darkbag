@@ -1,69 +1,44 @@
 package top.maary.darkbag.camera.delegate
 
-import android.content.Context
+import android.graphics.Color
 import android.graphics.SurfaceTexture
+import android.view.LayoutInflater
 import android.view.Surface
 import android.view.TextureView
-import android.graphics.Color
-import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import top.maary.darkbag.R
-import top.maary.darkbag.databinding.CameraUiContainerBinding
-import top.maary.darkbag.databinding.FragmentCameraBinding
 import top.maary.darkbag.processor.ColorProcessor
-import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.ui.ColorRecipeBottomSheet
-import top.maary.darkbag.utils.ExposureUtils
-import top.maary.darkbag.utils.LutManager
-import top.maary.darkbag.viewmodel.CameraViewModel
 import java.io.File
-
-/**
- * Host contract for LUT and color recipe controls.
- */
-interface CameraLutHost {
-    val hostContext: Context
-    val lifecycleScope: CoroutineScope
-    val lutManager: LutManager
-    val lutProcessor: LutSurfaceProcessor?
-    val cameraViewModel: CameraViewModel
-    val cameraUiContainerBinding: CameraUiContainerBinding?
-    val fragmentCameraBinding: FragmentCameraBinding?
-    val isFlashEnabled: Boolean
-    val isHdrPlusEnabled: Boolean
-    var lastHdrPlusConfig: ExposureUtils.ExposureConfig?
-
-    fun dismissFloatingOverlays()
-    fun applyCameraControls()
-}
 
 /**
  * Controller responsible for 3D LUT and LOG profile selection, live OpenGL viewfinder preview,
  * pop-up pill menus, and flash / underexposure toggle synchronization.
  */
 class CameraLutController(
-    private val host: CameraLutHost
+    private val env: CameraEnvironmentHost,
+    private val ui: CameraUiHost,
+    private val coordinator: CameraCoordinatorHost
 ) {
     private var activeLutJob: Job? = null
     private var lutAdapter: LutPreviewAdapter? = null
 
     /** Connects the viewfinder TextureView to the LUT processor output and pushes the live LUT. */
     fun setupViewFinderBinding() {
-        val proc = host.lutProcessor ?: return
-        val vf = host.fragmentCameraBinding?.viewFinder ?: return
+        val proc = env.sessionArbiter.lutProcessor ?: return
+        val vf = ui.fragmentCameraBinding?.viewFinder ?: return
         vf.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
                 proc.setOutputSurface(Surface(st), w, h)
@@ -84,14 +59,14 @@ class CameraLutController(
     }
 
     fun refreshLutList() {
-        val binding = host.cameraUiContainerBinding ?: return
+        val binding = ui.cameraUiContainerBinding ?: return
         val rv = binding.lutList ?: return
 
         if (rv.layoutManager == null) {
-            rv.layoutManager = LinearLayoutManager(host.hostContext)
+            rv.layoutManager = LinearLayoutManager(env.hostContext)
         }
 
-        val luts = host.lutManager.getLuts()
+        val luts = env.lutManager.getLuts()
         lutAdapter = LutPreviewAdapter(luts)
         rv.adapter = lutAdapter
     }
@@ -111,7 +86,7 @@ class CameraLutController(
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val settingsRepository = SettingsRepository.getInstance(host.hostContext)
+            val settingsRepository = SettingsRepository.getInstance(env.hostContext)
             val currentName = settingsRepository.current().activeLut.takeIf { it != "None" }
 
             val colorOnSurface = MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface)
@@ -126,16 +101,16 @@ class CameraLutController(
                 if (currentName == null) holder.text.setTextColor(colorPrimary)
                 holder.itemView.setOnClickListener {
                     settingsRepository.setActiveLut(null, null)
-                    val logName = host.cameraViewModel.uiState.value.activeLogName
-                    host.cameraViewModel.updateColorRecipe(logName, "None")
+                    val logName = env.cameraViewModel.uiState.value.activeLogName
+                    env.cameraViewModel.updateColorRecipe(logName, "None")
                     updateLiveLut(logName, null)
 
                     val oldPosition = if (currentName != null) luts.indexOfFirst { it.name == currentName } + 1 else 0
                     notifyItemChanged(oldPosition)
                     notifyItemChanged(0)
 
-                    host.cameraUiContainerBinding?.lutListContainer?.visibility = View.GONE
-                    host.cameraUiContainerBinding?.touchOverlay?.visibility = View.GONE
+                    ui.cameraUiContainerBinding?.lutListContainer?.visibility = View.GONE
+                    ui.cameraUiContainerBinding?.touchOverlay?.visibility = View.GONE
                 }
             } else {
                 val file = luts[position - 1]
@@ -143,16 +118,16 @@ class CameraLutController(
                 if (currentName == file.name) holder.text.setTextColor(colorPrimary)
                 holder.itemView.setOnClickListener {
                     settingsRepository.setActiveLut(file.name, null)
-                    val logName = host.cameraViewModel.uiState.value.activeLogName
-                    host.cameraViewModel.updateColorRecipe(logName, file.name)
+                    val logName = env.cameraViewModel.uiState.value.activeLogName
+                    env.cameraViewModel.updateColorRecipe(logName, file.name)
                     updateLiveLut(logName, file.name)
 
                     val oldPosition = if (currentName != null) luts.indexOfFirst { it.name == currentName } + 1 else 0
                     notifyItemChanged(oldPosition)
                     notifyItemChanged(position)
 
-                    host.cameraUiContainerBinding?.lutListContainer?.visibility = View.GONE
-                    host.cameraUiContainerBinding?.touchOverlay?.visibility = View.GONE
+                    ui.cameraUiContainerBinding?.lutListContainer?.visibility = View.GONE
+                    ui.cameraUiContainerBinding?.touchOverlay?.visibility = View.GONE
                 }
             }
         }
@@ -162,13 +137,14 @@ class CameraLutController(
 
     fun updateFlashIcon(btn: MaterialButton) {
         btn.text = null
-        btn.setIconResource(if (host.isFlashEnabled) R.drawable.ic_flash_on else R.drawable.ic_flash_off)
-        CameraBentoDeckView.styleBentoToggleTile(btn, host.isFlashEnabled, isTertiaryAccent = false)
+        val flashOn = env.runtimeState.isFlashEnabled
+        btn.setIconResource(if (flashOn) R.drawable.ic_flash_on else R.drawable.ic_flash_off)
+        CameraBentoDeckView.styleBentoToggleTile(btn, flashOn, isTertiaryAccent = false)
     }
 
     fun updateUnderexposureButton() {
-        val btn = host.cameraUiContainerBinding?.flashButton ?: return
-        val mode = SettingsRepository.getInstance(host.hostContext).current().hdrUnderexposureMode
+        val btn = ui.cameraUiContainerBinding?.flashButton ?: return
+        val mode = SettingsRepository.getInstance(env.hostContext).current().hdrUnderexposureMode
 
         btn.text = null
         val iconRes = when {
@@ -183,7 +159,7 @@ class CameraLutController(
     }
 
     fun cycleUnderexposureMode() {
-        val settingsRepository = SettingsRepository.getInstance(host.hostContext)
+        val settingsRepository = SettingsRepository.getInstance(env.hostContext)
         val currentMode = settingsRepository.current().hdrUnderexposureMode
         val modes = PreferenceKeys.HDR_UNDEREXPOSURE_MODES
         val currentIndex = modes.indexOf(currentMode)
@@ -194,29 +170,29 @@ class CameraLutController(
         updateUnderexposureButton()
 
         // Update lastHdrPlusConfig to reflect new mode immediately for the next shot
-        host.lastHdrPlusConfig = null
+        env.runtimeState.lastHdrPlusConfig = null
     }
 
     fun updateLiveLut(
-        targetLogName: String = host.cameraViewModel.uiState.value.activeLogName,
-        activeLutName: String? = host.cameraViewModel.uiState.value.activeLutName.takeIf { !it.equals("None", ignoreCase = true) }
+        targetLogName: String = env.cameraViewModel.uiState.value.activeLogName,
+        activeLutName: String? = env.cameraViewModel.uiState.value.activeLutName.takeIf { !it.equals("None", ignoreCase = true) }
     ) {
-        val settingsRepository = SettingsRepository.getInstance(host.hostContext)
+        val settingsRepository = SettingsRepository.getInstance(env.hostContext)
         val snapshot = settingsRepository.current()
         val cleanLutName = activeLutName?.takeIf { !it.equals("None", ignoreCase = true) }
         val targetLogIndex = PreferenceKeys.LOG_CURVES.indexOf(targetLogName)
         val isPreviewEnabled = snapshot.enableLutPreview
 
-        host.cameraUiContainerBinding?.let { CameraBentoDeckView.bindRecipeRow(it, targetLogName, cleanLutName) }
+        ui.cameraUiContainerBinding?.let { CameraBentoDeckView.bindRecipeRow(it, targetLogName, cleanLutName) }
 
-        val proc = host.lutProcessor ?: return
+        val proc = env.sessionArbiter.lutProcessor ?: return
 
         activeLutJob?.cancel()
-        activeLutJob = host.lifecycleScope.launch(Dispatchers.IO) {
+        activeLutJob = env.lifecycleScope.launch(Dispatchers.IO) {
             var lutData: FloatArray? = null
             var size = 0
             if (isPreviewEnabled && cleanLutName != null) {
-                val file = File(host.lutManager.lutDir, cleanLutName)
+                val file = File(env.lutManager.lutDir, cleanLutName)
                 if (file.exists()) {
                     lutData = ColorProcessor.loadLutData(file.absolutePath)
                     if (lutData != null) {
@@ -233,15 +209,15 @@ class CameraLutController(
     }
 
     fun showLutMenu() {
-        val currentLog = host.cameraViewModel.uiState.value.activeLogName
-        val currentLut = host.cameraViewModel.uiState.value.activeLutName.takeIf { !it.equals("None", ignoreCase = true) }
+        val currentLog = env.cameraViewModel.uiState.value.activeLogName
+        val currentLut = env.cameraViewModel.uiState.value.activeLutName.takeIf { !it.equals("None", ignoreCase = true) }
         ColorRecipeBottomSheet.show(
-            context = host.hostContext,
-            lutManager = host.lutManager,
+            context = env.hostContext,
+            lutManager = env.lutManager,
             initialLog = currentLog,
             initialLut = currentLut
         ) { logName, lutName ->
-            SettingsRepository.getInstance(host.hostContext).edit {
+            SettingsRepository.getInstance(env.hostContext).edit {
                 this[PreferenceKeys.TARGET_LOG] = logName
                 if (lutName == null || lutName.equals("None", ignoreCase = true)) {
                     remove(PreferenceKeys.ACTIVE_LUT)
@@ -250,7 +226,7 @@ class CameraLutController(
                 }
             }
 
-            host.cameraViewModel.updateColorRecipe(logName, lutName ?: "None")
+            env.cameraViewModel.updateColorRecipe(logName, lutName ?: "None")
         }
     }
 
@@ -264,11 +240,11 @@ class CameraLutController(
             if (position == 0) {
                 showLutMenu()
             } else {
-                val settingsRepository = SettingsRepository.getInstance(host.hostContext)
+                val settingsRepository = SettingsRepository.getInstance(env.hostContext)
                 var currentLut: String? = null
                 settingsRepository.edit {
                     this[PreferenceKeys.TARGET_LOG] = selectedLog
-                    if (selectedLog == host.hostContext.getString(R.string.lut_none)) {
+                    if (selectedLog == env.hostContext.getString(R.string.lut_none)) {
                         remove(PreferenceKeys.ACTIVE_LUT)
                         currentLut = null
                     } else {
@@ -276,7 +252,7 @@ class CameraLutController(
                     }
                 }
 
-                host.cameraViewModel.updateColorRecipe(selectedLog, currentLut ?: "None")
+                env.cameraViewModel.updateColorRecipe(selectedLog, currentLut ?: "None")
                 updateLiveLut(selectedLog, currentLut)
                 showLutMenu()
             }
@@ -284,8 +260,8 @@ class CameraLutController(
     }
 
     fun showLutSelectionMenu() {
-        val luts = host.lutManager.getLuts()
-        val items = mutableListOf("← Back" to true, host.hostContext.getString(R.string.lut_none) to true)
+        val luts = env.lutManager.getLuts()
+        val items = mutableListOf("← Back" to true, env.hostContext.getString(R.string.lut_none) to true)
         luts.forEach { file ->
             items.add(file.nameWithoutExtension to true)
         }
@@ -294,7 +270,7 @@ class CameraLutController(
             if (position == 0) {
                 showLutMenu()
             } else {
-                val settingsRepository = SettingsRepository.getInstance(host.hostContext)
+                val settingsRepository = SettingsRepository.getInstance(env.hostContext)
                 val newLut = if (position == 1) {
                     settingsRepository.setActiveLut(null, null)
                     null
@@ -303,8 +279,8 @@ class CameraLutController(
                     settingsRepository.setActiveLut(filename, null)
                     filename
                 }
-                val currentLog = host.cameraViewModel.uiState.value.activeLogName
-                host.cameraViewModel.updateColorRecipe(currentLog, newLut ?: "None")
+                val currentLog = env.cameraViewModel.uiState.value.activeLogName
+                env.cameraViewModel.updateColorRecipe(currentLog, newLut ?: "None")
                 updateLiveLut(currentLog, newLut)
                 showLutMenu()
             }
@@ -312,7 +288,7 @@ class CameraLutController(
     }
 
     fun showPillPopup(items: List<Pair<String, Boolean>>, autoDismiss: Boolean = true, onSelected: (String, Int) -> Unit) {
-        val binding = host.cameraUiContainerBinding ?: return
+        val binding = ui.cameraUiContainerBinding ?: return
         val container = binding.lutListContainer ?: return
         val rv = binding.lutList ?: return
 
@@ -323,10 +299,10 @@ class CameraLutController(
         val colorSurface = MaterialColors.getColor(container, com.google.android.material.R.attr.colorSurfaceContainerHigh)
         container.setCardBackgroundColor(colorSurface)
         container.cardElevation = 8f
-        container.layoutParams.width = host.hostContext.resources.getDimensionPixelSize(R.dimen.round_button_large) * 3
+        container.layoutParams.width = env.hostContext.resources.getDimensionPixelSize(R.dimen.round_button_large) * 3
         container.visibility = View.VISIBLE
 
-        rv.layoutManager = LinearLayoutManager(host.hostContext)
+        rv.layoutManager = LinearLayoutManager(env.hostContext)
         rv.adapter = object : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             inner class PillViewHolder(val btn: MaterialButton) : RecyclerView.ViewHolder(btn)
 
@@ -344,7 +320,7 @@ class CameraLutController(
                 pillHolder.btn.setOnClickListener {
                     onSelected(title, position)
                     if (autoDismiss) {
-                        host.dismissFloatingOverlays()
+                        ui.dismissFloatingOverlays()
                     }
                 }
             }
@@ -354,18 +330,18 @@ class CameraLutController(
     }
 
     fun bindRecipeControls() {
-        val uiBinding = host.cameraUiContainerBinding ?: return
+        val uiBinding = ui.cameraUiContainerBinding ?: return
         val openColorRecipeSheet = View.OnClickListener {
-            host.dismissFloatingOverlays()
+            ui.dismissFloatingOverlays()
             showLutMenu()
         }
         uiBinding.bentoLogButton?.setOnClickListener(openColorRecipeSheet)
         uiBinding.lutSwitcherButton?.setOnClickListener(openColorRecipeSheet)
 
-        val snapshot = SettingsRepository.getInstance(host.hostContext).current()
+        val snapshot = SettingsRepository.getInstance(env.hostContext).current()
         val activeLutName = snapshot.activeLut.takeIf { it != "None" }
         val targetLogName = snapshot.targetLog
-        host.cameraViewModel.updateColorRecipe(targetLogName, activeLutName ?: "None")
+        env.cameraViewModel.updateColorRecipe(targetLogName, activeLutName ?: "None")
         CameraBentoDeckView.bindRecipeRow(uiBinding, targetLogName, activeLutName)
         CameraBentoDeckView.applyDynamicRowHeights(uiBinding)
         updateLiveLut(targetLogName, activeLutName)

@@ -1,34 +1,13 @@
 package top.maary.darkbag.camera.delegate
 
-import android.content.Context
-import android.graphics.Bitmap
 import android.content.res.Configuration
 import android.view.View
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.constraintlayout.widget.ConstraintSet
 import kotlin.math.roundToInt
-import top.maary.darkbag.databinding.CameraUiContainerBinding
-import top.maary.darkbag.databinding.FragmentCameraBinding
-import top.maary.darkbag.modes.CaptureMode
-import top.maary.darkbag.modes.CaptureModeCoordinator
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
-import top.maary.darkbag.viewmodel.CameraViewModel
-
-interface CameraOverlayHost {
-    val context: Context
-    val fragmentCameraBinding: FragmentCameraBinding?
-    val cameraUiContainerBinding: CameraUiContainerBinding?
-    val activeCoordinator: CaptureModeCoordinator?
-    val cameraViewModel: CameraViewModel
-    val isProcessing: Boolean
-    val halfFrameStep: Int
-    var isHalfFrameUiAnimating: Boolean
-    var pendingVfSnapshot: Bitmap?
-
-    fun readScopedHalfFrameState(requireFileForStep1: Boolean = false)
-}
 
 /**
  * Manages viewfinder preview overlays:
@@ -37,10 +16,12 @@ interface CameraOverlayHost {
  * - Half-frame viewfinder split guide and advance animations
  */
 class CameraOverlayController(
-    private val host: CameraOverlayHost
+    private val env: CameraEnvironmentHost,
+    private val ui: CameraUiHost,
+    private val coordinator: CameraCoordinatorHost
 ) {
     fun showShutterBlackout() {
-        val vfBinding = host.fragmentCameraBinding ?: return
+        val vfBinding = ui.fragmentCameraBinding ?: return
         val blackout = vfBinding.viewFinderBlackout ?: return
         val vf = vfBinding.viewFinder
 
@@ -72,36 +53,36 @@ class CameraOverlayController(
     }
 
     fun updateProcessingAnimationUi() {
-        val processing = host.isProcessing
-        val shouldHide = (host.activeCoordinator?.shouldHideGalleryThumbnail() == true)
+        val processing = env.runtimeState.isProcessing
+        val shouldHide = (coordinator.activeCoordinator?.shouldHideGalleryThumbnail() == true)
         if (processing) {
-            host.cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
-            host.cameraUiContainerBinding?.photoViewContainer?.visibility = View.VISIBLE
+            ui.cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
+            ui.cameraUiContainerBinding?.photoViewContainer?.visibility = View.VISIBLE
             if (shouldHide) {
-                host.cameraUiContainerBinding?.photoViewButton?.visibility = View.INVISIBLE
+                ui.cameraUiContainerBinding?.photoViewButton?.visibility = View.INVISIBLE
             }
         } else {
-            host.cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+            ui.cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
             if (!shouldHide) {
-                host.cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
-                host.cameraUiContainerBinding?.photoViewButton?.alpha = 1f
+                ui.cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
+                ui.cameraUiContainerBinding?.photoViewButton?.alpha = 1f
             }
         }
     }
 
     fun showProcessingAnimation() {
-        host.cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
-        host.cameraUiContainerBinding?.photoViewContainer?.visibility = View.VISIBLE
+        ui.cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
+        ui.cameraUiContainerBinding?.photoViewContainer?.visibility = View.VISIBLE
     }
 
     fun hideProcessingAnimation() {
-        host.cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+        ui.cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
     }
 
     /** Pins the viewfinder container between the top controls and the bottom island (portrait) or the docked island (landscape). */
     fun updateViewFinderConstraints() {
-        val uiBinding = host.cameraUiContainerBinding ?: return
-        val vfBinding = host.fragmentCameraBinding ?: return
+        val uiBinding = ui.cameraUiContainerBinding ?: return
+        val vfBinding = ui.fragmentCameraBinding ?: return
         val root = vfBinding.root as? ConstraintLayout ?: return
         val bottomIsland = uiBinding.bottomIslandCard ?: return
         val topControls = uiBinding.topRightControls ?: return
@@ -109,7 +90,7 @@ class CameraOverlayController(
         val set = ConstraintSet().apply { clone(root) }
         val containerId = vfBinding.viewFinderContainer.id
         val bottomIslandId = bottomIsland.id
-        val res = host.context.resources
+        val res = env.hostContext.resources
         val marginH = (10 * res.displayMetrics.density).roundToInt()
         val marginV = (6 * res.displayMetrics.density).roundToInt()
         val isPortrait = res.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
@@ -140,8 +121,8 @@ class CameraOverlayController(
 
     fun syncViewFinderAspectRatio(isPortraitBounds: Boolean) {
         val ratio = if (isPortraitBounds) "3:4" else "4:3"
-        val viewFinder = host.fragmentCameraBinding?.viewFinder
-        val viewFinderContainer = host.fragmentCameraBinding?.viewFinderContainer
+        val viewFinder = ui.fragmentCameraBinding?.viewFinder
+        val viewFinderContainer = ui.fragmentCameraBinding?.viewFinderContainer
         (viewFinderContainer?.layoutParams as? ConstraintLayout.LayoutParams)?.let { lp ->
             if (lp.dimensionRatio != ratio) {
                 lp.dimensionRatio = ratio
@@ -155,19 +136,30 @@ class CameraOverlayController(
         }
     }
 
+    fun onViewFinderLayoutChanged() {
+        if (coordinator.effectiveCaptureMode.isHalfFrame && !env.runtimeState.isHalfFrameUiAnimating) {
+            updateHalfFrameUI()
+        }
+    }
+
     fun updateHalfFrameUI(animate: Boolean = false) {
-        val uiBinding = host.cameraUiContainerBinding ?: return
-        val vfBinding = host.fragmentCameraBinding ?: return
-        val settingsRepository = SettingsRepository.getInstance(host.context)
+        val uiBinding = ui.cameraUiContainerBinding ?: return
+        val vfBinding = ui.fragmentCameraBinding ?: return
+        val settingsRepository = SettingsRepository.getInstance(env.hostContext)
 
         // Post all updates to the viewfinder to avoid requestLayout() during layout pass
         vfBinding.viewFinder.post {
-            val isEnabled = host.activeCoordinator?.mode?.isHalfFrame == true
-            host.readScopedHalfFrameState()
-            host.cameraViewModel.setHalfFrameStep(host.halfFrameStep)
-            uiBinding.cameraCaptureButton?.setHalfFrameState(isEnabled, host.halfFrameStep)
+            val state = env.runtimeState
+            val isEnabled = coordinator.activeCoordinator?.mode?.isHalfFrame == true
+            coordinator.readScopedHalfFrameState()
+            val step = coordinator.halfFrameStep
+            env.cameraViewModel.setHalfFrameStep(step)
+            uiBinding.cameraCaptureButton?.setHalfFrameState(isEnabled, step)
             uiBinding.bottomIslandCard?.let { card ->
-                CameraBentoDeckView.styleDeckCard(card, if (isEnabled) CaptureMode.HALF_FRAME_SBS else CaptureMode.NORMAL)
+                CameraBentoDeckView.styleDeckCard(
+                    card,
+                    coordinator.activeCoordinator?.mode ?: coordinator.effectiveCaptureMode
+                )
             }
 
             val gapView = vfBinding.halfFrameGapIndicator ?: return@post
@@ -176,7 +168,7 @@ class CameraOverlayController(
             val edgeBottomView = vfBinding.halfFrameFilmEdgeBottom ?: return@post
 
             if (!isEnabled) {
-                host.isHalfFrameUiAnimating = false
+                state.isHalfFrameUiAnimating = false
                 if (uiBinding.tvHalfFrameStep?.visibility != View.GONE) {
                     uiBinding.tvHalfFrameStep?.visibility = View.GONE
                 }
@@ -202,15 +194,15 @@ class CameraOverlayController(
 
             // Enabled path: Half-Frame step is visually represented by the Left/Right split inside ExpressiveShutterButton
             uiBinding.tvHalfFrameStep?.visibility = View.GONE
-            val stepText = if (host.halfFrameStep == 0) "1/2" else "2/2"
+            val stepText = if (step == 0) "1/2" else "2/2"
             if (uiBinding.tvHalfFrameStep?.text != stepText) {
                 uiBinding.tvHalfFrameStep?.text = stepText
             }
 
             // Hide thumbnail button during processing of Shot 1 and throughout Shot 2
-            if (host.halfFrameStep == 1) {
+            if (step == 1) {
                 uiBinding.photoViewButton?.visibility = View.INVISIBLE
-            } else if (!host.isProcessing) {
+            } else if (!state.isProcessing) {
                 uiBinding.photoViewButton?.visibility = View.VISIBLE
                 uiBinding.photoViewButton?.alpha = 1f
             }
@@ -232,13 +224,13 @@ class CameraOverlayController(
             val layout = settingsRepository.current().halfFrameLayout
             val isTopBottom = layout == PreferenceKeys.HALF_FRAME_LAYOUT_TB
 
-            val baseShift = if (host.halfFrameStep == 0) -shift else shift
+            val baseShift = if (step == 0) -shift else shift
             val targetShift = if (isTopBottom) -baseShift else baseShift
 
             if (animate) {
-                performHalfFrameAdvanceAnimation(targetShift, stageW, gapWidth * scale, isTopBottom)
+                performHalfFrameAdvanceAnimation(targetShift, stageW, gapWidth * scale, isTopBottom, step)
             } else {
-                host.isHalfFrameUiAnimating = false
+                state.isHalfFrameUiAnimating = false
                 vfBinding.viewFinder.animate().cancel()
                 vfBinding.viewFinder.translationX = targetShift
                 vfBinding.viewFinder.alpha = 1f
@@ -252,11 +244,18 @@ class CameraOverlayController(
         }
     }
 
-    private fun performHalfFrameAdvanceAnimation(targetShift: Float, stageW: Float, gapWidth: Float, isTopBottom: Boolean) {
-        val vfBinding = host.fragmentCameraBinding ?: return
+    private fun performHalfFrameAdvanceAnimation(
+        targetShift: Float,
+        stageW: Float,
+        gapWidth: Float,
+        isTopBottom: Boolean,
+        step: Int
+    ) {
+        val vfBinding = ui.fragmentCameraBinding ?: return
         val vf = vfBinding.viewFinder
         val snapshot = vfBinding.halfFrameSnapshot ?: return
         val gap = vfBinding.halfFrameGapIndicator ?: return
+        val state = env.runtimeState
 
         // Direction logic: SBS moves Left (-X), TB moves Right (+X)
         val moveFactor = if (isTopBottom) 1f else -1f
@@ -264,7 +263,7 @@ class CameraOverlayController(
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
 
         // 1. Snapshot logic
-        val bitmap = host.pendingVfSnapshot
+        val bitmap = state.pendingVfSnapshot
         if (bitmap != null) {
             snapshot.setImageBitmap(bitmap)
             snapshot.visibility = View.VISIBLE
@@ -279,7 +278,7 @@ class CameraOverlayController(
         }
 
         // 2. Gap logic (only show when moving FROM Shot 1 TO Shot 2)
-        if (host.halfFrameStep == 1) {
+        if (step == 1) {
             gap.visibility = View.VISIBLE
             val scaledVfWidth = vf.width * vf.scaleX
             gap.translationX = if (isTopBottom) {
@@ -300,7 +299,7 @@ class CameraOverlayController(
 
         // 3. Prepare Live ViewFinder to slide in from opposite side
         vf.animate().cancel()
-        host.isHalfFrameUiAnimating = true
+        state.isHalfFrameUiAnimating = true
         vf.translationX = targetShift - (moveFactor * stageW)
 
         // 4. Perform animations
@@ -311,7 +310,7 @@ class CameraOverlayController(
             .withEndAction {
                 snapshot.visibility = View.GONE
                 snapshot.setImageBitmap(null)
-                host.pendingVfSnapshot = null
+                state.pendingVfSnapshot = null
             }
             .start()
 
@@ -328,14 +327,14 @@ class CameraOverlayController(
             .translationX(targetShift)
             .setDuration(duration)
             .setInterpolator(interpolator)
-            .withEndAction { host.isHalfFrameUiAnimating = false }
+            .withEndAction { state.isHalfFrameUiAnimating = false }
             .start()
 
         animateFilmEdgeRoll(isTopBottom, duration)
     }
 
     private fun animateFilmEdgeRoll(isTopBottom: Boolean, duration: Long = 500L) {
-        val vfBinding = host.fragmentCameraBinding ?: return
+        val vfBinding = ui.fragmentCameraBinding ?: return
         val topEdge = vfBinding.halfFrameFilmEdgeTop ?: return
         val bottomEdge = vfBinding.halfFrameFilmEdgeBottom ?: return
 
@@ -343,7 +342,7 @@ class CameraOverlayController(
         bottomEdge.animate().cancel()
 
         val periodPx = android.util.TypedValue.applyDimension(
-            android.util.TypedValue.COMPLEX_UNIT_DIP, 30f, host.context.resources.displayMetrics
+            android.util.TypedValue.COMPLEX_UNIT_DIP, 30f, env.hostContext.resources.displayMetrics
         )
         val rollDistance = periodPx * 10
         val moveFactor = if (isTopBottom) 1f else -1f

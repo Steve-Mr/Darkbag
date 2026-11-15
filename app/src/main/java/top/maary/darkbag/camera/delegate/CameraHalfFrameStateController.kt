@@ -1,34 +1,21 @@
 package top.maary.darkbag.camera.delegate
 
-import android.content.Context
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.util.Range
-import kotlinx.coroutines.flow.SharedFlow
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.ExposureUtils
 import top.maary.darkbag.utils.HalfFrameSessionStore
-
-/** Host contract for half-frame session state and digital-gain estimation. */
-interface CameraHalfFrameStateHost {
-    val hostContext: Context
-    val isHdrPlusEnabled: Boolean
-    val isoRange: Range<Int>?
-    val exposureTimeRange: Range<Long>?
-    val lastClippingRatio: Double
-    val captureResults: MutableMap<Long, TotalCaptureResult>
-    val captureResultFlow: SharedFlow<TotalCaptureResult>
-}
 
 /**
  * Owns the persisted half-frame step/temp-path session (via [HalfFrameSessionStore]) and the
  * digital-gain estimate recorded when Frame 1 is committed. Mode-specific step transitions
  * themselves stay inside the half-frame coordinator.
  */
-class CameraHalfFrameStateController(private val host: CameraHalfFrameStateHost) {
+class CameraHalfFrameStateController(private val env: CameraEnvironmentHost) {
 
-    private val store by lazy { HalfFrameSessionStore(host.hostContext) }
-    private val settingsRepository by lazy { SettingsRepository.getInstance(host.hostContext) }
+    private val store by lazy { HalfFrameSessionStore(env.hostContext) }
+    private val settingsRepository by lazy { SettingsRepository.getInstance(env.hostContext) }
 
     var step: Int = 0
         private set
@@ -59,11 +46,12 @@ class CameraHalfFrameStateController(private val host: CameraHalfFrameStateHost)
 
     /** Estimates the digital gain for [timestamp]; when [isFrame1Trigger], also commits step 1. */
     fun getDigitalGainAndUpdateStep(timestamp: Long, isFrame1Trigger: Boolean, shutterClick: Long?): Float {
-        val result = host.captureResults[timestamp] ?: host.captureResultFlow.replayCache.lastOrNull()
+        val state = env.runtimeState
+        val result = state.captureResults[timestamp] ?: state.captureResultFlow.replayCache.lastOrNull()
         val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
         val curTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
-        val validIsoRange = host.isoRange ?: Range(100, 3200)
-        val validTimeRange = host.exposureTimeRange ?: Range(1000L, 1_000_000_000L)
+        val validIsoRange = state.isoRange ?: Range(100, 3200)
+        val validTimeRange = state.exposureTimeRange ?: Range(1000L, 1_000_000_000L)
 
         val underexposureMode = settingsRepository.current().hdrUnderexposureMode
         val digitalGain = computeDigitalGain(underexposureMode, result, curIso, curTime, validIsoRange, validTimeRange)
@@ -82,9 +70,9 @@ class CameraHalfFrameStateController(private val host: CameraHalfFrameStateHost)
         isoRange: Range<Int>,
         timeRange: Range<Long>
     ): Float {
-        if (host.isHdrPlusEnabled) {
+        if (env.isHdrPlusEnabled) {
             return ExposureUtils.calculateHdrPlusExposure(
-                curIso, curTime, isoRange, timeRange, underexposureMode, host.lastClippingRatio
+                curIso, curTime, isoRange, timeRange, underexposureMode, env.runtimeState.lastClippingRatio
             ).digitalGain
         }
         val postRawBoost = result?.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST)
