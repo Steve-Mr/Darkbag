@@ -186,7 +186,6 @@ internal class HdrPlusBurstCaptureExecutor(
                     env.runtimeState.isBurstActive = false
                     env.cameraViewModel.setBurstActive(false)
                     env.runtimeState.hdrPlusStreamingBurstHelper = null
-                    env.runtimeState.processingSemaphore.release()
                     env.lifecycleScope.launch(Dispatchers.Main) {
                         ui.hideProcessingAnimation()
                         ui.resetBurstUi()
@@ -282,7 +281,6 @@ internal class HdrPlusBurstCaptureExecutor(
             env.cameraViewModel.setBurstActive(false)
             env.runtimeState.hdrPlusStreamingBurstHelper?.abort()
             env.runtimeState.hdrPlusStreamingBurstHelper = null
-            env.runtimeState.processingSemaphore.release()
             env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
         }
     }
@@ -323,7 +321,6 @@ internal class HdrPlusBurstCaptureExecutor(
                 )
                 burstHelper.abort()
                 env.runtimeState.hdrPlusStreamingBurstHelper = null
-                env.runtimeState.processingSemaphore.release()
                 ui.hideProcessingAnimation()
             }
         }

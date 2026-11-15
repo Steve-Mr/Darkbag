@@ -8,7 +8,6 @@ import android.util.Range
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.sync.Semaphore
 import top.maary.darkbag.processor.HdrPlusRequestManager
 import top.maary.darkbag.processor.HdrPlusStreamingBurst
 import top.maary.darkbag.rawvideo.RawVideoSessionManager
@@ -21,16 +20,7 @@ import java.util.Collections
  * and session arbiters. Decouples runtime camera state from [top.maary.darkbag.fragments.CameraFragment]
  * so subsystems and unit tests can share or inspect state without a Fragment.
  */
-class CameraRuntimeStateHolder(
-    var processingSemaphore: Semaphore = DefaultNoOpSemaphore
-) {
-    object DefaultNoOpSemaphore : Semaphore {
-        override val availablePermits: Int get() = 3
-        override suspend fun acquire() {}
-        override fun release() {}
-        override fun tryAcquire(): Boolean = true
-    }
-
+class CameraRuntimeStateHolder {
     // Lens & Facing
     @Volatile var lensFacing: Int = CameraCharacteristics.LENS_FACING_BACK
     @Volatile var availableLenses: List<LensInfo> = emptyList()
