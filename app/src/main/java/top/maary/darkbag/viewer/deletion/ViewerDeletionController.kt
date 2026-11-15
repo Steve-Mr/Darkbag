@@ -2,23 +2,18 @@ package top.maary.darkbag.viewer.deletion
 
 import android.content.Context
 import android.net.Uri
-import android.os.Build
-import android.provider.DocumentsContract
-import android.provider.MediaStore
-import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
 import androidx.fragment.app.FragmentManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 import top.maary.darkbag.fragments.DarkbagBatchDeleteSheet
 import top.maary.darkbag.fragments.ImageViewerAdapter
 import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.utils.MediaStoreUtils
 import top.maary.darkbag.viewer.strategy.ViewerMediaStrategy
 
 /**
@@ -43,25 +38,8 @@ class ViewerDeletionController(
     var pendingSingleDeleteGroup: ImageGroup? = null
     var pendingDeleteNextTargetUri: String? = null
 
-    suspend fun deleteUriSafe(context: Context, uri: Uri): Boolean {
-        return withContext(Dispatchers.IO) {
-            try {
-                if (uri.scheme == "content" && DocumentsContract.isDocumentUri(context, uri)) {
-                    DocumentsContract.deleteDocument(context.contentResolver, uri)
-                } else if (uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) {
-                    val docUri = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
-                    DocumentsContract.deleteDocument(context.contentResolver, docUri)
-                } else {
-                    context.contentResolver.delete(uri, null, null) > 0
-                }
-            } catch (e: SecurityException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e("ViewerDeletionController", "Failed to delete uri $uri", e)
-                false
-            }
-        }
-    }
+    suspend fun deleteUriSafe(context: Context, uri: Uri): Boolean =
+        MediaStoreUtils.deleteUriSafe(context, uri)
 
     /**
      * 显示单组删除提示弹窗或唤起 DarkbagBatchDeleteSheet。
@@ -220,18 +198,7 @@ class ViewerDeletionController(
                 nextTargetUri = nextGroup?.firstAvailableUri?.toString()
             }
 
-            val securityExceptionUris = mutableListOf<Uri>()
-            for (uri in urisToDelete.distinct()) {
-                try {
-                    deleteUriSafe(context, uri)
-                } catch (e: SecurityException) {
-                    if (uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
-                        securityExceptionUris.add(uri)
-                    }
-                } catch (e: Exception) {
-                    Log.e("ViewerDeletionController", "Failed to delete $uri", e)
-                }
-            }
+            val outcome = GalleryBatchDeletionCoordinator.executeUriBatchDeletion(context, urisToDelete)
 
             if (!deleteGroup) {
                 repository.invalidateCache(clearStale = true)
@@ -246,17 +213,19 @@ class ViewerDeletionController(
                 }
             }
 
-            if (securityExceptionUris.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (outcome.deleteRequest != null) {
                 pendingDeleteNextTargetUri = nextTargetUri
                 try {
-                    val deleteRequest = MediaStore.createDeleteRequest(context.contentResolver, securityExceptionUris)
-                    launchDeleteRequest(IntentSenderRequest.Builder(deleteRequest.intentSender).build())
+                    launchDeleteRequest(outcome.deleteRequest)
                 } catch (e: Exception) {
                     Toast.makeText(context, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show()
                     repository.invalidateCache(clearStale = true)
                     onReloadImages(nextTargetUri)
                 }
             } else {
+                if (outcome.promptCreationFailed) {
+                    Toast.makeText(context, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show()
+                }
                 repository.invalidateCache(clearStale = true)
                 onReloadImages(nextTargetUri)
             }
