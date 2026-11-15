@@ -165,6 +165,7 @@ class PlaygroundLayoutAndTopBarTest {
         assertNotNull(binding.tvPlaygroundTitle)
         assertNotNull(binding.tvPlaygroundSubtitle)
         assertNotNull(binding.btnPlaygroundSelectAll)
+        assertNotNull(binding.btnPlaygroundCamera)
         assertNotNull(binding.btnPlaygroundSettings)
         assertNotNull(binding.recyclerView)
         assertNotNull(binding.emptyStateText)
@@ -213,5 +214,21 @@ class PlaygroundLayoutAndTopBarTest {
             "galleryBottomBar must be BentoTrayCard",
             galleryBinding.galleryBottomBar is BentoTrayCard
         )
+    }
+
+    @Test
+    fun testPlaygroundTopBarCameraEntry() {
+        val binding = FragmentPlaygroundGalleryBinding.inflate(LayoutInflater.from(context))
+        assertEquals(View.GONE, binding.btnPlaygroundSelectAll.visibility)
+        assertEquals(View.VISIBLE, binding.btnPlaygroundCamera.visibility)
+        assertNotNull(binding.btnPlaygroundCamera.icon)
+    }
+
+    @Test
+    fun testDarkroomGalleryInsetsSetup() {
+        val galleryBinding = FragmentDarkroomGalleryBinding.inflate(LayoutInflater.from(context))
+        assertNotNull(galleryBinding.galleryHeaderCard)
+        assertNotNull(galleryBinding.galleryRecyclerView)
+        assertNotNull(galleryBinding.galleryBottomBar)
     }
 }
