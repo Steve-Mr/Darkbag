@@ -130,14 +130,17 @@ class PlaygroundGalleryFragment : Fragment() {
         binding.btnPlaygroundBack.setOnClickListener {
             if (viewModel.uiState.value.isSelectionMode) {
                 viewModel.processIntent(PlaygroundUserIntent.ClearSelection)
-            } else if (enableCamera) {
-                if (!findNavController().navigateUp()) {
-                    if (findNavController().currentDestination?.id == R.id.playground_gallery_fragment) {
-                        findNavController().navigate(R.id.action_playground_gallery_to_camera)
-                    }
-                }
             } else {
-                requireActivity().onBackPressedDispatcher.onBackPressed()
+                if (!findNavController().navigateUp()) {
+                    requireActivity().onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        }
+
+        binding.btnPlaygroundCamera.visibility = if (enableCamera) View.VISIBLE else View.GONE
+        binding.btnPlaygroundCamera.setOnClickListener {
+            if (findNavController().currentDestination?.id == R.id.playground_gallery_fragment) {
+                findNavController().navigate(R.id.action_playground_gallery_to_camera)
             }
         }
 
@@ -284,12 +287,19 @@ class PlaygroundGalleryFragment : Fragment() {
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
-        binding.btnPlaygroundBack.visibility = if (enableCamera || state.isSelectionMode) View.VISIBLE else View.GONE
+        binding.btnPlaygroundBack.visibility = if (enableCamera || state.isSelectionMode || findNavController().previousBackStackEntry != null) View.VISIBLE else View.GONE
         binding.btnPlaygroundBack.setIconResource(if (state.isSelectionMode) R.drawable.ic_close else R.drawable.ic_back)
 
-        val allFilesCount = state.items.size
-        val isAllSelected = state.isSelectionMode && state.selectedFiles.size >= allFilesCount && allFilesCount > 0
-        binding.btnPlaygroundSelectAll.setText(if (isAllSelected) R.string.gallery_deselect_all else R.string.gallery_select_all)
+        if (state.isSelectionMode) {
+            binding.btnPlaygroundCamera.visibility = View.GONE
+            binding.btnPlaygroundSelectAll.visibility = View.VISIBLE
+            val allFilesCount = state.items.size
+            val isAllSelected = state.selectedFiles.size >= allFilesCount && allFilesCount > 0
+            binding.btnPlaygroundSelectAll.setText(if (isAllSelected) R.string.gallery_deselect_all else R.string.gallery_select_all)
+        } else {
+            binding.btnPlaygroundCamera.visibility = if (enableCamera) View.VISIBLE else View.GONE
+            binding.btnPlaygroundSelectAll.visibility = View.GONE
+        }
 
         binding.playgroundLoadingIndicator.visibility = if (state.isLoading && state.items.isEmpty()) View.VISIBLE else View.GONE
         binding.emptyStateText.visibility = if (state.items.isEmpty() && !state.isLoading) View.VISIBLE else View.GONE

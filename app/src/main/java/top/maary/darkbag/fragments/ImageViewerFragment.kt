@@ -960,22 +960,32 @@ open class ImageViewerFragment : Fragment() {
             val navBarInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
             systemTopInset = statusBarInsets.top
             systemBottomInset = navBarInsets.bottom
+            val density = resources.displayMetrics.density
 
-            binding.topBarContainer.updateLayoutParams<ViewGroup.MarginLayoutParams> { topMargin = systemTopInset }
-            binding.viewerBentoDeck.updateLayoutParams<ViewGroup.MarginLayoutParams> { bottomMargin = systemBottomInset }
-            binding.editAdjustmentPanel.updateLayoutParams<ViewGroup.MarginLayoutParams> { bottomMargin = systemBottomInset }
+            binding.topBarContainer.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                topMargin = systemTopInset + (8 * density).toInt()
+            }
+            binding.viewerBentoDeck.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                bottomMargin = systemBottomInset + (12 * density).toInt()
+            }
+            binding.editAdjustmentPanel.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                bottomMargin = systemBottomInset + (12 * density).toInt()
+            }
             updateViewportPadding()
             insets
         }
     }
 
     private fun updateViewportPadding() {
-        val topPadding = if (isUiVisible) systemTopInset + topBarHeight else 0
+        val density = resources.displayMetrics.density
+        val topMarginExtra = (8 * density).toInt()
+        val bottomMarginExtra = (12 * density).toInt()
+        val topPadding = if (isUiVisible) systemTopInset + topMarginExtra + topBarHeight else 0
         val bottomPadding = if (isEditingAdjustments) {
             val panelHeight = binding.editAdjustmentPanel.height
-            if (panelHeight > 0) systemBottomInset + panelHeight else systemBottomInset + 200
+            if (panelHeight > 0) systemBottomInset + bottomMarginExtra + panelHeight else systemBottomInset + bottomMarginExtra + 200
         } else if (isUiVisible) {
-            systemBottomInset + bentoDeckHeight
+            systemBottomInset + bottomMarginExtra + bentoDeckHeight
         } else 0
         binding.imagePager.setPadding(0, topPadding, 0, bottomPadding)
     }

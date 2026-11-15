@@ -17,6 +17,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
@@ -142,17 +143,28 @@ class DarkroomGalleryFragment : Fragment() {
 
     private fun setupWindowInsets() {
         val density = resources.displayMetrics.density
-        val topClearance = (72 * density).toInt()
-        val bottomClearance = (84 * density).toInt()
+        val topClearance = (76 * density).toInt()
+        val bottomClearance = (88 * density).toInt()
 
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            binding.galleryHeaderCard.updatePadding(top = 0)
+            binding.galleryHeaderCard.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                topMargin = systemBars.top + (8 * density).toInt()
+                marginStart = systemBars.left + (12 * density).toInt()
+                marginEnd = systemBars.right + (12 * density).toInt()
+            }
             binding.galleryRecyclerView.updatePadding(
                 top = systemBars.top + topClearance,
-                bottom = systemBars.bottom + bottomClearance
+                bottom = systemBars.bottom + bottomClearance,
+                left = systemBars.left + (8 * density).toInt(),
+                right = systemBars.right + (8 * density).toInt()
             )
-            binding.galleryBottomBar.translationY = -systemBars.bottom.toFloat()
+            binding.galleryBottomBar.translationY = 0f
+            binding.galleryBottomBar.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                bottomMargin = systemBars.bottom + (12 * density).toInt()
+                marginStart = systemBars.left + (12 * density).toInt()
+                marginEnd = systemBars.right + (12 * density).toInt()
+            }
             insets
         }
     }
