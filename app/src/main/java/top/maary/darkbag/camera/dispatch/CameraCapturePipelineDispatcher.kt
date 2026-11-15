@@ -3,30 +3,19 @@ package top.maary.darkbag.camera.dispatch
 import android.content.Context
 import android.content.Intent
 import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraDevice
-import android.hardware.camera2.CameraManager
-import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.media.Image
-import android.media.ImageReader
 import android.os.Build
-import android.os.Handler
 import android.util.Log
-import android.util.Range
-import android.view.Surface
-import android.view.View
 import android.widget.Toast
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.MainApplication
 import top.maary.darkbag.R
@@ -38,27 +27,16 @@ import top.maary.darkbag.fragments.HdrPlusBurst
 import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.pipeline.sink.CaptureSink
-import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.processor.HdrPlusProcessingService
 import top.maary.darkbag.processor.HdrPlusRequest
 import top.maary.darkbag.processor.HdrPlusRequestManager
-import top.maary.darkbag.processor.HdrPlusStreamingBurst
 import top.maary.darkbag.processor.SensorCalibrationHelper
 import top.maary.darkbag.processor.StreamingBurstResult
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.CameraRepository
-import top.maary.darkbag.utils.ExposureUtils
 import top.maary.darkbag.utils.HalfFrameManager
-import top.maary.darkbag.utils.ImageSaver
 import top.maary.darkbag.utils.LensInfo
-import java.io.File
-import java.io.FileOutputStream
-import java.text.SimpleDateFormat
-import java.util.Locale
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
-import kotlin.math.pow
 
 /**
  * Dispatcher coordinating single-shot and burst Camera2 captures, raw frame buffer management,
@@ -72,7 +50,6 @@ class CameraCapturePipelineDispatcher(
 ) {
     companion object {
         private const val TAG = "CameraCapturePipeline"
-        private const val FILENAME = "yyyy-MM-dd-HH-mm-ss-SSS"
     }
 
     val metadataExtractor = CameraCaptureMetadataExtractor(env)
@@ -80,6 +57,51 @@ class CameraCapturePipelineDispatcher(
 
     private val processingChannel = Channel<RawImageHolder>(2)
     private var processingChannelJob: Job? = null
+
+    private val burstEnqueuer = HdrPlusBurstProcessingEnqueuer(
+        env = env,
+        ui = ui,
+        coordinator = coordinator,
+        metadataExtractor = metadataExtractor,
+        specAssembler = specAssembler,
+        onEnqueueRequest = ::enqueueProcessingRequest,
+        onNotifyQueuedOnMain = ::notifyQueuedOnMain,
+        activePhysicalIdProvider = ::activePhysicalId
+    )
+
+    private val burstExecutor = HdrPlusBurstCaptureExecutor(
+        env = env,
+        ui = ui,
+        coordinator = coordinator,
+        metadataExtractor = metadataExtractor,
+        specAssembler = specAssembler,
+        onStreamingBurstComplete = burstEnqueuer::processStreamingHdrPlusBurst,
+        onRecordCaptureResult = ::recordCaptureResult,
+        onNotifySinkFailure = ::notifySinkFailureAsync,
+        onAbortCapture = ::abortCapture
+    )
+
+    private val singleExecutor = SingleRawCaptureExecutor(
+        env = env,
+        ui = ui,
+        coordinator = coordinator,
+        metadataExtractor = metadataExtractor,
+        specAssembler = specAssembler,
+        enqueueRawHolder = { app, holder, timing ->
+            app.applicationScope.launch {
+                timing?.enqueued = System.currentTimeMillis()
+                processingChannel.send(holder)
+            }
+        },
+        onJpegFallback = { data, zoom, hfMeta, captureMeta ->
+            burstEnqueuer.saveJpegFallback(data, 0, zoom, hfMeta, captureMeta)
+        },
+        onRecordCaptureResult = ::recordCaptureResult,
+        onNotifySinkFailure = { ctx, sink, hfMeta, err ->
+            notifySinkFailureAsync(ctx, sink, hfMeta, err)
+        },
+        onAbortCapture = ::abortCapture
+    )
 
     fun startProcessingWorker(applicationScope: CoroutineScope) {
         if (processingChannelJob == null || processingChannelJob?.isActive != true) {
@@ -111,426 +133,14 @@ class CameraCapturePipelineDispatcher(
         timing: StandardTimingTracker? = null,
         isFrame1Trigger: Boolean = false,
         hfMetadata: HalfFrameManager.Metadata? = null
-    ) {
-        val appContext = env.hostContext.applicationContext
-        val device = env.sessionArbiter.camera2Device ?: run { abortCapture(); return }
-        val session = env.sessionArbiter.camera2Session ?: run { abortCapture(); return }
-        val reader = env.sessionArbiter.rawImageReader ?: run { abortCapture(); return }
-        val handler = env.sessionArbiter.camera2Handler ?: run { abortCapture(); return }
-
-        HdrPlusRequestManager.onTaskStarted()
-        var taskStarted = true
-
-        val capturedLens = env.runtimeState.currentLens
-        val capturedZoom = specAssembler.resolveEffectiveZoom(capturedLens, null)
-        val capturedOrientation = coordinator.getCombinedOrientation()
-        val capturedLensId = capturedLens?.id
-
-        try {
-            val request = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
-            request.addTarget(reader.surface)
-            request.set(CaptureRequest.JPEG_ORIENTATION, capturedOrientation)
-            coordinator.applyManualSettingsToRequest(request)
-
-            reader.setOnImageAvailableListener({ r ->
-                timing?.recordFrameArrival()
-                timing?.captureCallback = System.currentTimeMillis()
-                val image = r.acquireLatestImage() ?: run {
-                    if (taskStarted) {
-                        taskStarted = false
-                        HdrPlusRequestManager.onTaskFinished()
-                    }
-                    abortCapture()
-                    return@setOnImageAvailableListener
-                }
-                try {
-                    if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
-                        val digitalGain = coordinator.getDigitalGainAndUpdateStep(
-                            image.timestamp,
-                            isFrame1Trigger,
-                            timing?.shutterClick
-                        )
-                        val holder = copyAndroidImageToHolder(
-                            image = image,
-                            zoomRatio = capturedZoom,
-                            combinedOrientation = capturedOrientation,
-                            physicalId = capturedLensId,
-                            halfFrameMetadata = hfMetadata?.copy(digitalGain = digitalGain),
-                            sink = sink,
-                            capturedLens = capturedLens
-                        ).copy(timing = timing, digitalGain = digitalGain)
-                        image.close()
-                        onSingleFrameAccepted(timing, isFrame1Trigger)
-                        (appContext as MainApplication).applicationScope.launch {
-                            timing?.enqueued = System.currentTimeMillis()
-                            processingChannel.send(holder)
-                        }
-                    } else {
-                        val buffer = image.planes[0].buffer
-                        val data = ByteArray(buffer.remaining())
-                        buffer.get(data)
-                        val ts = image.timestamp
-                        image.close()
-                        onSingleFrameAccepted(timing, isFrame1Trigger)
-                        val captureMetadata = if (hfMetadata == null) {
-                            metadataExtractor.createCaptureMetadataFromTimestamp(ts, capturedLens)
-                        } else null
-                        saveJpegFallback(data, 0, capturedZoom, hfMetadata, captureMetadata)
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to process Camera2 image", e)
-                    image.close()
-                    if (taskStarted) {
-                        taskStarted = false
-                        HdrPlusRequestManager.onTaskFinished()
-                    }
-                    notifySinkFailureAsync(appContext, sink, hfMetadata, e)
-                    abortCapture()
-                }
-            }, handler)
-
-            session.capture(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureStarted(session: android.hardware.camera2.CameraCaptureSession, request: CaptureRequest, timestamp: Long, frameNumber: Long) {
-                    if (isFrame1Trigger) {
-                        coordinator.triggerAutoBurst()
-                    }
-                }
-
-                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                    recordCaptureResult(result)
-                }
-            }, handler)
-        } catch (e: Exception) {
-            Log.e(TAG, "Camera2 capture failed", e)
-            if (taskStarted) {
-                HdrPlusRequestManager.onTaskFinished()
-            }
-            notifySinkFailureAsync(appContext, sink, hfMetadata, e)
-            abortCapture()
-        }
-    }
-
-    private fun onSingleFrameAccepted(timing: StandardTimingTracker?, isFrame1Trigger: Boolean) {
-        timing?.recordShutterReady()
-        env.runtimeState.isBurstActive = false
-        env.cameraViewModel.setBurstActive(false)
-        env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
-        if (!isFrame1Trigger) {
-            ui.showProcessingAnimation()
-        }
-    }
-
-    private fun abortCapture() {
-        env.runtimeState.isBurstActive = false
-        env.cameraViewModel.setBurstActive(false)
-        env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
-        env.runtimeState.processingSemaphore.release()
-    }
+    ) = singleExecutor.takeSinglePictureCamera2(sink, timing, isFrame1Trigger, hfMetadata)
 
     fun triggerHdrPlusBurstCamera2(
         sink: CaptureSink? = null,
         isFrame1Trigger: Boolean = false,
         hfMetadata: HalfFrameManager.Metadata? = null,
         timing: StandardTimingTracker? = null
-    ) {
-        val appContext = env.hostContext.applicationContext
-        val device = env.sessionArbiter.camera2Device ?: run { abortCapture(); return }
-        val session = env.sessionArbiter.camera2Session ?: run { abortCapture(); return }
-        val reader = env.sessionArbiter.rawImageReader ?: run { abortCapture(); return }
-        val handler = env.sessionArbiter.camera2Handler ?: run { abortCapture(); return }
-
-        env.runtimeState.isBurstActive = true
-        val captureStartTime = hfMetadata?.captureTimeMillis ?: System.currentTimeMillis()
-        env.runtimeState.burstStartTime = captureStartTime
-        val isTaskStarted = AtomicBoolean(false)
-        val currentPrefs = SettingsRepository.getInstance(appContext).current()
-
-        try {
-            val result = env.runtimeState.captureResultFlow.replayCache.lastOrNull()
-            val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-            val curTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
-            val validIsoRange = env.runtimeState.isoRange ?: Range(100, 3200)
-            val validTimeRange = env.runtimeState.exposureTimeRange ?: Range(1000L, 1_000_000_000L)
-            val underexposureMode = currentPrefs.hdrUnderexposureMode
-
-            val config = ExposureUtils.calculateHdrPlusExposure(
-                curIso, curTime, validIsoRange, validTimeRange, underexposureMode, env.runtimeState.lastClippingRatio
-            )
-            val burstIso = if (env.runtimeState.isManualIso) env.runtimeState.currentIso else config.iso
-            val burstTime = if (env.runtimeState.isManualShutter) env.runtimeState.currentExposureTime else config.exposureTime
-            val burstGain = if (env.runtimeState.isManualExposure) {
-                if (env.runtimeState.currentEvIndex != 0) (2.0).pow(env.runtimeState.currentEvIndex.toDouble() / 3.0).toFloat() else 1.0f
-            } else {
-                config.digitalGain
-            }
-            val burstSize = currentPrefs.hdrBurstCount
-
-            if (isFrame1Trigger) {
-                coordinator.writeScopedHalfFrameStep(1, captureStartTime, digitalGain = burstGain, flareType = hfMetadata?.flareType ?: -1)
-            }
-
-            val capturedLens = env.runtimeState.currentLens
-            val burstLensId = capturedLens?.id ?: "0"
-            val burstChars = CameraRepository.getCharacteristics(env.camera2Manager, burstLensId)
-            val burstSensorOrientation = burstChars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-            val whiteLevel = burstChars.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
-            val blackLevelPattern = metadataExtractor.extractBlackLevelPattern(burstChars)
-            val cfa = burstChars.get(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
-
-            val (wb, ccmCapture) = metadataExtractor.extractWbAndCcm(result)
-            val (lensShadingMapData, lensShadingRows, lensShadingCols) = metadataExtractor.findLatestLensShadingMap(result)
-
-            val useSensorColorMatrix = true
-            val burstCalib = metadataExtractor.extractSensorCalibration(burstChars, result, wb)
-            val ccmSensor = burstCalib.renderCcm ?: ccmCapture
-            val ccm = if (useSensorColorMatrix) ccmSensor else ccmCapture
-            val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
-            val noiseProfileFlat = metadataExtractor.extractNoiseProfile(result)
-
-            val combinedOrientation = coordinator.getCombinedOrientation()
-            val fusionModeInt = specAssembler.resolveFusionModeInt(currentPrefs)
-            val currentZoom = specAssembler.resolveEffectiveZoom(capturedLens, null)
-
-            val sessionHandle = ColorProcessor.nativeCreateStreamingSession(
-                width = reader.width,
-                height = reader.height,
-                orientation = combinedOrientation,
-                whiteLevel = whiteLevel,
-                blackLevelPattern = blackLevelPattern,
-                lensShadingMap = lensShadingMapData,
-                lensShadingRows = lensShadingRows,
-                lensShadingCols = lensShadingCols,
-                whiteBalance = wb,
-                ccm = ccm,
-                cfaPattern = cfa,
-                noiseProfile = noiseProfileFlat,
-                fusionMode = fusionModeInt,
-                zoomFactor = currentZoom
-            )
-            if (sessionHandle == 0L) {
-                Log.e(TAG, "Failed to create native streaming session")
-                if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
-                notifySinkFailureAsync(
-                    appContext, sink, hfMetadata,
-                    RuntimeException("Native streaming session creation failed"),
-                    zoomFactor = currentZoom, lensId = burstLensId, timestamp = captureStartTime
-                )
-                abortCapture()
-                return
-            }
-
-            HdrPlusRequestManager.onTaskStarted()
-            isTaskStarted.set(true)
-
-            val burstContext = StreamingBurstCaptureContext(
-                sink = sink,
-                digitalGain = burstGain,
-                hfMetadata = hfMetadata?.copy(digitalGain = burstGain),
-                timing = timing,
-                width = reader.width,
-                height = reader.height,
-                combinedOrientation = combinedOrientation,
-                targetCharId = burstLensId,
-                chars = burstChars,
-                result = result,
-                whiteLevel = whiteLevel,
-                blackLevelPattern = blackLevelPattern,
-                wb = wb,
-                ccm = ccm,
-                ccmAlt = ccmAlt,
-                exportMatrixAB = false,
-                cfa = cfa,
-                lensShadingMapData = lensShadingMapData,
-                lensShadingRows = lensShadingRows,
-                lensShadingCols = lensShadingCols,
-                useSensorColorMatrix = useSensorColorMatrix,
-                noiseProfileFlat = noiseProfileFlat,
-                capturedLens = capturedLens,
-                zoomFactor = currentZoom
-            )
-
-            val burstHelper = HdrPlusStreamingBurst(
-                sessionHandle = sessionHandle,
-                frameCount = burstSize,
-                timing = timing,
-                cfaPattern = cfa,
-                onBurstComplete = { burstResult ->
-                    processStreamingHdrPlusBurst(burstResult, burstContext)
-                },
-                onBurstFailed = { error ->
-                    Log.e(TAG, "Streaming burst failed in workerJob", error)
-                    if (isTaskStarted.compareAndSet(true, false)) {
-                        HdrPlusRequestManager.onTaskFinished()
-                    }
-                    if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
-                    notifySinkFailureAsync(appContext, sink, hfMetadata, error, timestamp = captureStartTime)
-                    env.runtimeState.isBurstActive = false
-                    env.cameraViewModel.setBurstActive(false)
-                    env.runtimeState.hdrPlusStreamingBurstHelper = null
-                    env.runtimeState.processingSemaphore.release()
-                    env.lifecycleScope.launch(Dispatchers.Main) {
-                        ui.hideProcessingAnimation()
-                        ui.resetBurstUi()
-                    }
-                }
-            )
-            env.runtimeState.hdrPlusStreamingBurstHelper = burstHelper
-
-            env.lifecycleScope.launch(Dispatchers.Main) {
-                ui.cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
-                ui.cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
-                ui.cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
-            }
-
-            val burstRequests = buildBurstRequests(
-                device = device,
-                reader = reader,
-                chars = burstChars,
-                combinedOrientation = combinedOrientation,
-                burstIso = burstIso,
-                burstTime = burstTime,
-                burstSize = burstSize
-            )
-
-            val framesCaptured = AtomicInteger(0)
-            val watchdog = env.lifecycleScope.launch(Dispatchers.Main) {
-                delay(8000)
-                val capturedCount = framesCaptured.get()
-                if (env.runtimeState.isBurstActive && capturedCount < burstSize) {
-                    Log.e(TAG, "Burst capture timed out! Captured $capturedCount/$burstSize frames.")
-                    env.runtimeState.isBurstActive = false
-                    ui.resetBurstUi()
-                    if (capturedCount > 0) {
-                        Log.i(TAG, "Flushing partial burst ($capturedCount frames) to background worker.")
-                        if (isTaskStarted.compareAndSet(false, true)) HdrPlusRequestManager.onTaskStarted()
-                        if (!isFrame1Trigger && ui.cameraUiContainerBinding?.processingProgress?.visibility != View.VISIBLE) {
-                            ui.showProcessingAnimation()
-                        }
-                        burstHelper.flush()
-                    } else {
-                        if (isTaskStarted.compareAndSet(true, false)) HdrPlusRequestManager.onTaskFinished()
-                        if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
-                        notifySinkFailureAsync(
-                            appContext, sink, hfMetadata,
-                            RuntimeException("Burst capture timed out with 0 frames"),
-                            timestamp = captureStartTime
-                        )
-                        burstHelper.abort()
-                        env.runtimeState.hdrPlusStreamingBurstHelper = null
-                        env.runtimeState.processingSemaphore.release()
-                        ui.hideProcessingAnimation()
-                    }
-                }
-            }
-
-            reader.setOnImageAvailableListener({ r ->
-                val image = r.acquireNextImage() ?: return@setOnImageAvailableListener
-                val frameAccepted = try {
-                    val plane = image.planes[0]
-                    val frameResult = metadataExtractor.findCaptureResultSync(image.timestamp)
-                    val exposureTimeNs = frameResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: burstTime
-                    val noisePair = frameResult?.get(CaptureResult.SENSOR_NOISE_PROFILE)
-                    val npS = noisePair?.firstOrNull()?.first?.toFloat()
-                        ?: noiseProfileFlat?.getOrNull(0)?.toFloat() ?: 0.0001f
-                    val npO = noisePair?.firstOrNull()?.second?.toFloat()
-                        ?: noiseProfileFlat?.getOrNull(1)?.toFloat() ?: 0.00001f
-
-                    burstHelper.addFrame(
-                        buffer = plane.buffer,
-                        width = image.width,
-                        height = image.height,
-                        rowStride = plane.rowStride,
-                        pixelStride = plane.pixelStride,
-                        timestampNs = image.timestamp,
-                        exposureTimeNs = exposureTimeNs,
-                        rotationDegrees = burstSensorOrientation,
-                        physicalId = burstLensId,
-                        noiseProfileS = npS,
-                        noiseProfileO = npO
-                    )
-                } finally {
-                    image.close()
-                }
-
-                if (frameAccepted) {
-                    timing?.recordFrameArrival()
-                    val count = framesCaptured.incrementAndGet()
-                    env.lifecycleScope.launch(Dispatchers.Main) {
-                        ui.cameraUiContainerBinding?.cameraCaptureButton?.setProgress(count.toFloat() / burstSize)
-                    }
-                    if (count >= burstSize) {
-                        watchdog.cancel()
-                        timing?.captureCallback = System.currentTimeMillis()
-                        timing?.recordShutterReady()
-                        env.lifecycleScope.launch(Dispatchers.Main) {
-                            if (isTaskStarted.compareAndSet(false, true)) HdrPlusRequestManager.onTaskStarted()
-                            env.runtimeState.isBurstActive = false
-                            env.cameraViewModel.setBurstActive(false)
-                            ui.resetBurstUi()
-                            if (!isFrame1Trigger && ui.cameraUiContainerBinding?.processingProgress?.visibility != View.VISIBLE) {
-                                ui.showProcessingAnimation()
-                            }
-                            if (isFrame1Trigger) coordinator.triggerAutoBurst()
-                        }
-                    }
-                }
-            }, handler)
-
-            session.captureBurst(burstRequests, object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                    recordCaptureResult(result)
-                }
-            }, handler)
-        } catch (e: Exception) {
-            Log.e(TAG, "Camera2 burst failed", e)
-            if (isTaskStarted.compareAndSet(true, false)) HdrPlusRequestManager.onTaskFinished()
-            if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
-            notifySinkFailureAsync(appContext, sink, hfMetadata, e, timestamp = captureStartTime)
-            env.runtimeState.isBurstActive = false
-            env.cameraViewModel.setBurstActive(false)
-            env.runtimeState.hdrPlusStreamingBurstHelper?.abort()
-            env.runtimeState.hdrPlusStreamingBurstHelper = null
-            env.runtimeState.processingSemaphore.release()
-            env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
-        }
-    }
-
-    private fun buildBurstRequests(
-        device: CameraDevice,
-        reader: ImageReader,
-        chars: CameraCharacteristics,
-        combinedOrientation: Int,
-        burstIso: Int,
-        burstTime: Long,
-        burstSize: Int
-    ): List<CaptureRequest> {
-        val previewSurface = env.sessionArbiter.camera2PreviewSurface
-        val lscModes = chars.get(CameraCharacteristics.STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES)
-        val supportsLsc = lscModes != null && lscModes.contains(CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)
-        return List(burstSize) {
-            device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(reader.surface)
-                if (previewSurface != null && previewSurface.isValid) addTarget(previewSurface)
-                set(CaptureRequest.JPEG_ORIENTATION, combinedOrientation)
-                coordinator.applyManualSettingsToRequest(this, true)
-                if (supportsLsc) {
-                    set(CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE, CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)
-                }
-                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                set(CaptureRequest.SENSOR_SENSITIVITY, burstIso)
-                set(CaptureRequest.SENSOR_EXPOSURE_TIME, burstTime)
-                set(CaptureRequest.CONTROL_AWB_LOCK, true)
-            }.build()
-        }
-    }
-
-    private fun recordCaptureResult(result: TotalCaptureResult) {
-        val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
-        if (timestamp != null) {
-            env.runtimeState.captureResults[timestamp] = result
-        }
-        (env.runtimeState.captureResultFlow as? MutableSharedFlow)?.tryEmit(result)
-    }
+    ) = burstExecutor.triggerHdrPlusBurstCamera2(sink, isFrame1Trigger, hfMetadata, timing)
 
     fun copyAndroidImageToHolder(
         image: Image,
@@ -540,73 +150,9 @@ class CameraCapturePipelineDispatcher(
         halfFrameMetadata: HalfFrameManager.Metadata? = null,
         sink: CaptureSink? = null,
         capturedLens: LensInfo? = null
-    ): RawImageHolder {
-        val plane = image.planes[0]
-        val buffer = plane.buffer
-        val rowStride = plane.rowStride
-        val pixelStride = 2 // RAW16
-        val width = image.width
-        val height = image.height
-
-        val sensorOrientation = try {
-            CameraRepository.getCharacteristics(env.camera2Manager, physicalId ?: "0")
-                .get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-        } catch (_: Exception) {
-            0
-        }
-
-        val rowLength = width * pixelStride
-        val capacity = rowLength * height
-        val data = HdrPlusBurst.acquireBuffer(capacity)
-
-        if (buffer.isDirect) {
-            ColorProcessor.copyBayerWithStride(
-                buffer, buffer.position(),
-                data, data.position(),
-                width, height, rowStride, pixelStride
-            )
-        } else {
-            val oldPos = buffer.position()
-            buffer.rewind()
-            if (rowStride == rowLength) {
-                if (buffer.remaining() == capacity) {
-                    data.put(buffer)
-                } else {
-                    val oldLimit = buffer.limit()
-                    buffer.limit(buffer.position() + capacity)
-                    data.put(buffer)
-                    buffer.limit(oldLimit)
-                }
-            } else {
-                val oldLimit = buffer.limit()
-                for (y in 0 until height) {
-                    val rowStart = y * rowStride
-                    if (rowStart + rowLength > buffer.capacity()) break
-                    buffer.position(rowStart)
-                    buffer.limit(rowStart + rowLength)
-                    data.put(buffer)
-                }
-                buffer.limit(oldLimit)
-            }
-            buffer.position(oldPos)
-        }
-        data.limit(capacity)
-        data.rewind()
-
-        return RawImageHolder(
-            data = data,
-            width = width,
-            height = height,
-            timestamp = image.timestamp,
-            rotationDegrees = sensorOrientation,
-            combinedOrientation = combinedOrientation,
-            zoomRatio = zoomRatio,
-            physicalId = physicalId,
-            halfFrameMetadata = halfFrameMetadata,
-            sink = sink,
-            capturedLens = capturedLens
-        )
-    }
+    ): RawImageHolder = singleExecutor.copyAndroidImageToHolder(
+        image, zoomRatio, combinedOrientation, physicalId, halfFrameMetadata, sink, capturedLens
+    )
 
     fun processHdrPlusBurst(
         burstResult: BurstResult,
@@ -615,258 +161,20 @@ class CameraCapturePipelineDispatcher(
         timing: StandardTimingTracker? = null,
         capturedLens: LensInfo? = null,
         zoomFactor: Float = 1.0f
-    ) {
-        val effectiveLens = capturedLens ?: env.runtimeState.currentLens
-        val currentZoom = specAssembler.resolveEffectiveZoom(capturedLens, env.runtimeState.currentLens, zoomFactor)
-        val combinedOrientation = coordinator.getCombinedOrientation()
-        val appContext = env.hostContext.applicationContext
-
-        (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
-            var isHdrPlusSuccess = false
-            try {
-                val frames = burstResult.frames
-                Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames. DigitalGain=$digitalGain")
-
-                val width = frames[0].width
-                val height = frames[0].height
-                val result = metadataExtractor.findCaptureResult(frames[0].timestamp)
-                val targetCharId = activePhysicalId(result) ?: frames[0].physicalId ?: effectiveLens?.id ?: "0"
-                val chars = CameraRepository.getCharacteristics(env.camera2Manager, targetCharId)
-
-                val whiteLevel = chars.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
-                val blackLevelPattern = metadataExtractor.extractBlackLevelPattern(chars)
-                val cfa = chars.get(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
-                val (wb, ccmCapture) = metadataExtractor.extractWbAndCcm(result)
-                val useSensorColorMatrix = true
-                val burstCalib = metadataExtractor.extractSensorCalibration(chars, result, wb)
-                val ccmSensor = burstCalib.renderCcm ?: ccmCapture
-                val finalCcm = if (useSensorColorMatrix) ccmSensor else ccmCapture
-                val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
-
-                val captureMetadata = metadataExtractor.createCaptureMetadata(
-                    iso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100,
-                    exposureTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L,
-                    fNumber = result?.get(CaptureResult.LENS_APERTURE) ?: 1.8f,
-                    focalLength = result?.get(CaptureResult.LENS_FOCAL_LENGTH) ?: 0.0f,
-                    captureTime = System.currentTimeMillis(),
-                    targetCharId = targetCharId,
-                    isHdrPlus = true,
-                    captureResult = result,
-                    capturedLens = effectiveLens
-                )
-
-                isHdrPlusSuccess = true
-                notifyQueuedOnMain(appContext, R.string.toast_hdr_queued)
-
-                val (motionMp4Path, motionStillPtsUs) = specAssembler.awaitPendingMotionPhoto(
-                    pendingTaskProvider = { env.runtimeState.pendingMotionPhotoTask },
-                    clearPendingTask = { env.runtimeState.pendingMotionPhotoTask = null }
-                )
-                val (latchedLsc, latchedRows, latchedCols) = metadataExtractor.findLatestLensShadingMap(result)
-                val settingsRepo = SettingsRepository.getInstance(appContext)
-                settingsRepo.awaitHydrated()
-                val currentPrefs = settingsRepo.current()
-
-                val spec = specAssembler.assemble(
-                    context = appContext,
-                    prefs = currentPrefs,
-                    request = TaskSpecAssemblyRequest(
-                        width = width,
-                        height = height,
-                        orientation = combinedOrientation,
-                        zoomFactor = currentZoom,
-                        mirror = env.shouldMirror,
-                        isSingleFrame = false,
-                        isHdrPlus = true,
-                        targetCharId = targetCharId,
-                        chars = chars,
-                        captureResult = result,
-                        captureMetadata = captureMetadata,
-                        cfa = cfa,
-                        whiteLevel = whiteLevel,
-                        blackLevelPattern = blackLevelPattern,
-                        wb = wb,
-                        ccm = finalCcm,
-                        ccmAlt = ccmAlt,
-                        exportMatrixAB = false,
-                        useSensorColorMatrix = useSensorColorMatrix,
-                        calibration = burstCalib,
-                        lensShadingMapData = latchedLsc,
-                        lensShadingRows = latchedRows,
-                        lensShadingCols = latchedCols,
-                        noiseProfile = metadataExtractor.extractNoiseProfile(result),
-                        digitalGain = digitalGain,
-                        faithfulHighlights = false,
-                        hfMetadata = hfMetadata,
-                        timing = timing,
-                        motionPhotoMp4Path = motionMp4Path,
-                        motionPhotoStillPtsUs = motionStillPtsUs,
-                        sink = null,
-                        saveRawOverride = if (settingsRepo.hasExplicitKey(PreferenceKeys.SAVE_RAW)) currentPrefs.saveRaw else true
-                    )
-                )
-                val request = HdrPlusRequest.fromSpec(
-                    spec = spec,
-                    megaBuffer = burstResult.megaBuffer,
-                    numFrames = frames.size
-                )
-                enqueueProcessingRequest(appContext, request, timing)
-            } catch (e: Exception) {
-                Log.e(TAG, "processHdrPlusBurst failed", e)
-                isHdrPlusSuccess = false
-            } finally {
-                burstResult.frames.forEach { it.close() }
-                if (!isHdrPlusSuccess) {
-                    HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
-                }
-                env.runtimeState.processingSemaphore.release()
-                env.lifecycleScope.launch(Dispatchers.Main) {
-                    ui.resetBurstUi()
-                    if (!isHdrPlusSuccess) ui.hideProcessingAnimation()
-                }
-            }
-        }
-    }
+    ) = burstEnqueuer.processHdrPlusBurst(burstResult, digitalGain, hfMetadata, timing, capturedLens, zoomFactor)
 
     fun processStreamingHdrPlusBurst(
         streamingResult: StreamingBurstResult,
         burstContext: StreamingBurstCaptureContext
-    ) {
-        val effectiveLens = burstContext.capturedLens ?: env.runtimeState.currentLens
-        val currentZoom = specAssembler.resolveEffectiveZoom(
-            burstContext.capturedLens, env.runtimeState.currentLens, burstContext.zoomFactor
-        )
-        val appContext = env.hostContext.applicationContext
+    ) = burstEnqueuer.processStreamingHdrPlusBurst(streamingResult, burstContext)
 
-        (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
-            var isHdrPlusSuccess = false
-            try {
-                val frames = streamingResult.frames
-                Log.d(
-                    TAG,
-                    "processStreamingHdrPlusBurst started with ${frames.size} frames. " +
-                        "DigitalGain=${burstContext.digitalGain}, session=${streamingResult.sessionHandle}"
-                )
-
-                val result = burstContext.result
-                val burstCalib = metadataExtractor.extractSensorCalibration(burstContext.chars, result, burstContext.wb)
-                val settingsRepo = SettingsRepository.getInstance(appContext)
-                settingsRepo.awaitHydrated()
-                val prefs = settingsRepo.current()
-
-                val captureMetadata = metadataExtractor.createCaptureMetadata(
-                    iso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100,
-                    exposureTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L,
-                    fNumber = result?.get(CaptureResult.LENS_APERTURE) ?: 1.8f,
-                    focalLength = result?.get(CaptureResult.LENS_FOCAL_LENGTH) ?: 0.0f,
-                    captureTime = System.currentTimeMillis(),
-                    targetCharId = burstContext.targetCharId,
-                    isHdrPlus = true,
-                    captureResult = result,
-                    capturedLens = effectiveLens
-                )
-
-                isHdrPlusSuccess = true
-                notifyQueuedOnMain(appContext, R.string.toast_hdr_queued)
-
-                val (motionMp4Path, motionStillPtsUs) = specAssembler.awaitPendingMotionPhoto(
-                    pendingTaskProvider = { env.runtimeState.pendingMotionPhotoTask },
-                    clearPendingTask = { env.runtimeState.pendingMotionPhotoTask = null }
-                )
-
-                var effectiveLsc = burstContext.lensShadingMapData
-                var effectiveRows = burstContext.lensShadingRows
-                var effectiveCols = burstContext.lensShadingCols
-                if (effectiveLsc == null || effectiveRows <= 1 || effectiveCols <= 1) {
-                    val (latchedLsc, latchedRows, latchedCols) = metadataExtractor.findLatestLensShadingMap(result)
-                    if (latchedLsc != null) {
-                        effectiveLsc = latchedLsc
-                        effectiveRows = latchedRows
-                        effectiveCols = latchedCols
-                    }
-                }
-
-                val spec = specAssembler.assemble(
-                    context = appContext,
-                    prefs = prefs,
-                    request = TaskSpecAssemblyRequest(
-                        width = burstContext.width,
-                        height = burstContext.height,
-                        orientation = burstContext.combinedOrientation,
-                        zoomFactor = currentZoom,
-                        mirror = env.shouldMirror,
-                        isSingleFrame = false,
-                        isHdrPlus = true,
-                        targetCharId = burstContext.targetCharId,
-                        chars = burstContext.chars,
-                        captureResult = result,
-                        captureMetadata = captureMetadata,
-                        cfa = burstContext.cfa,
-                        whiteLevel = burstContext.whiteLevel,
-                        blackLevelPattern = burstContext.blackLevelPattern,
-                        wb = burstContext.wb,
-                        ccm = burstContext.ccm,
-                        ccmAlt = burstContext.ccmAlt,
-                        exportMatrixAB = burstContext.exportMatrixAB,
-                        useSensorColorMatrix = burstContext.useSensorColorMatrix,
-                        calibration = burstCalib,
-                        lensShadingMapData = effectiveLsc,
-                        lensShadingRows = effectiveRows,
-                        lensShadingCols = effectiveCols,
-                        noiseProfile = burstContext.noiseProfileFlat,
-                        digitalGain = burstContext.digitalGain,
-                        faithfulHighlights = false,
-                        hfMetadata = burstContext.hfMetadata,
-                        timing = burstContext.timing,
-                        motionPhotoMp4Path = motionMp4Path,
-                        motionPhotoStillPtsUs = motionStillPtsUs,
-                        sink = burstContext.sink,
-                        saveRawOverride = if (settingsRepo.hasExplicitKey(PreferenceKeys.SAVE_RAW)) prefs.saveRaw else true
-                    )
-                )
-                val request = HdrPlusRequest.fromSpec(
-                    spec = spec,
-                    megaBuffer = null,
-                    streamingSessionHandle = streamingResult.sessionHandle,
-                    numFrames = frames.size
-                )
-                enqueueProcessingRequest(appContext, request, burstContext.timing)
-            } catch (e: Exception) {
-                Log.e(TAG, "Streaming HDR+ enqueue failed", e)
-                HdrPlusRequestManager.onTaskFinished()
-                isHdrPlusSuccess = false
-                try {
-                    ColorProcessor.nativeAbortStreamingSession(streamingResult.sessionHandle)
-                } catch (abortEx: Throwable) {
-                    Log.w(TAG, "Error aborting session", abortEx)
-                }
-                burstContext.sink?.let { s ->
-                    try {
-                        val failSpec = specAssembler.buildFailureSpec(
-                            width = burstContext.width,
-                            height = burstContext.height,
-                            orientation = burstContext.combinedOrientation,
-                            lensId = burstContext.targetCharId,
-                            hfMetadata = burstContext.hfMetadata,
-                            sink = s
-                        )
-                        s.onError(appContext, failSpec, e)
-                    } catch (sinkErr: Throwable) {
-                        Log.w(TAG, "Error invoking sink.onError", sinkErr)
-                    }
-                }
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(appContext, appContext.getString(R.string.toast_hdr_failed_fallback), Toast.LENGTH_SHORT).show()
-                }
-            } finally {
-                env.runtimeState.processingSemaphore.release()
-                env.lifecycleScope.launch(Dispatchers.Main) {
-                    ui.resetBurstUi()
-                    if (!isHdrPlusSuccess) ui.hideProcessingAnimation()
-                }
-            }
-        }
-    }
+    fun saveJpegFallback(
+        data: ByteArray,
+        rotationDegrees: Int,
+        zoomFactor: Float,
+        halfFrameMetadata: HalfFrameManager.Metadata? = null,
+        captureMetadata: CaptureMetadata? = null
+    ) = burstEnqueuer.saveJpegFallback(data, rotationDegrees, zoomFactor, halfFrameMetadata, captureMetadata)
 
     suspend fun processImageAsync(context: Context, image: RawImageHolder) =
         withContext(Dispatchers.IO) {
@@ -1011,69 +319,19 @@ class CameraCapturePipelineDispatcher(
             }
         }
 
-    fun saveJpegFallback(
-        data: ByteArray,
-        rotationDegrees: Int,
-        zoomFactor: Float,
-        halfFrameMetadata: HalfFrameManager.Metadata? = null,
-        captureMetadata: CaptureMetadata? = null
-    ) {
-        val appContext = env.hostContext.applicationContext
-        val mirror = env.shouldMirror
+    private fun abortCapture() {
+        env.runtimeState.isBurstActive = false
+        env.cameraViewModel.setBurstActive(false)
+        env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
+        env.runtimeState.processingSemaphore.release()
+    }
 
-        (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
-            try {
-                val name = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
-                val bmpFile = File(appContext.cacheDir, "temp_$name.jpg")
-                FileOutputStream(bmpFile).use { it.write(data) }
-
-                val settingsRepository = SettingsRepository.getInstance(appContext)
-                val jpgFolderUri = settingsRepository.current().jpgStorageUri
-
-                val (motionMp4Path, motionStillPtsUs) = specAssembler.awaitPendingMotionPhoto(
-                    pendingTaskProvider = { env.runtimeState.pendingMotionPhotoTask },
-                    clearPendingTask = { env.runtimeState.pendingMotionPhotoTask = null }
-                )
-
-                val uri = ImageSaver.saveProcessedImage(
-                    context = appContext,
-                    inputBitmap = null,
-                    bmpPath = bmpFile.absolutePath,
-                    rotationDegrees = rotationDegrees,
-                    zoomFactor = zoomFactor,
-                    baseName = name,
-                    linearDngPath = null,
-                    saveJpg = true,
-                    jpgFolderUri = jpgFolderUri,
-                    mirror = mirror,
-                    halfFrameMetadata = halfFrameMetadata,
-                    captureMetadata = captureMetadata,
-                    motionPhotoMp4Path = motionMp4Path,
-                    motionPhotoStillPtsUs = motionStillPtsUs
-                )
-                withContext(Dispatchers.Main) {
-                    if (uri != null) {
-                        env.imageRepository.invalidateCache()
-                        settingsRepository.setLastCaptureUri(uri.toString())
-                        ui.setGalleryThumbnail(uri.toString())
-                    } else if (coordinator.activeCoordinator?.shouldClearThumbnailOnCapture() == true) {
-                        ui.setGalleryThumbnail(null)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to save JPEG fallback", e)
-            } finally {
-                HdrPlusRequestManager.onTaskFinished()
-                env.runtimeState.processingSemaphore.release()
-                withContext(Dispatchers.Main) {
-                    ui.resetBurstUi()
-                    ui.cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                    if (coordinator.activeCoordinator?.keepsProcessingAnimationActive() != true) {
-                        ui.hideProcessingAnimation()
-                    }
-                }
-            }
+    private fun recordCaptureResult(result: TotalCaptureResult) {
+        val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
+        if (timestamp != null) {
+            env.runtimeState.captureResults[timestamp] = result
         }
+        (env.runtimeState.captureResultFlow as? MutableSharedFlow)?.tryEmit(result)
     }
 
     private fun activePhysicalId(result: CaptureResult?): String? {
