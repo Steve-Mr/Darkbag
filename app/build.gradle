@@ -152,6 +152,9 @@ dependencies {
     // WorkManager
     implementation "androidx.work:work-runtime-ktx:2.10.0"
 
+    // Jetpack Preference DataStore
+    implementation "androidx.datastore:datastore-preferences:1.1.1"
+
     // Media3 ExoPlayer for high-performance video playback
     def media3_version = "1.4.1"
     implementation "androidx.media3:media3-exoplayer:$media3_version"
