@@ -475,9 +475,30 @@
 
     <!-- 首次安装引导流程 -->
     <string name="onboarding_header_title">DARKBAG 配置向导</string>
+    <string name="onboarding_welcome_title">欢迎使用 Darkbag</string>
     <string name="onboarding_subtitle">计算摄影 · 无损底片 · 胶片暗房工作台</string>
     <string name="onboarding_skip">跳过</string>
     <string name="onboarding_step_format">步骤 %1$02d / %2$02d</string>
+    <string name="onboarding_section_permissions">核心权限</string>
+    <string name="onboarding_badge_step_1">步骤 1</string>
+    <string name="onboarding_badge_required">必选</string>
+    <string name="onboarding_badge_recommended">推荐</string>
+    <string name="onboarding_badge_optional_video">视频可选</string>
+    <string name="onboarding_badge_format">格式</string>
+    <string name="onboarding_section_optics">1.0x 默认焦段与元数据</string>
+    <string name="onboarding_badge_optics">光学</string>
+    <string name="onboarding_focal_24_desc">原生广角</string>
+    <string name="onboarding_focal_28_desc">经典街拍</string>
+    <string name="onboarding_focal_35_desc">人文叙事</string>
+    <string name="onboarding_section_recipe_pairing">胶片配方与 Log 曲线绑定</string>
+    <string name="onboarding_badge_recipe">配方</string>
+    <string name="onboarding_recipe_step1_select_log">1. 选择配方适用的 Log 曲线</string>
+    <string name="onboarding_section_ui_tier">取景器操控层级</string>
+    <string name="onboarding_badge_ui_tier">操控层级</string>
+    <string name="onboarding_tier_ps_short">极简快拍</string>
+    <string name="onboarding_tier_film_short">胶片创作</string>
+    <string name="onboarding_tier_pro_short">专业手动</string>
+    <string name="onboarding_shutter_hold_title">长按快门动作</string>
     <string name="onboarding_btn_next">下一步 →</string>
     <string name="onboarding_btn_start">完成配置 · 进入 Darkbag</string>
     <string name="onboarding_btn_grant_perms">一键授予核心权限并继续 →</string>
@@ -500,6 +521,12 @@
     <string name="onboarding_tier_film_desc">🎞️ FILM 胶片创作层（推荐）：取景器常驻 Log/LUT 配方切换胶囊、半格胶片 / 多摄同开模式切换 与 HDR+ 动态欠曝 磁贴。</string>
     <string name="onboarding_tier_pro_desc">🎛️ PRO 专业手动层：全功能开启 手动 ISO / 快门速度 / 对焦拨盘 与 峰值对焦辅助高亮 (Focus Peaking)。</string>
     <string name="onboarding_ready_desc">已为您配置完成！随时可在设置菜单中调整。</string>
+    <string name="toast_camera_permission_required">需要相机权限才能拍摄照片</string>
+    <string name="toast_camera_permission_continue">需要相机权限才能继续</string>
+    <string name="toast_lut_imported_paired">已导入 %1$s 并关联至 %2$s</string>
+    <string name="toast_lut_import_failed">导入 LUT (.cube) 失败</string>
+    <string name="camera_recipe_log_off">Log: 关</string>
+    <string name="camera_recipe_lut_off">LUT: 关</string>
     <string name="pref_replay_onboarding">配置向导</string>
     <string name="pref_replay_onboarding_desc">重新配置初始模块、格式与操控层级</string>
     <string name="lut_import_select_log_title">选择基准 Log 曲线</string>

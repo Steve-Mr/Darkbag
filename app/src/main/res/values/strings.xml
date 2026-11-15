@@ -499,9 +499,30 @@
 
     <!-- Onboarding Flow -->
     <string name="onboarding_header_title">DARKBAG SETUP</string>
+    <string name="onboarding_welcome_title">Welcome to Darkbag</string>
     <string name="onboarding_subtitle">Computational Photography · Lossless Negatives · Darkroom</string>
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_step_format">STEP %1$02d / %2$02d</string>
+    <string name="onboarding_section_permissions">CORE PERMISSIONS</string>
+    <string name="onboarding_badge_step_1">STEP 1</string>
+    <string name="onboarding_badge_required">Required</string>
+    <string name="onboarding_badge_recommended">Recommended</string>
+    <string name="onboarding_badge_optional_video">Video Optional</string>
+    <string name="onboarding_badge_format">FORMAT</string>
+    <string name="onboarding_section_optics">1.0X FOCAL BASE &amp; METADATA</string>
+    <string name="onboarding_badge_optics">OPTICS</string>
+    <string name="onboarding_focal_24_desc">Native Wide</string>
+    <string name="onboarding_focal_28_desc">Classic Street</string>
+    <string name="onboarding_focal_35_desc">Documentary</string>
+    <string name="onboarding_section_recipe_pairing">FILM RECIPE &amp; LOG PAIRING</string>
+    <string name="onboarding_badge_recipe">RECIPE</string>
+    <string name="onboarding_recipe_step1_select_log">1. Select matching Log curve for recipe</string>
+    <string name="onboarding_section_ui_tier">VIEWFINDER DECK TIER</string>
+    <string name="onboarding_badge_ui_tier">UI TIER</string>
+    <string name="onboarding_tier_ps_short">Minimal Snap</string>
+    <string name="onboarding_tier_film_short">Film Recipe</string>
+    <string name="onboarding_tier_pro_short">Manual Pro</string>
+    <string name="onboarding_shutter_hold_title">Shutter Hold Action</string>
     <string name="onboarding_btn_next">Next →</string>
     <string name="onboarding_btn_start">Complete Setup · Enter Darkbag</string>
     <string name="onboarding_btn_grant_perms">Grant Core Permissions &amp; Continue →</string>
@@ -524,6 +545,12 @@
     <string name="onboarding_tier_film_desc">🎞️ FILM Simulation Layer (Recommended): Viewfinder includes Film Recipe capsule, Half-frame &amp; Multi-cam modes, and dynamic HDR+ underexposure.</string>
     <string name="onboarding_tier_pro_desc">🎛️ PRO Manual Layer: Unlocks manual dials (ISO, Shutter speed, Manual focus) and focus peaking highlight.</string>
     <string name="onboarding_ready_desc">Setup complete! You can adjust any of these options at any time in Darkbag Settings.</string>
+    <string name="toast_camera_permission_required">Camera permission is required for taking photos</string>
+    <string name="toast_camera_permission_continue">Camera permission is required to continue</string>
+    <string name="toast_lut_imported_paired">Imported %1$s paired with %2$s</string>
+    <string name="toast_lut_import_failed">Failed to import LUT (.cube)</string>
+    <string name="camera_recipe_log_off">Log: Off</string>
+    <string name="camera_recipe_lut_off">LUT: Off</string>
     <string name="pref_replay_onboarding">Setup Wizard</string>
     <string name="pref_replay_onboarding_desc">Re-run startup module, formats, and UI tier setup</string>
     <string name="lut_import_select_log_title">Select Base Log Curve</string>
