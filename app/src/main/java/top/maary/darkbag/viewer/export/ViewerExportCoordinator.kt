@@ -3,10 +3,8 @@ package top.maary.darkbag.viewer.export
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
 import android.provider.DocumentsContract
 import android.util.Log
 import android.view.LayoutInflater
@@ -14,7 +12,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.FileProvider
-import androidx.documentfile.provider.DocumentFile
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import kotlinx.coroutines.*
@@ -30,16 +27,13 @@ import top.maary.darkbag.pipeline.darkroom.sink.ShareFileSink
 import top.maary.darkbag.provider.DarkbagDocumentsProvider
 import top.maary.darkbag.rawvideo.RawVideoExporter
 import top.maary.darkbag.repository.ImageRepository
-import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.HalfFrameManager
-import top.maary.darkbag.utils.ImageSaver
 import top.maary.darkbag.viewer.strategy.ViewerMediaStrategy
 import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 图像/视频导出与外发协调器 (ViewerExportCoordinator).
- * 封装 CinemaDNG 全流程序列导出、MP4 调色重编码、单帧提取、JPEG 导出、TIFF 渲染外发及 M3 进度弹窗。
+ * 封装导出进度弹窗调度、CinemaDNG/MP4 导出委托、JPEG 导出、TIFF 渲染外发及多图分享。
  * 严格遵循 Invariant 1 (CaptureSink & 统一导出路径隔离) 与 Invariant 4 (零 UI 阻塞与协程异步流)。
  */
 class ViewerExportCoordinator(
@@ -49,6 +43,20 @@ class ViewerExportCoordinator(
 ) {
 
     var activeExportDialog: AlertDialog? = null
+
+    private val cinemaDngExportHelper = ViewerCinemaDngExportHelper(
+        context = context,
+        scope = scope,
+        showProgressDialog = { title, onCancel -> showExportProgressDialog(title, onCancel) },
+        dismissIfActive = { dialog ->
+            if (dialog.isShowing) {
+                try { dialog.dismiss() } catch (_: Exception) {}
+            }
+            if (activeExportDialog === dialog) {
+                activeExportDialog = null
+            }
+        }
+    )
 
     /**
      * 构建并展示导出进度弹窗。
@@ -101,143 +109,7 @@ class ViewerExportCoordinator(
     fun performExportCinemaDng(
         group: ImageGroup,
         onComplete: suspend (baseName: String) -> Unit
-    ) {
-        val uri = group.rawVideoUri ?: return
-        val rawFolderUriStr = SettingsRepository.getInstance(context).current().rawStorageUri
-        val clipName = "CDNG_${group.baseName}"
-
-        val isUserCancelled = AtomicBoolean(false)
-        var exportJob: Job? = null
-
-        val (progressDialog, updateProgress) = showExportProgressDialog(
-            title = context.getString(R.string.export_progress_exporting_cdng),
-            onCancel = {
-                isUserCancelled.set(true)
-                exportJob?.cancel()
-            }
-        )
-
-        exportJob = scope.launch {
-            var tempExportDir: File? = null
-            var destDir: File? = null
-            try {
-                if (rawFolderUriStr != null) {
-                    val tempDir = File(context.cacheDir, "cdng_${System.currentTimeMillis()}").apply { mkdirs() }
-                    tempExportDir = tempDir
-
-                    val resultDir = RawVideoExporter.exportToCinemaDng(
-                        context = context,
-                        rawVideoUri = uri,
-                        outputDir = tempDir,
-                        clipName = clipName,
-                        isCancelled = { isUserCancelled.get() || !isActive },
-                        onProgress = updateProgress
-                    )
-
-                    if (isUserCancelled.get() || !isActive) {
-                        withContext(NonCancellable + Dispatchers.IO) { tempDir.deleteRecursively() }
-                        Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                        return@launch
-                    }
-
-                    if (resultDir != null && resultDir.exists()) {
-                        val exportedClipName = resultDir.name
-                        withContext(Dispatchers.IO) {
-                            try {
-                                val treeUri = Uri.parse(rawFolderUriStr)
-                                val treeDoc = DocumentFile.fromTreeUri(context, treeUri)
-                                val clipDirDoc = treeDoc?.createDirectory(exportedClipName)
-                                if (clipDirDoc != null) {
-                                    resultDir.listFiles()?.forEach { file ->
-                                        if (isUserCancelled.get() || !isActive) return@forEach
-                                        val mime = if (file.name.endsWith(".wav")) "audio/wav" else "image/x-adobe-dng"
-                                        val targetDoc = clipDirDoc.createFile(mime, file.name)
-                                        if (targetDoc != null) {
-                                            context.contentResolver.openOutputStream(targetDoc.uri)?.use { out ->
-                                                file.inputStream().use { it.copyTo(out) }
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                Log.e("ViewerExportCoordinator", "Failed to copy CinemaDNG to SAF folder", e)
-                            } finally {
-                                tempDir.deleteRecursively()
-                            }
-                        }
-
-                        if (isUserCancelled.get() || !isActive) {
-                            Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                            return@launch
-                        }
-
-                        onComplete(group.baseName)
-                        Toast.makeText(context, "CinemaDNG exported: $exportedClipName", Toast.LENGTH_LONG).show()
-                    } else {
-                        withContext(NonCancellable + Dispatchers.IO) { tempDir.deleteRecursively() }
-                        Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-                    val picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-                    val targetDir = File(picturesDir, "Darkbag/CinemaDNG/$clipName").apply { mkdirs() }
-                    destDir = targetDir
-
-                    val resultDir = RawVideoExporter.exportToCinemaDng(
-                        context = context,
-                        rawVideoUri = uri,
-                        outputDir = targetDir,
-                        clipName = clipName,
-                        isCancelled = { isUserCancelled.get() || !isActive },
-                        onProgress = updateProgress
-                    )
-
-                    if (isUserCancelled.get() || !isActive) {
-                        withContext(NonCancellable + Dispatchers.IO) { targetDir.deleteRecursively() }
-                        Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                        return@launch
-                    }
-
-                    if (resultDir != null && resultDir.exists()) {
-                        withContext(Dispatchers.IO) {
-                            val filePaths = resultDir.listFiles()?.map { it.absolutePath }?.toTypedArray()
-                            if (!filePaths.isNullOrEmpty()) {
-                                MediaScannerConnection.scanFile(context, filePaths, null, null)
-                            }
-                        }
-                        onComplete(group.baseName)
-                        Toast.makeText(context, "CinemaDNG exported: $clipName", Toast.LENGTH_LONG).show()
-                    } else {
-                        withContext(NonCancellable + Dispatchers.IO) { targetDir.deleteRecursively() }
-                        Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            } catch (e: CancellationException) {
-                withContext(NonCancellable + Dispatchers.IO) {
-                    tempExportDir?.deleteRecursively()
-                    destDir?.deleteRecursively()
-                }
-                Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                withContext(NonCancellable + Dispatchers.IO) {
-                    tempExportDir?.deleteRecursively()
-                    destDir?.deleteRecursively()
-                }
-                if (isUserCancelled.get()) {
-                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                } else {
-                    Log.e("ViewerExportCoordinator", "CinemaDNG export error", e)
-                    Toast.makeText(context, "CinemaDNG export error: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-            } finally {
-                if (progressDialog.isShowing) {
-                    try { progressDialog.dismiss() } catch (_: Exception) {}
-                }
-                if (activeExportDialog === progressDialog) {
-                    activeExportDialog = null
-                }
-            }
-        }
-    }
+    ) = cinemaDngExportHelper.performExportCinemaDng(group, onComplete)
 
     /**
      * 执行 MP4 调色视频重编码导出。
@@ -247,78 +119,7 @@ class ViewerExportCoordinator(
         config: EditConfig = group.editConfig ?: EditConfig(),
         targetResolution: Int = 1080,
         onComplete: suspend (baseName: String) -> Unit
-    ) {
-        val uri = group.rawVideoUri ?: return
-        val mediaFolderUri = SettingsRepository.getInstance(context).current().jpgStorageUri
-        val tempMp4File = File(context.cacheDir, "${group.baseName}_graded.mp4")
-
-        val isUserCancelled = AtomicBoolean(false)
-        var exportJob: Job? = null
-
-        val (progressDialog, updateProgress) = showExportProgressDialog(
-            title = context.getString(R.string.export_progress_exporting_mp4),
-            onCancel = {
-                isUserCancelled.set(true)
-                exportJob?.cancel()
-            }
-        )
-
-        exportJob = scope.launch {
-            try {
-                val success = RawVideoExporter.exportToMp4(
-                    context = context,
-                    rawVideoUri = uri,
-                    outputFile = tempMp4File,
-                    editConfig = config,
-                    targetResolution = targetResolution,
-                    isCancelled = { isUserCancelled.get() || !isActive },
-                    onProgress = updateProgress
-                )
-
-                if (isUserCancelled.get() || !isActive) {
-                    withContext(NonCancellable + Dispatchers.IO) { tempMp4File.delete() }
-                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
-
-                if (success && tempMp4File.exists() && tempMp4File.length() > 0) {
-                    val (savedUri, _) = ImageSaver.saveMp4Video(
-                        context = context,
-                        mp4File = tempMp4File,
-                        baseName = "${group.baseName}_graded",
-                        mediaFolderUri = mediaFolderUri
-                    )
-                    if (savedUri != null) {
-                        onComplete(group.baseName)
-                        Toast.makeText(context, "Graded MP4 saved: ${group.baseName}_graded.mp4", Toast.LENGTH_LONG).show()
-                    } else {
-                        Toast.makeText(context, "Failed to save MP4 to storage", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-                    withContext(NonCancellable + Dispatchers.IO) { tempMp4File.delete() }
-                    Toast.makeText(context, "MP4 export failed", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: CancellationException) {
-                withContext(NonCancellable + Dispatchers.IO) { tempMp4File.delete() }
-                Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                withContext(NonCancellable + Dispatchers.IO) { tempMp4File.delete() }
-                if (isUserCancelled.get()) {
-                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                } else {
-                    Log.e("ViewerExportCoordinator", "MP4 export error", e)
-                    Toast.makeText(context, "MP4 export error: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-            } finally {
-                if (progressDialog.isShowing) {
-                    try { progressDialog.dismiss() } catch (_: Exception) {}
-                }
-                if (activeExportDialog === progressDialog) {
-                    activeExportDialog = null
-                }
-            }
-        }
-    }
+    ) = cinemaDngExportHelper.performExportMp4(group, config, targetResolution, onComplete)
 
     /**
      * 导出 CinemaDNG 单帧图像。
@@ -332,41 +133,16 @@ class ViewerExportCoordinator(
         repository: ImageRepository,
         onStart: () -> Unit,
         onFinished: (success: Boolean) -> Unit
-    ) {
-        if (frameUri == null) {
-            Toast.makeText(context, R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        onStart()
-        Toast.makeText(context, R.string.cinemadng_exporting_frame, Toast.LENGTH_SHORT).show()
-
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val fullyLoadedGroup = if (!group.metadataLoaded) {
-                    repository.loadMetadata(group)
-                } else group
-                val config = editConfig ?: fullyLoadedGroup.editConfig
-                RawVideoExporter.exportSingleFrameFromCinemaDng(
-                    context = context.applicationContext,
-                    frameDngUri = frameUri,
-                    baseName = group.baseName,
-                    frameIndex = frameIndex,
-                    editConfig = config,
-                    exportType = exportType
-                )
-            }
-
-            val (rawUri, jpgUri) = result
-            val success = rawUri != null || jpgUri != null
-            if (success) {
-                Toast.makeText(context, R.string.cinemadng_export_success, Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(context, R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
-            }
-            onFinished(success)
-        }
-    }
+    ) = cinemaDngExportHelper.exportCinemaDngFrame(
+        group = group,
+        frameUri = frameUri,
+        frameIndex = frameIndex,
+        exportType = exportType,
+        editConfig = editConfig,
+        repository = repository,
+        onStart = onStart,
+        onFinished = onFinished
+    )
 
     /**
      * 处理 RawVideoExportSheet 的结果分发。
@@ -689,6 +465,40 @@ class ViewerExportCoordinator(
         } catch (e: ActivityNotFoundException) {
             Toast.makeText(context, "No app found to share.", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    fun openExportHub(
+        group: ImageGroup,
+        currentEditConfig: EditConfig?,
+        frameIndex: Int,
+        repository: ImageRepository,
+        fragmentManager: androidx.fragment.app.FragmentManager
+    ) {
+        scope.launch {
+            val fullyLoaded = if (!group.metadataLoaded) repository.loadMetadata(group) else group
+            val config = currentEditConfig ?: fullyLoaded.editConfig
+            RawVideoExportSheet.newInstance(fullyLoaded, config?.log, config?.lut, frameIndex)
+                .show(fragmentManager, RawVideoExportSheet.TAG)
+        }
+    }
+
+    fun shareGroupMedia(
+        group: ImageGroup,
+        format: String,
+        onShowHalfFrameShare: (ImageGroup) -> Unit
+    ) {
+        if (format == "DNG" && group.isHalfFrame()) {
+            onShowHalfFrameShare(group)
+            return
+        }
+        val uri = when (format) {
+            "JPG" -> group.jpgUri
+            "MP4" -> group.mp4VideoUri
+            "DNG" -> group.dngUri ?: group.dngUri1 ?: group.dngUri2 ?: group.cinemaDngFirstFrameUri
+            else -> group.firstAvailableUri
+        }
+        uri?.let { shareImages(listOf(it)) }
+            ?: Toast.makeText(context, R.string.error_no_external_viewer, Toast.LENGTH_SHORT).show()
     }
 
     /**
