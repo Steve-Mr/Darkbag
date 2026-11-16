@@ -29,7 +29,8 @@ object Percentiles {
 /**
  * 一次探测的原始聚合结果（三窗口 W0/W1 的量化指标）。
  *
- * 所有时间单位均为毫秒；[warmupMs] 为环首充填耗时，未测到（可选窗口未执行）时为 `null`。
+ * 所有时间单位均为毫秒；[warmupMs] 为环首充填耗时，未测到（可选窗口未执行）时为 `null`；
+ * [thermalStatusBefore] / [thermalStatusAfter] 为 `null` 表示热状态未知（API < 29 或读取失败）。
  */
 data class ZslProbeSample(
     val rawFrameCount: Int,
@@ -46,8 +47,8 @@ data class ZslProbeSample(
     val previewDropRatio: Float,
     val metadataHitRate: Float,
     val warmupMs: Long?,
-    val thermalStatusBefore: Int,
-    val thermalStatusAfter: Int,
+    val thermalStatusBefore: Int?,
+    val thermalStatusAfter: Int?,
     val memoryDeltaBytes: Long,
     val captureFailures: Int
 )
@@ -60,7 +61,8 @@ data class ZslProbeSample(
  * - 帧间隔基于按时间戳排序后的相邻差，负差（乱序回调）不会产生负间隔；
  * - 预览掉帧比例 = `(基线帧率 - 双流帧率) / 基线帧率`，夹到 `[0, 1]`；无基线数据时为 0；
  * - 元数据命中率在无样本时为 0（交给判定层按 `METADATA_MISS` 处理）；
- * - 内存差 = 结束后可用内存 - 开始前可用内存（负值表示探测期间内存被占用）。
+ * - 内存差 = 结束后可用内存 - 开始前可用内存（负值表示探测期间内存被占用）；
+ * - 热状态原样透传 `null`（未知），由判定层决定"未知不加失败码、最高 SUPPORTED"。
  */
 object ZslProbeAggregator {
     fun aggregate(
@@ -72,8 +74,8 @@ object ZslProbeAggregator {
         metadataHits: Int,
         metadataTotal: Int,
         warmupMs: Long?,
-        thermalBefore: Int,
-        thermalAfter: Int,
+        thermalBefore: Int?,
+        thermalAfter: Int?,
         memoryBefore: Long,
         memoryAfter: Long,
         captureFailures: Int,
@@ -127,3 +129,89 @@ object ZslProbeAggregator {
         )
     }
 }
+
+internal enum class ProbePhase { IDLE, BASELINE, DUAL, RECOVERY }
+
+/** 环首充填判定帧数：第 3 帧到达即认为环已进入稳态（用于 warmup 近似）。 */
+internal const val WARMUP_FRAMES = 3
+
+/**
+ * 帧回调收集器：只计数/记录，所有可变状态由 `synchronized(this)` 保护。
+ * 回调可能来自相机线程，控制器只会在窗口结束后读取快照。
+ */
+internal class SampleCollector(private val clock: ZslProbeClock) : ZslProbeFrameObserver {
+    private var phase = ProbePhase.IDLE
+    private var dualStartNs = 0L
+    private var baselinePreview = 0
+    private var dualPreview = 0
+    private val rawTimestamps = ArrayList<Long>()
+    private val ageSamples = ArrayList<Float>()
+    private val copySamples = ArrayList<Float>()
+    private var metadataHits = 0
+    private var captureFailures = 0
+    private var warmupMs: Long? = null
+
+    @Synchronized
+    fun setPhase(newPhase: ProbePhase) {
+        phase = newPhase
+    }
+
+    @Synchronized
+    fun markDualStart(timestampNs: Long) {
+        dualStartNs = timestampNs
+    }
+
+    @Synchronized
+    fun baselinePreviewCount(): Int = baselinePreview
+
+    @Synchronized
+    fun dualPreviewCount(): Int = dualPreview
+
+    @Synchronized
+    fun snapshot(): CollectorSnapshot = CollectorSnapshot(
+        rawTimestampsNs = rawTimestamps.toList(),
+        ageSamplesMs = ageSamples.toList(),
+        copySamplesMs = copySamples.toList(),
+        metadataHits = metadataHits,
+        captureFailures = captureFailures,
+        warmupMs = warmupMs
+    )
+
+    override fun onPreviewResult(timestampNs: Long) {
+        synchronized(this) {
+            when (phase) {
+                ProbePhase.BASELINE -> baselinePreview++
+                ProbePhase.DUAL -> dualPreview++
+                ProbePhase.IDLE, ProbePhase.RECOVERY -> Unit
+            }
+        }
+    }
+
+    override fun onRawFrame(timestampNs: Long, copyMs: Long, metadataHit: Boolean) {
+        synchronized(this) {
+            if (phase != ProbePhase.DUAL) return
+            rawTimestamps.add(timestampNs)
+            ageSamples.add(((clock.nowNanos() - timestampNs) / 1_000_000f).coerceAtLeast(0f))
+            copySamples.add(copyMs.coerceAtLeast(0L).toFloat())
+            if (metadataHit) metadataHits++
+            if (warmupMs == null && dualStartNs > 0L && rawTimestamps.size >= WARMUP_FRAMES) {
+                warmupMs = ((clock.nowNanos() - dualStartNs) / 1_000_000L).coerceAtLeast(0L)
+            }
+        }
+    }
+
+    override fun onCaptureFailure() {
+        synchronized(this) {
+            if (phase == ProbePhase.DUAL) captureFailures++
+        }
+    }
+}
+
+internal data class CollectorSnapshot(
+    val rawTimestampsNs: List<Long>,
+    val ageSamplesMs: List<Float>,
+    val copySamplesMs: List<Float>,
+    val metadataHits: Int,
+    val captureFailures: Int,
+    val warmupMs: Long?
+)

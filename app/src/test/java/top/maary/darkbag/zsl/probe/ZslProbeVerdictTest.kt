@@ -31,8 +31,8 @@ class ZslProbeVerdictTest {
         previewDropRatio: Float = 0f,
         metadataHitRate: Float = 1f,
         warmupMs: Long? = 100L,
-        thermalStatusBefore: Int = 0,
-        thermalStatusAfter: Int = 1,
+        thermalStatusBefore: Int? = 0,
+        thermalStatusAfter: Int? = 1,
         memoryDeltaBytes: Long = 0L,
         captureFailures: Int = 0
     ) = ZslProbeSample(
@@ -77,7 +77,8 @@ class ZslProbeVerdictTest {
 
         assertEquals(ZslProbeVerdict.RECOMMENDED, outcome.verdict)
         assertTrue(outcome.failures.isEmpty())
-        assertEquals(RingConfig(3, 24, 2), outcome.ringConfig)
+        // F5：floor(24/5)*5 = 20，与 24 档位取 min → 20
+        assertEquals(RingConfig(3, 20, 2), outcome.ringConfig)
     }
 
     @Test
@@ -200,6 +201,45 @@ class ZslProbeVerdictTest {
     }
 
     @Test
+    fun testUnknownThermalStatusCapsAtSupportedWithoutFailureCodes() {
+        // F1：热读失败/API<29 → null，与 warmupMs == null 同构：
+        // 不否定设备（不产生 THERMAL_RISK 失败码），但不足以判 RECOMMENDED。
+        val outcome = evaluate(sample(thermalStatusAfter = null))
+
+        assertEquals(ZslProbeVerdict.SUPPORTED, outcome.verdict)
+        assertTrue(outcome.failures.isEmpty())
+        assertEquals(RingConfig(3, 24, 2), outcome.ringConfig)
+
+        // SUPPORTED 档不受影响：即使其它指标只到 SUPPORTED 档，也仍是 SUPPORTED 且无失败码
+        val limited = evaluate(sample(thermalStatusAfter = null, rawFps = 15f, warmupMs = 300L))
+        assertEquals(ZslProbeVerdict.SUPPORTED, limited.verdict)
+        assertTrue(limited.failures.isEmpty())
+    }
+
+    @Test
+    fun testFifteenFpsNominalIntervalIsNotJudgedAsJitter() {
+        // F6：targetFps=15 → 标称 1000/15 ≈ 66.67 ms；实测 gapP95 66.7 ms 属正常，
+        // 不得被判 RAW_JITTER / RAW_STALL（旧实现写死 30 fps 标称时会误判）。
+        val outcome = ZslProbeScoring.evaluate(
+            sample(
+                rawFps = 15f,
+                gapP50Ms = 66.7f,
+                gapP95Ms = 66.7f,
+                gapMaxMs = 66.7f,
+                ageP95Ms = 60f,
+                copyP95Ms = 4f,
+                warmupMs = 100L,
+                thermalStatusAfter = 1
+            ),
+            1000f / 15f
+        )
+
+        assertEquals(ZslProbeVerdict.SUPPORTED, outcome.verdict)
+        assertTrue(outcome.failures.isEmpty())
+        assertEquals(RingConfig(3, 15, 2), outcome.ringConfig)
+    }
+
+    @Test
     fun testCaptureFailuresBoundary() {
         assertEquals(ZslProbeVerdict.RECOMMENDED, evaluate(sample(captureFailures = 0)).verdict)
         assertEquals(ZslProbeVerdict.SUPPORTED, evaluate(sample(captureFailures = 1)).verdict)
@@ -275,12 +315,25 @@ class ZslProbeVerdictTest {
 
     @Test
     fun testRecommendedRingConfigClampsTargetFpsToMeasuredFpsToAvoidInversion() {
-        // 15/24 的推荐值高于实测 14.9 fps 时必须夹到 14，避免"推荐帧率 > 实测帧率"倒挂。
+        // F5：14.9 fps → floor(14.9/5)*5 = 10，与 15 档位取 min → 10，避免"推荐帧率 > 实测帧率"倒挂。
         val ring = ZslProbeScoring.recommendedRingConfig(sample(rawFps = 14.9f))
 
-        assertEquals(14, ring.targetFps)
+        assertEquals(10, ring.targetFps)
         assertEquals(2, ring.minValidFrames)
-        assertTrue(ring.depth == 2 || ring.depth == 3)
+        // warmupMs 默认 100 ≤ 200 → 深度确定为 3（不再断言"2 或 3"这种恒真条件）
+        assertEquals(3, ring.depth)
+    }
+
+    @Test
+    fun testRecommendedTargetFpsFollowsFloorStepFormula() {
+        assertEquals(10, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 14.9f)).targetFps)
+        assertEquals(10, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 12f)).targetFps)
+        assertEquals(15, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 15f)).targetFps)
+        assertEquals(20, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 24f)).targetFps)
+        assertEquals(24, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 25f)).targetFps)
+        assertEquals(24, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 100f)).targetFps)
+        // 下限至少 5：极慢设备也不会推荐 0/负数帧率
+        assertEquals(5, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 4f)).targetFps)
     }
 
     @Test

@@ -33,6 +33,7 @@ import top.maary.darkbag.camera.delegate.CameraShutterController
 import top.maary.darkbag.camera.delegate.CameraThumbnailController
 import top.maary.darkbag.camera.delegate.CameraTierController
 import top.maary.darkbag.camera.delegate.CameraUiHost
+import top.maary.darkbag.camera.delegate.CameraZslProbeRunner
 import top.maary.darkbag.camera.dispatch.CameraCapturePipelineDispatcher
 import top.maary.darkbag.camera.dispatch.CameraMultiCaptureDispatcher
 import top.maary.darkbag.camera.session.CameraHardwareStreamController
@@ -78,6 +79,11 @@ class CameraControllerHub(
     val motionPhotoController = CameraMotionPhotoController(env, this, this)
     val tierController = CameraTierController(env, this, this)
     val hdrPlusController = CameraHdrPlusController(env, this, this, lutController, lensController)
+    val zslProbeRunner = CameraZslProbeRunner(
+        env = env,
+        applyControls = { applyManualSettingsToRequest(it) },
+        restorePreviewRequest = { streamController.updateCamera2RepeatingRequest() }
+    )
     val shutterController = CameraShutterController(
         env, this, this, overlayController, focusMeteringController, videoController
     )
@@ -157,6 +163,20 @@ class CameraControllerHub(
     override fun onSessionConfigured() {
         env.runtimeState.isSwitchingLens = false
         fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(150L)?.start()
+        consumePendingZslProbe()
+    }
+
+    /**
+     * §3.12.2 唯一触发链：设置页只写 `zsl_probe_pending=true` 并返回相机，
+     * 真正的探测在会话配置完成后、于此消费一次 pending 并启动 runner。
+     *
+     * 只做装配与触发：不判断拍摄模式、不加 UI 分支（UI 执行面属 S1-B2）。
+     */
+    private fun consumePendingZslProbe() {
+        val settingsRepository = SettingsRepository.getInstance(env.hostContext)
+        if (!settingsRepository.current().zslProbePending) return
+        settingsRepository.setZslProbePending(false)
+        zslProbeRunner.start()
     }
 
     override fun triggerTapToFocus(x: Float, y: Float) =

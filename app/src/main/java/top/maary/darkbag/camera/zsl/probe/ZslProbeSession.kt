@@ -38,10 +38,16 @@ interface ZslProbeSession {
     /** 设置/清除帧观察者（`null` 表示停止回调）。 */
     fun setFrameObserver(observer: ZslProbeFrameObserver?)
 
-    /** 当前热状态（`PowerManager.getCurrentThermalStatus()`）。 */
-    fun thermalStatus(): Int
+    /**
+     * 当前热状态（`PowerManager.getCurrentThermalStatus()`）。
+     *
+     * 返回 `null` 表示"未知"：API < 29、系统服务缺失或读取抛异常（S1-B1 F1：未知不得伪装成
+     * `THERMAL_STATUS_NONE`，否则会在热读失败时乐观判 RECOMMENDED）。判定层把 `null` 与
+     * `warmupMs == null` 同等对待：不否定设备，但结论最高 SUPPORTED。
+     */
+    fun thermalStatus(): Int?
 
-    /** 当前可用内存（`ActivityManager.MemoryInfo.availMem`）。 */
+    /** 当前可用内存（`ActivityManager.MemoryInfo.availMem`），读取失败返回 0。 */
     fun availableMemoryBytes(): Long
 }
 

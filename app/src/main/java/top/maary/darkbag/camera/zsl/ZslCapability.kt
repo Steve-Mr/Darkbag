@@ -4,12 +4,13 @@ import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
 import android.util.Size
+import androidx.annotation.VisibleForTesting
 
 /**
  * ZSL 所需的静态能力快照（只读，不涉及任何会话/硬件 IPC）。
  *
- * 所有字段都从 [CameraCharacteristics] 容错读取：任何 `get` 失败（未实现、权限、
- * 设备厂商缺失、Robolectric 桩抛异常）都回落为"未知"，[from] 本身**绝不抛异常**。
+ * 所有字段都从 [CameraCharacteristics] 容错读取：读取失败（未实现、设备厂商缺失、Robolectric 桩）
+ * 回落为"未知"；仅 `SecurityException` 与进程级 `Error` 重抛（见 [ZslStaticCapabilities.safeGet]）。
  *
  * @property hardwareLevel `INFO_SUPPORTED_HARDWARE_LEVEL`，未知为 -1
  * @property rawSupported 是否存在可用的 `RAW_SENSOR` 输出尺寸
@@ -106,11 +107,26 @@ data class ZslStaticCapabilities(
             )
         }
 
-        /** 容错读取：任何 `Throwable`（含 Robolectric 桩的 AssertionError）都视为未知。 */
-        private inline fun <T> safeGet(block: () -> T?): T? = try {
+        /**
+         * 容错读取（S1-B1 F1：不再吞掉一切 `Throwable`）：
+         * - [AssertionError]（Robolectric 桩 / JVM 断言）→ 视为"未知"；
+         * - **非** [SecurityException] 的 [RuntimeException]（厂商缺失键、类型不匹配、空指针）→ 视为"未知"；
+         * - [SecurityException] 与 [Error]（`OutOfMemoryError` / `StackOverflowError` / `LinkageError` 等）
+         *   一律重抛：前者是权限语义问题，后者是进程级故障，静默降级会把真实故障伪装成"设备不支持"。
+         *
+         * `internal` 仅为让 [ZslCapabilityTest] 能直接注入异常路径；生产调用点只有 [from]。
+         */
+        @VisibleForTesting
+        internal fun <T> safeGet(block: () -> T?): T? = try {
             block()
-        } catch (_: Throwable) {
+        } catch (_: AssertionError) {
             null
+        } catch (e: SecurityException) {
+            throw e
+        } catch (_: RuntimeException) {
+            null
+        } catch (e: Error) {
+            throw e
         }
     }
 }

@@ -33,6 +33,14 @@ data class RingConfig(
     val targetFps: Int,
     val minValidFrames: Int
 ) {
+    /**
+     * 三个维度全部为正才算可执行环参数。
+     *
+     * 用于两道防线（S1-B1 F4）：报告解码时拒绝"正向 verdict 但环非法"的 JSON，
+     * 以及 [ZslPolicy.fromReport] 对内存中手工构造的非法报告防御性回落 [Disabled]。
+     */
+    fun isUsable(): Boolean = depth > 0 && targetFps > 0 && minValidFrames > 0
+
     companion object {
         /** 关闭态：调用方据此跳过任何环逻辑。 */
         val DISABLED = RingConfig(0, 0, 0)
@@ -46,6 +54,7 @@ data class RingConfig(
  * - 用户关闭实验开关 → [Disabled]；
  * - 无报告（未检测 / 已失效）→ [Disabled]；
  * - 报告判定为 [ZslProbeVerdict.UNSUPPORTED] → [Disabled]；
+ * - 报告推荐环非法（任一维度 ≤0，含 `RingConfig.DISABLED`）→ [Disabled]：绝不武装 0 深度/0 fps 的环；
  * - [ZslProbeVerdict.SUPPORTED] / [ZslProbeVerdict.RECOMMENDED] → [ZslMode.AUTO]，
  *   环参数直接取报告推荐值，曝光在 S1 阶段恒为 [ZslExposurePolicy.AE_CONTINUOUS]。
  */
@@ -62,6 +71,7 @@ data class ZslPolicy(
             if (!enabledByUser) return Disabled
             if (report == null) return Disabled
             if (report.verdict == ZslProbeVerdict.UNSUPPORTED) return Disabled
+            if (!report.ringConfig.isUsable()) return Disabled
             return ZslPolicy(
                 mode = ZslMode.AUTO,
                 ring = report.ringConfig,

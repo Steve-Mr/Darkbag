@@ -1,7 +1,6 @@
 package top.maary.darkbag.zsl
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertSame
 import org.junit.Test
 import top.maary.darkbag.camera.zsl.RingConfig
 import top.maary.darkbag.camera.zsl.ZslExposurePolicy
@@ -111,7 +110,26 @@ class ZslPolicyTest {
     fun testDefaultPolicyAndDisabledConstantAreDisabled() {
         assertEquals(ZslMode.DISABLED, ZslPolicy().mode)
         assertEquals(RingConfig.DISABLED, ZslPolicy().ring)
-        assertSame(ZslPolicy.Disabled, ZslPolicy.Disabled)
         assertEquals(ZslPolicy.Disabled, ZslPolicy())
+    }
+
+    @Test
+    fun testReportWithIllegalRingFallsBackToDisabled() {
+        // F4：内存中手工构造的非法环（任一维度 ≤0）绝不武装
+        assertIllegalRingDisabled(RingConfig(0, 24, 2))
+        assertIllegalRingDisabled(RingConfig(3, 0, 2))
+        assertIllegalRingDisabled(RingConfig(3, 24, 0))
+        assertIllegalRingDisabled(RingConfig(-1, 24, 2))
+        assertIllegalRingDisabled(RingConfig.DISABLED)
+    }
+
+    private fun assertIllegalRingDisabled(ring: RingConfig) {
+        val policy = ZslPolicy.fromReport(
+            report(ZslProbeVerdict.SUPPORTED, ringConfig = ring),
+            enabledByUser = true
+        )
+        assertEquals(ZslMode.DISABLED, policy.mode)
+        assertEquals(RingConfig.DISABLED, policy.ring)
+        assertEquals(ZslExposurePolicy.AE_CONTINUOUS, policy.exposure)
     }
 }

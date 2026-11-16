@@ -76,7 +76,10 @@ data class ZslProbeReport(
         /**
          * 解析报告。**绝不抛异常**：
          * - `null` / 空白 / 坏 JSON / 版本不符 / verdict 非法 / 缺少 `sample` 对象 → `null`；
-         * - 叶子字段缺失用 `opt*` 兜底（数值 0、`warmupMs` 为 `null`），未知失败码忽略，保证向前兼容。
+         * - 正向 verdict（SUPPORTED / RECOMMENDED）但推荐环非法（缺字段 / 任一维度 ≤0）→ `null`：
+         *   这种报告一旦被 [top.maary.darkbag.camera.zsl.ZslPolicy] 采信就会武装出 0 深度、0 fps 的环，
+         *   宁可当作"无报告"要求重测（S1-B1 F4）；UNSUPPORTED 允许 `RingConfig.DISABLED`；
+         * - 叶子字段缺失用 `opt*` 兜底（数值 0、`warmupMs` / 热状态为 `null`），未知失败码忽略，保证向前兼容。
          */
         fun fromJson(raw: String?): ZslProbeReport? {
             if (raw.isNullOrBlank()) return null
@@ -85,6 +88,8 @@ data class ZslProbeReport(
                 if (json.optInt(FIELD_VERSION, -1) != SCHEMA_VERSION) return null
                 val verdict = parseVerdict(json.optString(FIELD_VERDICT, "")) ?: return null
                 val sampleJson = json.optJSONObject(FIELD_SAMPLE) ?: return null
+                val ringConfig = ringFromJson(json.optJSONObject(FIELD_RING_CONFIG))
+                if (verdict != ZslProbeVerdict.UNSUPPORTED && !ringConfig.isUsable()) return null
                 ZslProbeReport(
                     version = json.optInt(FIELD_VERSION, SCHEMA_VERSION),
                     timestampMs = json.optLong(FIELD_TIMESTAMP_MS, 0L),
@@ -95,7 +100,7 @@ data class ZslProbeReport(
                     verdict = verdict,
                     failures = parseFailures(json.optJSONArray(FIELD_FAILURES)),
                     sample = sampleFromJson(sampleJson),
-                    ringConfig = ringFromJson(json.optJSONObject(FIELD_RING_CONFIG))
+                    ringConfig = ringConfig
                 )
             } catch (_: Throwable) {
                 null
@@ -104,7 +109,8 @@ data class ZslProbeReport(
 
         /**
          * 报告是否仍适用于当前设备/镜头/RAW 尺寸。
-         * 同时校验 schema 版本，避免旧版本字段语义漂移后误用。
+         * 同时校验 schema 版本与推荐环合法性（正向 verdict 必须有可执行的环参数），
+         * 避免旧版本字段语义漂移或手工构造的非法报告被误用。
          */
         fun isApplicable(
             report: ZslProbeReport?,
@@ -119,6 +125,9 @@ data class ZslProbeReport(
             if (report.lensId != lensId) return false
             if (report.rawWidth != rawWidth) return false
             if (report.rawHeight != rawHeight) return false
+            if (report.verdict != ZslProbeVerdict.UNSUPPORTED && !report.ringConfig.isUsable()) {
+                return false
+            }
             return true
         }
 
@@ -137,8 +146,8 @@ data class ZslProbeReport(
             .put(FIELD_PREVIEW_DROP_RATIO, sample.previewDropRatio.toDouble())
             .put(FIELD_METADATA_HIT_RATE, sample.metadataHitRate.toDouble())
             .put(FIELD_WARMUP_MS, sample.warmupMs ?: JSONObject.NULL)
-            .put(FIELD_THERMAL_BEFORE, sample.thermalStatusBefore)
-            .put(FIELD_THERMAL_AFTER, sample.thermalStatusAfter)
+            .put(FIELD_THERMAL_BEFORE, sample.thermalStatusBefore ?: JSONObject.NULL)
+            .put(FIELD_THERMAL_AFTER, sample.thermalStatusAfter ?: JSONObject.NULL)
             .put(FIELD_MEMORY_DELTA, sample.memoryDeltaBytes)
             .put(FIELD_CAPTURE_FAILURES, sample.captureFailures)
 
@@ -146,6 +155,10 @@ data class ZslProbeReport(
             .put(FIELD_RING_DEPTH, config.depth)
             .put(FIELD_RING_TARGET_FPS, config.targetFps)
             .put(FIELD_RING_MIN_VALID_FRAMES, config.minValidFrames)
+
+        /** 可空整数字段：缺失或 JSON `null` → `null`（未知），与 0（`THERMAL_STATUS_NONE`）区分。 */
+        private fun JSONObject.optNullableInt(field: String): Int? =
+            if (has(field) && !isNull(field)) optInt(field, 0) else null
 
         private fun parseVerdict(raw: String): ZslProbeVerdict? =
             ZslProbeVerdict.entries.firstOrNull { it.name == raw }
@@ -179,8 +192,8 @@ data class ZslProbeReport(
             } else {
                 null
             },
-            thermalStatusBefore = json.optInt(FIELD_THERMAL_BEFORE, 0),
-            thermalStatusAfter = json.optInt(FIELD_THERMAL_AFTER, 0),
+            thermalStatusBefore = json.optNullableInt(FIELD_THERMAL_BEFORE),
+            thermalStatusAfter = json.optNullableInt(FIELD_THERMAL_AFTER),
             memoryDeltaBytes = json.optLong(FIELD_MEMORY_DELTA, 0L),
             captureFailures = json.optInt(FIELD_CAPTURE_FAILURES, 0)
         )

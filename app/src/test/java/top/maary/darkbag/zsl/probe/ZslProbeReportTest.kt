@@ -11,6 +11,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import top.maary.darkbag.camera.zsl.RingConfig
+import top.maary.darkbag.camera.zsl.ZslMode
+import top.maary.darkbag.camera.zsl.ZslPolicy
 import top.maary.darkbag.camera.zsl.probe.ZslProbeFailure
 import top.maary.darkbag.camera.zsl.probe.ZslProbeReport
 import top.maary.darkbag.camera.zsl.probe.ZslProbeSample
@@ -38,8 +40,8 @@ class ZslProbeReportTest {
         previewDropRatio: Float = 0.083f,
         metadataHitRate: Float = 0.995f,
         warmupMs: Long? = 120L,
-        thermalStatusBefore: Int = 0,
-        thermalStatusAfter: Int = 1,
+        thermalStatusBefore: Int? = 0,
+        thermalStatusAfter: Int? = 1,
         memoryDeltaBytes: Long = -1_234_567L,
         captureFailures: Int = 1
     ) = ZslProbeSample(
@@ -158,9 +160,10 @@ class ZslProbeReportTest {
 
     @Test
     fun testMissingLeafFieldsFallBackToDefaults() {
+        // 取 UNSUPPORTED：正向 verdict 缺合法 ring 会被判无效（F4），那样就测不到叶子字段兜底。
         val raw = JSONObject()
             .put("version", 1)
-            .put("verdict", "SUPPORTED")
+            .put("verdict", "UNSUPPORTED")
             .put("sample", JSONObject())
             .toString()
 
@@ -247,5 +250,68 @@ class ZslProbeReportTest {
         assertTrue(json.has("sample"))
         assertTrue(json.has("ringConfig"))
         assertTrue(json.getJSONArray("failures").length() == 2)
+    }
+
+    // ---------------------------------------------------------------------
+    // S1-B1 F4：正向 verdict 必须携带合法推荐环
+    // ---------------------------------------------------------------------
+
+    private fun withoutRing(report: ZslProbeReport): String =
+        JSONObject(report.toJson()).apply { remove("ringConfig") }.toString()
+
+    @Test
+    fun testPositiveVerdictWithoutRingConfigDecodesToNull() {
+        assertNull(ZslProbeReport.fromJson(withoutRing(report(verdict = ZslProbeVerdict.SUPPORTED))))
+        assertNull(ZslProbeReport.fromJson(withoutRing(report(verdict = ZslProbeVerdict.RECOMMENDED))))
+    }
+
+    @Test
+    fun testPositiveVerdictWithZeroedRingDimensionsDecodesToNull() {
+        val zeroDepth = report(verdict = ZslProbeVerdict.SUPPORTED, ringConfig = RingConfig(0, 24, 2))
+        val zeroFps = report(verdict = ZslProbeVerdict.RECOMMENDED, ringConfig = RingConfig(3, 0, 2))
+        val zeroFrames = report(verdict = ZslProbeVerdict.SUPPORTED, ringConfig = RingConfig(3, 24, 0))
+
+        assertNull(ZslProbeReport.fromJson(zeroDepth.toJson()))
+        assertNull(ZslProbeReport.fromJson(zeroFps.toJson()))
+        assertNull(ZslProbeReport.fromJson(zeroFrames.toJson()))
+    }
+
+    @Test
+    fun testUnsupportedVerdictIsAllowedToCarryDisabledRing() {
+        val unsupported = report(verdict = ZslProbeVerdict.UNSUPPORTED, ringConfig = RingConfig.DISABLED)
+
+        assertNotNull(ZslProbeReport.fromJson(withoutRing(unsupported)))
+        assertNotNull(ZslProbeReport.fromJson(unsupported.toJson()))
+    }
+
+    @Test
+    fun testInvalidRingReportIsNotApplicableAndPolicyFallsBackToDisabled() {
+        val invalid = report(verdict = ZslProbeVerdict.SUPPORTED, ringConfig = RingConfig(0, 24, 2))
+
+        assertFalse(
+            ZslProbeReport.isApplicable(invalid, "Google/Pixel 8/14", "0", 4000, 3000)
+        )
+        assertEquals(ZslPolicy.Disabled, ZslPolicy.fromReport(invalid, enabledByUser = true))
+        assertEquals(ZslMode.DISABLED, ZslPolicy.fromReport(invalid, enabledByUser = true).mode)
+        // 合法环仍被采信，确保上面的拒绝不是"一律禁用"
+        assertEquals(
+            ZslMode.AUTO,
+            ZslPolicy.fromReport(report(verdict = ZslProbeVerdict.SUPPORTED), enabledByUser = true).mode
+        )
+    }
+
+    @Test
+    fun testThermalUnknownRoundTripsAsNull() {
+        val original = report(
+            verdict = ZslProbeVerdict.SUPPORTED,
+            sample = sample(thermalStatusBefore = null, thermalStatusAfter = null)
+        )
+
+        val decoded = ZslProbeReport.fromJson(original.toJson())
+
+        assertNotNull(decoded)
+        assertNull(decoded!!.sample.thermalStatusBefore)
+        assertNull(decoded.sample.thermalStatusAfter)
+        assertEquals(original.sample, decoded.sample)
     }
 }

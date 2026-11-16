@@ -1,6 +1,7 @@
 package top.maary.darkbag.camera.zsl.probe
 
 import top.maary.darkbag.camera.zsl.RingConfig
+import kotlin.math.floor
 
 /** 探测结论三档（优先级 RECOMMENDED > SUPPORTED > UNSUPPORTED）。 */
 enum class ZslProbeVerdict { RECOMMENDED, SUPPORTED, UNSUPPORTED }
@@ -35,9 +36,9 @@ data class ZslProbeOutcome(
  * 3. 否则 → [ZslProbeVerdict.UNSUPPORTED]，列出所有未达 SUPPORTED 档的失败码，
  *    且推荐环参数回落 [RingConfig.DISABLED]。
  *
- * 边界一律含等号（`≥` / `≤`）。`warmupMs == null` 表示可选预热窗口未执行：
- * 它不会导致 UNSUPPORTED（阈值未知，不能据此否定设备），但也不足以判定 RECOMMENDED，
- * 因此此时结论最高为 SUPPORTED，推荐环深度按 2 处理。
+ * 边界一律含等号（`≥` / `≤`）。`warmupMs == null` 与 `thermalStatusAfter == null` 都表示"该项未测到"：
+ * 它们不会导致 UNSUPPORTED（阈值未知，不能据此否定设备），但也不足以判定 RECOMMENDED，
+ * 因此此时结论最高为 SUPPORTED（失败码列表为空），推荐环深度按 2 处理。
  */
 object ZslProbeScoring {
     private const val RECOMMENDED_MIN_RAW_FPS = 24f
@@ -64,6 +65,7 @@ object ZslProbeScoring {
     private const val RING_DEPTH_SUPPORTED = 2
     private const val RING_TARGET_FPS_HIGH = 24
     private const val RING_TARGET_FPS_LOW = 15
+    private const val RING_FPS_STEP = 5
     private const val RING_MIN_VALID_FRAMES = 2
 
     fun evaluate(sample: ZslProbeSample, nominalFrameIntervalMs: Float): ZslProbeOutcome {
@@ -94,9 +96,10 @@ object ZslProbeScoring {
     }
 
     /**
-     * 推荐环参数派生：
+     * 推荐环参数派生（§3.8.4 字面实现，S1-B1 F5）：
      * - `depth = 3`（预热 ≤200 ms）否则 `2`；
-     * - `targetFps = 24`（实测 ≥24 fps）否则 `15`，并夹到实测 fps 以内防止"推荐帧率 > 实测帧率"倒挂；
+     * - `targetFps` 先取 24 / 15 档位，再把**下限**夹到 `floor(rawFps / 5) * 5`（至少 5），二者取 min：
+     *   实测 14.9 fps → `floor(14.9/5)*5 = 10` → 推荐 10（旧实现会给 14，违反 5 fps 档位）；
      * - `minValidFrames = 2`。
      */
     internal fun recommendedRingConfig(sample: ZslProbeSample): RingConfig {
@@ -105,11 +108,14 @@ object ZslProbeScoring {
         } else {
             RING_DEPTH_SUPPORTED
         }
-        val targetFps = (if (sample.rawFps >= RECOMMENDED_MIN_RAW_FPS) {
+        val tierFps = if (sample.rawFps >= RECOMMENDED_MIN_RAW_FPS) {
             RING_TARGET_FPS_HIGH
         } else {
             RING_TARGET_FPS_LOW
-        }).coerceAtMost(sample.rawFps.toInt().coerceAtLeast(1))
+        }
+        val rawFpsFloorStep = floor(sample.rawFps / RING_FPS_STEP).toInt() * RING_FPS_STEP
+        val measuredFloorFps = rawFpsFloorStep.coerceAtLeast(RING_FPS_STEP)
+        val targetFps = minOf(tierFps, measuredFloorFps)
         return RingConfig(depth, targetFps, RING_MIN_VALID_FRAMES)
     }
 
@@ -163,7 +169,17 @@ object ZslProbeScoring {
         } else {
             SUPPORTED_MAX_THERMAL_STATUS
         }
-        if (sample.thermalStatusAfter > maxThermalStatus) add(ZslProbeFailure.THERMAL_RISK)
+        val thermalAfter = sample.thermalStatusAfter
+        if (recommended) {
+            // 未知热状态不足以判定 RECOMMENDED（与 warmupMs == null 同构），但 SUPPORTED 档不禁用。
+            if (thermalAfter == null || thermalAfter > maxThermalStatus) {
+                add(ZslProbeFailure.THERMAL_RISK)
+            }
+        } else {
+            if (thermalAfter != null && thermalAfter > maxThermalStatus) {
+                add(ZslProbeFailure.THERMAL_RISK)
+            }
+        }
 
         val maxCaptureFailures = if (recommended) 0 else SUPPORTED_MAX_CAPTURE_FAILURES
         if (sample.captureFailures > maxCaptureFailures) add(ZslProbeFailure.CAPTURE_FAILED)

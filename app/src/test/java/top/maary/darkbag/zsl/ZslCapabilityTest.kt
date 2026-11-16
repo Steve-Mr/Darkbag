@@ -8,6 +8,7 @@ import android.util.Size
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -214,5 +215,50 @@ class ZslCapabilityTest {
         assertEquals(4000, caps.rawWidth)
         assertNull(caps.rawMinFrameDurationMs)
         assertNull(caps.maxRawFrameRate)
+    }
+
+    // ---------------------------------------------------------------------
+    // S1-B1 F1：safeGet 收紧后只吞 AssertionError 与非 SecurityException 的 RuntimeException
+    // ---------------------------------------------------------------------
+
+    @Test
+    fun testSafeGetTreatsAssertionErrorAsUnknown() {
+        val value: Int? = ZslStaticCapabilities.safeGet<Int> {
+            throw AssertionError("Robolectric stub: key not implemented")
+        }
+
+        assertNull(value)
+    }
+
+    @Test
+    fun testSafeGetTreatsRuntimeExceptionAsUnknown() {
+        assertNull(ZslStaticCapabilities.safeGet<Int> { throw IllegalStateException("vendor key missing") })
+        assertNull(ZslStaticCapabilities.safeGet<Int> { throw NullPointerException("null map") })
+    }
+
+    @Test
+    fun testSafeGetRethrowsOutOfMemoryError() {
+        val thrown = assertThrows(OutOfMemoryError::class.java) {
+            ZslStaticCapabilities.safeGet<Int> { throw OutOfMemoryError("24MB frame allocation failed") }
+        }
+
+        assertEquals("24MB frame allocation failed", thrown.message)
+    }
+
+    @Test
+    fun testSafeGetRethrowsStackOverflowAndLinkageErrors() {
+        assertThrows(StackOverflowError::class.java) {
+            ZslStaticCapabilities.safeGet<Int> { throw StackOverflowError("deep recursion") }
+        }
+        assertThrows(LinkageError::class.java) {
+            ZslStaticCapabilities.safeGet<Int> { throw NoClassDefFoundError("native bridge missing") }
+        }
+    }
+
+    @Test
+    fun testSafeGetRethrowsSecurityException() {
+        assertThrows(SecurityException::class.java) {
+            ZslStaticCapabilities.safeGet<Int> { throw SecurityException("camera permission revoked") }
+        }
     }
 }
