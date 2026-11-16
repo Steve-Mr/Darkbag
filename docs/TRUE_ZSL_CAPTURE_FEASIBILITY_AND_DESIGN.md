@@ -318,7 +318,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 |---|---|---|---|
 | W0 基线 | 1500 ms | 保持现状（预览 + 分析流，无 RAW target） | 预览帧率基线、帧间隔 P50/P95、热状态、内存 |
 | W1 双流 | 4000 ms | 工厂重建 repeating：追加 RAW target，锁 `SENSOR_FRAME_DURATION = 1/fps` 与 `CONTROL_AE_TARGET_FPS_RANGE=[fps,fps]`；RAW 监听只计数并 `close()`，同时向**单个复用 scratch buffer** 拷贝以量拷贝耗时 | RAW 帧数/帧率/间隔 P50/P95/max/抖动、帧龄 `(elapsedRealtimeNanos−sensorTs)` P50/P95、拷贝耗时 P50/P95、元数据命中率与延迟、预览帧率、`onCaptureFailed` 数、曝光漂移（ISO/time 标准差） |
-| W2 恢复 | 1000 ms | 还原原始请求与监听，移除 RAW target | 预览帧率恢复度、请求字段与 W0 一致 |
+| W2 恢复 | 1000 ms | 还原原始请求与监听（RAW target 是否仍在会话配置中取决于 S0 现状，见 §1.2） | **S1 定位为 settle window**：不做数值判据；恢复正确性由真机 `DUMP`（请求字段与探测前逐字段一致）与冒烟验证，见 `docs/zsl/evidence/S1B1_20261116.md` §7 |
 | W3 补测（可选） | 1000 ms | 重新武装到"环满 3 帧"计时 | 环预热耗时 `warmLoadMs` |
 
 - 总时长 ≈ 7.5 s（含 W3）；**看门狗 15 s**，超时或状态变化（来电、切后台、模式切换）立即中止并还原。
@@ -339,8 +339,10 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 | 环预热 | ≤ 200 ms | ≤ 400 ms | `WARMUP_SLOW` |
 | 热状态（结束） | ≤ `LIGHT` | ≤ `MODERATE` | `THERMAL_RISK` |
 | `onCaptureFailed` | 0 | ≤ 1 | `CAPTURE_FAILED` |
+| 预检（录制/多摄/PiP/电量<10%/availMem<600MB/热>MODERATE） | 通过 | 通过 | `PRECONDITION_FAILED` |
+| RAW 能力 | 支持 | 支持 | `RAW_UNSUPPORTED` |
 
-派生推荐：`ringDepth = 3 if warmLoad ≤ 200 else 2`；`ringFps = 24 if rawFps ≥ 24 else 15`（下限夹到 `floor(rawFps/5)*5`）；`minValidFrames = 2`。
+派生推荐：`ringDepth = 3 if warmLoad ≤ 200 else 2`；`ringFps = if (rawFps ≥ 24) 24 else max(5, floor(rawFps/5)*5)`（即 ≥24 → 24；15–23.9 → 15；S1-B1 复审 R6 定稿，避免实测 24 被降到 20）；`minValidFrames = 2`。
 附加信息（不参与判定，只入报告）：`hasDeviceZslKey`、`supportsPrivateReprocessing`、`syncMaxLatency`、`pipelineDepth`、`hardwareLevel`、RAW 尺寸、`minFrameDurationMs`。
 
 #### 3.8.5 结果持久化与生效
@@ -588,7 +590,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 
 ### S1 — 能力探测与实验开关（含决策门 D1）
 
-- **Scope Lock**：`camera/zsl/{ZslCapability,ZslPolicy,probe/*}.kt`、`camera/session/zsl/*`(适配器)、`repository/*`(3 键)、`res/layout/fragment_settings.xml`(新增托盘)、`res/layout/bottom_sheet_zsl_probe.xml`(新)、`fragments/settings/SettingsZslDelegate.kt`(新)、`ui/ZslProbeBottomSheet.kt`(新)、`fragments/SettingsFragment.kt`(≤+6 行)、`fragments/CameraFragment.kt`/`camera/CameraControllerHub.kt`(仅 pending 挂点，≤+10 行)、`res/values*/strings.xml`、测试、`docs/zsl/evidence/S1_*.md`。**`SettingsBentoDelegate.kt` 禁止改动**。
+- **Scope Lock**：`camera/zsl/{ZslCapability,ZslPolicy,probe/*}.kt`、`camera/session/zsl/*`(适配器)、`repository/*`(3 键)、`res/layout/fragment_settings.xml`(新增托盘)、`res/layout/bottom_sheet_zsl_probe.xml`(新)、`fragments/settings/SettingsZslDelegate.kt`(新)、`ui/ZslProbeBottomSheet.kt`(新)、`fragments/SettingsFragment.kt`(≤+6 行)、`camera/CameraControllerHub.kt`(runner 装配 + pending 挂点 + hydration 守卫，≤+25 行)、`camera/delegate/CameraZslProbeRunner.kt`(新)、`camera/session/zsl/ZslProbeSessionAdapter.kt`(新)、`camera/zsl/probe/ZslProbe{TargetFps,ReportStore}.kt`(新)、`res/values*/strings.xml`、测试、`docs/zsl/evidence/S1_*.md`。**`SettingsBentoDelegate.kt` 禁止改动**。
 - **交付物**：静态能力探测 + 主动自检（≤10 s）+ 报告持久化 + 设置页 Bento 托盘（三态）+ 探测 BottomSheet + 报告复制 + 触发链。
 
 | ID | 可考核目标 | 证据 |
