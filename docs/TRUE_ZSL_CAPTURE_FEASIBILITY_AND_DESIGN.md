@@ -218,7 +218,7 @@ camera/zsl (纯能力层)  ─────────────►  camera/se
 | 文件 | 改动 | 预算 |
 |---|---|---|
 | `camera/session/PreviewRequestFactory.kt`（**新**） | 收敛 3 处重复的预览请求构造（见 R1） | ~130 新 |
-| `camera/session/CameraHardwareStreamController.kt` | 改用工厂；对 RAW 面 `prepare()`；**删掉**两段重复构造 | **净减少** |
+| `camera/session/CameraHardwareStreamController.kt` | 改用工厂；**删掉**两段重复构造 | **净减少** |
 | `camera/delegate/CameraLensController.kt` | 变焦改用工厂（否则丢 RAW target） | 净减少 |
 | `camera/dispatch/HdrPlusBurstCaptureExecutor.kt` | 注入 `ZslFrameSource`：环帧优先 + 前向补齐 | ≤ +45 |
 | `camera/dispatch/SingleRawCaptureExecutor.kt` | 单帧优先取环 | ≤ +30 |
@@ -387,7 +387,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 | 实践 | 采用方式 | 依据 |
 |---|---|---|
 | 会话/流组合合法性 | 只复用既有 3 流组合，不新增流 | 保证组合表（附录 A5） |
-| buffer 预分配 | 会话配置后对 RAW 面 `prepare()`（LEGACY 保护） | 附录 A4 |
+| buffer 预分配 | **S0 不做**：公开 API 只有 `prepare(Surface)`，会按 `maxImages` 全量预分配（8×24MB≈192MB）；`prepare(int, Surface)` 是 `@hide`（javap 核对 api26–35 android.jar）。R4 顺延至 S2 环深度确定后重新评估 | 附录 A4 + §3.11 R4 |
 | 帧率可控 | ring 请求设 `SENSOR_FRAME_DURATION` + `CONTROL_AE_TARGET_FPS_RANGE`（RAW 视频已用，`CameraVideoController.kt:137-143`） | 同左 |
 | 逐帧元数据绑定 | 按 `SENSOR_TIMESTAMP` 精确匹配（5 ms 容差，`CameraCaptureMetadataExtractor.kt:59-63`） | 官方 `SENSOR_TIMESTAMP` 语义 |
 | AE 稳定性 | 武装前要求 `CONTROL_AE_STATE` 收敛；固定曝光用 `AE_MODE_OFF` + 显式 ISO/时间（与现有 burst 一致） | 现有代码 + 官方键语义 |
@@ -403,7 +403,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 | R1 | 预览 repeating 在 3 处各自构造：`CameraHardwareStreamController.kt:157-181`、`:380-396`、`CameraLensController.kt:267-285` | 否则变焦/切镜头会静默丢掉 RAW target，环"假活" |
 | R2 | `captureResults` 无淘汰（`CameraRuntimeStateHolder.kt:67-73`） | 30 fps 持续写 → 无界增长；改有界 LRU(300) |
 | R3 | RAW 回调与预览结果共用 `camera2Handler` | 24 MB/帧拷贝挤占预览回调 → 独立 RAW 线程 |
-| R4 | 未调 `session.prepare()` | 环启动首帧抖动 → 会后 `prepare(maxImages, surface)` |
+| R4 | 未调 `session.prepare()` | **已裁决顺延（S0 不做）**：公开 API 仅 `prepare(Surface)`，会把 RAW ImageReader 的 `maxImages=8` 全量预分配（12MP≈192MB，50MP≈800MB），与 S0「零行为变更 / 不引入峰值内存」冲突；`prepare(int, Surface)` 在公开 SDK 不存在（`@hide`，javap api26–35 核对）。S2 在环深度确定后，按需把 RAW reader 改为 `maxImages = K + 2` 再评估是否 `prepare(Surface)` |
 | R5 | burst 请求未设帧率 | 环帧间隔不可控 → 显式锁帧率 |
 | R6 | `HdrPlusStreamingBurst.addFrame()` 强制再拷一次 | 快门路径多 3×24 MB → `addOwnedFrame()` |
 | R7 | 遗留 `zslTargetUriStr`（恒 null） | 语义污染，顺手清理 |
@@ -569,8 +569,8 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 
 ### S0 — 地基与遥测（无行为变更）
 
-- **Scope Lock**：`camera/session/PreviewRequestFactory.kt`(新)、`camera/session/RawFrameThread.kt`(新)、`CameraHardwareStreamController.kt`、`CameraLensController.kt`、`CameraRuntimeStateHolder.kt`、`HdrPlusStreamingBurst.kt`、`StreamingBufferPool.kt`、`HdrPlusRequestManager.kt`(删字段)、`camera/zsl/ZslTelemetry*.kt`(新)、`camera/dispatch/HdrPlusBurstCaptureExecutor.kt`(仅遥测钩子，≤+8)、`camera/dispatch/SingleRawCaptureExecutor.kt`(仅遥测钩子，≤+8)、对应测试。
-- **交付物**：预览请求工厂；有界元数据 LRU；独立 RAW 线程；`prepare()`；`addOwnedFrame()`；单行 JSON 遥测（固定 schema v1）。
+- **Scope Lock**：`camera/session/PreviewRequestFactory.kt`(新)、`camera/session/RawFrameThread.kt`(新)、`CameraHardwareStreamController.kt`、`CameraLensController.kt`、`CameraVideoController.kt`、`CameraSessionArbiter.kt`(仅字段与关闭钩子)、`CameraRuntimeStateHolder.kt`、`HdrPlusStreamingBurst.kt`、`HdrPlusRequestManager.kt`(删字段)、`processor/HdrPlusRequestManagerTest.kt`(删 1 行字段赋值，编译必需)、`camera/zsl/ZslTelemetry*.kt`(新)、`camera/dispatch/HdrPlusBurstCaptureExecutor.kt`(仅遥测钩子，≤+8)、`camera/dispatch/SingleRawCaptureExecutor.kt`(仅遥测钩子，≤+8)、对应测试。
+- **交付物**：预览请求工厂；有界元数据 LRU；独立 RAW 线程；`addOwnedFrame()`；单行 JSON 遥测（固定 schema v1）。`prepare()` 已裁决顺延 S2（见 §3.11 R4）。
 
 | ID | 可考核目标 | 证据 |
 |---|---|---|
@@ -578,7 +578,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 | S0-2 | 目标与条件矩阵等价：analysis 附着规则 8 例真值表、目标顺序、null 面跳过、额外 target 透传；真实请求字段在 S1 设备证据包用 `DUMP` 复核（Robolectric 无法构造真实 `CaptureRequest`） | `UT` + `REVIEW` |
 | S0-3 | `captureResults` 插入 1000 条后 size ≤ 300，且精确时间戳仍能命中、超界返回 null | `UT` |
 | S0-4 | RAW 回调线程名独立（`ZslRawThread`），预览结果线程不受其阻塞 | `LOG` |
-| S0-5 | `prepare()` 在会话 configure 后调用一次；LEGACY 设备不调用 | `UT` + `LOG` |
+| S0-5 | **已修订**：S0 不引入 `prepare()`（公开 API 会按 maxImages 全量预分配，见 R4）；以「决策记录 + javap 证据」交付，S2 重新评估 | `REVIEW`（api 证据 + 文档裁决） |
 | S0-6 | `addOwnedFrame()` 路径不含 `StreamingBufferPool.acquire`/`copyBayerWithStride`（结构性断言），准入/满员/关闭语义有单测 | `UT` + `REVIEW`(grep) |
 | S0-7 | 每次拍摄输出 1 行 JSON，字段固定（含 `t1Ms`, `frames`, `mode`, `fallbackReason`） | `LOG` |
 | S0-8 | 全量既有测试 100% 通过；无文件增长超预算 | `UT` + `REVIEW` |
