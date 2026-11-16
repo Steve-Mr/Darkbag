@@ -65,7 +65,7 @@ class CameraRuntimeStateHolder {
     @Volatile var lastTelemetryUpdateMs: Long = 0L
     @Volatile var lastClippingRatio: Double = 0.0
     val captureResults: MutableMap<Long, TotalCaptureResult> =
-        Collections.synchronizedMap(mutableMapOf())
+        Collections.synchronizedMap(BoundedCaptureResultCache<TotalCaptureResult>(BoundedCaptureResultCache.DEFAULT_MAX_ENTRIES))
     val captureResultFlow = MutableSharedFlow<TotalCaptureResult>(
         replay = 10,
         extraBufferCapacity = 64,

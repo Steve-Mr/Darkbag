@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
 import top.maary.darkbag.camera.delegate.CameraUiHost
+import top.maary.darkbag.camera.zsl.ZslTelemetry
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.pipeline.sink.CaptureSink
 import top.maary.darkbag.processor.ColorProcessor
@@ -248,6 +249,11 @@ internal class HdrPlusBurstCaptureExecutor(
                         watchdog?.cancel()
                         timing?.captureCallback = System.currentTimeMillis()
                         timing?.recordShutterReady()
+                        ZslTelemetry.emitCaptureSummary(
+                            mode = timing?.captureMode?.name,
+                            frameCount = burstSize,
+                            t1Ms = (timing?.shutterReady ?: 0L) - (timing?.shutterClick ?: 0L)
+                        )
                         env.lifecycleScope.launch(Dispatchers.Main) {
                             if (isTaskStarted.compareAndSet(false, true)) HdrPlusRequestManager.onTaskStarted()
                             env.runtimeState.isBurstActive = false
@@ -260,7 +266,7 @@ internal class HdrPlusBurstCaptureExecutor(
                         }
                     }
                 }
-            }, handler)
+            }, env.sessionArbiter.rawFrameHandler ?: handler)
 
             session.captureBurst(burstRequests, object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(

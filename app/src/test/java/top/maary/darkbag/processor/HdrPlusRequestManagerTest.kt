@@ -136,7 +136,6 @@ class HdrPlusRequestManagerTest {
             baseName = "test",
             fullResJpgPath = "/tmp/test.jpg",
             linearDngPath = "/tmp/test.dng",
-            zslTargetUriStr = null,
             jpgFolderUri = null,
             rawFolderUri = null,
             hfMetadata = null,

@@ -27,6 +27,7 @@ import top.maary.darkbag.R
 import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
 import top.maary.darkbag.camera.delegate.CameraUiHost
+import top.maary.darkbag.camera.session.PreviewRequestPlan
 import top.maary.darkbag.rawvideo.RawVideoNative
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
@@ -184,14 +185,16 @@ class CameraVideoController(
         if (device != null && session != null && surface != null) {
             val restorePreviewRequest: () -> Unit = {
                 try {
-                    val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                    request.addTarget(surface)
                     val isMainLens = env.runtimeState.currentLens == null || (env.runtimeState.currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
-                    if (isMainLens) {
-                        env.sessionArbiter.analysisImageReader?.surface?.let { request.addTarget(it) }
+                    val plan = PreviewRequestPlan.resolve(
+                        previewSurface = surface,
+                        analysisSurface = env.sessionArbiter.analysisImageReader?.surface,
+                        attachAnalysis = isMainLens
+                    )
+                    val request = env.sessionArbiter.previewRequestFactory.build(device, plan) { builder ->
+                        coordinator.applyManualSettingsToRequest(builder)
                     }
-                    coordinator.applyManualSettingsToRequest(request)
-                    session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                    session.setRepeatingRequest(request, object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
                             coordinator.handleCaptureResult(result)
                         }

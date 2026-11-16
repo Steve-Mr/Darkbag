@@ -52,6 +52,13 @@ class CameraHardwareStreamController(
         private const val ANALYSIS_SAMPLING_STEP = 4
     }
 
+    /** analysis 面附着判定：主摄(1x) 且手动曝光或 HDR+ 开启（规则见 [PreviewRequestPlan.shouldAttachAnalysis]）。 */
+    private fun shouldAttachAnalysis(): Boolean {
+        val isMainLens = env.runtimeState.currentLens == null ||
+            (env.runtimeState.currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
+        return PreviewRequestPlan.shouldAttachAnalysis(env.runtimeState.isManualExposure, env.isHdrPlusEnabled, isMainLens)
+    }
+
     private val camera2Lock: Mutex
         get() = env.sessionArbiter.camera2Lock
 
@@ -161,15 +168,9 @@ class CameraHardwareStreamController(
             val device = env.sessionArbiter.sessionController.cameraDevice ?: return@post
             val surface = env.sessionArbiter.camera2PreviewSurface ?: return@post
             try {
-                val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                request.addTarget(surface)
-                val isMainLens = env.runtimeState.currentLens == null || (env.runtimeState.currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
-                if ((env.runtimeState.isManualExposure || env.isHdrPlusEnabled) && isMainLens) {
-                    env.sessionArbiter.analysisImageReader?.surface?.let { request.addTarget(it) }
-                }
-                applyManualSettingsToRequest(request, isHdrBurst)
-
-                session.setRepeatingRequest(request.build(), object : CameraCaptureSession.CaptureCallback() {
+                val plan = PreviewRequestPlan.resolve(surface, env.sessionArbiter.analysisImageReader?.surface, shouldAttachAnalysis())
+                val request = env.sessionArbiter.previewRequestFactory.build(device, plan) { applyManualSettingsToRequest(it, isHdrBurst) }
+                session.setRepeatingRequest(request, object : CameraCaptureSession.CaptureCallback() {
                     override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
                         handleCaptureResult(result)
                     }
@@ -298,6 +299,7 @@ class CameraHardwareStreamController(
     fun createCamera2CaptureSession() {
         val device = env.sessionArbiter.sessionController.cameraDevice ?: return
         val handler = env.sessionArbiter.sessionController.backgroundHandler ?: return
+        env.sessionArbiter.rawFrameThread.start()
 
         Log.d(TAG, "Creating Camera2 Capture Session for device: ${device.id}")
 
@@ -379,17 +381,9 @@ class CameraHardwareStreamController(
                             }
                             handler.post {
                                 try {
-                                    val previewRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                                    surface?.let { previewRequest.addTarget(it) }
-
-                                    val isMainLens = env.runtimeState.currentLens == null || (env.runtimeState.currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
-                                    if ((env.runtimeState.isManualExposure || env.isHdrPlusEnabled) && isMainLens) {
-                                        env.sessionArbiter.analysisImageReader?.surface?.let { previewRequest.addTarget(it) }
-                                    }
-
-                                    applyManualSettingsToRequest(previewRequest)
-
-                                    session.setRepeatingRequest(previewRequest.build(), object : CameraCaptureSession.CaptureCallback() {
+                                    val plan = PreviewRequestPlan.resolve(surface, env.sessionArbiter.analysisImageReader?.surface, shouldAttachAnalysis())
+                                    val previewRequest = env.sessionArbiter.previewRequestFactory.build(device, plan) { applyManualSettingsToRequest(it) }
+                                    session.setRepeatingRequest(previewRequest, object : CameraCaptureSession.CaptureCallback() {
                                         override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
                                             handleCaptureResult(result)
                                         }

@@ -45,6 +45,16 @@ class CameraSessionArbiter(
     var analysisImageReader: ImageReader? = null
     var lutProcessor: LutSurfaceProcessor? = null
 
+    /** 单相机预览 repeating 请求的唯一构造点（会话配置/变焦/RAW 视频恢复共用）。 */
+    val previewRequestFactory = PreviewRequestFactory()
+
+    /** 独立 RAW 帧回调线程；会话配置时启动，关闭单相机资源时停止。 */
+    val rawFrameThread = RawFrameThread()
+
+    /** RAW ImageReader 回调 Handler；未启动时为 null（调用方回落到 camera2Handler）。 */
+    val rawFrameHandler: Handler?
+        get() = rawFrameThread.handler
+
     val camera2Device: CameraDevice?
         get() = sessionController.cameraDevice
 
@@ -172,6 +182,7 @@ class CameraSessionArbiter(
     suspend fun closeSingleCameraResources() {
         camera2Lock.withLock {
             state.captureResults.clear()
+            rawFrameThread.stop()
             sessionController.closeCamera()
             rawImageReader?.close()
             rawImageReader = null

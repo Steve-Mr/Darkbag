@@ -569,7 +569,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 
 ### S0 — 地基与遥测（无行为变更）
 
-- **Scope Lock**：`camera/session/PreviewRequestFactory.kt`(新)、`camera/session/RawFrameThread.kt`(新)、`CameraHardwareStreamController.kt`、`CameraLensController.kt`、`CameraVideoController.kt`、`CameraSessionArbiter.kt`(仅字段与关闭钩子)、`CameraRuntimeStateHolder.kt`、`HdrPlusStreamingBurst.kt`、`HdrPlusRequestManager.kt`(删字段)、`processor/HdrPlusRequestManagerTest.kt`(删 1 行字段赋值，编译必需)、`camera/zsl/ZslTelemetry*.kt`(新)、`camera/dispatch/HdrPlusBurstCaptureExecutor.kt`(仅遥测钩子，≤+8)、`camera/dispatch/SingleRawCaptureExecutor.kt`(仅遥测钩子，≤+8)、对应测试。
+- **Scope Lock**：`camera/session/PreviewRequestFactory.kt`(新)、`camera/session/RawFrameThread.kt`(新)、`camera/state/BoundedCaptureResultCache.kt`(新)、`CameraHardwareStreamController.kt`、`CameraLensController.kt`、`CameraVideoController.kt`、`CameraSessionArbiter.kt`(仅字段与关闭钩子)、`CameraRuntimeStateHolder.kt`、`HdrPlusStreamingBurst.kt`、`HdrPlusRequestManager.kt`(删字段)、`processor/HdrPlusRequestManagerTest.kt`(删 1 行字段赋值，编译必需)、`camera/zsl/ZslTelemetry*.kt`(新)、`camera/dispatch/HdrPlusBurstCaptureExecutor.kt`(遥测钩子 + S0-4 RAW 回调线程切换，≤+8)、`camera/dispatch/SingleRawCaptureExecutor.kt`(遥测钩子 + S0-4 RAW 回调线程切换 + JPEG 兜底模式标注，≤+8)、对应测试。
 - **交付物**：预览请求工厂；有界元数据 LRU；独立 RAW 线程；`addOwnedFrame()`；单行 JSON 遥测（固定 schema v1）。`prepare()` 已裁决顺延 S2（见 §3.11 R4）。
 
 | ID | 可考核目标 | 证据 |

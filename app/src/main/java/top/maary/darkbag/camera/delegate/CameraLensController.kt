@@ -4,7 +4,6 @@ import android.animation.ValueAnimator
 import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
 import android.util.Log
@@ -16,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import top.maary.darkbag.camera.session.PreviewRequestPlan
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.utils.CameraRepository
@@ -269,12 +269,12 @@ class CameraLensController(
             val activeDevice = arbiter.camera2Device ?: return@post
             val surface = arbiter.camera2PreviewSurface ?: return@post
             try {
-                val request = activeDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                request.addTarget(surface)
-                coordinator.applyManualSettingsToRequest(request)
-                request.set(CaptureRequest.SCALER_CROP_REGION, cropRegion)
-
-                activeSession.setRepeatingRequest(request.build(), object : CameraCaptureSession.CaptureCallback() {
+                val plan = PreviewRequestPlan.resolve(surface, null, attachAnalysis = false)
+                val request = arbiter.previewRequestFactory.build(activeDevice, plan) {
+                    coordinator.applyManualSettingsToRequest(it)
+                    it.set(CaptureRequest.SCALER_CROP_REGION, cropRegion)
+                }
+                activeSession.setRepeatingRequest(request, object : CameraCaptureSession.CaptureCallback() {
                     override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
                         coordinator.handleCaptureResult(result)
                     }

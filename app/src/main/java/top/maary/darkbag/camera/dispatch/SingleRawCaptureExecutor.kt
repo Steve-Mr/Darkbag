@@ -13,8 +13,10 @@ import top.maary.darkbag.MainApplication
 import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
 import top.maary.darkbag.camera.delegate.CameraUiHost
+import top.maary.darkbag.camera.zsl.ZslTelemetry
 import top.maary.darkbag.fragments.HdrPlusBurst
 import top.maary.darkbag.models.CaptureMetadata
+import top.maary.darkbag.models.CaptureTimingMode
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.pipeline.sink.CaptureSink
 import top.maary.darkbag.processor.ColorProcessor
@@ -102,6 +104,7 @@ internal class SingleRawCaptureExecutor(
                         buffer.get(data)
                         val ts = image.timestamp
                         image.close()
+                        timing?.captureMode = CaptureTimingMode.SINGLE_JPEG
                         onSingleFrameAccepted(timing, isFrame1Trigger)
                         val captureMetadata = if (hfMetadata == null) {
                             metadataExtractor.createCaptureMetadataFromTimestamp(ts, capturedLens)
@@ -118,7 +121,7 @@ internal class SingleRawCaptureExecutor(
                     onNotifySinkFailure(appContext, sink, hfMetadata, e)
                     onAbortCapture()
                 }
-            }, handler)
+            }, env.sessionArbiter.rawFrameHandler ?: handler)
 
             session.capture(request.build(), object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureStarted(
@@ -152,6 +155,11 @@ internal class SingleRawCaptureExecutor(
 
     private fun onSingleFrameAccepted(timing: StandardTimingTracker?, isFrame1Trigger: Boolean) {
         timing?.recordShutterReady()
+        ZslTelemetry.emitCaptureSummary(
+            mode = timing?.captureMode?.name,
+            frameCount = 1,
+            t1Ms = (timing?.shutterReady ?: 0L) - (timing?.shutterClick ?: 0L)
+        )
         env.runtimeState.isBurstActive = false
         env.cameraViewModel.setBurstActive(false)
         env.lifecycleScope.launch(Dispatchers.Main) {

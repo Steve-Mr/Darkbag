@@ -353,22 +353,39 @@ class HdrPlusStreamingBurst(
                 noiseProfileO = noiseProfileO
             )
 
-            val sendResult = frameChannel.trySend(QueuedFrame(cleanBuffer, frame))
-            if (!sendResult.isSuccess) {
-                Log.e(TAG, "Failed to enqueue frame to frameChannel (capacity full or closed)")
-                StreamingBufferPool.release(cleanBuffer)
-                return false
-            }
-
-            enqueuedCount++
-            Log.d(TAG, "Streaming frame $enqueuedCount/$frameCount enqueued (fast copy)")
-
-            if (enqueuedCount == frameCount) {
-                frameChannel.close()
-            }
-
-            return true
+            return enqueueFrame(cleanBuffer, frame, owned = false)
         }
+    }
+
+    /** 零拷贝移交一帧（所有权转移，S2 用）：不拷贝、不经 [StreamingBufferPool]，准入/满员/关闭语义同 [addFrame]。 */
+    fun addOwnedFrame(
+        buffer: ByteBuffer, width: Int, height: Int, timestampNs: Long, exposureTimeNs: Long,
+        rotationDegrees: Int, physicalId: String? = null,
+        noiseProfileS: Float = 0.0001f, noiseProfileO: Float = 0.00001f
+    ): Boolean {
+        synchronized(lock) {
+            if (isCompleted || isAborted || enqueuedCount >= frameCount) return false
+            val frame = StreamingBurstFrame(
+                width = width, height = height, timestampNs = timestampNs, exposureTimeNs = exposureTimeNs,
+                rotationDegrees = rotationDegrees, physicalId = physicalId,
+                noiseProfileS = noiseProfileS, noiseProfileO = noiseProfileO
+            )
+            return enqueueFrame(buffer, frame, owned = true)
+        }
+    }
+
+    /** 入队唯一实现（调用方持 [lock]）；[owned] 缓冲不属于池，入队失败不得回收进池。 */
+    private fun enqueueFrame(buffer: ByteBuffer, frame: StreamingBurstFrame, owned: Boolean): Boolean {
+        val sendResult = frameChannel.trySend(QueuedFrame(buffer, frame))
+        if (!sendResult.isSuccess) {
+            Log.e(TAG, "Failed to enqueue frame to frameChannel (capacity full or closed)")
+            if (!owned) StreamingBufferPool.release(buffer)
+            return false
+        }
+        enqueuedCount++
+        Log.d(TAG, "Streaming frame $enqueuedCount/$frameCount enqueued (${if (owned) "owned" else "copied"})")
+        if (enqueuedCount == frameCount) frameChannel.close()
+        return true
     }
 
     /**
