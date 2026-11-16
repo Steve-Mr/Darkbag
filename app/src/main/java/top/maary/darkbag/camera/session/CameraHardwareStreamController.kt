@@ -161,23 +161,44 @@ class CameraHardwareStreamController(
         env.sessionArbiter.applySingleCameraCropToRequest(request)
     }
 
+    /** 异步更新预览 repeating（保持既有 post 语义：调用方不关心成败）。 */
     fun updateCamera2RepeatingRequest(isHdrBurst: Boolean = false) {
         val handler = env.sessionArbiter.sessionController.backgroundHandler ?: return
         handler.post {
-            val session = env.sessionArbiter.sessionController.captureSession ?: return@post
-            val device = env.sessionArbiter.sessionController.cameraDevice ?: return@post
-            val surface = env.sessionArbiter.camera2PreviewSurface ?: return@post
-            try {
-                val plan = PreviewRequestPlan.resolve(surface, env.sessionArbiter.analysisImageReader?.surface, shouldAttachAnalysis())
-                val request = env.sessionArbiter.previewRequestFactory.build(device, plan) { applyManualSettingsToRequest(it, isHdrBurst) }
-                session.setRepeatingRequest(request, object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                        handleCaptureResult(result)
-                    }
-                }, handler)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to update Camera2 repeating request", e)
-            }
+            applyRepeatingRequest(handler, isHdrBurst)
+        }
+    }
+
+    /**
+     * **同步**构建并提交预览 repeating，返回成败（S1-B2 R1）。
+     *
+     * 供 ZSL 探测的恢复阶段使用：`endDualStream()` 必须拿到"恢复到底成没成"的可达结果，
+     * 异步 `post` 版本永远只能返回"已派发"。**必须在 camera2Handler 线程调用**
+     * （由 `ZslProbeSessionAdapter` 通过 `runBlockingOnHandler` 保证）；handler/设备/会话/预览面
+     * 任一缺失或提交抛异常 → `false`。
+     */
+    fun updateCamera2RepeatingRequestNow(): Boolean {
+        val handler = env.sessionArbiter.sessionController.backgroundHandler ?: return false
+        return applyRepeatingRequest(handler, isHdrBurst = false)
+    }
+
+    /** repeating 的唯一构造点（异步/同步两个入口共用），返回是否成功提交。 */
+    private fun applyRepeatingRequest(handler: Handler, isHdrBurst: Boolean): Boolean {
+        val session = env.sessionArbiter.sessionController.captureSession ?: return false
+        val device = env.sessionArbiter.sessionController.cameraDevice ?: return false
+        val surface = env.sessionArbiter.camera2PreviewSurface ?: return false
+        return try {
+            val plan = PreviewRequestPlan.resolve(surface, env.sessionArbiter.analysisImageReader?.surface, shouldAttachAnalysis())
+            val request = env.sessionArbiter.previewRequestFactory.build(device, plan) { applyManualSettingsToRequest(it, isHdrBurst) }
+            session.setRepeatingRequest(request, object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                    handleCaptureResult(result)
+                }
+            }, handler)
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update Camera2 repeating request", e)
+            false
         }
     }
 

@@ -77,8 +77,8 @@ class ZslProbeVerdictTest {
 
         assertEquals(ZslProbeVerdict.RECOMMENDED, outcome.verdict)
         assertTrue(outcome.failures.isEmpty())
-        // F5：floor(24/5)*5 = 20，与 24 档位取 min → 20
-        assertEquals(RingConfig(3, 20, 2), outcome.ringConfig)
+        // R6 定稿：rawFps ≥ 24 → 24（不再被 floor(24/5)*5 = 20 降到 20）
+        assertEquals(RingConfig(3, 24, 2), outcome.ringConfig)
     }
 
     @Test
@@ -302,7 +302,8 @@ class ZslProbeVerdictTest {
             ),
             outcome.failures.toSet()
         )
-        assertEquals(ZslProbeFailure.entries.size, outcome.failures.size)
+        // 每个失败码恰好一次（R3 新增的 PC/RAW 两个码不在阈值评分表内，故按 10 个评分码计数）
+        assertEquals(10, outcome.failures.size)
         assertEquals(RingConfig.DISABLED, outcome.ringConfig)
     }
 
@@ -315,7 +316,7 @@ class ZslProbeVerdictTest {
 
     @Test
     fun testRecommendedRingConfigClampsTargetFpsToMeasuredFpsToAvoidInversion() {
-        // F5：14.9 fps → floor(14.9/5)*5 = 10，与 15 档位取 min → 10，避免"推荐帧率 > 实测帧率"倒挂。
+        // R6：14.9 fps < 15 → floor(14.9/5)*5 = 10（不再是 15 档），避免"推荐帧率 > 实测帧率"倒挂。
         val ring = ZslProbeScoring.recommendedRingConfig(sample(rawFps = 14.9f))
 
         assertEquals(10, ring.targetFps)
@@ -324,15 +325,29 @@ class ZslProbeVerdictTest {
         assertEquals(3, ring.depth)
     }
 
+    /**
+     * R6 定稿公式（设计 §3.8.4）五档钉死：
+     * `≥24 → 24`；`15–23.9 → 15`；`<15 → floor(rawFps/5)*5`，下限 5。
+     */
+    @Test
+    fun testRecommendedTargetFpsPinnedAcrossFiveTiers() {
+        assertEquals(24, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 24f)).targetFps)
+        assertEquals(15, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 23.9f)).targetFps)
+        assertEquals(10, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 14.9f)).targetFps)
+        // 下限至少 5：极慢设备也不会推荐 0/负数帧率
+        assertEquals(5, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 4f)).targetFps)
+        assertEquals(24, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 100f)).targetFps)
+    }
+
     @Test
     fun testRecommendedTargetFpsFollowsFloorStepFormula() {
         assertEquals(10, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 14.9f)).targetFps)
         assertEquals(10, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 12f)).targetFps)
         assertEquals(15, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 15f)).targetFps)
-        assertEquals(20, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 24f)).targetFps)
+        assertEquals(15, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 20f)).targetFps)
+        assertEquals(24, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 24f)).targetFps)
         assertEquals(24, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 25f)).targetFps)
         assertEquals(24, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 100f)).targetFps)
-        // 下限至少 5：极慢设备也不会推荐 0/负数帧率
         assertEquals(5, ZslProbeScoring.recommendedRingConfig(sample(rawFps = 4f)).targetFps)
     }
 

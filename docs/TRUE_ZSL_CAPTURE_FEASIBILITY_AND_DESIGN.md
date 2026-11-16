@@ -309,7 +309,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 #### 3.8.2 入口与前置
 
 - **双界面**（详见 §3.12）：控制面在**全屏 Settings** 的新 Bento 托盘 `card_tray_zsl`；执行面在**相机页**的 `ZslProbeBottomSheet`。设置页点"运行检测"只写 `zsl_probe_pending=true` 并返回相机，真正的探测由 `onSessionConfigured()` 挂点触发（原因此见 §1.10：设置页无活跃会话）。
-- 前置：会话 `Active`、非录制/多摄/PiP、电量 >10%、`availMem ≥ 600 MB`、热状态 ≤ `MODERATE`；否则直接返回 `PRECONDITION_FAILED` 并给出原因。
+- 前置：会话 `Active`、非录制/多摄/PiP、电量 **<10% 拒绝（10% 通过）**、`availMem ≥ 600 MB`、热状态 ≤ `MODERATE`；不满足即返回 `PRECONDITION_FAILED` 并给出原因（未知电量/热状态放行）。
 - 全程遵守 Invariant 4：所有 camera IPC 在 camera handler；UI 只展示状态。
 
 #### 3.8.3 测量序列（固定、可复现、可中止）
@@ -590,7 +590,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 
 ### S1 — 能力探测与实验开关（含决策门 D1）
 
-- **Scope Lock**：`camera/zsl/{ZslCapability,ZslPolicy,probe/*}.kt`、`camera/session/zsl/*`(适配器)、`repository/*`(3 键)、`res/layout/fragment_settings.xml`(新增托盘)、`res/layout/bottom_sheet_zsl_probe.xml`(新)、`fragments/settings/SettingsZslDelegate.kt`(新)、`ui/ZslProbeBottomSheet.kt`(新)、`fragments/SettingsFragment.kt`(≤+6 行)、`camera/CameraControllerHub.kt`(runner 装配 + pending 挂点 + hydration 守卫，≤+25 行)、`camera/delegate/CameraZslProbeRunner.kt`(新)、`camera/session/zsl/ZslProbeSessionAdapter.kt`(新)、`camera/zsl/probe/ZslProbe{TargetFps,ReportStore}.kt`(新)、`res/values*/strings.xml`、测试、`docs/zsl/evidence/S1_*.md`。**`SettingsBentoDelegate.kt` 禁止改动**。
+- **Scope Lock**：`camera/zsl/{ZslCapability,ZslPolicy,probe/*}.kt`、`camera/session/zsl/*`(适配器)、`repository/*`(3 键)、`res/layout/fragment_settings.xml`(新增托盘)、`res/layout/bottom_sheet_zsl_probe.xml`(新)、`fragments/settings/SettingsZslDelegate.kt`(新)、`ui/ZslProbeBottomSheet.kt`(新)、`fragments/SettingsFragment.kt`(≤+6 行)、`camera/CameraControllerHub.kt`(runner 装配 + pending 挂点 + hydration 守卫，≤+25 行)、`camera/delegate/CameraZslProbeRunner.kt`(新)、`camera/session/zsl/ZslProbeSessionAdapter.kt`(新；S1-B2 拆出 `ZslProbeBeginGate/HandlerDispatch/SystemReadings/RawReader` 四个 ≤70 行文件)、`camera/session/CameraHardwareStreamController.kt`(仅 R1 同步恢复入口，≤+35/−15)、`camera/zsl/probe/ZslProbe{TargetFps,ReportStore}.kt`(新)、`res/values*/strings.xml`、测试、`docs/zsl/evidence/S1_*.md`。**`SettingsBentoDelegate.kt` 禁止改动**。
 - **交付物**：静态能力探测 + 主动自检（≤10 s）+ 报告持久化 + 设置页 Bento 托盘（三态）+ 探测 BottomSheet + 报告复制 + 触发链。
 
 | ID | 可考核目标 | 证据 |

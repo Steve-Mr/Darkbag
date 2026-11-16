@@ -34,6 +34,7 @@ import top.maary.darkbag.camera.delegate.CameraThumbnailController
 import top.maary.darkbag.camera.delegate.CameraTierController
 import top.maary.darkbag.camera.delegate.CameraUiHost
 import top.maary.darkbag.camera.delegate.CameraZslProbeRunner
+import top.maary.darkbag.camera.delegate.ZslProbePendingConsumer
 import top.maary.darkbag.camera.dispatch.CameraCapturePipelineDispatcher
 import top.maary.darkbag.camera.dispatch.CameraMultiCaptureDispatcher
 import top.maary.darkbag.camera.session.CameraHardwareStreamController
@@ -82,7 +83,8 @@ class CameraControllerHub(
     val zslProbeRunner = CameraZslProbeRunner(
         env = env,
         applyControls = { applyManualSettingsToRequest(it) },
-        restorePreviewRequest = { streamController.updateCamera2RepeatingRequest() }
+        // R1：探测恢复必须拿到"同步提交的真实成败"，因此走 camera2Handler 上的 Now 变体
+        restorePreviewRequest = { streamController.updateCamera2RepeatingRequestNow() }
     )
     val shutterController = CameraShutterController(
         env, this, this, overlayController, focusMeteringController, videoController
@@ -170,13 +172,19 @@ class CameraControllerHub(
      * §3.12.2 唯一触发链：设置页只写 `zsl_probe_pending=true` 并返回相机，
      * 真正的探测在会话配置完成后、于此消费一次 pending 并启动 runner。
      *
-     * 只做装配与触发：不判断拍摄模式、不加 UI 分支（UI 执行面属 S1-B2）。
+     * hydration 守卫（S1-B2 R10）：DataStore 未 hydrate 时 `current()` 是默认值（pending=false），
+     * 此时消费会把用户刚点下的请求丢掉。未 hydrate 直接返回、不动状态；hydrate 完成后由
+     * [onSettingsHydrated] 再调一次本方法。
+     *
+     * 只做装配与触发：不判断拍摄模式、不加 UI 分支（UI 执行面属 S1-B3）。
      */
     private fun consumePendingZslProbe() {
         val settingsRepository = SettingsRepository.getInstance(env.hostContext)
-        if (!settingsRepository.current().zslProbePending) return
-        settingsRepository.setZslProbePending(false)
-        zslProbeRunner.start()
+        ZslProbePendingConsumer(
+            isHydrated = { settingsRepository.isHydrated },
+            settingsRepository = settingsRepository,
+            startProbe = { zslProbeRunner.start() }
+        ).consume()
     }
 
     override fun triggerTapToFocus(x: Float, y: Float) =
@@ -338,6 +346,8 @@ class CameraControllerHub(
         if (previousMode != activeMode) {
             bindCameraUseCases()
         }
+        // settings 刚 hydrate 完成：补一次 pending 消费（R10；未 hydrate 时被守卫挡下）
+        consumePendingZslProbe()
     }
 
     fun onResume(

@@ -1,7 +1,5 @@
 package top.maary.darkbag.camera.session.zsl
 
-import android.app.ActivityManager
-import android.content.Context
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureFailure
@@ -9,10 +7,6 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.media.ImageReader
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
@@ -24,9 +18,6 @@ import top.maary.darkbag.camera.zsl.probe.ZslProbeSession
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.utils.CameraRepository
 import java.nio.ByteBuffer
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * [ZslProbeSession] 的 Camera2 实现（S1-B1 §4.1）：**只**做"追加/移除 RAW target + 锁定帧率 +
@@ -38,12 +29,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * @param env 相机环境网关（提供 arbiter / runtimeState / CameraManager）
  * @param applyControls 复用的既有请求配置（手动 ISO/快门、对焦、OIS、crop 等）
- * @param restorePreviewRequest 恢复既有预览 repeating 的入口（由 hub 注入，内部投递到 camera2Handler）
+ * @param restorePreviewRequest 恢复既有预览 repeating 的入口（由 hub 注入；内部在 camera2Handler
+ *   上**同步**构建并提交，返回真实成败，见 S1-B2 R1）
  */
 class ZslProbeSessionAdapter(
     private val env: CameraEnvironmentHost,
     private val applyControls: (CaptureRequest.Builder) -> Unit,
-    private val restorePreviewRequest: () -> Unit
+    private val restorePreviewRequest: () -> Boolean
 ) : ZslProbeSession {
 
     @Volatile private var observer: ZslProbeFrameObserver? = null
@@ -69,13 +61,20 @@ class ZslProbeSessionAdapter(
 
     override fun beginDualStream(targetFps: Int): Boolean {
         if (begun) return true
+        val rawReader = env.sessionArbiter.rawImageReader ?: return false
+        // R3/F1：会话里挂的必须是真 RAW_SENSOR reader——`reader.imageFormat == ImageFormat.RAW_SENSOR`
+        // （即 getImageFormat()）自 API 19 起可用，因此**无条件**校验、无 SDK 版本分支；
+        // 仅当格式读取本身抛异常时才回落到静态能力快照（见 ZslProbeRawReader.kt）。
+        if (!isRawSensorReader(rawReader) { rawSupportedFallback() }) {
+            Log.w(TAG, "RAW reader is not a RAW_SENSOR reader, skip dual stream")
+            return false
+        }
         val fps = targetFps.coerceAtLeast(1)
         val arbiter = env.sessionArbiter
         val device = arbiter.camera2Device ?: return false
         val session = arbiter.camera2Session ?: return false
         val handler = arbiter.camera2Handler ?: return false
         val previewSurface = arbiter.camera2PreviewSurface ?: return false
-        val rawReader = arbiter.rawImageReader ?: return false
         val rawSurface = rawReader.surface ?: return false
 
         val scratch = allocateScratch(rawReader) ?: return false
@@ -89,8 +88,19 @@ class ZslProbeSessionAdapter(
         )
         val rawHandler = arbiter.rawFrameHandler ?: handler
 
-        val started = runBlockingOnHandler(handler, BEGIN_TIMEOUT_MS) {
-            // 先挂 RAW 监听再提交 repeating：避免双流首帧落在"无监听"的空窗里
+        // R4：本次启动的放弃闸门——等待超时后，**迟到**的 block 不得再提交双流请求
+        val gate = ZslProbeBeginGate()
+        val started = ZslProbeHandlerDispatch.runBlocking(
+            handler = handler,
+            timeoutMs = BEGIN_TIMEOUT_MS,
+            onTimeout = { gate.abandon() }
+        ) {
+            if (gate.isAbandoned) return@runBlocking false
+            // R2：先发布 scratch 与 begun，再挂监听，最后提交 repeating。
+            // 顺序反了会让双流首帧落在"监听已挂、scratch 还是 null"的空窗里，首帧拷贝被静默跳过。
+            scratchBuffer = scratch
+            begun = true
+            // 再挂 RAW 监听：避免双流首帧落在"无监听"的空窗里
             rawReader.setOnImageAvailableListener({ reader -> handleRawImage(reader) }, rawHandler)
             val request = arbiter.previewRequestFactory.build(device, plan) { builder ->
                 applyControls(builder)
@@ -100,69 +110,79 @@ class ZslProbeSessionAdapter(
                     fpsRange?.let { builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
                 }
             }
+            if (gate.isAbandoned) {
+                // 已被放弃：撤销本次注册与状态，绝不再 setRepeatingRequest（R4）
+                abandonBegin(rawReader)
+                return@runBlocking false
+            }
             session.setRepeatingRequest(request, captureCallback(), handler)
-            scratchBuffer = scratch
-            begun = true
             true
         }
         if (!started) {
             scratchBuffer = null
             runCatching { rawReader.setOnImageAvailableListener(null, null) }
+            // R4：超时路径下 block 可能已经把 begun 置 true（请求可能已被改写），补偿还原，
+            // 否则探测协程会带着"RAW 监听已挂但预览请求未提交"的孤儿状态继续跑
+            gate.compensate(alreadyBegun = begun) { endDualStream() }
         }
         return started
     }
 
     override fun endDualStream(): Boolean {
-        var ok = true
+        var ok = false
         try {
-            env.sessionArbiter.rawImageReader?.setOnImageAvailableListener(null, null)
+            // 顺序（S1-B2 R1）：① 先注销 RAW 监听（不再有帧进入 scratch）
+            // ② 再在 camera2Handler 上同步恢复预览 repeating 并拿到**真实成效**
+            // ③ 最后释放 scratch（finally），避免释放瞬间仍有帧拷入
+            //
+            // F6：注销监听本身可能抛异常（reader 已 close / 厂商实现异常），但**绝不能**因此跳过
+            // 恢复——监听注销失败仍必须尝试还原 repeating，所以单独 runCatching 包住（与 abandonBegin 一致）。
+            runCatching { env.sessionArbiter.rawImageReader?.setOnImageAvailableListener(null, null) }
+                .onFailure { Log.w(TAG, "Failed to detach RAW listener during restore", it) }
             val handler = env.sessionArbiter.camera2Handler
-            if (handler == null) {
+            ok = if (handler == null) {
+                // handler 已销毁（会话关闭）：直接在调用线程尝试恢复
                 restorePreviewRequest()
             } else {
-                // 在 camera2Handler 上调用并等待，保证"移除 RAW target"先于/同步于恢复请求
-                ok = runBlockingOnHandler(handler, END_TIMEOUT_MS) {
-                    restorePreviewRequest()
-                    true
-                }
+                ZslProbeHandlerDispatch.runBlocking(handler, END_TIMEOUT_MS) { restorePreviewRequest() }
             }
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to end probe dual stream", t)
             ok = false
         } finally {
-            // scratch 在监听注销之后才释放，避免释放瞬间仍有帧拷入
             scratchBuffer = null
             begun = false
         }
         return ok
     }
 
-    /**
-     * 热状态：API 29+ 读 [PowerManager.getCurrentThermalStatus]，其余/异常返回 `null`（未知）。
-     * 未知必须与 `THERMAL_STATUS_NONE(0)` 区分，否则热读失败会被乐观判为 RECOMMENDED。
-     */
-    override fun thermalStatus(): Int? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
-        return try {
-            val manager = env.hostContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
-            manager?.currentThermalStatus
-        } catch (_: AssertionError) {
-            null
-        } catch (_: RuntimeException) {
-            null
-        }
+    /** 放弃晚到 block 的收口：撤销监听与双流本地状态，不碰 repeating（从未提交）。(R4) */
+    private fun abandonBegin(rawReader: ImageReader) {
+        runCatching { rawReader.setOnImageAvailableListener(null, null) }
+        scratchBuffer = null
+        begun = false
     }
 
-    override fun availableMemoryBytes(): Long = try {
-        val activityManager =
-            env.hostContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-                ?: return 0L
-        ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }.availMem
+    /**
+     * 静态能力兜底：**仅**在 `ImageReader.getImageFormat()` 读取本身抛异常时使用
+     * （会话绑定时的能力快照与 reader 创建条件是同一来源，见 [isRawSensorReader]）。
+     */
+    private fun rawSupportedFallback(): Boolean = try {
+        capabilities.rawSupported
     } catch (_: AssertionError) {
-        0L
+        false
     } catch (_: RuntimeException) {
-        0L
+        false
     }
+
+    /**
+     * 热状态：API 29+ 读 `PowerManager.getCurrentThermalStatus`，其余/异常返回 `null`（未知）。
+     * 未知必须与 `THERMAL_STATUS_NONE(0)` 区分，否则热读失败会被乐观判为 RECOMMENDED。
+     */
+    override fun thermalStatus(): Int? = ZslProbeSystemReadings.thermalStatus(env.hostContext)
+
+    override fun availableMemoryBytes(): Long =
+        ZslProbeSystemReadings.availableMemoryBytes(env.hostContext)
 
     /** 分配单帧 scratch（宽×高×2）；尺寸非法返回 `null`。 */
     private fun allocateScratch(reader: ImageReader): ByteBuffer? {
@@ -250,40 +270,6 @@ class ZslProbeSessionAdapter(
         } finally {
             image.close()
         }
-    }
-
-    /**
-     * 在 [handler] 上执行并同步等待结果；已在该 Handler 的线程上时直接执行（避免自死锁）。
-     * 投递失败 / 等待超时 / 块内异常 → `false`。
-     */
-    private fun runBlockingOnHandler(handler: Handler, timeoutMs: Long, block: () -> Boolean): Boolean {
-        if (Looper.myLooper() === handler.looper) {
-            return try {
-                block()
-            } catch (t: Throwable) {
-                Log.e(TAG, "Probe request block failed on handler thread", t)
-                false
-            }
-        }
-        val outcome = AtomicBoolean(false)
-        val latch = CountDownLatch(1)
-        val posted = handler.post {
-            try {
-                outcome.set(block())
-            } catch (t: Throwable) {
-                Log.e(TAG, "Probe request block failed", t)
-            } finally {
-                latch.countDown()
-            }
-        }
-        if (!posted) return false
-        val finished = try {
-            latch.await(timeoutMs, TimeUnit.MILLISECONDS)
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-            false
-        }
-        return finished && outcome.get()
     }
 
     private companion object {

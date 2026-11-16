@@ -156,7 +156,9 @@ class ZslProbeController(
         val dualPreviewCount = collector.dualPreviewCount()
         val snapshot = collector.snapshot()
 
-        // W2：恢复窗口（先还原请求，再留 1000 ms 观察恢复）
+        // W2：恢复窗口 = **settle window**（S1-B2 R5，设计 §3.8.3）：先还原请求，再留 1000 ms 观察恢复。
+        // 本窗口**不做任何数值判据**（不产出恢复度指标、不参与评分）：恢复正确性由真机
+        // `DUMP`（请求字段与探测前逐字段一致）与冒烟矩阵验证；因此也不要为 W2 新增字段。
         restore()
         collector.setPhase(ProbePhase.RECOVERY)
         if (!awaitWindow(WINDOW_RECOVERY_MS)) return ZslProbeResult.Aborted

@@ -29,6 +29,10 @@ object Percentiles {
 /**
  * 一次探测的原始聚合结果（三窗口 W0/W1 的量化指标）。
  *
+ * 窗口口径（S1-B2 R5，设计 §3.8.3）：只有 W0/W1 的指标参与判定；**W2 是 settle window，
+ * 不产出任何数值判据**——恢复是否正确由真机 `DUMP`（请求字段与探测前逐字段一致）与冒烟矩阵
+ * 验证，因此本类**没有**"恢复度"字段，也不得为 W2 新增字段。
+ *
  * 所有时间单位均为毫秒；[warmupMs] 为环首充填耗时，未测到（可选窗口未执行）时为 `null`；
  * [thermalStatusBefore] / [thermalStatusAfter] 为 `null` 表示热状态未知（API < 29 或读取失败）。
  */
@@ -51,7 +55,34 @@ data class ZslProbeSample(
     val thermalStatusAfter: Int?,
     val memoryDeltaBytes: Long,
     val captureFailures: Int
-)
+) {
+    companion object {
+        /**
+         * 全零样本：探测**未开窗**时用于构造报告（如设备无 RAW 能力，S1-B2 R3）。
+         * 与 [ZslProbeAggregator] 在"零帧零窗口"下的产出语义一致（热状态未知为 `null`）。
+         */
+        fun empty(): ZslProbeSample = ZslProbeSample(
+            rawFrameCount = 0,
+            rawFps = 0f,
+            gapP50Ms = 0f,
+            gapP95Ms = 0f,
+            gapMaxMs = 0f,
+            ageP50Ms = 0f,
+            ageP95Ms = 0f,
+            copyP50Ms = 0f,
+            copyP95Ms = 0f,
+            previewFpsBaseline = 0f,
+            previewFpsDual = 0f,
+            previewDropRatio = 0f,
+            metadataHitRate = 0f,
+            warmupMs = null,
+            thermalStatusBefore = null,
+            thermalStatusAfter = null,
+            memoryDeltaBytes = 0L,
+            captureFailures = 0
+        )
+    }
+}
 
 /**
  * 把探测窗口的原始观测聚合成 [ZslProbeSample]（纯函数）。

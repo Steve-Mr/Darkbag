@@ -135,13 +135,13 @@ class ZslProbeReportTest {
     @Test
     fun testMissingOrUnknownVerdictReturnsNull() {
         val missing = JSONObject()
-            .put("version", 1)
+            .put("version", 2)
             .put("sample", JSONObject())
             .toString()
         assertNull(ZslProbeReport.fromJson(missing))
 
         val unknown = JSONObject()
-            .put("version", 1)
+            .put("version", 2)
             .put("verdict", "MAYBE")
             .put("sample", JSONObject())
             .toString()
@@ -151,7 +151,7 @@ class ZslProbeReportTest {
     @Test
     fun testMissingSampleObjectReturnsNull() {
         val raw = JSONObject()
-            .put("version", 1)
+            .put("version", 2)
             .put("verdict", "SUPPORTED")
             .toString()
 
@@ -162,7 +162,7 @@ class ZslProbeReportTest {
     fun testMissingLeafFieldsFallBackToDefaults() {
         // 取 UNSUPPORTED：正向 verdict 缺合法 ring 会被判无效（F4），那样就测不到叶子字段兜底。
         val raw = JSONObject()
-            .put("version", 1)
+            .put("version", 2)
             .put("verdict", "UNSUPPORTED")
             .put("sample", JSONObject())
             .toString()
@@ -313,5 +313,68 @@ class ZslProbeReportTest {
         assertNull(decoded!!.sample.thermalStatusBefore)
         assertNull(decoded.sample.thermalStatusAfter)
         assertEquals(original.sample, decoded.sample)
+    }
+
+    // ---------------------------------------------------------------------
+    // S1-B2 R3：schema 升到 2（新增 PRECONDITION_FAILED / RAW_UNSUPPORTED 失败码）
+    // ---------------------------------------------------------------------
+
+    @Test
+    fun testSchemaVersionIsTwoAndWrittenIntoSavedJson() {
+        assertEquals(2, ZslProbeReport.SCHEMA_VERSION)
+
+        val json = JSONObject(report().toJson())
+
+        assertEquals(2, json.getInt("version"))
+    }
+
+    @Test
+    fun testVersionOneJsonIsRejected() {
+        val downgraded = JSONObject(report().toJson()).put("version", 1).toString()
+
+        assertNull(ZslProbeReport.fromJson(downgraded))
+    }
+
+    @Test
+    fun testPreconditionAndRawUnsupportedFailureCodesRoundTrip() {
+        listOf(ZslProbeFailure.PRECONDITION_FAILED, ZslProbeFailure.RAW_UNSUPPORTED).forEach { code ->
+            val original = report(
+                verdict = ZslProbeVerdict.UNSUPPORTED,
+                failures = listOf(code),
+                ringConfig = RingConfig.DISABLED
+            )
+
+            val decoded = ZslProbeReport.fromJson(original.toJson())
+
+            assertNotNull("$code must survive JSON round trip", decoded)
+            assertEquals(listOf(code), decoded!!.failures)
+        }
+    }
+
+    @Test
+    fun testRawUnsupportedReportWithEmptySampleRoundTripsAsApplicable() {
+        // Runner 的"无 RAW 能力"报告（R3）：全零 sample + DISABLED 环 + RAW_UNSUPPORTED
+        val original = ZslProbeReport(
+            version = ZslProbeReport.SCHEMA_VERSION,
+            timestampMs = 1_700_000_000_123L,
+            deviceFingerprint = "Google/Pixel 8/14",
+            lensId = "0",
+            rawWidth = 0,
+            rawHeight = 0,
+            verdict = ZslProbeVerdict.UNSUPPORTED,
+            failures = listOf(ZslProbeFailure.RAW_UNSUPPORTED),
+            sample = ZslProbeSample.empty(),
+            ringConfig = RingConfig.DISABLED
+        )
+
+        val decoded = ZslProbeReport.fromJson(original.toJson())
+
+        assertNotNull(decoded)
+        assertEquals(original, decoded)
+        assertTrue(decoded!!.sample.rawFps == 0f)
+        assertEquals(0, decoded.sample.rawFrameCount)
+        assertTrue(
+            ZslProbeReport.isApplicable(decoded, "Google/Pixel 8/14", "0", 0, 0)
+        )
     }
 }

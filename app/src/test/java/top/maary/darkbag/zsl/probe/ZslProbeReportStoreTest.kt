@@ -2,6 +2,7 @@ package top.maary.darkbag.zsl.probe
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -22,8 +23,10 @@ import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
 
 /**
- * 报告持久化端口（S1-B1 F7）：4 个 DataStore 键的默认值、保存（含 schema 版本）、
+ * 报告持久化端口（S1-B1 F7 + S1-B2 R11）：4 个 DataStore 键的默认值、保存（含 schema 版本）、
  * 读回一致、以及 `save("")` 的彻底清空语义。
+ *
+ * `save` 自 S1-B2 R11 起是 `suspend`（单次 `editAndAwait` 原子写两键），测试统一用 [runBlocking] 驱动。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
@@ -76,6 +79,10 @@ class ZslProbeReportStoreTest {
         ringConfig = RingConfig(3, 24, 2)
     )
 
+    private fun save(report: ZslProbeReport?) = runBlocking { store.save(report) }
+
+    private fun save(json: String?) = runBlocking { store.save(json) }
+
     @Test
     fun testKeysDefaultToEmptyStateBeforeAnySave() {
         val prefs = repository.current()
@@ -91,7 +98,7 @@ class ZslProbeReportStoreTest {
     fun testSavePersistsReportJsonAndSchemaVersionThenLoadsBack() {
         val original = report()
 
-        store.save(original)
+        save(original)
 
         val prefs = repository.current()
         assertEquals(original.toJson(), prefs.zslProbeReportJson)
@@ -103,10 +110,10 @@ class ZslProbeReportStoreTest {
 
     @Test
     fun testSaveBlankStringClearsReportAndResetsVersion() {
-        store.save(report())
+        save(report())
         assertEquals(ZslProbeReport.SCHEMA_VERSION, repository.current().zslProbeVersion)
 
-        store.save("")
+        save("")
 
         assertNull(repository.current().zslProbeReportJson)
         assertEquals(0, repository.current().zslProbeVersion)
@@ -115,9 +122,9 @@ class ZslProbeReportStoreTest {
 
     @Test
     fun testSaveNullReportClearsPreviouslyStoredReport() {
-        store.save(report())
+        save(report())
 
-        store.save(null as ZslProbeReport?)
+        save(null as ZslProbeReport?)
 
         assertNull(store.load())
         assertEquals(0, repository.current().zslProbeVersion)
@@ -134,7 +141,7 @@ class ZslProbeReportStoreTest {
 
     @Test
     fun testSaveWritesSingleLineJsonWithoutNewlines() {
-        store.save(report())
+        save(report())
 
         val raw = repository.current().zslProbeReportJson!!
         assertFalse(raw.contains("\n"))

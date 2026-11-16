@@ -37,7 +37,14 @@ data class ZslProbeReport(
         .toString()
 
     companion object {
-        const val SCHEMA_VERSION = 1
+        /**
+         * 报告 schema 版本：**2**（S1-B2 R3）。
+         *
+         * v2 相对 v1 只增加失败原因码 `PRECONDITION_FAILED` / `RAW_UNSUPPORTED`（枚举名进 JSON），
+         * 字段集合不变；但旧版 UI/判定不认这两个码，因此 [fromJson] 只接受 v2，
+         * 存量 v1 报告按"无报告"处理、要求重测（[isApplicable] 同样拒绝）。
+         */
+        const val SCHEMA_VERSION = 2
 
         private const val FIELD_VERSION = "version"
         private const val FIELD_TIMESTAMP_MS = "timestampMs"

@@ -542,6 +542,28 @@ class SettingsRepository(context: Context) {
         edit { this[PreferenceKeys.ZSL_PROBE_VERSION] = version }
     }
 
+    /**
+     * 原子写入探测报告体 + 报告版本（S1-B2 R11）。
+     *
+     * 拆成 [setZslProbeReportJson] + [setZslProbeVersion] 会产生"新 JSON / 旧版本"或
+     * "旧 JSON / 新版本"的中间快照，读取方（UI 三态、`ZslPolicy`）可能看到半更新状态。
+     * 这里在**同一次** DataStore `edit` 事务里写两个键，并挂起到落盘完成，
+     * 保证"报告体 ↔ 版本"在任何时刻都一致。
+     *
+     * @param json 报告 JSON；`null` / 空白表示清空报告
+     * @param version 报告 schema 版本；清空时必须传 0（= "无生效报告"）
+     */
+    suspend fun setZslProbeBundle(json: String?, version: Int) {
+        editAndAwait {
+            if (json.isNullOrEmpty()) {
+                remove(PreferenceKeys.ZSL_PROBE_REPORT)
+            } else {
+                this[PreferenceKeys.ZSL_PROBE_REPORT] = json
+            }
+            this[PreferenceKeys.ZSL_PROBE_VERSION] = version
+        }
+    }
+
     fun setZslProbePending(pending: Boolean) {
         edit { this[PreferenceKeys.ZSL_PROBE_PENDING] = pending }
     }

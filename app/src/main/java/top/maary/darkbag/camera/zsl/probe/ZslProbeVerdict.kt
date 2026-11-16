@@ -17,7 +17,13 @@ enum class ZslProbeFailure {
     METADATA_MISS,
     WARMUP_SLOW,
     THERMAL_RISK,
-    CAPTURE_FAILED
+    CAPTURE_FAILED,
+
+    /** 预检不通过（会话未 Active / 录制 / 多摄 / PiP / 电量 / 内存 / 热），**未开窗**（S1-B2 R12）。 */
+    PRECONDITION_FAILED,
+
+    /** 设备/镜头没有 `RAW_SENSOR` 输出：探测无意义，直接产出 UNSUPPORTED 报告（S1-B2 R3）。 */
+    RAW_UNSUPPORTED
 }
 
 /** 评分结果：结论 + 失败原因（仅 UNSUPPORTED 非空） + 推荐环参数。 */
@@ -96,10 +102,12 @@ object ZslProbeScoring {
     }
 
     /**
-     * 推荐环参数派生（§3.8.4 字面实现，S1-B1 F5）：
+     * 推荐环参数派生（设计文档 §3.8.4 定稿，S1-B2 R6）：
      * - `depth = 3`（预热 ≤200 ms）否则 `2`；
-     * - `targetFps` 先取 24 / 15 档位，再把**下限**夹到 `floor(rawFps / 5) * 5`（至少 5），二者取 min：
-     *   实测 14.9 fps → `floor(14.9/5)*5 = 10` → 推荐 10（旧实现会给 14，违反 5 fps 档位）；
+     * - `targetFps` 三档：
+     *   - `rawFps ≥ 24` → 24（实测 24 fps 不再被 `floor(24/5)*5 = 20` 降到 20）；
+     *   - `15 ≤ rawFps < 24` → 15（15–23.9 一律 15，避免推荐帧率高于档位）；
+     *   - 更低 → `floor(rawFps / 5) * 5`，下限夹到 5（14.9 → 10、4 → 5）；
      * - `minValidFrames = 2`。
      */
     internal fun recommendedRingConfig(sample: ZslProbeSample): RingConfig {
@@ -108,15 +116,15 @@ object ZslProbeScoring {
         } else {
             RING_DEPTH_SUPPORTED
         }
-        val tierFps = if (sample.rawFps >= RECOMMENDED_MIN_RAW_FPS) {
-            RING_TARGET_FPS_HIGH
-        } else {
-            RING_TARGET_FPS_LOW
-        }
-        val rawFpsFloorStep = floor(sample.rawFps / RING_FPS_STEP).toInt() * RING_FPS_STEP
-        val measuredFloorFps = rawFpsFloorStep.coerceAtLeast(RING_FPS_STEP)
-        val targetFps = minOf(tierFps, measuredFloorFps)
-        return RingConfig(depth, targetFps, RING_MIN_VALID_FRAMES)
+        return RingConfig(depth, recommendedTargetFps(sample.rawFps), RING_MIN_VALID_FRAMES)
+    }
+
+    /** 三档目标帧率（R6 定稿公式），抽出来便于逐档钉测试。 */
+    private fun recommendedTargetFps(rawFps: Float): Int = when {
+        rawFps >= RING_TARGET_FPS_HIGH.toFloat() -> RING_TARGET_FPS_HIGH
+        rawFps >= RING_TARGET_FPS_LOW.toFloat() -> RING_TARGET_FPS_LOW
+        else -> (floor(rawFps / RING_FPS_STEP).toInt() * RING_FPS_STEP)
+            .coerceAtLeast(RING_FPS_STEP)
     }
 
     private fun unmetThresholds(

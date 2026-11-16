@@ -724,6 +724,27 @@ class CameraPhaseCControllersTest {
         assertTrue(viewModel.uiState.value.isManualIso)
     }
 
+    // -------------------------------------------------------------------------
+    // S1-B2 R1：同步恢复入口（ZSL 探测端必须拿到真实成败）
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun testStreamController_updateCamera2RepeatingRequestNow_returnsFalseWithoutDeviceOrSession() {
+        // 空资源（Robolectric 无真相机）：没有 handler / device / session / 预览面 → 必须返回 false，
+        // 且不得抛异常（探测端据此把恢复失败收口成 Failed("restore failed")）
+        val gateway = FakeCameraGateway()
+        val streamController = CameraHardwareStreamController(gateway, gateway, gateway)
+
+        assertNull(gateway.sessionArbiter.sessionController.backgroundHandler)
+        assertNull(gateway.sessionArbiter.camera2Device)
+        assertNull(gateway.sessionArbiter.camera2Session)
+        assertNull(gateway.sessionArbiter.camera2PreviewSurface)
+
+        assertFalse(streamController.updateCamera2RepeatingRequestNow())
+        // 异步变体在 handler 缺失时静默返回（保持既有 post 语义），同样不得抛
+        streamController.updateCamera2RepeatingRequest()
+    }
+
     // =========================================================================
     // Test Doubles (using the 3 consolidated gateways)
     // =========================================================================
