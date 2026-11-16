@@ -97,6 +97,12 @@ object PreferenceKeys {
     const val KEY_RAW_VIDEO_FPS = "raw_video_fps"
     const val KEY_RAW_VIDEO_RESOLUTION = "raw_video_resolution"
 
+    // --- ZSL experimental keys (S1) ---
+    const val KEY_ZSL_EXPERIMENTAL_ENABLED = "zsl_experimental_enabled"
+    const val KEY_ZSL_PROBE_REPORT = "zsl_probe_report"
+    const val KEY_ZSL_PROBE_VERSION = "zsl_probe_version"
+    const val KEY_ZSL_PROBE_PENDING = "zsl_probe_pending"
+
     const val KEY_UI_TIER = "pref_camera_bento_ui_tier"
     const val KEY_SELECTED_LENS_SENSOR_ID = "selected_lens_sensor_id"
     const val KEY_SELECTED_LENS_ID = "selected_lens_id"
@@ -185,6 +191,11 @@ object PreferenceKeys {
     val SHUTTER_LONG_PRESS_ACTION = stringPreferencesKey(KEY_SHUTTER_LONG_PRESS_ACTION)
     val RAW_VIDEO_FPS = stringPreferencesKey(KEY_RAW_VIDEO_FPS)
     val RAW_VIDEO_RESOLUTION = stringPreferencesKey(KEY_RAW_VIDEO_RESOLUTION)
+
+    val ZSL_EXPERIMENTAL_ENABLED = booleanPreferencesKey(KEY_ZSL_EXPERIMENTAL_ENABLED)
+    val ZSL_PROBE_REPORT = stringPreferencesKey(KEY_ZSL_PROBE_REPORT)
+    val ZSL_PROBE_VERSION = intPreferencesKey(KEY_ZSL_PROBE_VERSION)
+    val ZSL_PROBE_PENDING = booleanPreferencesKey(KEY_ZSL_PROBE_PENDING)
 
     val UI_TIER = stringPreferencesKey(KEY_UI_TIER)
     val SELECTED_LENS_SENSOR_ID = stringPreferencesKey(KEY_SELECTED_LENS_SENSOR_ID)

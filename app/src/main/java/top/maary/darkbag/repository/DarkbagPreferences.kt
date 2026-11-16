@@ -81,5 +81,9 @@ data class DarkbagPreferences(
     val galleryColumnsPortrait: Int = 3,
     val galleryColumnsLandscape: Int = 4,
     val galleryWaterfall: Boolean = false,
-    val playgroundColumns: Int = 2
+    val playgroundColumns: Int = 2,
+    val zslExperimentalEnabled: Boolean = false,
+    val zslProbeReportJson: String? = null,
+    val zslProbeVersion: Int = 0,
+    val zslProbePending: Boolean = false
 )

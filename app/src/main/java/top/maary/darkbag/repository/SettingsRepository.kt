@@ -213,7 +213,11 @@ class SettingsRepository(context: Context) {
             galleryColumnsPortrait = int(PreferenceKeys.KEY_GALLERY_COLUMNS_PORTRAIT, 3),
             galleryColumnsLandscape = int(PreferenceKeys.KEY_GALLERY_COLUMNS_LANDSCAPE, 4),
             galleryWaterfall = bool(PreferenceKeys.KEY_GALLERY_WATERFALL, false),
-            playgroundColumns = int(PreferenceKeys.KEY_PLAYGROUND_COLUMNS, 2)
+            playgroundColumns = int(PreferenceKeys.KEY_PLAYGROUND_COLUMNS, 2),
+            zslExperimentalEnabled = bool(PreferenceKeys.KEY_ZSL_EXPERIMENTAL_ENABLED, false),
+            zslProbeReportJson = str(PreferenceKeys.KEY_ZSL_PROBE_REPORT),
+            zslProbeVersion = int(PreferenceKeys.KEY_ZSL_PROBE_VERSION, 0),
+            zslProbePending = bool(PreferenceKeys.KEY_ZSL_PROBE_PENDING, false)
         )
     }
 
@@ -518,6 +522,28 @@ class SettingsRepository(context: Context) {
 
     fun setPlaygroundColumns(columns: Int) {
         edit { this[PreferenceKeys.PLAYGROUND_COLUMNS] = columns }
+    }
+
+    fun setZslExperimentalEnabled(enabled: Boolean) {
+        edit { this[PreferenceKeys.ZSL_EXPERIMENTAL_ENABLED] = enabled }
+    }
+
+    fun setZslProbeReportJson(json: String?) {
+        edit {
+            if (json.isNullOrEmpty()) {
+                remove(PreferenceKeys.ZSL_PROBE_REPORT)
+            } else {
+                this[PreferenceKeys.ZSL_PROBE_REPORT] = json
+            }
+        }
+    }
+
+    fun setZslProbeVersion(version: Int) {
+        edit { this[PreferenceKeys.ZSL_PROBE_VERSION] = version }
+    }
+
+    fun setZslProbePending(pending: Boolean) {
+        edit { this[PreferenceKeys.ZSL_PROBE_PENDING] = pending }
     }
 
     fun setRawVideoFps(fps: String) {
