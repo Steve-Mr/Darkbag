@@ -173,7 +173,7 @@ camera/zsl (纯能力层)  ─────────────►  camera/se
 | `camera/zsl/**` 单文件 | ≤ 300 行 |
 | 任一新增类 | ≤ 250 行；单类 public 方法 ≤ 12 |
 | 既有文件增长 | `CameraControllerHub` ≤ +25 行；`HdrPlusBurstCaptureExecutor` ≤ +45；`SingleRawCaptureExecutor` ≤ +30；`CameraHardwareStreamController` **必须净减少** |
-| 预览请求构造 | 全仓库 `createCaptureRequest(TEMPLATE_PREVIEW)` 仅 1 处（工厂内） |
+| 预览请求构造 | **单相机会话预览 repeating** 请求只在 `PreviewRequestFactory` 内构造：`CameraHardwareStreamController`/`CameraLensController`/`CameraVideoController` 的 `TEMPLATE_PREVIEW` 计数为 0（对焦取消/触发、多摄、前摄 PiP 的请求不在此列） |
 | 单测数量 | S2 起每阶段新增 ≥ 12 个行为测试；`zsl` 包每个 public 类型 ≥ 3 个 |
 
 **④ 禁止清单（出现即打回）**
@@ -574,12 +574,12 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 
 | ID | 可考核目标 | 证据 |
 |---|---|---|
-| S0-1 | `createCaptureRequest(TEMPLATE_PREVIEW)` 全仓库仅 1 处（工厂内），变焦/切镜头/会话配置三条路径均走工厂 | `REVIEW` grep + `UT` |
-| S0-2 | 工厂产出的请求字段与改造前逐字段一致（targets/crop/ISO/时间/AE/OIS/LSC/焦距） | `UT`（字段转储比对）+ `DUMP` |
+| S0-1 | 单相机预览 repeating 的四条路径（会话配置、变焦/参数更新、切镜头变焦、RAW 视频恢复）全部走工厂；上述 3 个文件中 `TEMPLATE_PREVIEW` 计数为 0，工厂内为 1 | `REVIEW` grep + `UT` |
+| S0-2 | 目标与条件矩阵等价：analysis 附着规则 8 例真值表、目标顺序、null 面跳过、额外 target 透传；真实请求字段在 S1 设备证据包用 `DUMP` 复核（Robolectric 无法构造真实 `CaptureRequest`） | `UT` + `REVIEW` |
 | S0-3 | `captureResults` 插入 1000 条后 size ≤ 300，且精确时间戳仍能命中、超界返回 null | `UT` |
 | S0-4 | RAW 回调线程名独立（`ZslRawThread`），预览结果线程不受其阻塞 | `LOG` |
 | S0-5 | `prepare()` 在会话 configure 后调用一次；LEGACY 设备不调用 | `UT` + `LOG` |
-| S0-6 | `addOwnedFrame()` 不触发 `copyBayerWithStride`（spy 计数为 0），所有权转移后池不再持有 | `UT` |
+| S0-6 | `addOwnedFrame()` 路径不含 `StreamingBufferPool.acquire`/`copyBayerWithStride`（结构性断言），准入/满员/关闭语义有单测 | `UT` + `REVIEW`(grep) |
 | S0-7 | 每次拍摄输出 1 行 JSON，字段固定（含 `t1Ms`, `frames`, `mode`, `fallbackReason`） | `LOG` |
 | S0-8 | 全量既有测试 100% 通过；无文件增长超预算 | `UT` + `REVIEW` |
 
@@ -711,7 +711,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 
 | 断言 | 命令/方式 |
 |---|---|
-| 预览请求构造单一化 | `grep -rn "createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)" app/src/main/java | wc -l` == 1 |
+| 预览请求构造单一化 | `grep -c TEMPLATE_PREVIEW` 在 `camera/session/CameraHardwareStreamController.kt`、`camera/delegate/CameraLensController.kt`、`camera/video/CameraVideoController.kt` 均为 0；`camera/session/PreviewRequestFactory.kt` 为 1 |
 | 无 UI 分支 | `grep -rn "isZsl\|zslEnabled" app/src/main/java/top/maary/darkbag/fragments app/src/main/java/top/maary/darkbag/modes | wc -l` == 0 |
 | 文件预算 | `find app/src/main/java/top/maary/darkbag/camera/zsl -name '*.kt' -exec wc -l {} +` 每项 ≤300 |
 | 无占位测试 | `grep -rn "assertTrue(true)\|TODO()\|FIXME" app/src/test/java/top/maary/darkbag/{camera,processor} | wc -l` == 0 |
