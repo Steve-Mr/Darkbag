@@ -588,4 +588,50 @@
     <string name="toast_queue_full">Queue full: processing %1$d photos, please wait…</string>
     <string name="toast_memory_low">System memory low, waiting for processing to complete…</string>
     <string name="error_configure_camera_session">Failed to configure camera session</string>
+
+    <!-- ZSL capture capability probe (design §3.12.5) -->
+    <string name="settings_zsl_title">ZSL capture</string>
+    <string name="settings_zsl_sub">Zero shutter lag, depends on device RAW throughput</string>
+    <string name="pref_zsl_enable">Enable ZSL capture</string>
+    <string name="zsl_badge_experimental">EXPERIMENTAL</string>
+    <string name="zsl_probe_label">PROBE</string>
+    <string name="zsl_state_untested">Not tested</string>
+    <string name="zsl_state_pending">Waiting for viewfinder</string>
+    <string name="zsl_state_supported">Supported · %1$d FPS · %2$d frames</string>
+    <string name="zsl_state_limited">Limited · %1$d FPS · %2$d frames</string>
+    <string name="zsl_state_unsupported">Unsupported · %1$s</string>
+    <string name="zsl_state_aborted">Test cancelled</string>
+    <string name="zsl_action_run">Run test</string>
+    <string name="zsl_action_details">Details</string>
+    <string name="zsl_action_retest">Retest</string>
+    <string name="zsl_action_copy_report">Copy report</string>
+    <string name="zsl_action_done">Done</string>
+    <string name="zsl_probe_title">ZSL capability test</string>
+    <string name="zsl_metric_raw_fps">RAW frame rate</string>
+    <string name="zsl_metric_gap_p95">Frame gap P95</string>
+    <string name="zsl_metric_age_p95">Frame age P95</string>
+    <string name="zsl_metric_copy_p95">Copy P95</string>
+    <string name="zsl_metric_preview_drop">Preview drops</string>
+    <string name="zsl_metric_thermal">Thermal</string>
+    <string name="zsl_reason_raw_fps_low">RAW frame rate low</string>
+    <string name="zsl_reason_preview_degraded">Viewfinder degraded</string>
+    <string name="zsl_reason_thermal_risk">Device thermal risk</string>
+    <string name="zsl_reason_unsupported">Not supported on this device</string>
+
+    <!-- ZSL probe sheet: status badges, progress stages, unknown metric value -->
+    <string name="zsl_probe_badge_running">RUNNING</string>
+    <string name="zsl_probe_badge_supported">SUPPORTED</string>
+    <string name="zsl_probe_badge_limited">LIMITED</string>
+    <string name="zsl_probe_badge_unsupported">UNSUPPORTED</string>
+    <string name="zsl_probe_badge_cancelled">CANCELLED</string>
+    <string name="zsl_probe_progress">Testing %1$s</string>
+    <string name="zsl_stage_baseline">Baseline</string>
+    <string name="zsl_stage_dual">Dual stream</string>
+    <string name="zsl_stage_recovery">Recovery</string>
+    <string name="zsl_metric_unknown">Unknown</string>
+
+    <!-- ZSL 首次启用前的"先检测"确认 -->
+    <string name="zsl_confirm_title">Run ZSL capability test?</string>
+    <string name="zsl_confirm_message">ZSL stays off until a capability test completes.</string>
+    <string name="zsl_confirm_run">Run test</string>
 </resources>

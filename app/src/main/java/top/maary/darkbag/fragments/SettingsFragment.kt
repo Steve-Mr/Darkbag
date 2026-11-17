@@ -28,9 +28,12 @@ import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentSettingsBinding
 import top.maary.darkbag.fragments.settings.SettingsBentoDelegate
 import top.maary.darkbag.fragments.settings.SettingsSheetDispatcher
+import top.maary.darkbag.fragments.settings.SettingsZslDelegate
 import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import top.maary.darkbag.ui.ViewfinderDeckCustomizerSheet
+import top.maary.darkbag.ui.ZslProbeBottomSheet
 import top.maary.darkbag.utils.CacheManager
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.DebugLogManager
@@ -49,6 +52,7 @@ class SettingsFragment : Fragment() {
 
     private lateinit var bentoDelegate: SettingsBentoDelegate
     private lateinit var sheetDispatcher: SettingsSheetDispatcher
+    private lateinit var zslDelegate: SettingsZslDelegate
 
     private var isAdvancedExpanded = false
     private var aboutClickCount = 0
@@ -106,6 +110,16 @@ class SettingsFragment : Fragment() {
         cameraRepository = CameraRepository(ctx)
         bentoDelegate = SettingsBentoDelegate(ctx, cameraRepository)
         sheetDispatcher = SettingsSheetDispatcher(childFragmentManager, ctx, cameraRepository, settingsViewModel)
+        zslDelegate = SettingsZslDelegate(ctx).apply {
+            onRequestProbe = {
+                SettingsRepository.getInstance(ctx).setZslProbePending(true)
+                Navigation.findNavController(requireActivity(), R.id.fragment_container).navigateUp()
+            }
+            onShowDetails = { report -> ZslProbeBottomSheet.showDetails(childFragmentManager, report) }
+            onToggle = { enabled -> SettingsRepository.getInstance(ctx).setZslExperimentalEnabled(enabled) }
+            onConfirmProbe = { confirmed -> confirmRunProbe(confirmed) }
+            onCancelProbe = { SettingsRepository.getInstance(ctx).setZslProbePending(false) }
+        }
 
         // Apply Edge-to-Edge Insets
         ViewCompat.setOnApplyWindowInsetsListener(binding.cardSettingsHeader) { v, insets ->
@@ -140,9 +154,20 @@ class SettingsFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 settingsViewModel.preferences.collect { prefsState ->
                     bentoDelegate.renderPreferences(binding, prefsState)
+                    zslDelegate.render(binding, prefsState)
                 }
             }
         }
+    }
+
+    /** 无有效报告时点开关：先确认再检测；取消无需回弹（delegate 已把开关恢复成持久化值）。 */
+    private fun confirmRunProbe(onConfirmed: () -> Unit) {
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.zsl_confirm_title)
+            .setMessage(R.string.zsl_confirm_message)
+            .setPositiveButton(R.string.zsl_confirm_run) { _, _ -> onConfirmed() }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     override fun onResume() {

@@ -222,6 +222,19 @@ class CameraZslProbeRunner(
         job?.cancel()
     }
 
+    /**
+     * 结论已被界面消费（sheet 关闭）后回到 [ZslProbeState.Idle]（S1-B3 F4）。
+     *
+     * 不做消费的话，`Finished` 会一直留在状态流里：`CameraFragment` 每次重新订阅都会再弹一次
+     * 结论 sheet，且下次进入相机页时 UI 分不清"陈旧结论"和"刚出的结论"。只消费 `Finished`，
+     * 正在运行或已中止的状态不受影响（中止路径自己会回 Idle）。
+     */
+    fun consumeFinished() {
+        if (_state.value is ZslProbeState.Finished) {
+            _state.value = ZslProbeState.Idle
+        }
+    }
+
     /** 最近一次落库的报告；无报告或已失效（解码失败）时返回 `null`。 */
     fun lastReport(): ZslProbeReport? = reportStore.load()
 

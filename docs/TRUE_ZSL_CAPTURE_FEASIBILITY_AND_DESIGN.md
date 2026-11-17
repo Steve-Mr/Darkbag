@@ -488,13 +488,15 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 #### 3.12.4 探测 BottomSheet（执行面）
 
 - 骨架复用 `bottom_sheet_bento_selection.xml`：`BottomSheetDragHandleView` + 标题行（标题 + badge）+ `NestedScrollView` 内容区。
-- 标题 `ZSL 兼容性检测`，badge 随状态：`RUNNING` / `SUPPORTED` / `LIMITED` / `UNSUPPORTED`（对应 `bg_bento_badge_tertiary` / `bg_bento_badge_primary` / 警告色 / `?attr/colorError` 语义）。
+- 标题 `ZSL 兼容性检测`，badge 随状态：`RUNNING` / `SUPPORTED` / `LIMITED` / `UNSUPPORTED` / `CANCELLED`（取消态）（对应 `bg_bento_badge_tertiary` / `bg_bento_badge_primary` / 警告色 / `?attr/colorError` 语义）。
 - 内容 = 6 行指标：`RAW 帧率`、`帧间隔 P95`、`帧龄 P95`、`拷贝 P95`、`取景掉帧`、`热状态`；每行左 10sp 标签（`?attr/colorOnSurfaceVariant`）+ 右 12sp 数值（`?attr/colorOnSurface`），行距 8dp；超阈值项数值改用 `?attr/colorError`。
-- 进行中显示四段进度（基线 / 双流 / 恢复 / 预热）。
+- 进行中显示三段进度（基线 0–1500ms / 双流 1500–5500ms / 恢复 ≥5500ms；W3 预热未实现，不设假阶段）。
 - 结论态底部两枚 tile：`重新检测`、`完成`；结论态额外 `复制报告`（写入剪贴板，便于报障）。
 - 关闭 = 中止（见 §3.12.2）。
 
 #### 3.12.5 字符串清单（双语、单语言呈现）
+
+> S1-B3 实测：主表 26 个 key 之外，另加 4 个 sheet badge、3 个进度阶段（基线/双流/恢复）、进度占位、`Unknown`、取消态（`zsl_state_aborted`/`zsl_probe_badge_cancelled`）与 3 个确认对话框 key，**共 40 个**（en/zh 完全 parity）。
 
 | key | `values/`（en） | `values-zh-rCN/`（zh） |
 |---|---|---|
@@ -530,11 +532,12 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 | 文件 | 内容 | 预算 |
 |---|---|---|
 | `fragments/settings/SettingsZslDelegate.kt`（新） | 绑定托盘、三态渲染、开关/按钮事件、pending 写入 | ≤180 行 |
-| `ui/ZslProbeBottomSheet.kt`（新） | DialogFragment + 进度/结论渲染 | ≤160 行 |
-| `res/layout/bottom_sheet_zsl_probe.xml`（新） | sheet 布局 | ≤140 行 |
-| `res/layout/fragment_settings.xml` | 插入 `card_tray_zsl` | 既有文件 +≤100 行 |
-| `res/values/strings.xml`、`values-zh-rCN/strings.xml` | 上述 26 个 key | 各 +~26 行 |
-| `fragments/SettingsFragment.kt` | 实例化 + 一行委托 | ≤+6 行 |
+| `ui/ZslProbeBottomSheet.kt`（新） | DialogFragment：LIVE/RESULT/DETAILS 三模式 + 状态流 + 三段进度 + 6 行指标 + 剪贴板 + 关闭即中止 | **≤300 行**（实测 278；纯契约 `zslStageRes`/`zslProbeActionFor`/原因映射已外提到 `ui/ZslProbeSheetContract.kt` 37 行） |
+| `res/layout/bottom_sheet_zsl_probe.xml`（新） | sheet 布局 | ≤150 行 |
+| `res/layout/fragment_settings.xml` | 插入 `card_tray_zsl` | 既有文件 **+≤160 行**（S1-B3 实测修订：对齐同文件既有 tray 的多行属性风格） |
+| `res/values/strings.xml`、`values-zh-rCN/strings.xml` | 26 主 key + 5 badge + 3 阶段 + 进度 + `Unknown` + 取消态 + 3 确认 = **40 个** | 各 +~46 行 |
+| `fragments/SettingsFragment.kt` | 实例化 + 回调 + 确认对话框 + collect 内一行 render | **≤+25 行**（实测 +25） |
+| `fragments/CameraFragment.kt` | 状态流 → sheet + onStop abort | **≤+25 行**（实测 +18） |
 | `fragments/settings/SettingsBentoDelegate.kt` | **不改**（已 488 行，继续加会变超级文件） | 0 |
 | `viewmodel/SettingsViewModel.kt` | 可选：暴露 `zslProbeReport` StateFlow | ≤+15 行 |
 
@@ -590,7 +593,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 
 ### S1 — 能力探测与实验开关（含决策门 D1）
 
-- **Scope Lock**：`camera/zsl/{ZslCapability,ZslPolicy,probe/*}.kt`、`camera/session/zsl/*`(适配器)、`repository/*`(3 键)、`res/layout/fragment_settings.xml`(新增托盘)、`res/layout/bottom_sheet_zsl_probe.xml`(新)、`fragments/settings/SettingsZslDelegate.kt`(新)、`ui/ZslProbeBottomSheet.kt`(新)、`fragments/SettingsFragment.kt`(≤+6 行)、`camera/CameraControllerHub.kt`(runner 装配 + pending 挂点 + hydration 守卫，≤+25 行)、`camera/delegate/CameraZslProbeRunner.kt`(新)、`camera/session/zsl/ZslProbeSessionAdapter.kt`(新；S1-B2 拆出 `ZslProbeBeginGate/HandlerDispatch/SystemReadings/RawReader` 四个 ≤70 行文件)、`camera/session/CameraHardwareStreamController.kt`(仅 R1 同步恢复入口，≤+35/−15)、`camera/zsl/probe/ZslProbe{TargetFps,ReportStore}.kt`(新)、`res/values*/strings.xml`、测试、`docs/zsl/evidence/S1_*.md`。**`SettingsBentoDelegate.kt` 禁止改动**。
+- **Scope Lock**：`camera/zsl/{ZslCapability,ZslPolicy,probe/*}.kt`、`camera/session/zsl/*`(适配器)、`repository/*`(3 键)、`res/layout/fragment_settings.xml`(新增托盘)、`res/layout/bottom_sheet_zsl_probe.xml`(新)、`fragments/settings/SettingsZslDelegate.kt`(新)、`ui/ZslProbeBottomSheet.kt`(新)、`fragments/SettingsFragment.kt`(≤+25 行)、`fragments/CameraFragment.kt`(仅状态流→sheet 与 onStop abort，≤+25 行)、`ui/ZslProbeSheetContract.kt`(新；纯契约 37 行)、`camera/CameraControllerHub.kt`(runner 装配 + pending 挂点 + hydration 守卫，≤+25 行)、`camera/delegate/CameraZslProbeRunner.kt`(新)、`camera/session/zsl/ZslProbeSessionAdapter.kt`(新；S1-B2 拆出 `ZslProbeBeginGate/HandlerDispatch/SystemReadings/RawReader` 四个 ≤70 行文件)、`camera/session/CameraHardwareStreamController.kt`(仅 R1 同步恢复入口，≤+35/−15)、`camera/zsl/probe/ZslProbe{TargetFps,ReportStore}.kt`(新)、`res/values*/strings.xml`、测试、`docs/zsl/evidence/S1_*.md`。**`SettingsBentoDelegate.kt` 禁止改动**。
 - **交付物**：静态能力探测 + 主动自检（≤10 s）+ 报告持久化 + 设置页 Bento 托盘（三态）+ 探测 BottomSheet + 报告复制 + 触发链。
 
 | ID | 可考核目标 | 证据 |

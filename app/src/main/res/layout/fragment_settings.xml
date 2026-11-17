@@ -668,6 +668,152 @@
             </top.maary.darkbag.ui.bento.BentoTrayCard>
 
             <!-- ====================================================================== -->
+            <!-- 2.5 ZSL 能力探测托盘 - primaryContainer · stroke 0 · 26dp              -->
+            <!-- ====================================================================== -->
+            <top.maary.darkbag.ui.bento.BentoTrayCard
+                android:id="@+id/card_tray_zsl"
+                style="@style/Widget.Darkbag.BentoTray"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                app:strokeWidth="0dp"
+                app:bentoContainerRole="primaryContainer">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <!-- Header Row: ZSL CAPTURE + EXPERIMENTAL badge -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:paddingHorizontal="4dp"
+                        android:paddingVertical="2dp"
+                        android:layout_marginBottom="6dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/settings_zsl_title"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:textColor="?attr/colorOnPrimaryContainer" />
+
+                        <TextView
+                            android:id="@+id/txt_zsl_tray_badge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_bento_badge_tertiary"
+                            android:paddingHorizontal="8dp"
+                            android:paddingVertical="2dp"
+                            tools:text="EXPERIMENTAL"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold"
+                            android:textColor="?attr/colorTertiary" />
+                    </LinearLayout>
+
+                    <!-- Single-line sub label -->
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingHorizontal="4dp"
+                        android:paddingBottom="6dp"
+                        android:text="@string/settings_zsl_sub"
+                        android:textSize="10sp"
+                        android:textColor="?attr/colorOnPrimaryContainer"
+                        android:maxLines="1"
+                        android:ellipsize="end" />
+
+                    <!-- Porcelain switch tile -->
+                    <top.maary.darkbag.ui.bento.BentoSwitchTile
+                        android:id="@+id/switch_zsl_enabled"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginBottom="8dp"
+                        app:bentoSwitchTitle="@string/pref_zsl_enable"
+                        app:bentoSwitchBadge="ZSL"
+                        app:bentoSwitchBadgeStyle="tertiary" />
+
+                    <!-- Two-line micro-telemetry: PROBE / status value -->
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        app:cardCornerRadius="14dp"
+                        app:cardBackgroundColor="?attr/colorSurface"
+                        app:cardElevation="0dp"
+                        app:strokeWidth="0dp"
+                        app:contentPadding="8dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/txt_zsl_state_label"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/zsl_probe_label"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:maxLines="1"
+                                android:ellipsize="end" />
+
+                            <TextView
+                                android:id="@+id/txt_zsl_state_value"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                tools:text="Not tested"
+                                android:textSize="12sp"
+                                android:textColor="?attr/colorOnSurface"
+                                android:maxLines="2"
+                                android:ellipsize="end" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <!-- Action row: Run test / Details -->
+                    <top.maary.darkbag.ui.bento.BentoRowLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_zsl_run"
+                            style="@style/Widget.Darkbag.BentoTile.Button"
+                            android:layout_width="0dp"
+                            android:layout_height="48dp"
+                            android:layout_weight="1"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            app:backgroundTint="?attr/colorSurface"
+                            android:textColor="?attr/colorOnSurface"
+                            app:cornerRadius="14dp"
+                            app:strokeWidth="0dp"
+                            tools:text="Run test" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_zsl_details"
+                            style="@style/Widget.Darkbag.BentoTile.Button"
+                            android:layout_width="0dp"
+                            android:layout_height="48dp"
+                            android:layout_weight="1"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            app:backgroundTint="?attr/colorSurface"
+                            android:textColor="?attr/colorOnSurface"
+                            app:cornerRadius="14dp"
+                            app:strokeWidth="0dp"
+                            android:text="@string/zsl_action_details" />
+                    </top.maary.darkbag.ui.bento.BentoRowLayout>
+                </LinearLayout>
+            </top.maary.darkbag.ui.bento.BentoTrayCard>
+
+            <!-- ====================================================================== -->
             <!-- 3. 高级设置专区 (ADVANCED SETTINGS) - Bento 可折叠卡片 (形态 B)         -->
             <!-- ====================================================================== -->
             <top.maary.darkbag.ui.bento.BentoTrayCard

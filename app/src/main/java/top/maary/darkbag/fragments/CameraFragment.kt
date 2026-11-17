@@ -39,6 +39,7 @@ import top.maary.darkbag.MainApplication
 import top.maary.darkbag.R
 import top.maary.darkbag.camera.CameraControllerHub
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
+import top.maary.darkbag.camera.delegate.ZslProbeState
 import top.maary.darkbag.camera.session.CameraSessionArbiter
 import top.maary.darkbag.camera.state.CameraRuntimeStateHolder
 import top.maary.darkbag.databinding.CameraUiContainerBinding
@@ -50,6 +51,7 @@ import top.maary.darkbag.repository.ImageRepository
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
+import top.maary.darkbag.ui.ZslProbeBottomSheet
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.LocationHelper
 import top.maary.darkbag.utils.LutManager
@@ -148,6 +150,8 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
     }
 
     override fun onStop() {
+        // 探测期间切后台/来电：中止并还原请求，绝不后台偷跑（§3.12.2）
+        if (hub.zslProbeRunner.state.value is ZslProbeState.Running) hub.zslProbeRunner.abort()
         super.onStop()
         hub.onStop()
     }
@@ -294,6 +298,20 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
                 launch {
                     ColorProcessor.halfFrameFlow.collect {
                         hub.onHalfFrameStoreChanged()
+                    }
+                }
+                launch {
+                    // 执行面：探测状态流 → ZSL 探测 sheet（LIVE 跟随 / FINISHED 结论）
+                    hub.zslProbeRunner.state.collect { state ->
+                        when (state) {
+                            is ZslProbeState.Running ->
+                                ZslProbeBottomSheet.showLive(parentFragmentManager, hub.zslProbeRunner)
+
+                            is ZslProbeState.Finished ->
+                                ZslProbeBottomSheet.showResult(parentFragmentManager, state.result, hub.zslProbeRunner)
+
+                            ZslProbeState.Idle -> Unit
+                        }
                     }
                 }
             }

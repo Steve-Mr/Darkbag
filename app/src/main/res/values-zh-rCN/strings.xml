@@ -564,4 +564,50 @@
     <string name="toast_queue_full">处理队列已满：正在处理 %1$d 张照片，请稍候…</string>
     <string name="toast_memory_low">系统内存不足，正在等待处理完成…</string>
     <string name="error_configure_camera_session">配置相机对话失败</string>
+
+    <!-- ZSL 抓拍能力探测（设计 §3.12.5） -->
+    <string name="settings_zsl_title">ZSL 抓拍</string>
+    <string name="settings_zsl_sub">零快门延迟，依赖设备 RAW 吞吐</string>
+    <string name="pref_zsl_enable">启用 ZSL 抓拍</string>
+    <string name="zsl_badge_experimental">实验</string>
+    <string name="zsl_probe_label">PROBE</string>
+    <string name="zsl_state_untested">未检测</string>
+    <string name="zsl_state_pending">等待取景器</string>
+    <string name="zsl_state_supported">支持 · %1$d FPS · %2$d 帧</string>
+    <string name="zsl_state_limited">受限 · %1$d FPS · %2$d 帧</string>
+    <string name="zsl_state_unsupported">不支持 · %1$s</string>
+    <string name="zsl_state_aborted">检测已取消</string>
+    <string name="zsl_action_run">运行检测</string>
+    <string name="zsl_action_details">查看详情</string>
+    <string name="zsl_action_retest">重新检测</string>
+    <string name="zsl_action_copy_report">复制报告</string>
+    <string name="zsl_action_done">完成</string>
+    <string name="zsl_probe_title">ZSL 兼容性检测</string>
+    <string name="zsl_metric_raw_fps">RAW 帧率</string>
+    <string name="zsl_metric_gap_p95">帧间隔 P95</string>
+    <string name="zsl_metric_age_p95">帧龄 P95</string>
+    <string name="zsl_metric_copy_p95">拷贝 P95</string>
+    <string name="zsl_metric_preview_drop">取景掉帧</string>
+    <string name="zsl_metric_thermal">热状态</string>
+    <string name="zsl_reason_raw_fps_low">RAW 帧率不足</string>
+    <string name="zsl_reason_preview_degraded">取景器掉帧</string>
+    <string name="zsl_reason_thermal_risk">设备温度风险</string>
+    <string name="zsl_reason_unsupported">此设备不支持</string>
+
+    <!-- ZSL 探测 sheet：状态徽标、进度阶段、未知指标值 -->
+    <string name="zsl_probe_badge_running">检测中</string>
+    <string name="zsl_probe_badge_supported">支持</string>
+    <string name="zsl_probe_badge_limited">受限</string>
+    <string name="zsl_probe_badge_unsupported">不支持</string>
+    <string name="zsl_probe_badge_cancelled">已取消</string>
+    <string name="zsl_probe_progress">正在检测 %1$s</string>
+    <string name="zsl_stage_baseline">基线</string>
+    <string name="zsl_stage_dual">双流</string>
+    <string name="zsl_stage_recovery">恢复</string>
+    <string name="zsl_metric_unknown">未知</string>
+
+    <!-- ZSL 首次启用前的"先检测"确认 -->
+    <string name="zsl_confirm_title">运行 ZSL 能力检测？</string>
+    <string name="zsl_confirm_message">在完成能力检测前，ZSL 将保持关闭。</string>
+    <string name="zsl_confirm_run">运行检测</string>
 </resources>
