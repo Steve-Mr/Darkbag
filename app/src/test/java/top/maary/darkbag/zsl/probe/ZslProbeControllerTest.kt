@@ -93,7 +93,7 @@ class ZslProbeControllerTest {
             if (throwOnObserverCallback) {
                 repeat(5) { emitRawFrame() }
                 clock.throwOnNextNanosRead = true
-                observer?.onRawFrame(clock.nanoTime - 25_000_000L, 4L)
+                observer?.onRawFrame(clock.nanoTime - 25_000_000L, 4_000_000L)
                 return true
             }
             if (!beginResult) return false
@@ -104,7 +104,7 @@ class ZslProbeControllerTest {
 
         private fun emitRawFrame() {
             clock.advanceMs(frameIntervalMs)
-            observer?.onRawFrame(clock.nowNanos() - 25_000_000L, 4L)
+            observer?.onRawFrame(clock.nowNanos() - 25_000_000L, 4_000_000L)
         }
 
         override fun metadataBinding(timestampsNs: List<Long>): ZslMetadataBinding {
@@ -246,6 +246,11 @@ class ZslProbeControllerTest {
         assertEquals(33f, report.sample.gapP95Ms, 0.001f)
         assertEquals(25f, report.sample.ageP95Ms, 0.001f)
         assertEquals(4f, report.sample.copyP95Ms, 0.001f)
+        // 拷贝吞吐端到端（S1-FIX-R2 复审 MINOR-5）：帧字节数取自能力快照 4000x3000x2，
+        // 桩帧耗时 4 ms -> 24_000_000 B / 0.004 s ≈ 5722 MiB/s。
+        assertEquals(24_000_000L, report.sample.copyFrameBytes)
+        assertTrue(report.sample.copyThroughputMeasured)
+        assertEquals(5_722f, report.sample.copyThroughputP5MiBps, 2f)
         assertEquals(30f, report.sample.previewFpsBaseline, 0.001f)
         assertEquals(30f, report.sample.previewFpsDual, 0.001f)
         assertEquals(0f, report.sample.previewDropRatio, 0f)

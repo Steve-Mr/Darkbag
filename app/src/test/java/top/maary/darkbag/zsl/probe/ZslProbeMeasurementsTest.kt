@@ -1,7 +1,9 @@
 package top.maary.darkbag.zsl.probe
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import top.maary.darkbag.camera.zsl.probe.Percentiles
 import top.maary.darkbag.camera.zsl.probe.ZslProbeAggregator
@@ -16,7 +18,8 @@ class ZslProbeMeasurementsTest {
     private fun aggregate(
         timestamps: List<Long> = listOf(0L),
         ages: List<Float> = listOf(10f),
-        copies: List<Float> = listOf(2f),
+        copiesNs: List<Long> = listOf(2_000_000L),
+        frameBytes: Long = 24L * 1024 * 1024,
         baselineCount: Int = 30,
         dualCount: Int = 30,
         metadataHits: Int = 1,
@@ -32,7 +35,8 @@ class ZslProbeMeasurementsTest {
     ) = ZslProbeAggregator.aggregate(
         rawTimestampsNs = timestamps,
         ageSamplesMs = ages,
-        copySamplesMs = copies,
+        copySamplesNs = copiesNs,
+        frameBytes = frameBytes,
         previewBaselineCount = baselineCount,
         previewDualCount = dualCount,
         metadataHits = metadataHits,
@@ -114,13 +118,21 @@ class ZslProbeMeasurementsTest {
     fun testAggregateComputesAgeAndCopyPercentiles() {
         val sample = aggregate(
             ages = listOf(10f, 20f, 30f, 40f),
-            copies = listOf(2f, 4f)
+            copiesNs = listOf(2_000_000L, 4_000_000L)
         )
 
         assertEquals(25f, sample.ageP50Ms, delta)
         assertEquals(38.5f, sample.ageP95Ms, 0.01f)
         assertEquals(3f, sample.copyP50Ms, delta)
         assertEquals(3.9f, sample.copyP95Ms, 0.01f)
+        // 24 MiB / 2 ms = 12288 MiB/s；24 MiB / 4 ms = 6144 MiB/s
+        val mib = 24.0
+        val fast = (mib / 0.002).toFloat()
+        val slow = (mib / 0.004).toFloat()
+        // p5（n=2）落在慢端：t=0.05*(2-1)=0.05 -> slow*0.95 + fast*0.05
+        assertEquals(slow * 0.95f + fast * 0.05f, sample.copyThroughputP5MiBps, 1f)
+        assertEquals((slow + fast) / 2f, sample.copyThroughputP50MiBps, 1f)
+        assertEquals(24L * 1024 * 1024, sample.copyFrameBytes)
     }
 
     @Test
@@ -175,7 +187,7 @@ class ZslProbeMeasurementsTest {
         val sample = aggregate(
             timestamps = emptyList(),
             ages = emptyList(),
-            copies = emptyList(),
+            copiesNs = emptyList(),
             baselineCount = 0,
             dualCount = 0,
             metadataHits = 0,
@@ -197,5 +209,58 @@ class ZslProbeMeasurementsTest {
         assertEquals(0f, sample.previewDropRatio, 0f)
         assertEquals(0f, sample.metadataHitRate, 0f)
         assertNull(sample.warmupMs)
+    }
+
+    // ---------------------------------------------------------------------
+    // S1-FIX-R2：拷贝吞吐（MiB/s）换算与边界
+    // ---------------------------------------------------------------------
+
+    @Test
+    fun testThroughputIsMiBPerSecondWithNanosPrecision() {
+        // 24 MiB / 15.0 ms = 1600 MiB/s；纳秒精度不应被整毫秒截断。
+        val sample = aggregate(
+            copiesNs = listOf(15_000_000L),
+            frameBytes = 24L * 1024 * 1024
+        )
+        assertEquals(1600f, sample.copyThroughputP5MiBps, delta)
+        assertEquals(1600f, sample.copyThroughputP50MiBps, delta)
+        assertEquals(24L * 1024 * 1024, sample.copyFrameBytes)
+    }
+
+    @Test
+    fun testThroughputIsResolutionNeutral() {
+        // 同一耗时下 50 MP 帧的吞吐必须约为 12 MP 的 4.17 倍：这正是绝对毫秒门限做不到的。
+        val small = aggregate(copiesNs = listOf(15_000_000L), frameBytes = 12L * 1024 * 1024)
+        val big = aggregate(copiesNs = listOf(15_000_000L), frameBytes = 50L * 1024 * 1024)
+        val ratio = big.copyThroughputP5MiBps / small.copyThroughputP5MiBps
+        assertEquals(50f / 12f, ratio, 0.01f)
+    }
+
+    @Test
+    fun testUnknownFrameBytesYieldsUnmeasuredThroughput() {
+        // RAW 尺寸未知 -> 无法换算 -> 标记"未测到"（判定层据此判 COPY_UNMEASURED）。
+        val sample = aggregate(copiesNs = listOf(15_000_000L), frameBytes = 0L)
+        assertEquals(0f, sample.copyThroughputP5MiBps, 0f)
+        assertEquals(0f, sample.copyThroughputP50MiBps, 0f)
+        assertFalse(sample.copyThroughputMeasured)
+        // 耗时仍然照常统计，便于诊断。
+        assertEquals(15f, sample.copyP95Ms, delta)
+    }
+
+    @Test
+    fun testMeasuredFlagIsTrueWhenThroughputIsComputable() {
+        val sample = aggregate(copiesNs = listOf(15_000_000L), frameBytes = 24L * 1024 * 1024)
+        assertTrue(sample.copyThroughputMeasured)
+    }
+
+    @Test
+    fun testZeroOrNegativeCopyNanosDoesNotProduceInfinity() {
+        val sample = aggregate(
+            copiesNs = listOf(0L, -5L, 15_000_000L),
+            frameBytes = 24L * 1024 * 1024
+        )
+        assertTrue(sample.copyThroughputP5MiBps.isFinite())
+        assertTrue(sample.copyThroughputP50MiBps.isFinite())
+        assertEquals(0f, sample.copyThroughputP5MiBps, delta)
     }
 }

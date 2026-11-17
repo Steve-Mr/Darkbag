@@ -152,7 +152,8 @@ class ZslProbeBottomSheet : BottomSheetDialogFragment() {
         val texts = sample?.let {
             listOf(
                 "%.1f fps".format(it.rawFps), "%.1f ms".format(it.gapP95Ms), "%.1f ms".format(it.ageP95Ms),
-                "%.1f ms".format(it.copyP95Ms), "%.0f%%".format(it.previewDropRatio * 100f),
+                if (it.copyThroughputMeasured) "%.0f MiB/s".format(it.copyThroughputP5MiBps) else unknown,
+                "%.0f%%".format(it.previewDropRatio * 100f),
                 it.thermalStatusAfter?.toString() ?: unknown
             )
         } ?: List(METRIC_LABELS.size) { unknown }
@@ -251,7 +252,7 @@ class ZslProbeBottomSheet : BottomSheetDialogFragment() {
         private const val STAGE_TICK_MS = 200L
         private val METRIC_LABELS = intArrayOf(
             R.string.zsl_metric_raw_fps, R.string.zsl_metric_gap_p95, R.string.zsl_metric_age_p95,
-            R.string.zsl_metric_copy_p95, R.string.zsl_metric_preview_drop, R.string.zsl_metric_thermal
+            R.string.zsl_metric_copy_throughput, R.string.zsl_metric_preview_drop, R.string.zsl_metric_thermal
         )
 
         fun showLive(fm: FragmentManager, runner: CameraZslProbeRunner) = show(fm, Mode.LIVE, runner = runner)

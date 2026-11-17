@@ -15,6 +15,7 @@
 | S1-B3 Bento UI（设置托盘 + 探测 sheet + 字符串） | **完成** | 见 git log `feat(zsl): S1-B3 ...` | [`evidence/S1B3_20261116.md`](evidence/S1B3_20261116.md) | **APPROVED**（round 3） |
 | **D1 决策门**（go / no-go） | 未开始 | — | — | — |
 | S1-FIX 探测测量缺陷修正 | **完成** | 见 git log `fix(zsl): measure baseline...` | [`evidence/S1FIX_20261117.md`](evidence/S1FIX_20261117.md) | **APPROVED** |
+| S1-FIX-R2 拷贝判据改带宽口径 | **完成** | 见 git log `fix(zsl): judge RAW copy by throughput instead of absolute latency` | [`evidence/S1FIX_20261117_R2.md`](evidence/S1FIX_20261117_R2.md) | **APPROVED**（round 2） |
 | S2 Z1 单帧 ZSL（里程碑 M1） | 未开始 | — | — | — |
 | S3 Z2 低照 HDR+ 混合 | 未开始 | — | — | — |
 | S4 Z3 全场景 + 取景增益（里程碑 M2） | 未开始 | — | — | — |
@@ -26,6 +27,7 @@
 | 2026-11-16 | S0 | 557/557 通过（+24） | 未触及 native | **APPROVED** | F1 行预算（CHS 433→427、Lens 443→443）修复后通过；`prepare()` 顺延 S2 并记录于设计文档 §3.11 R4 |
 | 2026-11-16 | S1-A | 623/623 通过（+66） | 未触及 native | **APPROVED** | 阈值表/六路径恢复/报告容错均通过；7 条 MINOR（safeGet 过宽、restore 失败未收口、abort 非即时、正向 verdict 缺 ring、fps 夹取、15fps 标称、恒真断言）转 S1-B |
 | 2026-11-17 | S1-FIX | 727/727 通过（+8） | 未触及 native | **APPROVED** | 修正 W0 基线预览恒 0、元数据瞬时判定；报告 schema 升 v3（旧报告失效需重测） |
+| 2026-11-18 | S1-FIX-R2 | 740/740 通过（+13） | 未触及 native | **APPROVED**（round 2） | `COPY_SLOW` 判据由 ≤6/≤12 ms 改为吞吐 ≥1800/≥900 MiB/s：本机（n=1）24 MiB 帧 9/15.15 ms ≈2667/1584 MiB/s，属内存带宽正常水平，而 6 ms 需 ~4000 MiB/s 移动端难以企及。测量改纳秒精度；新增 `COPY_UNMEASURED` 区分「未测到」与「测得低」；schema 升 v4 |
 | 2026-11-17 | S1-B3 | 719/719 通过（+29） | 未触及 native | **APPROVED** | B1（Details 空白按钮）修复；Aborted 独立 CANCELLED badge；三段进度；契约外提 `ZslProbeSheetContract`；证据包/设计文档数字对齐 |
 | 2026-11-16 | S1-B2 | 690/690 通过（+35） | 未触及 native | **APPROVED** | F1（`getImageFormat` 实为 API19+，改为无条件真实格式校验）修复后通过；拆分适配器为 4 文件（282/43/62/28/51）；R1/R2/R4/R6/R10/R11/R12 闭环 |
 | 2026-11-16 | S1-B1 | 655/655 通过（+32） | 未触及 native | **APPROVED** | 适配器/触发链代码级通过，真机证据列 §7；12 条 MINOR（restore 结果不可达、首帧 scratch 竞态、未校验 RAW 格式、latch 超时孤儿双流、W2 判据缺失、24→20 口径、Scope Lock、abort 无调用方、hydration、ReportStore 非原子、前置条件缺失）转 S1-B2/B3 |

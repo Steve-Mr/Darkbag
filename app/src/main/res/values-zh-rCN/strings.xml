@@ -586,12 +586,13 @@
     <string name="zsl_metric_raw_fps">RAW 帧率</string>
     <string name="zsl_metric_gap_p95">帧间隔 P95</string>
     <string name="zsl_metric_age_p95">帧龄 P95</string>
-    <string name="zsl_metric_copy_p95">拷贝 P95</string>
+    <string name="zsl_metric_copy_throughput">拷贝吞吐</string>
     <string name="zsl_metric_preview_drop">取景掉帧</string>
     <string name="zsl_metric_thermal">热状态</string>
     <string name="zsl_reason_raw_fps_low">RAW 帧率不足</string>
     <string name="zsl_reason_preview_degraded">取景器掉帧</string>
     <string name="zsl_reason_thermal_risk">设备温度风险</string>
+    <string name="zsl_reason_copy_unmeasured">无法测量拷贝速度</string>
     <string name="zsl_reason_unsupported">此设备不支持</string>
 
     <!-- ZSL 探测 sheet：状态徽标、进度阶段、未知指标值 -->

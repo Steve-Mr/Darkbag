@@ -273,8 +273,8 @@ class ZslProbeSessionAdapter(
                     Log.w(TAG, "copyBayerWithStride failed", t)
                 }
             }
-            val copyMs = (SystemClock.elapsedRealtimeNanos() - copyStartedNs) / 1_000_000L
-            observer?.onRawFrame(image.timestamp, copyMs)
+            val copyNanos = SystemClock.elapsedRealtimeNanos() - copyStartedNs
+            observer?.onRawFrame(image.timestamp, copyNanos)
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to consume RAW probe frame", t)
         } finally {

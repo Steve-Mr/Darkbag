@@ -12,8 +12,13 @@ interface ZslProbeFrameObserver {
     /** 预览 repeating 产出一帧（[timestampNs] 为传感器时间戳）。 */
     fun onPreviewResult(timestampNs: Long)
 
-    /** RAW 帧到达（[copyMs] 为单帧拷入 scratch buffer 的耗时）。 */
-    fun onRawFrame(timestampNs: Long, copyMs: Long)
+    /**
+     * RAW 帧到达（[copyNanos] 为单帧拷入 scratch buffer 的耗时，**纳秒精度**）。
+     *
+     * 必须是纳秒而非整毫秒：拷贝判据已改为带宽口径，15 ms 与 15.9 ms 在整毫秒下同值，
+     * 却对应 6% 的吞吐差（S1-FIX-R2）。
+     */
+    fun onRawFrame(timestampNs: Long, copyNanos: Long)
 
     /** 相机报告 `onCaptureFailed`。 */
     fun onCaptureFailure()

@@ -38,14 +38,15 @@ data class ZslProbeReport(
 
     companion object {
         /**
-         * 报告 schema 版本：**3**（S1-FIX）。
+         * 报告 schema 版本：**4**（S1-FIX-R2）。
          *
          * v2 增加 `PRECONDITION_FAILED` / `RAW_UNSUPPORTED` 失败码；v3 改变 `metadataHitRate` 的
-         * 语义（从"RAW 回调瞬时命中"改为"W2 settle 之后按时间戳回查"），因此 [fromJson] 只接受 v3：
-         * 存量 v1/v2 报告一律按"无报告"处理、要求重测（[isApplicable] 同样拒绝），
-         * 避免同一版本号承载两种口径。
+         * 语义（从"RAW 回调瞬时命中"改为"W2 settle 之后按时间戳回查"）；v4 把 `COPY_SLOW` 的
+         * 判据从绝对耗时改为吞吐（新增 `copyThroughputP5MiBps` / `copyThroughputP50MiBps` /
+         * `copyFrameBytes`）。因此 [fromJson] 只接受 v4：存量 v1–v3 报告一律按"无报告"处理、
+         * 要求重测（[isApplicable] 同样拒绝），避免同一版本号承载两种判据口径。
          */
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
 
         private const val FIELD_VERSION = "version"
         private const val FIELD_TIMESTAMP_MS = "timestampMs"
@@ -67,6 +68,10 @@ data class ZslProbeReport(
         private const val FIELD_AGE_P95 = "ageP95Ms"
         private const val FIELD_COPY_P50 = "copyP50Ms"
         private const val FIELD_COPY_P95 = "copyP95Ms"
+        private const val FIELD_COPY_THROUGHPUT_P5 = "copyThroughputP5MiBps"
+        private const val FIELD_COPY_THROUGHPUT_P50 = "copyThroughputP50MiBps"
+        private const val FIELD_COPY_FRAME_BYTES = "copyFrameBytes"
+        private const val FIELD_COPY_MEASURED = "copyThroughputMeasured"
         private const val FIELD_PREVIEW_FPS_BASELINE = "previewFpsBaseline"
         private const val FIELD_PREVIEW_FPS_DUAL = "previewFpsDual"
         private const val FIELD_PREVIEW_DROP_RATIO = "previewDropRatio"
@@ -96,6 +101,7 @@ data class ZslProbeReport(
                 if (json.optInt(FIELD_VERSION, -1) != SCHEMA_VERSION) return null
                 val verdict = parseVerdict(json.optString(FIELD_VERDICT, "")) ?: return null
                 val sampleJson = json.optJSONObject(FIELD_SAMPLE) ?: return null
+                if (!hasRequiredCopyFields(sampleJson)) return null
                 val ringConfig = ringFromJson(json.optJSONObject(FIELD_RING_CONFIG))
                 if (verdict != ZslProbeVerdict.UNSUPPORTED && !ringConfig.isUsable()) return null
                 ZslProbeReport(
@@ -139,6 +145,20 @@ data class ZslProbeReport(
             return true
         }
 
+        /**
+         * v4 必填的拷贝字段校验（S1-FIX-R2 复审 MINOR-4）。
+         *
+         * 只有在"确实收到过 RAW 帧"时才要求；零帧样本（如 `RAW_UNSUPPORTED`）本就测不到这些值。
+         * 否则伪造/损坏的 v4 JSON 会因 `opt*` 兜底成 0，被下游误读成"测得 0 MiB/s"。
+         * `copyThroughputMeasured` 缺失时按 `false`（未测到）处理，同样是 fail-closed。
+         */
+        private fun hasRequiredCopyFields(sampleJson: JSONObject): Boolean {
+            if (sampleJson.optInt(FIELD_RAW_FRAME_COUNT, 0) <= 0) return true
+            return sampleJson.has(FIELD_COPY_THROUGHPUT_P5) &&
+                sampleJson.has(FIELD_COPY_THROUGHPUT_P50) &&
+                sampleJson.has(FIELD_COPY_FRAME_BYTES)
+        }
+
         private fun sampleToJson(sample: ZslProbeSample): JSONObject = JSONObject()
             .put(FIELD_RAW_FRAME_COUNT, sample.rawFrameCount)
             .put(FIELD_RAW_FPS, sample.rawFps.toDouble())
@@ -149,6 +169,10 @@ data class ZslProbeReport(
             .put(FIELD_AGE_P95, sample.ageP95Ms.toDouble())
             .put(FIELD_COPY_P50, sample.copyP50Ms.toDouble())
             .put(FIELD_COPY_P95, sample.copyP95Ms.toDouble())
+            .put(FIELD_COPY_THROUGHPUT_P5, sample.copyThroughputP5MiBps.toDouble())
+            .put(FIELD_COPY_MEASURED, sample.copyThroughputMeasured)
+            .put(FIELD_COPY_THROUGHPUT_P50, sample.copyThroughputP50MiBps.toDouble())
+            .put(FIELD_COPY_FRAME_BYTES, sample.copyFrameBytes)
             .put(FIELD_PREVIEW_FPS_BASELINE, sample.previewFpsBaseline.toDouble())
             .put(FIELD_PREVIEW_FPS_DUAL, sample.previewFpsDual.toDouble())
             .put(FIELD_PREVIEW_DROP_RATIO, sample.previewDropRatio.toDouble())
@@ -191,6 +215,10 @@ data class ZslProbeReport(
             ageP95Ms = json.optDouble(FIELD_AGE_P95, 0.0).toFloat(),
             copyP50Ms = json.optDouble(FIELD_COPY_P50, 0.0).toFloat(),
             copyP95Ms = json.optDouble(FIELD_COPY_P95, 0.0).toFloat(),
+            copyThroughputP5MiBps = json.optDouble(FIELD_COPY_THROUGHPUT_P5, 0.0).toFloat(),
+            copyThroughputP50MiBps = json.optDouble(FIELD_COPY_THROUGHPUT_P50, 0.0).toFloat(),
+            copyThroughputMeasured = json.optBoolean(FIELD_COPY_MEASURED, false),
+            copyFrameBytes = json.optLong(FIELD_COPY_FRAME_BYTES, 0L),
             previewFpsBaseline = json.optDouble(FIELD_PREVIEW_FPS_BASELINE, 0.0).toFloat(),
             previewFpsDual = json.optDouble(FIELD_PREVIEW_FPS_DUAL, 0.0).toFloat(),
             previewDropRatio = json.optDouble(FIELD_PREVIEW_DROP_RATIO, 0.0).toFloat(),

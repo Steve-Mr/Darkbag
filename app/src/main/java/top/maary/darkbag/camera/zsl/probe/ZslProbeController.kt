@@ -5,6 +5,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
 import top.maary.darkbag.camera.zsl.RingConfig
+import top.maary.darkbag.camera.zsl.ZslStaticCapabilities
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** 探测结果：完成（含报告）/ 失败（固定原因码）/ 用户中止。 */
@@ -171,10 +172,13 @@ class ZslProbeController(
             .getOrDefault(ZslMetadataBinding(0, snapshot.rawTimestampsNs.size))
         val metadataTotal = if (binding.total > 0) binding.total else snapshot.rawTimestampsNs.size
 
+        val capabilities = runCatching { session.capabilities }.getOrNull()
+
         val sample = ZslProbeAggregator.aggregate(
             rawTimestampsNs = snapshot.rawTimestampsNs,
             ageSamplesMs = snapshot.ageSamplesMs,
-            copySamplesMs = snapshot.copySamplesMs,
+            copySamplesNs = snapshot.copySamplesNs,
+            frameBytes = capabilities.rawFrameBytes(),
             previewBaselineCount = baselinePreviewCount,
             previewDualCount = dualPreviewCount,
             metadataHits = binding.bound,
@@ -198,7 +202,6 @@ class ZslProbeController(
         } else {
             ZslProbeScoring.evaluate(sample, 1000f / targetFps.coerceAtLeast(1))
         }
-        val capabilities = runCatching { session.capabilities }.getOrNull()
         return ZslProbeResult.Completed(
             ZslProbeReport(
                 version = ZslProbeReport.SCHEMA_VERSION,
@@ -262,3 +265,20 @@ private const val PAUSE_SLICE_MS = 100L
 private const val MIN_RAW_FRAMES = 5
 private const val RESTORE_FAILED_DETAIL = "restore failed"
 private const val NO_RESULT_DETAIL = "probe produced no result"
+
+/**
+ * 单帧拷贝字节数（RAW16 = 2 字节/像素）；能力未知或尺寸非法时返回 0。
+ *
+ * 返回 0 会让吞吐**无法测量**（`copyThroughputMeasured = false`），判定层据此判
+ * `COPY_UNMEASURED` 而非 `COPY_SLOW`（S1-FIX-R2 复审 MAJOR-3）：拿不到 RAW 尺寸属于
+ * "阈值未知"，不能归咎于拷贝慢；但结论仍是 UNSUPPORTED 并建议重测，不乐观放行。
+ *
+ * `session.capabilities` 读取失败会被上游 `runCatching{}.getOrNull()` 吞成 null，因此
+ * 这里必须容忍 null，而不是让整个探测崩溃。
+ */
+private fun ZslStaticCapabilities?.rawFrameBytes(): Long {
+    if (this == null || rawWidth <= 0 || rawHeight <= 0) return 0L
+    return rawWidth.toLong() * rawHeight.toLong() * RAW_BYTES_PER_PIXEL
+}
+
+private const val RAW_BYTES_PER_PIXEL = 2L

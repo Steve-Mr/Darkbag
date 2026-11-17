@@ -26,6 +26,10 @@ class ZslProbeVerdictTest {
         ageP95Ms: Float = 60f,
         copyP50Ms: Float = 2f,
         copyP95Ms: Float = 4f,
+        copyThroughputP5MiBps: Float = 2000f,
+        copyThroughputP50MiBps: Float = 2500f,
+        copyThroughputMeasured: Boolean = true,
+        copyFrameBytes: Long = 24L * 1024 * 1024,
         previewFpsBaseline: Float = 30f,
         previewFpsDual: Float = 30f,
         previewDropRatio: Float = 0f,
@@ -45,6 +49,10 @@ class ZslProbeVerdictTest {
         ageP95Ms = ageP95Ms,
         copyP50Ms = copyP50Ms,
         copyP95Ms = copyP95Ms,
+        copyThroughputP5MiBps = copyThroughputP5MiBps,
+        copyThroughputP50MiBps = copyThroughputP50MiBps,
+        copyThroughputMeasured = copyThroughputMeasured,
+        copyFrameBytes = copyFrameBytes,
         previewFpsBaseline = previewFpsBaseline,
         previewFpsDual = previewFpsDual,
         previewDropRatio = previewDropRatio,
@@ -66,7 +74,7 @@ class ZslProbeVerdictTest {
                 gapP95Ms = 45f,
                 gapMaxMs = 120f,
                 ageP95Ms = 100f,
-                copyP95Ms = 6f,
+                copyThroughputP5MiBps = 1800f,
                 previewDropRatio = 0.10f,
                 metadataHitRate = 0.99f,
                 warmupMs = 200L,
@@ -134,14 +142,99 @@ class ZslProbeVerdictTest {
         assertEquals(listOf(ZslProbeFailure.FRAME_AGE_HIGH), outcome.failures)
     }
 
+    /**
+     * 拷贝判据为**吞吐口径**（S1-FIX-R2）：RECOMMENDED ≥1800 MiB/s、SUPPORTED ≥900 MiB/s，
+     * 边界含等号。绝对耗时分位 `copyP95Ms` 不再参与判定——即使耗时很低，吞吐不足仍须判失败。
+     */
     @Test
-    fun testCopyP95Boundary() {
-        assertEquals(ZslProbeVerdict.RECOMMENDED, evaluate(sample(copyP95Ms = 6f)).verdict)
-        assertEquals(ZslProbeVerdict.SUPPORTED, evaluate(sample(copyP95Ms = 6.1f)).verdict)
-        assertEquals(ZslProbeVerdict.SUPPORTED, evaluate(sample(copyP95Ms = 12f)).verdict)
-        val outcome = evaluate(sample(copyP95Ms = 12.1f))
+    fun testCopyThroughputBoundary() {
+        assertEquals(ZslProbeVerdict.RECOMMENDED, evaluate(sample(copyThroughputP5MiBps = 1800f)).verdict)
+        assertEquals(ZslProbeVerdict.SUPPORTED, evaluate(sample(copyThroughputP5MiBps = 1799f)).verdict)
+        assertEquals(ZslProbeVerdict.SUPPORTED, evaluate(sample(copyThroughputP5MiBps = 900f)).verdict)
+        val outcome = evaluate(sample(copyThroughputP5MiBps = 899f))
         assertEquals(ZslProbeVerdict.UNSUPPORTED, outcome.verdict)
         assertEquals(listOf(ZslProbeFailure.COPY_SLOW), outcome.failures)
+    }
+
+    @Test
+    fun testCopyLatencyNoLongerGatesVerdict() {
+        // 旧口径下 copyP95Ms=15.15 会判 UNSUPPORTED；新口径只看吞吐，耗时分位仅入报告。
+        assertEquals(ZslProbeVerdict.RECOMMENDED, evaluate(sample(copyP95Ms = 15.15f)).verdict)
+        assertEquals(ZslProbeVerdict.RECOMMENDED, evaluate(sample(copyP95Ms = 999f)).verdict)
+    }
+
+    @Test
+    fun testMeasuredThroughputOfZeroIsCopySlow() {
+        // 真的测得 0 MiB/s（measured=true）属于"已知不可行"。
+        val outcome = evaluate(
+            sample(copyThroughputP5MiBps = 0f, copyThroughputMeasured = true)
+        )
+        assertEquals(ZslProbeVerdict.UNSUPPORTED, outcome.verdict)
+        assertEquals(listOf(ZslProbeFailure.COPY_SLOW), outcome.failures)
+    }
+
+    /**
+     * 未测到吞吐（能力读取失败 -> 字节数未知）必须报 `COPY_UNMEASURED` 而非 `COPY_SLOW`：
+     * 这是"阈值未知"，不该指责拷贝慢（S1-FIX-R2 复审 MAJOR-3）。结论仍是 UNSUPPORTED。
+     */
+    @Test
+    fun testUnmeasuredThroughputIsCopyUnmeasuredNotCopySlow() {
+        val outcome = evaluate(
+            sample(copyThroughputP5MiBps = 0f, copyThroughputMeasured = false)
+        )
+        assertEquals(ZslProbeVerdict.UNSUPPORTED, outcome.verdict)
+        assertEquals(listOf(ZslProbeFailure.COPY_UNMEASURED), outcome.failures)
+    }
+
+    @Test
+    fun testUnmeasuredCopyIsReportedEvenWhenThroughputValueLooksFine() {
+        // 标记为未测到时，即便携带的数值看起来达标，也不可采信。
+        val outcome = evaluate(
+            sample(copyThroughputP5MiBps = 5000f, copyThroughputMeasured = false)
+        )
+        assertEquals(ZslProbeVerdict.UNSUPPORTED, outcome.verdict)
+        assertEquals(listOf(ZslProbeFailure.COPY_UNMEASURED), outcome.failures)
+    }
+
+    /**
+     * 真机回归（S1-FIX-R2）：moto XT2409-5 / lens 0 / 4096×3072 实测报告。
+     *
+     * 原始样本（省略未参与判定的字段）：rawFps 29.5、gapP95 33.479、gapMax 33.479、
+     * ageP95 78.58、copyP50 9 ms、copyP95 15.15 ms、previewFpsBaseline 26.67、previewFpsDual 29.25、
+     * metadataHitRate 1.0、warmupMs 225、thermal 0/0、captureFailures 0。
+     *
+     * 旧口径（copyP95 ≤12 ms）判为 UNSUPPORTED / COPY_SLOW，但 24 MiB / 15.15 ms ≈ 1584 MiB/s
+     * 已接近内存带宽上限，属于正常表现。新吞吐口径下该机应判 SUPPORTED（预热 225 > 200 使其
+     * 无法达到 RECOMMENDED），环深度 2。
+     */
+    @Test
+    fun testMotoXt2409RealReportIsSupportedNotCopySlow() {
+        val outcome = evaluate(
+            sample(
+                rawFps = 29.5f,
+                gapP50Ms = 33.479f,
+                gapP95Ms = 33.479f,
+                gapMaxMs = 33.479f,
+                ageP50Ms = 67.987f,
+                ageP95Ms = 78.582f,
+                copyP50Ms = 9f,
+                copyP95Ms = 15.15f,
+                copyThroughputP5MiBps = 1584f,
+                copyThroughputP50MiBps = 2666f,
+                previewFpsBaseline = 26.667f,
+                previewFpsDual = 29.25f,
+                previewDropRatio = 0f,
+                metadataHitRate = 1f,
+                warmupMs = 225L,
+                thermalStatusBefore = 0,
+                thermalStatusAfter = 0,
+                captureFailures = 0
+            )
+        )
+
+        assertEquals(ZslProbeVerdict.SUPPORTED, outcome.verdict)
+        assertTrue(outcome.failures.isEmpty())
+        assertEquals(RingConfig(2, 24, 2), outcome.ringConfig)
     }
 
     @Test
@@ -277,7 +370,7 @@ class ZslProbeVerdictTest {
                 gapP95Ms = 100f,
                 gapMaxMs = 500f,
                 ageP95Ms = 200f,
-                copyP95Ms = 20f,
+                copyThroughputP5MiBps = 100f,
                 previewDropRatio = 0.5f,
                 metadataHitRate = 0.5f,
                 warmupMs = 500L,

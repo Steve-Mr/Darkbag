@@ -610,12 +610,13 @@
     <string name="zsl_metric_raw_fps">RAW frame rate</string>
     <string name="zsl_metric_gap_p95">Frame gap P95</string>
     <string name="zsl_metric_age_p95">Frame age P95</string>
-    <string name="zsl_metric_copy_p95">Copy P95</string>
+    <string name="zsl_metric_copy_throughput">Copy Throughput</string>
     <string name="zsl_metric_preview_drop">Preview drops</string>
     <string name="zsl_metric_thermal">Thermal</string>
     <string name="zsl_reason_raw_fps_low">RAW frame rate low</string>
     <string name="zsl_reason_preview_degraded">Viewfinder degraded</string>
     <string name="zsl_reason_thermal_risk">Device thermal risk</string>
+    <string name="zsl_reason_copy_unmeasured">Could not measure copy speed</string>
     <string name="zsl_reason_unsupported">Not supported on this device</string>
 
     <!-- ZSL probe sheet: status badges, progress stages, unknown metric value -->

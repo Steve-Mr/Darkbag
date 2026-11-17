@@ -35,6 +35,10 @@ class ZslProbeReportTest {
         ageP95Ms: Float = 60.25f,
         copyP50Ms: Float = 2.5f,
         copyP95Ms: Float = 4.75f,
+        copyThroughputP5MiBps: Float = 2000f,
+        copyThroughputP50MiBps: Float = 2500f,
+        copyThroughputMeasured: Boolean = true,
+        copyFrameBytes: Long = 24L * 1024 * 1024,
         previewFpsBaseline: Float = 30f,
         previewFpsDual: Float = 27.5f,
         previewDropRatio: Float = 0.083f,
@@ -54,6 +58,10 @@ class ZslProbeReportTest {
         ageP95Ms = ageP95Ms,
         copyP50Ms = copyP50Ms,
         copyP95Ms = copyP95Ms,
+        copyThroughputP5MiBps = copyThroughputP5MiBps,
+        copyThroughputP50MiBps = copyThroughputP50MiBps,
+        copyThroughputMeasured = copyThroughputMeasured,
+        copyFrameBytes = copyFrameBytes,
         previewFpsBaseline = previewFpsBaseline,
         previewFpsDual = previewFpsDual,
         previewDropRatio = previewDropRatio,
@@ -316,16 +324,59 @@ class ZslProbeReportTest {
     }
 
     // ---------------------------------------------------------------------
-    // S1-FIX：schema 升到 3（metadataHitRate 口径从"回调瞬时"改为"W2 后回查"，旧 v2 报告失效需重测）
+    // S1-FIX-R2：schema 升到 4（COPY_SLOW 判据从绝对耗时改为吞吐，旧 v1–v3 报告失效需重测）
     // ---------------------------------------------------------------------
 
     @Test
-    fun testSchemaVersionIsThreeAndWrittenIntoSavedJson() {
-        assertEquals(3, ZslProbeReport.SCHEMA_VERSION)
+    fun testSchemaVersionIsFourAndWrittenIntoSavedJson() {
+        assertEquals(4, ZslProbeReport.SCHEMA_VERSION)
 
         val json = JSONObject(report().toJson())
 
-        assertEquals(3, json.getInt("version"))
+        assertEquals(4, json.getInt("version"))
+    }
+
+    @Test
+    fun testThreeNewCopyFieldsRoundTrip() {
+        val original = report()
+        val decoded = ZslProbeReport.fromJson(original.toJson())!!
+
+        assertEquals(2000f, decoded.sample.copyThroughputP5MiBps, 0.001f)
+        assertEquals(2500f, decoded.sample.copyThroughputP50MiBps, 0.001f)
+        assertEquals(24L * 1024 * 1024, decoded.sample.copyFrameBytes)
+        assertTrue(decoded.sample.copyThroughputMeasured)
+    }
+
+    /**
+     * 伪造/损坏的 v4 JSON（有 RAW 帧但缺吞吐字段）必须整体拒绝：
+     * 否则 `opt*` 兜底成 0 会被下游误读成"测得 0 MiB/s"（S1-FIX-R2 复审 MINOR-4）。
+     */
+    @Test
+    fun testV4JsonMissingCopyFieldsIsRejectedWhenFramesExist() {
+        val json = JSONObject(report().toJson())
+        val sample = json.getJSONObject("sample")
+        sample.remove("copyThroughputP5MiBps")
+        sample.remove("copyThroughputP50MiBps")
+        sample.remove("copyFrameBytes")
+        sample.remove("copyThroughputMeasured")
+
+        assertNull(ZslProbeReport.fromJson(json.toString()))
+    }
+
+    @Test
+    fun testV4JsonWithoutCopyFieldsIsAcceptedForZeroFrameSample() {
+        // 零帧样本（如 RAW_UNSUPPORTED）本就测不到这些值，不应被拒。
+        val json = JSONObject(report().toJson())
+        val sample = json.getJSONObject("sample")
+        sample.put("rawFrameCount", 0)
+        sample.remove("copyThroughputP5MiBps")
+        sample.remove("copyThroughputP50MiBps")
+        sample.remove("copyFrameBytes")
+        sample.remove("copyThroughputMeasured")
+
+        val decoded = ZslProbeReport.fromJson(json.toString())
+        assertNotNull(decoded)
+        assertFalse(decoded!!.sample.copyThroughputMeasured)
     }
 
     @Test

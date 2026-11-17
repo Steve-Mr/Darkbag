@@ -85,6 +85,10 @@ class ZslProbeBottomSheetTest {
         ageP95Ms = 60.5f,
         copyP50Ms = 2.5f,
         copyP95Ms = 4.5f,
+        copyThroughputP5MiBps = 2000f,
+        copyThroughputP50MiBps = 2500f,
+        copyThroughputMeasured = true,
+        copyFrameBytes = 24L * 1024 * 1024,
         previewFpsBaseline = 30f,
         previewFpsDual = 27.5f,
         previewDropRatio = 0.083f,
@@ -133,14 +137,14 @@ class ZslProbeBottomSheetTest {
         assertEquals(themedContext.getString(R.string.zsl_metric_raw_fps), labelAt(0))
         assertEquals(themedContext.getString(R.string.zsl_metric_gap_p95), labelAt(1))
         assertEquals(themedContext.getString(R.string.zsl_metric_age_p95), labelAt(2))
-        assertEquals(themedContext.getString(R.string.zsl_metric_copy_p95), labelAt(3))
+        assertEquals(themedContext.getString(R.string.zsl_metric_copy_throughput), labelAt(3))
         assertEquals(themedContext.getString(R.string.zsl_metric_preview_drop), labelAt(4))
         assertEquals(themedContext.getString(R.string.zsl_metric_thermal), labelAt(5))
 
         assertEquals("29.5 fps", valueAt(0))
         assertEquals("45.5 ms", valueAt(1))
         assertEquals("60.5 ms", valueAt(2))
-        assertEquals("4.5 ms", valueAt(3))
+        assertEquals("2000 MiB/s", valueAt(3))
         assertEquals("8%", valueAt(4))
         assertEquals("1", valueAt(5))
 

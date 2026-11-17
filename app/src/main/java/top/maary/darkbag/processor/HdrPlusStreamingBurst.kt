@@ -29,7 +29,10 @@ data class StreamingBurstResult(
  *
  * Uses a decoupled Producer-Consumer queue:
  * - Producer (`addFrame`): Runs on Camera2 handler thread, quickly copies incoming Bayer data
- *   into a pooled DirectByteBuffer (~2ms), allowing Camera2 hardware images to be closed immediately.
+ *   into a pooled DirectByteBuffer, allowing Camera2 hardware images to be closed immediately.
+ *   This copy is bandwidth-bound, not negligible: measured ~9 ms P50 / ~15 ms P95 for a 12 MP
+ *   (24 MiB) RAW16 frame on moto XT2409-5 (see `addFrame` KDoc and
+ *   `docs/zsl/evidence/S1FIX_20261117_R2.md`).
  * - Consumer (`workerJob`): Runs on a dedicated background thread, drives Halide's `hdrplus_accumulate_step`,
  *   and immediately recycles/frees each frame buffer as soon as that step finishes.
  */
@@ -291,8 +294,14 @@ class HdrPlusStreamingBurst(
     }
 
     /**
-     * Rapidly receives an incoming Camera2 RAW frame, copies it into a pooled DirectByteBuffer (~2ms),
+     * Rapidly receives an incoming Camera2 RAW frame, copies it into a pooled DirectByteBuffer,
      * enqueues it for background accumulation, and returns immediately so the caller can close the Image.
+     *
+     * The copy is **not** a fixed ~2 ms: measured on a 12 MP (24 MiB) RAW16 stream, the single-frame
+     * `copyBayerWithStride` takes ~9 ms median / ~15 ms P95 (≈1580–2670 MiB/s) on moto XT2409-5,
+     * which is close to the LPDDR memory-bandwidth ceiling. Cost scales with frame size, so treat it
+     * as a bandwidth-bound memcpy rather than a negligible step.
+     * Evidence: `docs/zsl/evidence/S1FIX_20261117_R2.md`; probe metric `copyThroughputP5MiBps`.
      */
     fun addFrame(
         buffer: ByteBuffer,

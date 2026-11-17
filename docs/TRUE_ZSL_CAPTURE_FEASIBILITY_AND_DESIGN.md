@@ -69,7 +69,7 @@
 ### 1.3 帧数据通路：每帧 24 MB 拷贝（既有模式，可复用）
 
 - 12 MP RAW16 = 4000×3000×2 B = **24 MB/帧**。
-- `HdrPlusStreamingBurst.addFrame()` 在 Camera2 回调线程把 Bayer 数据 `copyBayerWithStride` 进池化 direct buffer（`processor/HdrPlusStreamingBurst.kt:297-372`，拷贝 `:318-340`），随即 `image.close()`（`HdrPlusBurstCaptureExecutor.kt:237-239`）。KDoc 称 ~2 ms/帧（`:294-296`）`[需实测]`。
+- `HdrPlusStreamingBurst.addFrame()` 在 Camera2 回调线程把 Bayer 数据 `copyBayerWithStride` 进池化 direct buffer（`processor/HdrPlusStreamingBurst.kt:306-367`，拷贝 `:331-336`），随即 `image.close()`（`camera/dispatch/HdrPlusBurstCaptureExecutor.kt:239`）。**已实测**（moto XT2409-5，4096×3072 RAW16）：单帧拷贝 P50 ≈9 ms / P95 ≈15 ms，即吞吐 ≈1580–2670 MiB/s，接近 LPDDR 内存带宽上限；**旧 KDoc 的 ~2 ms/帧 属于未经验证的估计，已更正**（见 `docs/zsl/evidence/S1FIX_20261117_R2.md`）。
 - 缓冲池上限 12 个（`processor/StreamingBufferPool.kt:14`），单 buffer 24 MB → 池化常驻上限 ~288 MB。
 
 ### 1.4 元数据：时间戳精确匹配可用，但缓存无上限
@@ -253,7 +253,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 | 点击 → 曝光决策 | `calculateHdrPlusExposure`（`HdrPlusBurstCaptureExecutor.kt:79-90`） | 武装时已算好并生效 |
 | 构请求 + 下发 | N 个请求 + `captureBurst`（`:329-356,265`） | **无请求下发** |
 | 等曝光/读出/回调 | N × 帧间隔（166–500 ms `[需实测]`） | **0** |
-| 拷进池 | 每帧 24 MB（`HdrPlusStreamingBurst.kt:318-340`） | **0**（所有权移交） |
+| 拷进池 | 每帧 24 MB（`HdrPlusStreamingBurst.kt:331-336`） | **0**（所有权移交） |
 | 建原生会话 + push | 首帧到达后 | 立即（工作线程） |
 | 取景器 | 连拍期间靠预览 target 勉强维持 + 黑场遮罩 | 不打断 |
 
@@ -333,7 +333,8 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 | 帧间隔 P95 | ≤ 1.5× | ≤ 1.8× 标称 | `RAW_JITTER` |
 | 最大间隔 | ≤ 4× 标称 | ≤ 6× 标称 | `RAW_STALL` |
 | 帧龄 P95 | ≤ 100 ms | ≤ 140 ms | `FRAME_AGE_HIGH` |
-| 拷贝 P95 | ≤ 6 ms | ≤ 12 ms | `COPY_SLOW` |
+| 拷贝吞吐 P5 | ≥ 1800 MiB/s | ≥ 900 MiB/s | `COPY_SLOW`（测得但偏低） |
+| 拷贝吞吐可测性 | 可测 | 可测 | `COPY_UNMEASURED`（未测到：单帧字节数未知） |
 | 预览掉帧 | ≤ 10% | ≤ 20% | `PREVIEW_DEGRADED` |
 | 元数据命中（≤100 ms） | ≥ 99% | ≥ 97% | `METADATA_MISS` |
 | 环预热 | ≤ 200 ms | ≤ 400 ms | `WARMUP_SLOW` |
@@ -341,6 +342,24 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 | `onCaptureFailed` | 0 | ≤ 1 | `CAPTURE_FAILED` |
 | 预检（录制/多摄/PiP/电量<10%/availMem<600MB/热>MODERATE） | 通过 | 通过 | `PRECONDITION_FAILED` |
 | RAW 能力 | 支持 | 支持 | `RAW_UNSUPPORTED` |
+
+> **拷贝判据口径（S1-FIX-R2，带宽替代绝对耗时）**：判据由「拷贝耗时 P95 ≤6/≤12 ms」改为「单帧拷贝吞吐 P5 ≥1800/≥900 MiB/s」。
+> 旧门限对 12 MP 的 24 MiB 帧需要 ~4000 MiB/s 的单核拷贝吞吐（桌面 DDR5 量级），当前移动端 SoC 难以企及
+> （本机实测仅 P5 1584 MiB/s，n=1，待多机数据校准），故该门限大概率在任何设备上都只会产出 `COPY_SLOW`；
+> 且绝对毫秒天然绑定分辨率，50 MP 机型即便内存相同也必然超限。
+> 新门限锚定物理预算：30 fps 的帧预算 33.3 ms 对应 24 MiB / 33.3 ms ≈ 717 MiB/s，是绝对下限；
+> SUPPORTED=900 留出 2/3 帧时间余量，RECOMMENDED=1800 略高于本机实测 P5 吞吐
+> （moto XT2409-5：P5 1584 / P50 2667 MiB/s，**n=1，待多机补充**；1800 对应 13.3 ms ≈ 40% 帧预算）。
+> 测量端改为**纳秒**上报 `copyNanos`，并由 `copyFrameBytes` 换算；`copyP50Ms/copyP95Ms` 仍入报告供诊断，但**不再参与判定**。
+>
+> **吞吐无法测量 ≠ 拷贝慢（S1-FIX-R2 复审 MAJOR-3）**：样本带 `copyThroughputMeasured` 标志。
+> - `false`（单帧字节数未知，即 `session.capabilities` 读取失败）→ **`COPY_UNMEASURED`**，文案指向
+>   "无法测量拷贝速度"，sheet 指标显示 `unknown`；这是**阈值未知**，不归咎于拷贝慢。
+> - `true` 且吞吐低于门限 → **`COPY_SLOW`**。
+>
+> 两者结论都是 UNSUPPORTED 并要求重测（fail-closed，与 `availMem` 读取失败同构，**不**沿用
+> `warmupMs == null` / 热状态的乐观放行）。注意"无 RAW 帧"不会经由评分层产生：`rawFrameCount < 5`
+> 已在评分前短路为 `RAW_FPS_LOW`。报告 schema 升 **v4**。
 
 > **元数据命中口径（S1 补丁）**：`metadataHitRate` 由「W2 之后逐帧按 `SENSOR_TIMESTAMP` 回查（精确 + 5ms 容差）」得出，**不是** RAW 回调瞬间的表命中率。HAL 允许结果晚于图像投递，瞬时判定会把「晚到」误判为「缺失」（真机报告曾出现 2.5% 的假阴性）。
 
@@ -491,7 +510,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 
 - 骨架复用 `bottom_sheet_bento_selection.xml`：`BottomSheetDragHandleView` + 标题行（标题 + badge）+ `NestedScrollView` 内容区。
 - 标题 `ZSL 兼容性检测`，badge 随状态：`RUNNING` / `SUPPORTED` / `LIMITED` / `UNSUPPORTED` / `CANCELLED`（取消态）（对应 `bg_bento_badge_tertiary` / `bg_bento_badge_primary` / 警告色 / `?attr/colorError` 语义）。
-- 内容 = 6 行指标：`RAW 帧率`、`帧间隔 P95`、`帧龄 P95`、`拷贝 P95`、`取景掉帧`、`热状态`；每行左 10sp 标签（`?attr/colorOnSurfaceVariant`）+ 右 12sp 数值（`?attr/colorOnSurface`），行距 8dp；超阈值项数值改用 `?attr/colorError`。
+- 内容 = 6 行指标：`RAW 帧率`、`帧间隔 P95`、`帧龄 P95`、`拷贝吞吐`、`取景掉帧`、`热状态`；每行左 10sp 标签（`?attr/colorOnSurfaceVariant`）+ 右 12sp 数值（`?attr/colorOnSurface`），行距 8dp；超阈值项数值改用 `?attr/colorError`。
 - 进行中显示三段进度（基线 0–1500ms / 双流 1500–5500ms / 恢复 ≥5500ms；W3 预热未实现，不设假阶段）。
 - 结论态底部两枚 tile：`重新检测`、`完成`；结论态额外 `复制报告`（写入剪贴板，便于报障）。
 - 关闭 = 中止（见 §3.12.2）。
@@ -521,7 +540,7 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 | `zsl_metric_raw_fps` | RAW frame rate | RAW 帧率 |
 | `zsl_metric_gap_p95` | Frame gap P95 | 帧间隔 P95 |
 | `zsl_metric_age_p95` | Frame age P95 | 帧龄 P95 |
-| `zsl_metric_copy_p95` | Copy P95 | 拷贝 P95 |
+| `zsl_metric_copy_throughput` | Copy Throughput | 拷贝吞吐 |
 | `zsl_metric_preview_drop` | Preview drops | 取景掉帧 |
 | `zsl_metric_thermal` | Thermal | 热状态 |
 | `zsl_reason_raw_fps_low` | RAW frame rate low | RAW 帧率不足 |
@@ -836,7 +855,7 @@ Sampled claims: <3 条抽检结果>
 | 变焦重复构造 repeating | `camera/delegate/CameraLensController.kt:267-285` |
 | 单帧现造 STILL_CAPTURE | `camera/dispatch/SingleRawCaptureExecutor.kt:63-67,123` |
 | 连拍 `captureBurst` + 请求构造 | `camera/dispatch/HdrPlusBurstCaptureExecutor.kt:265,329-356` |
-| 逐帧 24 MB 拷贝 + 立即 close | `processor/HdrPlusStreamingBurst.kt:297-372`；`HdrPlusBurstCaptureExecutor.kt:237-239` |
+| 逐帧 24 MB 拷贝 + 立即 close | `processor/HdrPlusStreamingBurst.kt:306-367`；`camera/dispatch/HdrPlusBurstCaptureExecutor.kt:239` |
 | 缓冲池上限 12 | `processor/StreamingBufferPool.kt:14` |
 | 元数据无淘汰 | `camera/state/CameraRuntimeStateHolder.kt:67-73`；`camera/session/CameraSessionArbiter.kt:172-183` |
 | 5 ms 时间戳容差 | `camera/dispatch/CameraCaptureMetadataExtractor.kt:59-63,303` |

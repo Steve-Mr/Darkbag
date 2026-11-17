@@ -15,6 +15,7 @@ internal object ZslProbeReasonStrings {
         ZslProbeFailure.RAW_FPS_LOW -> R.string.zsl_reason_raw_fps_low
         ZslProbeFailure.PREVIEW_DEGRADED -> R.string.zsl_reason_preview_degraded
         ZslProbeFailure.THERMAL_RISK -> R.string.zsl_reason_thermal_risk
+        ZslProbeFailure.COPY_UNMEASURED -> R.string.zsl_reason_copy_unmeasured
         else -> R.string.zsl_reason_unsupported
     }
 }
