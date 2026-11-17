@@ -135,13 +135,13 @@ class ZslProbeReportTest {
     @Test
     fun testMissingOrUnknownVerdictReturnsNull() {
         val missing = JSONObject()
-            .put("version", 2)
+            .put("version", ZslProbeReport.SCHEMA_VERSION)
             .put("sample", JSONObject())
             .toString()
         assertNull(ZslProbeReport.fromJson(missing))
 
         val unknown = JSONObject()
-            .put("version", 2)
+            .put("version", ZslProbeReport.SCHEMA_VERSION)
             .put("verdict", "MAYBE")
             .put("sample", JSONObject())
             .toString()
@@ -151,7 +151,7 @@ class ZslProbeReportTest {
     @Test
     fun testMissingSampleObjectReturnsNull() {
         val raw = JSONObject()
-            .put("version", 2)
+            .put("version", ZslProbeReport.SCHEMA_VERSION)
             .put("verdict", "SUPPORTED")
             .toString()
 
@@ -162,7 +162,7 @@ class ZslProbeReportTest {
     fun testMissingLeafFieldsFallBackToDefaults() {
         // 取 UNSUPPORTED：正向 verdict 缺合法 ring 会被判无效（F4），那样就测不到叶子字段兜底。
         val raw = JSONObject()
-            .put("version", 2)
+            .put("version", ZslProbeReport.SCHEMA_VERSION)
             .put("verdict", "UNSUPPORTED")
             .put("sample", JSONObject())
             .toString()
@@ -316,16 +316,23 @@ class ZslProbeReportTest {
     }
 
     // ---------------------------------------------------------------------
-    // S1-B2 R3：schema 升到 2（新增 PRECONDITION_FAILED / RAW_UNSUPPORTED 失败码）
+    // S1-FIX：schema 升到 3（metadataHitRate 口径从"回调瞬时"改为"W2 后回查"，旧 v2 报告失效需重测）
     // ---------------------------------------------------------------------
 
     @Test
-    fun testSchemaVersionIsTwoAndWrittenIntoSavedJson() {
-        assertEquals(2, ZslProbeReport.SCHEMA_VERSION)
+    fun testSchemaVersionIsThreeAndWrittenIntoSavedJson() {
+        assertEquals(3, ZslProbeReport.SCHEMA_VERSION)
 
         val json = JSONObject(report().toJson())
 
-        assertEquals(2, json.getInt("version"))
+        assertEquals(3, json.getInt("version"))
+    }
+
+    @Test
+    fun testVersionTwoJsonIsRejectedAfterMetadataSemanticsChange() {
+        val old = JSONObject(report().toJson()).put("version", 2).toString()
+
+        assertNull(ZslProbeReport.fromJson(old))
     }
 
     @Test

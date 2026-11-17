@@ -164,14 +164,21 @@ class ZslProbeController(
         if (!awaitWindow(WINDOW_RECOVERY_MS)) return ZslProbeResult.Aborted
         if (watchdogExpired(startNs)) return watchdogFailure()
 
+        // 元数据绑定在 W2 之后解析：HAL 允许 CaptureResult 晚于图像投递，瞬时查表会把"晚到"
+        // 误判成"缺失"（真机报告 METADATA_MISS 2.5% 即由此产生）。W2 的 1000 ms 同时充当
+        // 结果落地的 grace window；解析失败按"未绑定"保守处理，绝不因端口异常而放行。
+        val binding = runCatching { session.metadataBinding(snapshot.rawTimestampsNs) }
+            .getOrDefault(ZslMetadataBinding(0, snapshot.rawTimestampsNs.size))
+        val metadataTotal = if (binding.total > 0) binding.total else snapshot.rawTimestampsNs.size
+
         val sample = ZslProbeAggregator.aggregate(
             rawTimestampsNs = snapshot.rawTimestampsNs,
             ageSamplesMs = snapshot.ageSamplesMs,
             copySamplesMs = snapshot.copySamplesMs,
             previewBaselineCount = baselinePreviewCount,
             previewDualCount = dualPreviewCount,
-            metadataHits = snapshot.metadataHits,
-            metadataTotal = snapshot.rawTimestampsNs.size,
+            metadataHits = binding.bound,
+            metadataTotal = metadataTotal,
             warmupMs = snapshot.warmupMs,
             thermalBefore = thermalBefore,
             thermalAfter = safeThermalStatus(),

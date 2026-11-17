@@ -178,7 +178,6 @@ internal class SampleCollector(private val clock: ZslProbeClock) : ZslProbeFrame
     private val rawTimestamps = ArrayList<Long>()
     private val ageSamples = ArrayList<Float>()
     private val copySamples = ArrayList<Float>()
-    private var metadataHits = 0
     private var captureFailures = 0
     private var warmupMs: Long? = null
 
@@ -203,7 +202,6 @@ internal class SampleCollector(private val clock: ZslProbeClock) : ZslProbeFrame
         rawTimestampsNs = rawTimestamps.toList(),
         ageSamplesMs = ageSamples.toList(),
         copySamplesMs = copySamples.toList(),
-        metadataHits = metadataHits,
         captureFailures = captureFailures,
         warmupMs = warmupMs
     )
@@ -218,13 +216,12 @@ internal class SampleCollector(private val clock: ZslProbeClock) : ZslProbeFrame
         }
     }
 
-    override fun onRawFrame(timestampNs: Long, copyMs: Long, metadataHit: Boolean) {
+    override fun onRawFrame(timestampNs: Long, copyMs: Long) {
         synchronized(this) {
             if (phase != ProbePhase.DUAL) return
             rawTimestamps.add(timestampNs)
             ageSamples.add(((clock.nowNanos() - timestampNs) / 1_000_000f).coerceAtLeast(0f))
             copySamples.add(copyMs.coerceAtLeast(0L).toFloat())
-            if (metadataHit) metadataHits++
             if (warmupMs == null && dualStartNs > 0L && rawTimestamps.size >= WARMUP_FRAMES) {
                 warmupMs = ((clock.nowNanos() - dualStartNs) / 1_000_000L).coerceAtLeast(0L)
             }
@@ -242,7 +239,6 @@ internal data class CollectorSnapshot(
     val rawTimestampsNs: List<Long>,
     val ageSamplesMs: List<Float>,
     val copySamplesMs: List<Float>,
-    val metadataHits: Int,
     val captureFailures: Int,
     val warmupMs: Long?
 )

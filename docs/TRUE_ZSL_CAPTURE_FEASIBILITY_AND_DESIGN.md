@@ -316,9 +316,9 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 
 | 窗口 | 时长 | 动作 | 采集指标 |
 |---|---|---|---|
-| W0 基线 | 1500 ms | 保持现状（预览 + 分析流，无 RAW target） | 预览帧率基线、帧间隔 P50/P95、热状态、内存 |
+| W0 基线 | 1500 ms | 保持现状（预览 + 分析流，无 RAW target） | 预览帧率基线（**从 `captureResultFlow` 计数：W0 的 repeating 仍由生产回调驱动，且以订阅时 replay 尾部为截断点排除历史帧**）、热状态、内存 |
 | W1 双流 | 4000 ms | 工厂重建 repeating：追加 RAW target，锁 `SENSOR_FRAME_DURATION = 1/fps` 与 `CONTROL_AE_TARGET_FPS_RANGE=[fps,fps]`；RAW 监听只计数并 `close()`，同时向**单个复用 scratch buffer** 拷贝以量拷贝耗时 | RAW 帧数/帧率/间隔 P50/P95/max/抖动、帧龄 `(elapsedRealtimeNanos−sensorTs)` P50/P95、拷贝耗时 P50/P95、元数据命中率与延迟、预览帧率、`onCaptureFailed` 数、曝光漂移（ISO/time 标准差） |
-| W2 恢复 | 1000 ms | 还原原始请求与监听（RAW target 是否仍在会话配置中取决于 S0 现状，见 §1.2） | **S1 定位为 settle window**：不做数值判据；恢复正确性由真机 `DUMP`（请求字段与探测前逐字段一致）与冒烟验证，见 `docs/zsl/evidence/S1B1_20261116.md` §7 |
+| W2 恢复 | 1000 ms | 还原原始请求与监听（RAW target 是否仍在会话配置中取决于 S0 现状，见 §1.2） | **S1 定位为 settle window**：不做数值判据；同时充当 `CaptureResult` 晚到的 grace window —— **元数据绑定在 W2 结束后统一回查**，恢复正确性由真机 `DUMP` 与冒烟验证；W0→W1 工厂重建的 1–3 帧可能被多计/少计（方向保守，不造成同帧双计） |
 | W3 补测（可选） | 1000 ms | 重新武装到"环满 3 帧"计时 | 环预热耗时 `warmLoadMs` |
 
 - 总时长 ≈ 7.5 s（含 W3）；**看门狗 15 s**，超时或状态变化（来电、切后台、模式切换）立即中止并还原。
@@ -341,6 +341,8 @@ Disarmed ──arm()──► Arming（等 AE 收敛 + 首帧） ──满 K─�
 | `onCaptureFailed` | 0 | ≤ 1 | `CAPTURE_FAILED` |
 | 预检（录制/多摄/PiP/电量<10%/availMem<600MB/热>MODERATE） | 通过 | 通过 | `PRECONDITION_FAILED` |
 | RAW 能力 | 支持 | 支持 | `RAW_UNSUPPORTED` |
+
+> **元数据命中口径（S1 补丁）**：`metadataHitRate` 由「W2 之后逐帧按 `SENSOR_TIMESTAMP` 回查（精确 + 5ms 容差）」得出，**不是** RAW 回调瞬间的表命中率。HAL 允许结果晚于图像投递，瞬时判定会把「晚到」误判为「缺失」（真机报告曾出现 2.5% 的假阴性）。
 
 派生推荐：`ringDepth = 3 if warmLoad ≤ 200 else 2`；`ringFps = if (rawFps ≥ 24) 24 else max(5, floor(rawFps/5)*5)`（即 ≥24 → 24；15–23.9 → 15；S1-B1 复审 R6 定稿，避免实测 24 被降到 20）；`minValidFrames = 2`。
 附加信息（不参与判定，只入报告）：`hasDeviceZslKey`、`supportsPrivateReprocessing`、`syncMaxLatency`、`pipelineDepth`、`hardwareLevel`、RAW 尺寸、`minFrameDurationMs`。

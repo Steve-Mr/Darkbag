@@ -9,10 +9,14 @@ import android.hardware.camera2.TotalCaptureResult
 import android.media.ImageReader
 import android.os.SystemClock
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
 import top.maary.darkbag.camera.dispatch.CameraCaptureMetadataExtractor
 import top.maary.darkbag.camera.session.PreviewRequestPlan
 import top.maary.darkbag.camera.zsl.ZslStaticCapabilities
+import top.maary.darkbag.camera.zsl.probe.ZslMetadataBinding
 import top.maary.darkbag.camera.zsl.probe.ZslProbeFrameObserver
 import top.maary.darkbag.camera.zsl.probe.ZslProbeSession
 import top.maary.darkbag.processor.ColorProcessor
@@ -44,8 +48,14 @@ class ZslProbeSessionAdapter(
     /** 单次分配、所有帧复用的拷贝目标（RAW16 即 2 字节/像素）。 */
     @Volatile private var scratchBuffer: ByteBuffer? = null
 
-    /** 元数据命中判定复用既有提取器（5 ms 容差），不重复实现时间戳匹配。 */
+    /** 元数据绑定回查复用既有提取器（5 ms 容差），不重复实现时间戳匹配。 */
     private val metadataExtractor by lazy { CameraCaptureMetadataExtractor(env) }
+
+    /** W0 基线预览计数（生产回调只把结果发到 captureResultFlow，见 ZslProbeMeasurementsTap）。 */
+    private val previewTap = ZslProbePreviewTap(
+        env.runtimeState.captureResultFlow,
+        CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    ) { begun }
     private val lensId: String
         get() = env.runtimeState.currentLens?.id ?: DEFAULT_LENS_ID
 
@@ -57,6 +67,7 @@ class ZslProbeSessionAdapter(
 
     override fun setFrameObserver(observer: ZslProbeFrameObserver?) {
         this.observer = observer
+        if (observer == null) previewTap.stop() else previewTap.start(observer)
     }
 
     override fun beginDualStream(targetFps: Int): Boolean {
@@ -219,7 +230,7 @@ class ZslProbeSessionAdapter(
         )
     }
 
-    /** 探测期间的预览回调：只喂有界元数据缓存（metadataHit 依赖）+ 上报帧事件，不改 UI 遥测。 */
+    /** W1 双流期间的预览回调：喂有界元数据缓存（W2 后回查用）+ 直接上报预览帧。 */
     private fun captureCallback() = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(
             session: CameraCaptureSession,
@@ -240,7 +251,7 @@ class ZslProbeSessionAdapter(
         }
     }
 
-    /** RAW 帧：acquire → 计时拷贝 → 元数据命中断言 → 关闭 → 上报。 */
+    /** RAW 帧：acquire → 计时拷贝 → 关闭 → 上报（元数据绑定在 W2 之后统一回查）。 */
     private fun handleRawImage(reader: ImageReader) {
         val image = try {
             reader.acquireNextImage()
@@ -263,14 +274,17 @@ class ZslProbeSessionAdapter(
                 }
             }
             val copyMs = (SystemClock.elapsedRealtimeNanos() - copyStartedNs) / 1_000_000L
-            val metadataHit = metadataExtractor.findCaptureResultSync(image.timestamp) != null
-            observer?.onRawFrame(image.timestamp, copyMs, metadataHit)
+            observer?.onRawFrame(image.timestamp, copyMs)
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to consume RAW probe frame", t)
         } finally {
             image.close()
         }
     }
+
+    /** W2 settle 之后统一回查（调用方已留 1000 ms 让晚到的结果落地，见 ZslProbeMetadataBinder）。 */
+    override fun metadataBinding(timestampsNs: List<Long>): ZslMetadataBinding =
+        ZslProbeMetadataBinder.bind(timestampsNs) { metadataExtractor.findCaptureResultSync(it) != null }
 
     private companion object {
         const val TAG = "ZslProbeSession"

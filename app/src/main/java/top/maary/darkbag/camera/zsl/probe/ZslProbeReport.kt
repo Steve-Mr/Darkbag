@@ -38,13 +38,14 @@ data class ZslProbeReport(
 
     companion object {
         /**
-         * 报告 schema 版本：**2**（S1-B2 R3）。
+         * 报告 schema 版本：**3**（S1-FIX）。
          *
-         * v2 相对 v1 只增加失败原因码 `PRECONDITION_FAILED` / `RAW_UNSUPPORTED`（枚举名进 JSON），
-         * 字段集合不变；但旧版 UI/判定不认这两个码，因此 [fromJson] 只接受 v2，
-         * 存量 v1 报告按"无报告"处理、要求重测（[isApplicable] 同样拒绝）。
+         * v2 增加 `PRECONDITION_FAILED` / `RAW_UNSUPPORTED` 失败码；v3 改变 `metadataHitRate` 的
+         * 语义（从"RAW 回调瞬时命中"改为"W2 settle 之后按时间戳回查"），因此 [fromJson] 只接受 v3：
+         * 存量 v1/v2 报告一律按"无报告"处理、要求重测（[isApplicable] 同样拒绝），
+         * 避免同一版本号承载两种口径。
          */
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
 
         private const val FIELD_VERSION = "version"
         private const val FIELD_TIMESTAMP_MS = "timestampMs"

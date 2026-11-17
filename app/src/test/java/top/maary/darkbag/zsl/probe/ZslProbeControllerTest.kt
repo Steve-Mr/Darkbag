@@ -11,6 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import top.maary.darkbag.camera.zsl.RingConfig
 import top.maary.darkbag.camera.zsl.ZslStaticCapabilities
+import top.maary.darkbag.camera.zsl.probe.ZslMetadataBinding
 import top.maary.darkbag.camera.zsl.probe.*
 
 /**
@@ -58,7 +59,10 @@ class ZslProbeControllerTest {
         private val throwOnObserverCallback: Boolean = false,
         private val captureFailureCount: Int = 0,
         private val endResult: Boolean = true,
-        private val throwOnEnd: Boolean = false
+        private val throwOnEnd: Boolean = false,
+        /** 从 W2 之后回查得到的绑定数；默认全部绑定（模拟"晚到但最终可命中"）。 */
+        private val boundMetadataCount: Int? = null,
+        private val throwOnMetadataBinding: Boolean = false
     ) : ZslProbeSession {
         override val capabilities = ZslStaticCapabilities(
             hardwareLevel = 3, rawSupported = true, rawWidth = 4000, rawHeight = 3000,
@@ -89,7 +93,7 @@ class ZslProbeControllerTest {
             if (throwOnObserverCallback) {
                 repeat(5) { emitRawFrame() }
                 clock.throwOnNextNanosRead = true
-                observer?.onRawFrame(clock.nanoTime - 25_000_000L, 4L, true)
+                observer?.onRawFrame(clock.nanoTime - 25_000_000L, 4L)
                 return true
             }
             if (!beginResult) return false
@@ -100,7 +104,12 @@ class ZslProbeControllerTest {
 
         private fun emitRawFrame() {
             clock.advanceMs(frameIntervalMs)
-            observer?.onRawFrame(clock.nowNanos() - 25_000_000L, 4L, true)
+            observer?.onRawFrame(clock.nowNanos() - 25_000_000L, 4L)
+        }
+
+        override fun metadataBinding(timestampsNs: List<Long>): ZslMetadataBinding {
+            if (throwOnMetadataBinding) throw IllegalStateException("binding lookup exploded")
+            return ZslMetadataBinding(boundMetadataCount ?: timestampsNs.size, timestampsNs.size)
         }
 
         override fun endDualStream(): Boolean {
@@ -165,7 +174,9 @@ class ZslProbeControllerTest {
         captureFailureCount: Int = 0,
         endResult: Boolean = true,
         throwOnEnd: Boolean = false,
-        watchdogMs: Long = 15_000L
+        watchdogMs: Long = 15_000L,
+        boundMetadataCount: Int? = null,
+        throwOnMetadataBinding: Boolean = false
     ): Harness {
         val clock = FakeClock()
         val session = FakeProbeSession(
@@ -177,7 +188,9 @@ class ZslProbeControllerTest {
             throwOnObserverCallback = throwOnObserverCallback,
             captureFailureCount = captureFailureCount,
             endResult = endResult,
-            throwOnEnd = throwOnEnd
+            throwOnEnd = throwOnEnd,
+            boundMetadataCount = boundMetadataCount,
+            throwOnMetadataBinding = throwOnMetadataBinding
         )
         val scheduler = FakeScheduler(clock, session)
         return Harness(
@@ -467,6 +480,40 @@ class ZslProbeControllerTest {
         assertEquals(ZslProbeVerdict.SUPPORTED, report.verdict)
         assertTrue(report.failures.isEmpty())
         assertEquals(RingConfig(2, 15, 2), report.ringConfig)
+        assertRestored(h)
+    }
+
+    @Test
+    fun testMetadataBindingResolvedAfterSettleWindow_countsOnlyLateBoundFrames() {
+        // 模拟真机：RAW 帧到达时没有 CaptureResult，W2 之后只回查到 3/120 → 仍是 METADATA_MISS，
+        // 但命中率必须来自"窗口后回查"而不是"回调瞬时查表"。
+        val h = harness(boundMetadataCount = 3)
+        val report = completed(runProbe(h))
+
+        assertEquals(3f / 120f, report.sample.metadataHitRate, 0.0001f)
+        assertEquals(ZslProbeVerdict.UNSUPPORTED, report.verdict)
+        assertTrue(report.failures.contains(ZslProbeFailure.METADATA_MISS))
+    }
+
+    @Test
+    fun testMetadataBindingResolvedAfterSettleWindow_fullyBoundPasses() {
+        // 晚到但最终全部绑定：不得判 METADATA_MISS（旧实现会因瞬时查表得到 2.5%）。
+        val h = harness()
+        val report = completed(runProbe(h))
+
+        assertEquals(1f, report.sample.metadataHitRate, 0f)
+        assertFalse(report.failures.contains(ZslProbeFailure.METADATA_MISS))
+    }
+
+    @Test
+    fun testMetadataBindingFailureFallsBackConservatively() {
+        // 回查端口抛异常时不得放行：按 0/total 处理 → METADATA_MISS，且探测仍以 Completed 收口
+        val h = harness(throwOnMetadataBinding = true)
+        val report = completed(runProbe(h))
+
+        assertEquals(0f, report.sample.metadataHitRate, 0f)
+        assertEquals(ZslProbeVerdict.UNSUPPORTED, report.verdict)
+        assertTrue(report.failures.contains(ZslProbeFailure.METADATA_MISS))
         assertRestored(h)
     }
 }

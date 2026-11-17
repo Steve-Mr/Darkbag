@@ -12,8 +12,8 @@ interface ZslProbeFrameObserver {
     /** 预览 repeating 产出一帧（[timestampNs] 为传感器时间戳）。 */
     fun onPreviewResult(timestampNs: Long)
 
-    /** RAW 帧到达（[copyMs] 为单帧拷入 scratch buffer 的耗时，[metadataHit] 表示时长窗内命中元数据）。 */
-    fun onRawFrame(timestampNs: Long, copyMs: Long, metadataHit: Boolean)
+    /** RAW 帧到达（[copyMs] 为单帧拷入 scratch buffer 的耗时）。 */
+    fun onRawFrame(timestampNs: Long, copyMs: Long)
 
     /** 相机报告 `onCaptureFailed`。 */
     fun onCaptureFailure()
@@ -49,7 +49,19 @@ interface ZslProbeSession {
 
     /** 当前可用内存（`ActivityManager.MemoryInfo.availMem`），读取失败返回 0。 */
     fun availableMemoryBytes(): Long
+
+    /**
+     * 窗口结束后解析 RAW 帧与 `CaptureResult` 的绑定情况。
+     *
+     * 不能按"RAW 回调那一刻是否已命中"统计：HAL 允许结果晚于图像投递，瞬时查表会把
+     * "晚到"误判成"缺失"。实现方在 [timestampsNs] 全部产生、且经过 W2 settle window 之后
+     * 再按 `SENSOR_TIMESTAMP` 回查（精确 + 既有容差），返回绑定数与总数。
+     */
+    fun metadataBinding(timestampsNs: List<Long>): ZslMetadataBinding
 }
+
+/** RAW 帧 ↔ `CaptureResult` 的绑定统计（W2 之后解析）。 */
+data class ZslMetadataBinding(val bound: Int, val total: Int)
 
 /**
  * 窗口等待调度端口。
