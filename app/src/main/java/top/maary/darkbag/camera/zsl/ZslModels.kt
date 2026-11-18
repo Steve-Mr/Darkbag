@@ -88,6 +88,7 @@ private object ZslImageFormats {
 /** Pure policy used by the controller for adaptive ZSL; kept JVM-testable. */
 object ZslAdaptivePolicy {
     const val MIN_HDR_FRAMES = 3
+    const val MIN_HYBRID_PRE_ROLL = 2
 
     val INSTANT_FALLBACK_REASONS = setOf(
         "no_stable_run",
@@ -99,6 +100,12 @@ object ZslAdaptivePolicy {
         val requested = requestedBurst.coerceAtLeast(MIN_HDR_FRAMES)
         return if (adaptive) stableFrames.coerceIn(0, requested) else requested
     }
+
+    /**
+     * Determines whether a partial pre-roll run meets the threshold for hybrid ZSL window extension.
+     */
+    fun canExtendWindow(stableFrames: Int, requestedBurst: Int): Boolean =
+        stableFrames in MIN_HYBRID_PRE_ROLL until requestedBurst.coerceAtLeast(MIN_HDR_FRAMES)
 
     fun shouldUseInstantSingle(adaptive: Boolean, reason: String): Boolean =
         adaptive && reason in INSTANT_FALLBACK_REASONS

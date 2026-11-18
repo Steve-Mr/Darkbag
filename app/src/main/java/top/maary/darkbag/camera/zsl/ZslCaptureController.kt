@@ -365,8 +365,16 @@ class ZslCaptureController(
         timing.captureMode = CaptureTimingMode.HDR_BURST
         timing.zslRoute = ZslRoute.RAW_RING.key
         timing.zslPreRollFrames = seed.preRollCount
-        timing.zslPostRollFrames = 0
-        // ZSL plans are always complete pre-roll sets now: keep RAW target/profile armed.
+        timing.zslPostRollFrames = seed.remainingCount
+
+        val isHybridBurst = seed.remainingCount > 0
+        if (isHybridBurst) {
+            // A hybrid burst extends the window with a hardware burst, switching RawFrameRouter to CAPTURE.
+            // Disarm ZSL now so repeating request drops -1 EV / raw target, and the ring is reset cleanly.
+            // Keep preview gain active since HdrPlusBurstCaptureExecutor will manage burstGain during capture.
+            disarm(reason = "hybrid_burst", resetPreviewGain = false)
+        }
+
         val started = try {
             pipeline.triggerHdrPlusBurstCamera2(
                 sink = sink,
@@ -385,17 +393,20 @@ class ZslCaptureController(
                 ui.showZslCaptureFeedback()
             }
         } else {
+            if (isHybridBurst) {
+                env.sessionArbiter.lutProcessor?.setPreviewGain(1.0f)
+            }
             timing.zslFallbackReason = "burst_start_failed"
             timing.zslRoute = ""
             timing.zslPreRollFrames = 0
             timing.zslPostRollFrames = 0
             timing.zslFrameOffsetMs = 0L
         }
-        if (started) {
+        if (started && !isHybridBurst) {
             publishDebug(armed = true, reason = "", fps = ZslDebugRegistry.state.value.fps)
         }
-        Log.i(TAG, "ZSL HDR+ shot started=$started frames=${seed.preRollCount}")
-        if (!started || profile == Profile.OFF) {
+        Log.i(TAG, "ZSL HDR+ shot started=$started pre=${seed.preRollCount} post=${seed.remainingCount}")
+        if (!started || isHybridBurst || profile == Profile.OFF) {
             scheduleRearm()
         }
         return started
@@ -420,14 +431,14 @@ class ZslCaptureController(
         val t0 = pressTimestampNs(timing)
         val requestedBurst = prefs.hdrBurstCount.coerceIn(3, 8)
         val maxRingBurst = minOf(requestedBurst, ring.config.depth).coerceAtLeast(3)
-        val selected = ring.stableRun(t0, maxRingBurst)
-        if (selected.size < ZslAdaptivePolicy.MIN_HDR_FRAMES) {
-            timing.zslFallbackReason = "no_stable_run"
-            return null
-        }
-        val targetFrames = ZslAdaptivePolicy.hdrTargetFrameCount(adaptive, selected.size, requestedBurst)
-        if (!adaptive && selected.size < targetFrames) {
-            timing.zslFallbackReason = "pre_roll_short"
+        // In strict mode (!adaptive), we allow a stable run down to MIN_HYBRID_PRE_ROLL (2 frames)
+        // to extend the window with post-roll capture rather than completely falling back to forward burst.
+        // In adaptive mode, we require at least MIN_HDR_FRAMES (3 frames) for pure pre-roll contraction.
+        val minRequiredRun = if (adaptive) ZslAdaptivePolicy.MIN_HDR_FRAMES else ZslAdaptivePolicy.MIN_HYBRID_PRE_ROLL
+        val ringSize = ring.size
+        val selected = ring.stableRun(t0, maxRingBurst, minRunCount = minRequiredRun)
+        if (selected.size < minRequiredRun) {
+            timing.zslFallbackReason = if (!adaptive && ringSize < minRequiredRun) "pre_roll_short" else "no_stable_run"
             return null
         }
         val preBase = selected.first()
@@ -443,15 +454,14 @@ class ZslCaptureController(
             return null
         }
         val taken = ring.take(selected)
-        if (taken.size < 3) {
+        if (taken.size < minRequiredRun) {
             timing.zslFallbackReason = "frame_race"
             ring.releaseFrames(taken)
             return null
         }
         val byTimestamp = taken.associateBy { it.timestamp }
         val ordered = selected.mapNotNull { byTimestamp[it.timestamp] }
-        val takenTargetFrames = ZslAdaptivePolicy.hdrTargetFrameCount(adaptive, ordered.size, requestedBurst)
-        if (ordered.size < 3 || (!adaptive && ordered.size < takenTargetFrames)) {
+        if (ordered.size < minRequiredRun) {
             timing.zslFallbackReason = "frame_race"
             ring.releaseFrames(taken)
             return null
@@ -473,14 +483,15 @@ class ZslCaptureController(
             return null
         }
         timing.zslFrameOffsetMs = abs(base.timestamp - t0) / 1_000_000L
+        val isExtendingWindow = !adaptive && ZslAdaptivePolicy.canExtendWindow(ordered.size, requestedBurst)
+        val targetFrameCount = if (isExtendingWindow) requestedBurst else (if (adaptive) ordered.size else requestedBurst)
         return ZslBurstSeed(
             frames = ordered,
             baseResult = baseResult,
             iso = iso,
             exposureTimeNs = exposure,
             digitalGain = hdrDigitalGain,
-            // Adaptive uses stable pre-roll (3..depth); strict mode requires full requestedBurst.
-            targetFrameCount = takenTargetFrames
+            targetFrameCount = targetFrameCount
         )
     }
 
@@ -742,7 +753,7 @@ class ZslCaptureController(
         ZslDebugRegistry.update { it.copy(lastCapture = text) }
     }
 
-    private fun disarm(reason: String = "unknown") {
+    private fun disarm(reason: String = "unknown", resetPreviewGain: Boolean = true) {
         val previous = ZslDebugRegistry.state.value
         val snapshot = previous.afterDisarm(
             reason = reason,
@@ -762,7 +773,9 @@ class ZslCaptureController(
         if (profile != Profile.OFF) {
             stream.setZslRawTargetEnabled(false)
             stream.setZslPreviewProfile(false)
-            env.sessionArbiter.lutProcessor?.setPreviewGain(1.0f)
+            if (resetPreviewGain) {
+                env.sessionArbiter.lutProcessor?.setPreviewGain(1.0f)
+            }
         }
         profile = Profile.OFF
         hdrEvSteps = 0

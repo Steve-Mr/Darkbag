@@ -321,17 +321,22 @@ class ZslRawRing(
 
     /**
      * Returns a stable pre-roll run for HDR+ ZSL, base-frame first.
-     * Returns an empty list when fewer than 3 frames share exposure/WB/crop/AF state.
+     * Returns an empty list when fewer than [minRunCount] frames share exposure/WB/crop/AF state.
      */
-    fun stableRun(t0Ns: Long, targetCount: Int): List<ZslFrame> {
+    fun stableRun(
+        t0Ns: Long,
+        targetCount: Int,
+        minRunCount: Int = ZslAdaptivePolicy.MIN_HDR_FRAMES
+    ): List<ZslFrame> {
         val all = synchronized(lock) { frames.toList() }
         val indices = ZslFrameSelector.stableRunIndices(
             samples = all.map { it.toSample() },
             t0Ns = t0Ns,
             targetCount = targetCount,
-            maxAgeNs = config.maxAgeNs
+            maxAgeNs = config.maxAgeNs,
+            minRunCount = minRunCount
         )
-        if (indices.size < 3) return emptyList()
+        if (indices.size < minRunCount) return emptyList()
         return indices.map { all[it] }
     }
 

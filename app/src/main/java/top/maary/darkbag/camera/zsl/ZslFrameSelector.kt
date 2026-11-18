@@ -37,28 +37,30 @@ object ZslFrameSelector {
 
     /**
      * Returns indices of a stable consecutive run, base frame first.
-     * Returns empty when fewer than 3 frames share exposure/WB/crop/AF state.
+     * Returns empty when fewer than [minRunCount] frames share exposure/WB/crop/AF state.
      */
     fun stableRunIndices(
         samples: List<ZslFrameSample>,
         t0Ns: Long,
         targetCount: Int,
-        maxAgeNs: Long
+        maxAgeNs: Long,
+        minRunCount: Int = 3
     ): List<Int> {
-        if (targetCount < 3 || samples.size < 3) return emptyList()
+        val minCount = minRunCount.coerceAtLeast(1)
+        if (targetCount < minCount || samples.size < minCount) return emptyList()
         val all = samples.withIndex()
             .filter { it.value.hasResult && it.value.iso != null && it.value.exposureTimeNs != null }
             .sortedBy { it.value.timestamp }
-        if (all.size < 3) return emptyList()
+        if (all.size < minCount) return emptyList()
 
         val nearestPos = all.indices.minByOrNull { abs(all[it].value.timestamp - t0Ns) } ?: return emptyList()
         if (abs(all[nearestPos].value.timestamp - t0Ns) > maxAgeNs) return emptyList()
 
         val start = (nearestPos - targetCount + 1).coerceAtLeast(0)
         var run = all.subList(start, nearestPos + 1)
-        if (run.size < 3) return emptyList()
+        if (run.size < minCount) return emptyList()
 
-        while (run.size >= 3) {
+        while (run.size >= minCount) {
             if (isStable(run.map { it.value })) {
                 val base = run.last().index
                 val others = run.dropLast(1).sortedByDescending { it.value.timestamp }.map { it.index }

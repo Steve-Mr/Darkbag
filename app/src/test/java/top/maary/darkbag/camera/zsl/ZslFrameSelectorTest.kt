@@ -105,4 +105,24 @@ class ZslFrameSelectorTest {
             ZslFrameSelector.stableRunIndices(samples, 3_066_000_000L, 3, 4_000_000_000L).isEmpty()
         )
     }
+
+    @Test
+    fun stableRunSupportsTwoFramePreRollWhenRequested() {
+        val samples = listOf(
+            sample(1_000L),
+            sample(1_033L)
+        )
+        // Default requires 3, so returns empty
+        assertTrue(ZslFrameSelector.stableRunIndices(samples, 1_033L, 5, 300).isEmpty())
+
+        // With minRunCount = 2, returns base frame first (index 1 then index 0)
+        val hybridIndices = ZslFrameSelector.stableRunIndices(
+            samples = samples,
+            t0Ns = 1_033L,
+            targetCount = 5,
+            maxAgeNs = 300,
+            minRunCount = 2
+        )
+        assertEquals(listOf(1, 0), hybridIndices)
+    }
 }
