@@ -183,15 +183,25 @@ void main() {
     float sx0 = float(X) / uZoomFactor + uCropXStart;
     float sy0 = float(Y) / uZoomFactor + uCropYStart;
 
-    // Optical flow lookup (dx, dy)
+    // Optical flow lookup (dx, dy) with bilinear interpolation across neighboring tile centers
     float dx = 0.0;
     float dy = 0.0;
     if (uIsRef == 0 && uHasFlow != 0) {
-        float fx = (sx0 / float(uSensorWidth)) * float(uFlowWidth);
-        float fy = (sy0 / float(uSensorHeight)) * float(uFlowHeight);
-        int fix = clamp(int(fx), 0, uFlowWidth - 1);
-        int fiy = clamp(int(fy), 0, uFlowHeight - 1);
-        vec2 flow = texelFetch(uFlowTex, ivec2(fix, fiy), 0).xy;
+        float fx = (sx0 / float(uSensorWidth)) * float(uFlowWidth) - 0.5;
+        float fy = (sy0 / float(uSensorHeight)) * float(uFlowHeight) - 0.5;
+        float fx_c = clamp(fx, 0.0, float(max(0, uFlowWidth - 1)));
+        float fy_c = clamp(fy, 0.0, float(max(0, uFlowHeight - 1)));
+        int x0 = int(floor(fx_c));
+        int y0 = int(floor(fy_c));
+        int x1 = min(x0 + 1, uFlowWidth - 1);
+        int y1 = min(y0 + 1, uFlowHeight - 1);
+        float wx = fx_c - float(x0);
+        float wy = fy_c - float(y0);
+        vec2 f00 = texelFetch(uFlowTex, ivec2(x0, y0), 0).xy;
+        vec2 f10 = texelFetch(uFlowTex, ivec2(x1, y0), 0).xy;
+        vec2 f01 = texelFetch(uFlowTex, ivec2(x0, y1), 0).xy;
+        vec2 f11 = texelFetch(uFlowTex, ivec2(x1, y1), 0).xy;
+        vec2 flow = mix(mix(f00, f10, wx), mix(f01, f11, wx), wy);
         dx = flow.x;
         dy = flow.y;
     }
@@ -290,11 +300,11 @@ void main() {
 
                 const float eps = 1e-4;
                 float var_noise = max(0.0, uNoiseModel.x * mean_ref + uNoiseModel.y);
-                float var_total = var_spatial + var_noise + eps;
+                float var_total = 0.15 * var_spatial + max(var_noise, 16.0) + eps;
                 float diffVal = candVal - mean_ref;
                 float distSq = (diffVal * diffVal) / var_total;
 
-                w_motion = exp(-max(0.0, distSq - 4.0) * 0.5);
+                w_motion = exp(-max(0.0, distSq - 2.5) * 0.75);
                 if (w_motion < 0.01) {
                     w_motion = 0.0;
                 }

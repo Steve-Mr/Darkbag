@@ -225,14 +225,29 @@ bool SabreEngine::accumulateFrame(
             float dy = 0.0f;
 
             if (!isRef && flowX && flowY && flowWidth > 0 && flowHeight > 0) {
-                // Map sensor pixel (x, y) to flow tile grid
-                float fx = (static_cast<float>(x) / m_width) * flowWidth;
-                float fy = (static_cast<float>(y) / m_height) * flowHeight;
-                int ix = std::clamp(static_cast<int>(fx), 0, flowWidth - 1);
-                int iy = std::clamp(static_cast<int>(fy), 0, flowHeight - 1);
-                size_t flowIdx = static_cast<size_t>(iy) * flowWidth + ix;
-                dx = flowX[flowIdx];
-                dy = flowY[flowIdx];
+                // Bilinear interpolation across neighboring tile flow vectors
+                float fx = (static_cast<float>(x) / m_width) * flowWidth - 0.5f;
+                float fy = (static_cast<float>(y) / m_height) * flowHeight - 0.5f;
+                float fx_c = std::clamp(fx, 0.0f, static_cast<float>(std::max(0, flowWidth - 1)));
+                float fy_c = std::clamp(fy, 0.0f, static_cast<float>(std::max(0, flowHeight - 1)));
+                int x0 = static_cast<int>(std::floor(fx_c));
+                int y0 = static_cast<int>(std::floor(fy_c));
+                int x1 = std::min(x0 + 1, flowWidth - 1);
+                int y1 = std::min(y0 + 1, flowHeight - 1);
+                float wx = fx_c - static_cast<float>(x0);
+                float wy = fy_c - static_cast<float>(y0);
+                auto sampleFlow = [&](int ix, int iy) -> std::pair<float, float> {
+                    size_t idx = static_cast<size_t>(iy) * flowWidth + ix;
+                    return {flowX[idx], flowY[idx]};
+                };
+                auto [fx00, fy00] = sampleFlow(x0, y0);
+                auto [fx10, fy10] = sampleFlow(x1, y0);
+                auto [fx01, fy01] = sampleFlow(x0, y1);
+                auto [fx11, fy11] = sampleFlow(x1, y1);
+                dx = (fx00 * (1.0f - wx) + fx10 * wx) * (1.0f - wy) +
+                     (fx01 * (1.0f - wx) + fx11 * wx) * wy;
+                dy = (fy00 * (1.0f - wx) + fy10 * wx) * (1.0f - wy) +
+                     (fy01 * (1.0f - wx) + fy11 * wx) * wy;
             }
 
             // Aligned position on the reference sensor coordinate space
@@ -303,11 +318,11 @@ bool SabreEngine::accumulateFrame(
 
                 const float eps = 1e-4f;
                 float var_noise = std::max(0.0f, noiseS * mean_ref + noiseO);
-                float var_total = var_spatial + var_noise + eps;
+                float var_total = 0.15f * var_spatial + std::max(var_noise, 16.0f) + eps;
                 float diffVal = rawVal - mean_ref;
                 float distSq = (diffVal * diffVal) / var_total;
 
-                w_motion = std::exp(-std::max(0.0f, distSq - 4.0f) * 0.5f);
+                w_motion = std::exp(-std::max(0.0f, distSq - 2.5f) * 0.75f);
                 if (w_motion < 0.01f) {
                     w_motion = 0.0f;
                 }
