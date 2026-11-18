@@ -102,6 +102,17 @@ object ZslAdaptivePolicy {
 
     fun shouldUseInstantSingle(adaptive: Boolean, reason: String): Boolean =
         adaptive && reason in INSTANT_FALLBACK_REASONS
+
+    fun isLowLight(
+        iso: Int?,
+        exposureTimeNs: Long?,
+        isoUpper: Int?,
+        exposureUpperNs: Long?
+    ): Boolean {
+        if (iso == null || exposureTimeNs == null || isoUpper == null || isoUpper <= 0) return false
+        val exposureCap = minOf(66_666_667L, exposureUpperNs ?: Long.MAX_VALUE)
+        return iso.toFloat() >= isoUpper * 0.8f && exposureTimeNs >= exposureCap
+    }
 }
 
 enum class ZslRingMode { EAGER_COPY, LAZY_IMAGE }

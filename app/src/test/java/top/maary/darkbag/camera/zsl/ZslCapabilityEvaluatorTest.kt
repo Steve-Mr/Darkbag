@@ -214,4 +214,13 @@ class ZslAdaptivePolicyTest {
         assertFalse(ZslAdaptivePolicy.shouldUseInstantSingle(true, "low_light"))
         assertFalse(ZslAdaptivePolicy.shouldUseInstantSingle(false, "no_stable_run"))
     }
+
+    @Test
+    fun lowLightGateRequiresHighIsoAndCappedExposure() {
+        assertTrue(ZslAdaptivePolicy.isLowLight(iso = 2560, exposureTimeNs = 66_666_667L, isoUpper = 3200, exposureUpperNs = 200_000_000L))
+        assertTrue(ZslAdaptivePolicy.isLowLight(iso = 3000, exposureTimeNs = 50_000_000L, isoUpper = 3200, exposureUpperNs = 50_000_000L))
+        assertFalse(ZslAdaptivePolicy.isLowLight(iso = 2400, exposureTimeNs = 100_000_000L, isoUpper = 3200, exposureUpperNs = 200_000_000L))
+        assertFalse(ZslAdaptivePolicy.isLowLight(iso = 3200, exposureTimeNs = 33_000_000L, isoUpper = 3200, exposureUpperNs = 200_000_000L))
+        assertFalse(ZslAdaptivePolicy.isLowLight(iso = null, exposureTimeNs = 100_000_000L, isoUpper = 3200, exposureUpperNs = 200_000_000L))
+    }
 }

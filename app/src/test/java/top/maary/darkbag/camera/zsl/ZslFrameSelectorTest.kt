@@ -82,6 +82,13 @@ class ZslFrameSelectorTest {
     }
 
     @Test
+    fun latestValidRejectsUnfocusedFrames() {
+        val samples = listOf(sample(100, af = true), sample(200, af = false), sample(300, hasResult = false))
+        assertEquals(0, ZslFrameSelector.latestValidIndex(samples))
+        assertNull(ZslFrameSelector.latestValidIndex(listOf(sample(200, af = false))))
+    }
+
+    @Test
     fun stableRunRequiresEveryFrameFocused() {
         val samples = (0 until 3).map { sample(1_000L + it * 33L, af = it != 1) }
         assertTrue(ZslFrameSelector.stableRunIndices(samples, 1_066, 3, 300).isEmpty())

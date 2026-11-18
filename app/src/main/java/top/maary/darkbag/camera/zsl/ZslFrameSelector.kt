@@ -22,11 +22,14 @@ object ZslFrameSelector {
     const val EXPOSURE_TOLERANCE = 0.05f
     const val WB_TOLERANCE = 0.05f
 
+    private fun isInstantCandidate(sample: ZslFrameSample): Boolean =
+        sample.hasResult && sample.afFocused && sample.iso != null && sample.exposureTimeNs != null
+
+    fun latestValidIndex(samples: List<ZslFrameSample>): Int? =
+        samples.indices.lastOrNull { isInstantCandidate(samples[it]) }
+
     fun nearestIndex(samples: List<ZslFrameSample>, t0Ns: Long, maxAgeNs: Long): Int? {
-        val valid = samples.indices.filter {
-            samples[it].hasResult && samples[it].afFocused &&
-                samples[it].iso != null && samples[it].exposureTimeNs != null
-        }
+        val valid = samples.indices.filter { isInstantCandidate(samples[it]) }
         val best = valid.minByOrNull { abs(samples[it].timestamp - t0Ns) } ?: return null
         if (abs(samples[best].timestamp - t0Ns) > maxAgeNs) return null
         return best

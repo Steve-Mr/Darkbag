@@ -232,8 +232,8 @@ class ZslCaptureController(
     }
 
     /**
-     * Adaptive fallback: newest frame with metadata, no stability/AF fusion gate. This is a
-     * deliberate quality downgrade to guarantee a frame is captured for fast scenes.
+     * Adaptive fallback: newest focused frame with metadata, no multi-frame stability gate. This is
+     * a deliberate quality downgrade to guarantee a sharp, properly-lit frame for fast scenes.
      */
     private fun captureInstantSingle(
         sink: CaptureSink?,
@@ -243,6 +243,12 @@ class ZslCaptureController(
     ): Boolean {
         val activeRing = ring ?: return false
         val frame = activeRing.latestValid() ?: return false
+        val isoUpper = env.runtimeState.isoRange?.upper
+        val exposureUpper = env.runtimeState.exposureTimeRange?.upper
+        if (ZslAdaptivePolicy.isLowLight(frame.iso, frame.exposureTimeNs, isoUpper, exposureUpper)) {
+            timing.zslFallbackReason = "low_light"
+            return false
+        }
         val t0 = pressTimestampNs(timing)
         if (abs(frame.timestamp - t0) > activeRing.config.maxAgeNs) {
             timing.zslFallbackReason = "instant_too_old"
@@ -400,6 +406,15 @@ class ZslCaptureController(
             timing.zslFallbackReason = "not_armed"
             return null
         }
+        val isoUpper = env.runtimeState.isoRange?.upper
+        val exposureUpper = env.runtimeState.exposureTimeRange?.upper
+        val probe = ring.latestWithMetadata()
+        val probeIso = probe?.iso ?: env.runtimeState.liveIso.takeIf { it > 0 }
+        val probeExposure = probe?.exposureTimeNs ?: env.runtimeState.liveExposureTime.takeIf { it > 0L }
+        if (ZslAdaptivePolicy.isLowLight(probeIso, probeExposure, isoUpper, exposureUpper)) {
+            timing.zslFallbackReason = "low_light"
+            return null
+        }
         val t0 = pressTimestampNs(timing)
         val requestedBurst = prefs.hdrBurstCount.coerceIn(3, 8)
         val burst = minOf(requestedBurst, ring.config.depth).coerceAtLeast(3)
@@ -438,10 +453,7 @@ class ZslCaptureController(
             ring.releaseFrames(taken)
             return null
         }
-        val isoUpper = env.runtimeState.isoRange?.upper
-        val exposureUpper = env.runtimeState.exposureTimeRange?.upper ?: Long.MAX_VALUE
-        val exposureCap = minOf(66_666_667L, exposureUpper)
-        if (isoUpper != null && iso.toFloat() >= isoUpper * 0.8f && exposure >= exposureCap) {
+        if (ZslAdaptivePolicy.isLowLight(iso, exposure, isoUpper, exposureUpper)) {
             timing.zslFallbackReason = "low_light"
             ring.releaseFrames(taken)
             return null

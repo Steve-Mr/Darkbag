@@ -1,5 +1,6 @@
 package top.maary.darkbag.camera.zsl
 
+import android.hardware.camera2.CaptureResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertFalse
@@ -54,5 +55,17 @@ class ZslRawRingTest {
         assertFalse(ring.matches("0", "2", "0", 1.0f))
         assertFalse(ring.matches("0", "0", "2", 1.0f))
         assertFalse(ring.matches("0", "0", "0", 2.0f))
+    }
+
+    @Test
+    fun afStateHelperAcceptsStationaryInactiveAndRejectsScanning() {
+        assertTrue(isAfStateFocused(CaptureResult.CONTROL_AF_MODE_OFF, CaptureResult.CONTROL_AF_STATE_INACTIVE, CaptureResult.LENS_STATE_MOVING))
+        assertTrue(isAfStateFocused(CaptureResult.CONTROL_AF_MODE_CONTINUOUS_PICTURE, CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED, CaptureResult.LENS_STATE_MOVING))
+        assertTrue(isAfStateFocused(CaptureResult.CONTROL_AF_MODE_CONTINUOUS_PICTURE, CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED, CaptureResult.LENS_STATE_STATIONARY))
+        assertTrue(isAfStateFocused(CaptureResult.CONTROL_AF_MODE_CONTINUOUS_PICTURE, CaptureResult.CONTROL_AF_STATE_INACTIVE, CaptureResult.LENS_STATE_STATIONARY))
+        assertFalse(isAfStateFocused(CaptureResult.CONTROL_AF_MODE_CONTINUOUS_PICTURE, CaptureResult.CONTROL_AF_STATE_INACTIVE, CaptureResult.LENS_STATE_MOVING))
+        assertFalse(isAfStateFocused(CaptureResult.CONTROL_AF_MODE_CONTINUOUS_PICTURE, CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN, CaptureResult.LENS_STATE_STATIONARY))
+        assertFalse(isAfStateFocused(CaptureResult.CONTROL_AF_MODE_CONTINUOUS_PICTURE, CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN, CaptureResult.LENS_STATE_STATIONARY))
+        assertFalse(isAfStateFocused(CaptureResult.CONTROL_AF_MODE_CONTINUOUS_PICTURE, CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED, CaptureResult.LENS_STATE_STATIONARY))
     }
 }

@@ -49,6 +49,20 @@ internal fun <T> resolveLateResult(
     lookup: ((Long) -> T?)?
 ): T? = provided ?: lookup?.invoke(timestamp)
 
+/** Pure AF convergence check for unit testing without Camera2 framework mocks. */
+internal fun isAfStateFocused(afMode: Int?, afState: Int?, lensState: Int?): Boolean {
+    if (afMode == CaptureResult.CONTROL_AF_MODE_OFF) return true
+    return when (afState) {
+        CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED,
+        CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED -> true
+        CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN,
+        CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN,
+        CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED,
+        CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED -> false
+        else -> lensState == CaptureResult.LENS_STATE_STATIONARY
+    }
+}
+
 class ZslRawRing(
     val config: ZslRingConfig,
     val cameraId: String,
@@ -274,9 +288,16 @@ class ZslRawRing(
         }
     }
 
-    /** Newest frame with enough metadata for the instant single-frame fallback. */
-    fun latestValid(): ZslFrame? = synchronized(lock) {
-        frames.lastOrNull { it.result != null && it.iso != null && it.exposureTimeNs != null }
+    /** Newest frame with metadata and focused AF state for instant single-frame fallback. */
+    fun latestValid(): ZslFrame? {
+        val all = synchronized(lock) { frames.toList() }
+        val index = ZslFrameSelector.latestValidIndex(all.map { it.toSample() }) ?: return null
+        return all[index]
+    }
+
+    /** Newest frame carrying ISO/exposure metadata (used for pre-flight low-light checks). */
+    fun latestWithMetadata(): ZslFrame? = synchronized(lock) {
+        frames.lastOrNull { it.iso != null && it.exposureTimeNs != null }
     }
 
     fun nearest(t0Ns: Long): ZslFrame? {
@@ -331,21 +352,11 @@ class ZslRawRing(
 
     private fun isAfFocused(result: TotalCaptureResult?): Boolean {
         if (result == null) return false
-        // Manual focus has no AF convergence state; accept it explicitly.
-        if (result.get(CaptureResult.CONTROL_AF_MODE) == CaptureResult.CONTROL_AF_MODE_OFF) {
-            return true
-        }
-        val af = result.get(CaptureResult.CONTROL_AF_STATE)
-        return when (af) {
-            CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED,
-            CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED -> true
-            CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN,
-            CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN,
-            CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED,
-            CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED,
-            CaptureResult.CONTROL_AF_STATE_INACTIVE -> false
-            else -> result.get(CaptureResult.LENS_STATE) == CaptureResult.LENS_STATE_STATIONARY
-        }
+        return isAfStateFocused(
+            afMode = result.get(CaptureResult.CONTROL_AF_MODE),
+            afState = result.get(CaptureResult.CONTROL_AF_STATE),
+            lensState = result.get(CaptureResult.LENS_STATE)
+        )
     }
 
     private fun copyPlane(
