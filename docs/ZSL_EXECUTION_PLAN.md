@@ -24,12 +24,12 @@
 | Z7.2 HDR+ + Motion | 已实现（设备待验） | encoder 使用 previewGain；HDR+ ZSL 只使用完整预卷（adaptive 3–5 帧，strict 必须满 burst），不补拍/不 disarm；still PTS 已映射，Motion 亮度/连续性待验证 |
 | Z8 零拷贝 ring | 未开始 | 实验项，需 feature flag 与真机帧率/热验证 |
 | Adaptive ZSL | 已实现 | `66763ff4`：稳定 3–5 帧直接用实际帧数做 HDR+；无稳定段取最新有效 RAW 走非 HDR+ 单帧；严格模式必须满预卷，否则 forward；`hdrBurstCount` 为上限 |
-| 快门动画 | 未实现 | 计划中的 ZSL 快门反馈/降级提示 |
+| 快门反馈 | 已实现 | `67572b76`：ZSL 命中时轻触觉 + 快门短暂缩放脉冲，不增加相机主线程工作 |
 | Pixel 3 验证 | 部分通过 | 已修复 Android 14 display NPE；Pixel 3 上 adaptive 5 帧和 3 帧（内存上限）ZSL 均成功出 DNG/JPG；Motion+ZSL、连续场景、still PTS 待测 |
 | Z9 核心测试 | 部分完成 | AF/ring/EV/formatter 已有；RawFrameRouter 状态机、trim、迟到 result 仍缺 |
 | 真机矩阵 | 部分开始 | Pixel 3 (`8BVX1FW0X`) 已连接并完成 adaptive ZSL 样张；moto 29.9fps ring；redroid 不作为相机设备 |
 
-**剩余优先项**：Motion+ZSL 的 still PTS/亮度真机验证；快门动画；RawFrameRouter/trim/迟到 result 专项测试；再评估 Z8 零拷贝。
+**剩余优先项**：Motion+ZSL 的 still PTS/亮度真机验证；RawFrameRouter/trim/迟到 result 专项测试；再评估 Z8 零拷贝。
 
 ---
 
