@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
 import top.maary.darkbag.camera.delegate.CameraUiHost
+import top.maary.darkbag.camera.zsl.ZslAdaptivePolicy
 import top.maary.darkbag.camera.zsl.ZslBurstSeed
 import top.maary.darkbag.camera.zsl.RawFrameRouter
 import top.maary.darkbag.models.StandardTimingTracker
@@ -113,7 +114,17 @@ internal class HdrPlusBurstCaptureExecutor(
             } else {
                 config.digitalGain
             }
-            val burstSize = seed?.targetFrameCount ?: currentPrefs.hdrBurstCount
+            val burstSize = seed?.targetFrameCount ?: run {
+                val requested = currentPrefs.hdrBurstCount
+                val motion = env.sessionArbiter.sceneMotionMonitor.currentLevel
+                val isLowLight = ZslAdaptivePolicy.isLowLight(curIso, curTime, validIsoRange.upper, validTimeRange.upper)
+                ZslAdaptivePolicy.resolveAdaptiveBurstCount(
+                    requestedBurst = requested,
+                    motionLevel = motion,
+                    adaptiveEnabled = currentPrefs.zslAdaptive,
+                    isLowLight = isLowLight
+                )
+            }
 
             if (isFrame1Trigger) {
                 coordinator.writeScopedHalfFrameStep(

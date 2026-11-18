@@ -148,7 +148,7 @@ class ZslCaptureController(
         val seed = prepareHdrPlusSeed(timing)
         if (seed == null) {
             if (ZslAdaptivePolicy.shouldUseInstantSingle(settings.current().zslAdaptive, timing.zslFallbackReason)) {
-                val instant = captureInstantSingle(sink, hfMetadata, timing, "instant_single")
+                val instant = captureInstantSingle(sink, hfMetadata, timing, timing.zslFallbackReason)
                 if (instant is ZslDispatchOutcome.Consumed) return instant
             }
             return ZslDispatchOutcome.Fallback(timing.zslFallbackReason.ifBlank { "no_seed" })
@@ -194,7 +194,7 @@ class ZslCaptureController(
         val taken = activeRing.take(listOf(frame))
         if (taken.isEmpty()) return ZslDispatchOutcome.Fallback("frame_race")
         timing.zslFallbackReason = reason
-        return dispatchSingle(taken.firstOwnedFrame() ?: taken.first(), sink, false, hfMetadata, timing, supervisor.hdrDigitalGain, "instant", t0)
+        return dispatchSingle(taken.firstOwnedFrame() ?: taken.first(), sink, false, hfMetadata, timing, supervisor.hdrDigitalGain, reason, t0)
     }
 
     private fun dispatchSingle(
@@ -214,7 +214,7 @@ class ZslCaptureController(
         timing = timing, adaptive = settings.current().zslAdaptive, requestedBurst = settings.current().hdrBurstCount,
         isoUpper = env.runtimeState.isoRange?.upper, exposureUpper = env.runtimeState.exposureTimeRange?.upper,
         hdrDigitalGain = supervisor.hdrDigitalGain, liveIso = env.runtimeState.liveIso, liveExposure = env.runtimeState.liveExposureTime,
-        t0Ns = pressTimestampNs(timing)
+        t0Ns = pressTimestampNs(timing), motionLevel = env.sessionArbiter.sceneMotionMonitor.currentLevel
     )
 
     private fun evaluate() {

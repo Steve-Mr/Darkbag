@@ -3,8 +3,12 @@ package top.maary.darkbag.camera.zsl
 import android.hardware.camera2.TotalCaptureResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import top.maary.darkbag.camera.motion.MotionLevel
+import top.maary.darkbag.models.StandardTimingTracker
 
 class ZslHybridBurstTest {
 
@@ -109,5 +113,88 @@ class ZslHybridBurstTest {
         val ringFrames5 = 5
         val reasonStrictJumping = if (!false && ringFrames5 < minRequiredRun) "pre_roll_short" else "no_stable_run"
         assertEquals("no_stable_run", reasonStrictJumping)
+    }
+
+    private fun createSupervisorWithRing(ring: ZslRawRing): ZslRingSupervisor {
+        val unsafeClass = Class.forName("sun.misc.Unsafe")
+        val field = unsafeClass.getDeclaredField("theUnsafe").apply { isAccessible = true }
+        val unsafe = field.get(null)
+        val allocateInstance = unsafeClass.getMethod("allocateInstance", Class::class.java)
+        val supervisor = allocateInstance.invoke(unsafe, ZslRingSupervisor::class.java) as ZslRingSupervisor
+        val ringField = ZslRingSupervisor::class.java.getDeclaredField("ring").apply { isAccessible = true }
+        ringField.set(supervisor, ring)
+        return supervisor
+    }
+
+    private fun populateRing(ring: ZslRawRing, framesList: List<ZslFrame>) {
+        val framesField = ZslRawRing::class.java.getDeclaredField("frames").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val deque = framesField.get(ring) as java.util.ArrayDeque<ZslFrame>
+        deque.addAll(framesList)
+    }
+
+    @Test
+    fun testPrepareHdrPlusSeedMotionAdaptation() {
+        val ring = ZslRawRing(
+            config = ZslRingConfig(8, 30, 128L * 1024L * 1024L, 24L * 1024L * 1024L, 300_000_000L),
+            cameraId = "0", lensId = "0", physicalId = "0", zoomRatio = 1f, rotationDegrees = 0
+        )
+        val supervisor = createSupervisorWithRing(ring)
+        val mockResult = dummyTotalCaptureResult()
+
+        // Create 6 stable frames inside the 300ms window
+        val baseTs = 1000_000_000L
+        val frames = (0 until 6).map { i ->
+            ZslFrame(
+                buffer = null, width = 4000, height = 3000, rowStride = 4000,
+                timestamp = baseTs + i * 33_000_000L,
+                result = mockResult, iso = 100, exposureTimeNs = 10_000_000L,
+                wb = floatArrayOf(1f, 1f, 1f, 1f), cropKey = null, afFocused = true,
+                lensId = "0", zoomRatio = 1f, rotationDegrees = 0, rowLength = 4000, image = null
+            )
+        }
+        populateRing(ring, frames)
+
+        val t0Ns = baseTs + 5 * 33_000_000L + 5_000_000L // 5ms after latest frame
+
+        // 1. MotionLevel.MODERATE: requested burst = 6, but shrinks to 3 frames
+        val timingModerate = StandardTimingTracker(shutterClick = 1000L)
+        val seedModerate = supervisor.prepareHdrPlusSeed(
+            timing = timingModerate,
+            adaptive = true,
+            requestedBurst = 6,
+            isoUpper = 3200,
+            exposureUpper = 100_000_000L,
+            hdrDigitalGain = 1.0f,
+            liveIso = 100,
+            liveExposure = 10_000_000L,
+            t0Ns = t0Ns,
+            motionLevel = MotionLevel.MODERATE
+        )
+        assertNotNull(seedModerate)
+        assertEquals(3, seedModerate!!.preRollCount)
+        assertEquals(3, seedModerate.targetFrameCount)
+        assertEquals(0, seedModerate.remainingCount)
+
+        // Clear ring and repopulate for next test
+        ring.clear()
+        populateRing(ring, frames)
+
+        // 2. MotionLevel.FAST in normal light: triggers motion_fast_single and returns null
+        val timingFast = StandardTimingTracker(shutterClick = 1000L)
+        val seedFast = supervisor.prepareHdrPlusSeed(
+            timing = timingFast,
+            adaptive = true,
+            requestedBurst = 6,
+            isoUpper = 3200,
+            exposureUpper = 100_000_000L,
+            hdrDigitalGain = 1.0f,
+            liveIso = 100,
+            liveExposure = 10_000_000L,
+            t0Ns = t0Ns,
+            motionLevel = MotionLevel.FAST
+        )
+        assertNull(seedFast)
+        assertEquals("motion_fast_single", timingFast.zslFallbackReason)
     }
 }

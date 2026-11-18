@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import top.maary.darkbag.camera.motion.MotionLevel
 
 class ZslCapabilityEvaluatorTest {
 
@@ -212,9 +213,53 @@ class ZslAdaptivePolicyTest {
     fun instantSingleOnlyForAdaptiveStabilityFailures() {
         assertTrue(ZslAdaptivePolicy.shouldUseInstantSingle(true, "no_stable_run"))
         assertTrue(ZslAdaptivePolicy.shouldUseInstantSingle(true, "missing_metadata"))
+        assertTrue(ZslAdaptivePolicy.shouldUseInstantSingle(true, "motion_fast_single"))
         assertFalse(ZslAdaptivePolicy.shouldUseInstantSingle(true, "pre_roll_short"))
         assertFalse(ZslAdaptivePolicy.shouldUseInstantSingle(true, "low_light"))
         assertFalse(ZslAdaptivePolicy.shouldUseInstantSingle(false, "no_stable_run"))
+        assertFalse(ZslAdaptivePolicy.shouldUseInstantSingle(false, "motion_fast_single"))
+    }
+
+    @Test
+    fun shouldFallbackSingleOnMotionPolicy() {
+        // Fast motion in bright light triggers single fallback only when adaptive is enabled
+        assertTrue(ZslAdaptivePolicy.shouldFallbackSingleOnMotion(MotionLevel.FAST, adaptiveEnabled = true, isLowLight = false))
+        assertFalse(ZslAdaptivePolicy.shouldFallbackSingleOnMotion(MotionLevel.FAST, adaptiveEnabled = false, isLowLight = false))
+        assertFalse(ZslAdaptivePolicy.shouldFallbackSingleOnMotion(MotionLevel.FAST, adaptiveEnabled = true, isLowLight = true))
+
+        // Still and moderate motion never trigger single fallback
+        assertFalse(ZslAdaptivePolicy.shouldFallbackSingleOnMotion(MotionLevel.STILL, adaptiveEnabled = true, isLowLight = false))
+        assertFalse(ZslAdaptivePolicy.shouldFallbackSingleOnMotion(MotionLevel.STILL, adaptiveEnabled = true, isLowLight = true))
+        assertFalse(ZslAdaptivePolicy.shouldFallbackSingleOnMotion(MotionLevel.MODERATE, adaptiveEnabled = true, isLowLight = false))
+        assertFalse(ZslAdaptivePolicy.shouldFallbackSingleOnMotion(MotionLevel.MODERATE, adaptiveEnabled = true, isLowLight = true))
+    }
+
+    @Test
+    fun resolveAdaptiveBurstCountRules() {
+        // Strict mode (!adaptive): always requestedBurst (coerced at least MIN_HDR_FRAMES = 3)
+        assertEquals(8, ZslAdaptivePolicy.resolveAdaptiveBurstCount(8, MotionLevel.STILL, adaptiveEnabled = false, isLowLight = false))
+        assertEquals(8, ZslAdaptivePolicy.resolveAdaptiveBurstCount(8, MotionLevel.MODERATE, adaptiveEnabled = false, isLowLight = false))
+        assertEquals(8, ZslAdaptivePolicy.resolveAdaptiveBurstCount(8, MotionLevel.FAST, adaptiveEnabled = false, isLowLight = false))
+        assertEquals(5, ZslAdaptivePolicy.resolveAdaptiveBurstCount(5, MotionLevel.FAST, adaptiveEnabled = false, isLowLight = true))
+        assertEquals(3, ZslAdaptivePolicy.resolveAdaptiveBurstCount(2, MotionLevel.STILL, adaptiveEnabled = false, isLowLight = false))
+
+        // Adaptive mode:
+        // STILL: requestedBurst
+        assertEquals(8, ZslAdaptivePolicy.resolveAdaptiveBurstCount(8, MotionLevel.STILL, adaptiveEnabled = true, isLowLight = false))
+        assertEquals(5, ZslAdaptivePolicy.resolveAdaptiveBurstCount(5, MotionLevel.STILL, adaptiveEnabled = true, isLowLight = true))
+
+        // MODERATE: drops to 3 frames
+        assertEquals(3, ZslAdaptivePolicy.resolveAdaptiveBurstCount(8, MotionLevel.MODERATE, adaptiveEnabled = true, isLowLight = false))
+        assertEquals(3, ZslAdaptivePolicy.resolveAdaptiveBurstCount(5, MotionLevel.MODERATE, adaptiveEnabled = true, isLowLight = true))
+
+        // FAST in low-light: drops to 3 frames (preserves SNR)
+        assertEquals(3, ZslAdaptivePolicy.resolveAdaptiveBurstCount(8, MotionLevel.FAST, adaptiveEnabled = true, isLowLight = true))
+
+        // FAST in bright light:
+        // allowSingleFallback = false: drops to 3 frames
+        assertEquals(3, ZslAdaptivePolicy.resolveAdaptiveBurstCount(8, MotionLevel.FAST, adaptiveEnabled = true, isLowLight = false, allowSingleFallback = false))
+        // allowSingleFallback = true: drops to 1 frame
+        assertEquals(1, ZslAdaptivePolicy.resolveAdaptiveBurstCount(8, MotionLevel.FAST, adaptiveEnabled = true, isLowLight = false, allowSingleFallback = true))
     }
 
     @Test

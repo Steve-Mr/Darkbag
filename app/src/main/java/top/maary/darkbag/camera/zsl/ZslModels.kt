@@ -1,5 +1,7 @@
 package top.maary.darkbag.camera.zsl
 
+import top.maary.darkbag.camera.motion.MotionLevel
+
 /**
  * ZSL capability model. Pure Kotlin; safe to unit-test without Android.
  *
@@ -93,8 +95,34 @@ object ZslAdaptivePolicy {
     val INSTANT_FALLBACK_REASONS = setOf(
         "no_stable_run",
         "frame_race",
-        "missing_metadata"
+        "missing_metadata",
+        "motion_fast_single"
     )
+
+    fun shouldFallbackSingleOnMotion(
+        motionLevel: MotionLevel,
+        adaptiveEnabled: Boolean,
+        isLowLight: Boolean
+    ): Boolean = adaptiveEnabled && motionLevel == MotionLevel.FAST && !isLowLight
+
+    fun resolveAdaptiveBurstCount(
+        requestedBurst: Int,
+        motionLevel: MotionLevel,
+        adaptiveEnabled: Boolean,
+        isLowLight: Boolean,
+        allowSingleFallback: Boolean = false
+    ): Int {
+        if (!adaptiveEnabled) return requestedBurst.coerceAtLeast(MIN_HDR_FRAMES)
+        return when (motionLevel) {
+            MotionLevel.STILL -> requestedBurst.coerceAtLeast(MIN_HDR_FRAMES)
+            MotionLevel.MODERATE -> minOf(requestedBurst, MIN_HDR_FRAMES).coerceAtLeast(MIN_HDR_FRAMES)
+            MotionLevel.FAST -> {
+                if (isLowLight) minOf(requestedBurst, MIN_HDR_FRAMES).coerceAtLeast(MIN_HDR_FRAMES)
+                else if (allowSingleFallback) 1
+                else minOf(requestedBurst, MIN_HDR_FRAMES).coerceAtLeast(MIN_HDR_FRAMES)
+            }
+        }
+    }
 
     fun hdrTargetFrameCount(adaptive: Boolean, stableFrames: Int, requestedBurst: Int): Int {
         val requested = requestedBurst.coerceAtLeast(MIN_HDR_FRAMES)

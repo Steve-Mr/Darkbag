@@ -4,6 +4,7 @@ import android.os.Handler
 import android.util.Log
 import android.util.Range
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
+import top.maary.darkbag.camera.motion.MotionLevel
 import top.maary.darkbag.camera.session.CameraHardwareStreamController
 import top.maary.darkbag.fragments.HdrPlusBurst
 import top.maary.darkbag.models.StandardTimingTracker
@@ -197,25 +198,22 @@ class ZslRingSupervisor(
     }
 
     fun prepareHdrPlusSeed(
-        timing: StandardTimingTracker,
-        adaptive: Boolean,
-        requestedBurst: Int,
-        isoUpper: Int?,
-        exposureUpper: Long?,
-        hdrDigitalGain: Float,
-        liveIso: Int?,
-        liveExposure: Long?,
-        t0Ns: Long
+        timing: StandardTimingTracker, adaptive: Boolean, requestedBurst: Int,
+        isoUpper: Int?, exposureUpper: Long?, hdrDigitalGain: Float,
+        liveIso: Int?, liveExposure: Long?, t0Ns: Long,
+        motionLevel: MotionLevel = MotionLevel.STILL
     ): ZslBurstSeed? {
         val activeRing = ring ?: run { timing.zslFallbackReason = "not_armed"; return null }
         val probe = activeRing.latestWithMetadata()
         val pIso = probe?.iso ?: liveIso?.takeIf { it > 0 }
         val pExp = probe?.exposureTimeNs ?: liveExposure?.takeIf { it > 0L }
-        if (ZslAdaptivePolicy.isLowLight(pIso, pExp, isoUpper, exposureUpper)) {
-            timing.zslFallbackReason = "low_light"; return null
+        val isLowLight = ZslAdaptivePolicy.isLowLight(pIso, pExp, isoUpper, exposureUpper)
+        if (isLowLight) { timing.zslFallbackReason = "low_light"; return null }
+        if (ZslAdaptivePolicy.shouldFallbackSingleOnMotion(motionLevel, adaptive, isLowLight)) {
+            timing.zslFallbackReason = "motion_fast_single"; return null
         }
-
-        val maxRingBurst = minOf(requestedBurst, activeRing.config.depth).coerceAtLeast(3)
+        val effectiveBurst = ZslAdaptivePolicy.resolveAdaptiveBurstCount(requestedBurst, motionLevel, adaptive, isLowLight)
+        val maxRingBurst = minOf(effectiveBurst, activeRing.config.depth).coerceAtLeast(3)
         val minRequiredRun = if (adaptive) ZslAdaptivePolicy.MIN_HDR_FRAMES else ZslAdaptivePolicy.MIN_HYBRID_PRE_ROLL
         val ringSize = activeRing.size
         val selected = activeRing.stableRun(t0Ns, maxRingBurst, minRunCount = minRequiredRun)
@@ -240,13 +238,11 @@ class ZslRingSupervisor(
         val base = ordered.first()
         val (bRes, bIso, bExp) = Triple(base.result, base.iso, base.exposureTimeNs)
         if (bRes == null || bIso == null || bExp == null || bExp <= 0L) {
-            timing.zslFallbackReason = "missing_metadata"
-            activeRing.releaseFrames(taken)
-            return null
+            timing.zslFallbackReason = "missing_metadata"; activeRing.releaseFrames(taken); return null
         }
         timing.zslFrameOffsetMs = abs(base.timestamp - t0Ns) / 1_000_000L
-        val isExtending = !adaptive && ZslAdaptivePolicy.canExtendWindow(ordered.size, requestedBurst)
-        val targetCount = if (isExtending) requestedBurst else (if (adaptive) ordered.size else requestedBurst)
+        val isExtending = !adaptive && ZslAdaptivePolicy.canExtendWindow(ordered.size, effectiveBurst)
+        val targetCount = if (isExtending) effectiveBurst else (if (adaptive) ordered.size else effectiveBurst)
         return ZslBurstSeed(ordered, bRes, bIso, bExp, hdrDigitalGain, targetCount)
     }
 }

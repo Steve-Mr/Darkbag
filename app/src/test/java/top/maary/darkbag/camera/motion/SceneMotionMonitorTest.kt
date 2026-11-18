@@ -124,4 +124,41 @@ class SceneMotionMonitorTest {
         val res = monitor.processGridForTest(gridA, 50.0f, timestampNs = 132_000_000L)
         assertNull(res)
     }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun testHistoryWindowSizeZeroThrows() {
+        SceneMotionMonitor(historyWindowSize = 0)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun testHistoryWindowSizeNegativeThrows() {
+        SceneMotionMonitor(historyWindowSize = -1)
+    }
+
+    @Test
+    fun testStreamPauseReinitializesBaseline() {
+        val monitor = SceneMotionMonitor(historyWindowSize = 3)
+        val gridA = FloatArray(SceneMotionEstimator.TOTAL_CELLS) { 50.0f }
+        val gridB = FloatArray(SceneMotionEstimator.TOTAL_CELLS) { 200.0f }
+
+        // Establish motion baseline and active frame
+        monitor.processGridForTest(gridA, 50.0f, timestampNs = 1_000_000_000L)
+        val res1 = monitor.processGridForTest(gridB, 200.0f, timestampNs = 1_033_000_000L)
+        assertNotNull(res1)
+
+        // Stream pause: gap of 600ms (> 500ms)
+        val resPause = monitor.processGridForTest(gridB, 200.0f, timestampNs = 1_633_000_000L)
+        assertNull("Stream pause (>500ms) must act as baseline re-initialization and return null", resPause)
+        assertEquals(MotionLevel.STILL, monitor.currentLevel)
+        assertEquals(MotionLevel.STILL, monitor.motionState.value)
+        assertNull(monitor.lastResult)
+
+        // Next frame after pause should compare against gridB (1_633_000_000L)
+        val res2 = monitor.processGridForTest(gridB, 200.0f, timestampNs = 1_666_000_000L)
+        assertNotNull(res2)
+
+        // Timestamp jump backwards (timestampNs < lastFrameTimeNs)
+        val resJumpBack = monitor.processGridForTest(gridB, 200.0f, timestampNs = 1_500_000_000L)
+        assertNull("Negative timestamp delta must act as baseline re-initialization and return null", resJumpBack)
+    }
 }

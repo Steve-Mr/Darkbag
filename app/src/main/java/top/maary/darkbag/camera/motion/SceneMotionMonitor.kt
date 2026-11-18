@@ -16,6 +16,9 @@ import java.util.ArrayDeque
 class SceneMotionMonitor(
     private val historyWindowSize: Int = DEFAULT_HISTORY_WINDOW
 ) {
+    init {
+        require(historyWindowSize > 0) { "historyWindowSize must be > 0" }
+    }
     companion object {
         private const val TAG = "SceneMotionMonitor"
         const val DEFAULT_HISTORY_WINDOW = 3
@@ -95,6 +98,18 @@ class SceneMotionMonitor(
             (timestampNs - lastFrameTimeNs) / 1_000_000L
         } else {
             0L
+        }
+
+        if (deltaMs > 500L || (lastFrameTimeNs > 0L && timestampNs < lastFrameTimeNs)) {
+            System.arraycopy(grid, 0, prevGrid, 0, SceneMotionEstimator.TOTAL_CELLS)
+            prevMean = mean
+            lastFrameTimeNs = timestampNs
+            hasPrevGrid = true
+            history.clear()
+            lastResult = null
+            currentLevel = MotionLevel.STILL
+            _motionState.value = MotionLevel.STILL
+            return null
         }
 
         val result = SceneMotionEstimator.compareGrids(
