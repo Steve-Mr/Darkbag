@@ -38,6 +38,13 @@ data class ZslFrame(
  * Bounded RAW ring for application-side ZSL. Copy happens on the ZSL RAW thread.
  * Selection is deterministic and pure enough to be tested through the public snapshots.
  */
+/** Resolves a result that may arrive either with the Image or slightly later. */
+internal fun <T> resolveLateResult(
+    provided: T?,
+    timestamp: Long,
+    lookup: ((Long) -> T?)?
+): T? = provided ?: lookup?.invoke(timestamp)
+
 class ZslRawRing(
     val config: ZslRingConfig,
     val cameraId: String,
@@ -106,7 +113,7 @@ class ZslRawRing(
             synchronized(lock) {
                 // The Image can arrive before its CaptureResult. Re-read the result while
                 // holding the ring lock, after the copy, so attachResult() cannot miss the frame.
-                val resolvedResult = result ?: resultLookup?.invoke(image.timestamp)
+                val resolvedResult = resolveLateResult(result, image.timestamp, resultLookup)
                 val frame = ZslFrame(
                     buffer = buffer,
                     width = width,
