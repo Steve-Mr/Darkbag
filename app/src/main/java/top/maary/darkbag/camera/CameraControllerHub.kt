@@ -154,6 +154,8 @@ class CameraControllerHub(
 
     override fun hideProcessingAnimation() = overlayController.hideProcessingAnimation()
 
+    override fun showZslCaptureFeedback() = shutterController.showZslCaptureFeedback()
+
     override fun resetBurstUi() = shutterController.resetBurstUi()
 
     override fun updateCurrentThumbnail(uri: Uri?) = thumbnailController.updateCurrentThumbnail(uri)

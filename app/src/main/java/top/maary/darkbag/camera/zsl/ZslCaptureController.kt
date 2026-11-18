@@ -368,6 +368,9 @@ class ZslCaptureController(
         }
         if (started) {
             noteCapture("hdr+ · pre ${timing.zslPreRollFrames} · post ${timing.zslPostRollFrames} · offset ${timing.zslFrameOffsetMs}ms")
+            env.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                ui.showZslCaptureFeedback()
+            }
         } else {
             timing.zslFallbackReason = "burst_start_failed"
             timing.zslRoute = ""

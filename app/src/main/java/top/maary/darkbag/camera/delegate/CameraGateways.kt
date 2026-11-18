@@ -64,6 +64,9 @@ interface CameraUiHost {
     fun showShutterBlackout()
     fun showProcessingAnimation()
     fun hideProcessingAnimation()
+    /** Lightweight ZSL-only shutter feedback; no capture/processing work. */
+    fun showZslCaptureFeedback() {}
+
     fun resetBurstUi()
     fun updateCurrentThumbnail(uri: Uri?)
     fun setGalleryThumbnail(filename: String?)
