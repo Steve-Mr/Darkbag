@@ -22,6 +22,9 @@ data class ZslDebugState(
     val depth: Int = 0,
     val frames: Int = 0,
     val fps: Float? = null,
+    val ringMode: String = "",
+    val slots: Int = 0,
+    val droppedImages: Long = 0L,
     val lastCapture: String = ""
 )
 
@@ -81,6 +84,9 @@ object ZslDebugFormatter {
                 } else {
                     append(labels.ringFormat.format(state.frames, state.depth))
                 }
+                if (state.ringMode.isNotBlank()) append(" · ").append(state.ringMode)
+                if (state.slots > 0) append(" · slots=").append(state.slots)
+                if (state.droppedImages > 0L) append(" · drops=").append(state.droppedImages)
             }
             if (state.lastCapture.isNotBlank()) {
                 append('\n').append(labels.lastFormat.format(state.lastCapture))

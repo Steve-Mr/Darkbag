@@ -39,6 +39,9 @@ data class ZslFrame(
  * Bounded RAW ring for application-side ZSL. Copy happens on the ZSL RAW thread.
  * Selection is deterministic and pure enough to be tested through the public snapshots.
  */
+/** Chooses the owned, post-take frame rather than the pre-take ring reference. */
+internal fun List<ZslFrame>.firstOwnedFrame(): ZslFrame? = firstOrNull { it.buffer != null }
+
 /** Resolves a result that may arrive either with the Image or slightly later. */
 internal fun <T> resolveLateResult(
     provided: T?,

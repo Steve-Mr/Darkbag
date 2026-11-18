@@ -82,6 +82,7 @@ class ZslCaptureController(
     private val rearmRunnable = Runnable { attemptRearm() }
     private val armProbeRunnable = Runnable { runArmProbe() }
     private var probeAttempted = false
+    private var probeDroppedBaseline = 0L
 
     private val trimListener: () -> Unit = {
         cameraHandler?.post {
@@ -221,7 +222,7 @@ class ZslCaptureController(
         }
 
         return captureFrameFromRing(
-            frame = frame,
+            frame = taken.firstOwnedFrame() ?: taken.first(),
             sink = sink,
             hfMetadata = hfMetadata,
             timing = timing,
@@ -251,7 +252,7 @@ class ZslCaptureController(
         if (taken.isEmpty()) return false
         timing.zslFallbackReason = reason
         return captureFrameFromRing(
-            frame = frame,
+            frame = taken.firstOwnedFrame() ?: taken.first(),
             sink = sink,
             hfMetadata = hfMetadata,
             timing = timing,
@@ -612,10 +613,15 @@ class ZslCaptureController(
         stream.setZslRawTargetEnabled(true)
         env.sessionArbiter.lutProcessor?.setPreviewGain(hdrDigitalGain)
         router.installRing(newRing)
-        Log.i(TAG, "ZSL armed: ${targetProfile.name} depth=${limitedConfig.depth} raw=${report.rawWidth}x${report.rawHeight}")
+        Log.i(
+            TAG,
+            "ZSL armed: ${targetProfile.name} depth=${limitedConfig.depth} mode=${limitedConfig.mode} " +
+                "slots=${env.sessionArbiter.rawImageReader?.maxImages} raw=${report.rawWidth}x${report.rawHeight}"
+        )
         publishDebug(armed = true, reason = "", report = report)
         if (!probeAttempted) {
             probeAttempted = true
+            probeDroppedBaseline = env.sessionArbiter.rawFrameRouter?.droppedImages ?: 0L
             cameraHandler?.removeCallbacks(armProbeRunnable)
             cameraHandler?.postDelayed(armProbeRunnable, ARM_PROBE_MS)
         }
@@ -629,14 +635,24 @@ class ZslCaptureController(
         if (!sessionActive || profile == Profile.OFF) return
         val activeRing = ring ?: return
         val count = activeRing.receivedFrames
+        val dropped = (env.sessionArbiter.rawFrameRouter?.droppedImages ?: 0L) - probeDroppedBaseline
+        val lazyMode = activeConfig?.mode == ZslRingMode.LAZY_IMAGE
         val minFrames = if (profile == Profile.HDR_PLUS) ZslRingConfig.MIN_HDR_DEPTH else 1
+        if (lazyMode && dropped > 2L) {
+            lazyRingFailed = true
+            Log.w(TAG, "Lazy RAW ring dropped $dropped frames; falling back to eager copy")
+            disarm("lazy_dropped")
+            scheduleRearm()
+            return
+        }
         if (count < minFrames) {
             Log.w(TAG, "ZSL arm probe failed: only $count RAW frames in ${ARM_PROBE_MS}ms")
-            if (activeConfig?.mode == ZslRingMode.LAZY_IMAGE) {
+            if (lazyMode) {
                 lazyRingFailed = true
                 Log.w(TAG, "Lazy RAW ring failed arm probe; falling back to eager copy")
             }
             disarm("probe_no_frames")
+            if (lazyMode) scheduleRearm()
             return
         }
         val spanNs = activeRing.lastFrameTimestampNs - activeRing.firstFrameTimestampNs
@@ -644,11 +660,12 @@ class ZslCaptureController(
         val fps = (count - 1) * 1_000_000_000f / spanNs.toFloat()
         if (fps < MIN_PROBE_FPS) {
             Log.w(TAG, "ZSL arm probe failed: ${"%.1f".format(fps)} fps < $MIN_PROBE_FPS")
-            if (activeConfig?.mode == ZslRingMode.LAZY_IMAGE) {
+            if (lazyMode) {
                 lazyRingFailed = true
                 Log.w(TAG, "Lazy RAW ring failed FPS probe; falling back to eager copy")
             }
             disarm("probe_low_fps")
+            if (lazyMode) scheduleRearm()
             return
         }
         publishDebug(armed = true, reason = "", fps = fps)
@@ -679,7 +696,10 @@ class ZslCaptureController(
                 },
                 depth = depthOverride ?: activeConfig?.depth ?: current.depth,
                 frames = framesOverride ?: ring?.size ?: 0,
-                fps = fps ?: current.fps
+                fps = fps ?: current.fps,
+                ringMode = activeConfig?.mode?.name?.lowercase() ?: current.ringMode,
+                slots = env.sessionArbiter.rawImageReader?.maxImages ?: current.slots,
+                droppedImages = env.sessionArbiter.rawFrameRouter?.droppedImages ?: current.droppedImages
             )
         }
     }

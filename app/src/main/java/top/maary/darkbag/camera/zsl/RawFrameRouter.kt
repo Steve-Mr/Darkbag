@@ -74,6 +74,8 @@ class RawFrameRouter(
     private var captureConsumer: ((Image) -> Unit)? = null
     private var closed = false
     private val captureGeneration = AtomicLong(0)
+    @Volatile var droppedImages: Long = 0L
+        private set
 
     private val listener = ImageReader.OnImageAvailableListener { r ->
         val currentMode = synchronized(lock) { state.mode }
@@ -82,7 +84,11 @@ class RawFrameRouter(
         } catch (e: Exception) {
             Log.w(TAG, "Failed to acquire RAW image", e)
             null
-        } ?: return@OnImageAvailableListener
+        }
+        if (image == null) {
+            if (currentMode != RawRouterMode.IDLE) droppedImages++
+            return@OnImageAvailableListener
+        }
 
         try {
             when (currentMode) {

@@ -1,6 +1,7 @@
 package top.maary.darkbag.camera.zsl
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,6 +21,29 @@ class ZslRawRingTest {
         val mode = ZslRingMode.LAZY_IMAGE
         assertEquals(mode, ZslRingConfig.forHdrPlus(5, 24L * 1024L * 1024L, mode)?.mode)
         assertEquals(mode, ZslRingConfig.forSingle(24L * 1024L * 1024L, mode)?.mode)
+    }
+
+    @Test
+    fun ownershipHelperPrefersPostTakeFrame() {
+        val preTake = ZslFrame(
+            buffer = null,
+            width = 4,
+            height = 2,
+            rowStride = 4,
+            timestamp = 1L,
+            result = null,
+            iso = null,
+            exposureTimeNs = null,
+            wb = null,
+            cropKey = null,
+            afFocused = false,
+            lensId = "0",
+            zoomRatio = 1f,
+            rotationDegrees = 0,
+            rowLength = 4
+        )
+        val owned = preTake.copy(buffer = java.nio.ByteBuffer.allocateDirect(8))
+        assertSame(owned, listOf(preTake, owned).firstOwnedFrame())
     }
 
     @Test
