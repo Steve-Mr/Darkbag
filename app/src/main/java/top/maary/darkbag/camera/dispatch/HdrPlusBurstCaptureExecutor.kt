@@ -204,6 +204,7 @@ internal class HdrPlusBurstCaptureExecutor(
                 frameCount = burstSize,
                 timing = timing,
                 cfaPattern = cfa,
+                lockFirstFrameAsReference = seed != null,
                 onBurstComplete = { burstResult -> onStreamingBurstComplete(burstResult, burstContext) },
                 onBurstFailed = { error ->
                     Log.e(TAG, "Streaming burst failed in workerJob", error)

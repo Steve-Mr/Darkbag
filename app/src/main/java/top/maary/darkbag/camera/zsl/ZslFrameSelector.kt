@@ -21,11 +21,11 @@ data class ZslFrameSample(
 object ZslFrameSelector {
     const val EXPOSURE_TOLERANCE = 0.05f
     const val WB_TOLERANCE = 0.05f
-    const val AF_TIMEOUT_NS = 2_000_000_000L
 
     fun nearestIndex(samples: List<ZslFrameSample>, t0Ns: Long, maxAgeNs: Long): Int? {
         val valid = samples.indices.filter {
-            samples[it].hasResult && samples[it].iso != null && samples[it].exposureTimeNs != null
+            samples[it].hasResult && samples[it].afFocused &&
+                samples[it].iso != null && samples[it].exposureTimeNs != null
         }
         val best = valid.minByOrNull { abs(samples[it].timestamp - t0Ns) } ?: return null
         if (abs(samples[best].timestamp - t0Ns) > maxAgeNs) return null
@@ -70,15 +70,14 @@ object ZslFrameSelector {
         val base = run.lastOrNull() ?: return false
         val baseIso = base.iso ?: return false
         val baseExposure = base.exposureTimeNs ?: return false
-        if (baseExposure <= 0 || base.wb == null) return false
+        if (!base.afFocused || baseExposure <= 0 || base.wb == null) return false
         return run.all { frame ->
             val iso = frame.iso ?: return@all false
             val exposure = frame.exposureTimeNs ?: return@all false
-            if (exposure <= 0) return@all false
+            if (!frame.afFocused || exposure <= 0) return@all false
             if (abs(iso - baseIso).toFloat() / baseIso > EXPOSURE_TOLERANCE) return@all false
             if (abs(exposure - baseExposure).toFloat() / baseExposure > EXPOSURE_TOLERANCE) return@all false
             if (frame.cropKey != base.cropKey) return@all false
-            if (!frame.afFocused && abs(frame.timestamp - base.timestamp) > AF_TIMEOUT_NS) return@all false
             wbClose(frame.wb, base.wb)
         }
     }

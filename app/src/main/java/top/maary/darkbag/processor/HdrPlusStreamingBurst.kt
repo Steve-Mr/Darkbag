@@ -38,6 +38,7 @@ class HdrPlusStreamingBurst(
     private val frameCount: Int,
     private val timing: StandardTimingTracker? = null,
     val cfaPattern: Int = 0,
+    private val lockFirstFrameAsReference: Boolean = false,
     private val onBurstComplete: (StreamingBurstResult) -> Unit,
     private val onBurstFailed: ((Throwable) -> Unit)? = null
 ) {
@@ -95,16 +96,23 @@ class HdrPlusStreamingBurst(
                     if (isAborted) {
                         StreamingBufferPool.release(item0.buffer)
                     } else {
-                        val score0 = ColorProcessor.nativeComputeGcamFrameScore(
-                            frameBuffer = item0.buffer,
-                            width = item0.frame.width,
-                            height = item0.frame.height,
-                            cfaPattern = cfaPattern,
-                            noiseProfileS = item0.frame.noiseProfileS,
-                            noiseProfileO = item0.frame.noiseProfileO,
-                            exposureTimeNs = item0.frame.exposureTimeNs,
-                            timeDeltaFromFirstNs = 0L
-                        )
+                        val score0 = if (lockFirstFrameAsReference) {
+                            // ZSL pre-roll is ordered base-first and captured before the shutter;
+                            // never let adaptive base selection promote an older frame.
+                            Log.d(TAG, "ZSL seed: locking frame 0 as reference")
+                            Float.MAX_VALUE
+                        } else {
+                            ColorProcessor.nativeComputeGcamFrameScore(
+                                frameBuffer = item0.buffer,
+                                width = item0.frame.width,
+                                height = item0.frame.height,
+                                cfaPattern = cfaPattern,
+                                noiseProfileS = item0.frame.noiseProfileS,
+                                noiseProfileO = item0.frame.noiseProfileO,
+                                exposureTimeNs = item0.frame.exposureTimeNs,
+                                timeDeltaFromFirstNs = 0L
+                            )
+                        }
                         Log.d(TAG, "Frame 0 GCam score: $score0 (threshold: $STEADY_SCORE_THRESHOLD)")
 
                         if (score0 >= STEADY_SCORE_THRESHOLD) {

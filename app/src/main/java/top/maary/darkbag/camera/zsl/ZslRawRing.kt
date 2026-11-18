@@ -4,6 +4,7 @@ import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.media.Image
 import android.util.Log
+import kotlin.math.abs
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.processor.StreamingBufferPool
 import java.nio.ByteBuffer
@@ -40,10 +41,16 @@ data class ZslFrame(
  */
 class ZslRawRing(
     val config: ZslRingConfig,
+    val cameraId: String,
     private val lensId: String?,
     private val zoomRatio: Float,
     private val rotationDegrees: Int
 ) {
+    fun matches(cameraId: String, lensId: String?, zoomRatio: Float): Boolean =
+        this.cameraId == cameraId &&
+            this.lensId == lensId &&
+            abs(this.zoomRatio - zoomRatio) < 0.01f
+
     companion object {
         private const val TAG = "ZslRawRing"
     }
@@ -61,7 +68,11 @@ class ZslRawRing(
     val size: Int
         get() = synchronized(lock) { frames.size }
 
-    fun offer(image: Image, result: TotalCaptureResult?): Boolean {
+    fun offer(
+        image: Image,
+        result: TotalCaptureResult?,
+        resultLookup: ((Long) -> TotalCaptureResult?)? = null
+    ): Boolean {
         val plane = image.planes.firstOrNull() ?: run {
             image.close()
             return false
@@ -91,24 +102,27 @@ class ZslRawRing(
             copyPlane(plane.buffer, rowStride, rowLength, width, height, buffer, dataLength)
             buffer.position(0)
             buffer.limit(dataLength)
-            val frame = ZslFrame(
-                buffer = buffer,
-                width = width,
-                height = height,
-                rowStride = rowStride,
-                timestamp = image.timestamp,
-                result = result,
-                iso = result?.get(CaptureResult.SENSOR_SENSITIVITY),
-                exposureTimeNs = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
-                wb = extractWb(result),
-                cropKey = result?.get(CaptureResult.SCALER_CROP_REGION)?.toString(),
-                afFocused = isAfFocused(result),
-                lensId = lensId,
-                zoomRatio = zoomRatio,
-                rotationDegrees = rotationDegrees,
-                rowLength = rowLength
-            )
             synchronized(lock) {
+                // The Image can arrive before its CaptureResult. Re-read the result while
+                // holding the ring lock, after the copy, so attachResult() cannot miss the frame.
+                val resolvedResult = result ?: resultLookup?.invoke(image.timestamp)
+                val frame = ZslFrame(
+                    buffer = buffer,
+                    width = width,
+                    height = height,
+                    rowStride = rowStride,
+                    timestamp = image.timestamp,
+                    result = resolvedResult,
+                    iso = resolvedResult?.get(CaptureResult.SENSOR_SENSITIVITY),
+                    exposureTimeNs = resolvedResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+                    wb = extractWb(resolvedResult),
+                    cropKey = resolvedResult?.get(CaptureResult.SCALER_CROP_REGION)?.toString(),
+                    afFocused = isAfFocused(resolvedResult),
+                    lensId = lensId,
+                    zoomRatio = zoomRatio,
+                    rotationDegrees = rotationDegrees,
+                    rowLength = rowLength
+                )
                 while (frames.size >= config.depth) {
                     if (frames.isEmpty()) break
                     releaseFrame(frames.removeFirst())
@@ -205,12 +219,22 @@ class ZslRawRing(
     }
 
     private fun isAfFocused(result: TotalCaptureResult?): Boolean {
-        val af = result?.get(CaptureResult.CONTROL_AF_STATE)
-        if (af == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
-            af == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED
-        ) return true
-        val lens = result?.get(CaptureResult.LENS_STATE)
-        return lens == CaptureResult.LENS_STATE_STATIONARY
+        if (result == null) return false
+        // Manual focus has no AF convergence state; accept it explicitly.
+        if (result.get(CaptureResult.CONTROL_AF_MODE) == CaptureResult.CONTROL_AF_MODE_OFF) {
+            return true
+        }
+        val af = result.get(CaptureResult.CONTROL_AF_STATE)
+        return when (af) {
+            CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED,
+            CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED -> true
+            CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN,
+            CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN,
+            CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED,
+            CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED,
+            CaptureResult.CONTROL_AF_STATE_INACTIVE -> false
+            else -> result.get(CaptureResult.LENS_STATE) == CaptureResult.LENS_STATE_STATIONARY
+        }
     }
 
     private fun copyPlane(

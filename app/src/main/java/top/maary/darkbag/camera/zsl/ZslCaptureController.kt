@@ -32,6 +32,7 @@ import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.HalfFrameManager
 import kotlin.math.abs
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
  * Owns experimental ZSL arming, frame selection, and handoff.
@@ -77,9 +78,20 @@ class ZslCaptureController(
     private val armProbeRunnable = Runnable { runArmProbe() }
     private var probeAttempted = false
 
+    private val trimListener: () -> Unit = {
+        cameraHandler?.post {
+            disarm("memory_trim")
+            if (!env.runtimeState.isBurstActive) {
+                StreamingBufferPool.clear()
+                HdrPlusBurst.clearPool()
+            }
+        }
+    }
+
     fun start() {
         if (started) return
         started = true
+        ZslRuntimeHooks.registerTrimListener(trimListener)
         jobs += env.lifecycleScope.launch {
             env.cameraViewModel.uiState
                 .map { it.isHdrPlusEnabled }
@@ -103,6 +115,7 @@ class ZslCaptureController(
     }
 
     fun stop() {
+        ZslRuntimeHooks.unregisterTrimListener(trimListener)
         jobs.forEach { it.cancel() }
         jobs.clear()
         cameraHandler?.removeCallbacks(rearmRunnable)
@@ -181,6 +194,10 @@ class ZslCaptureController(
             timing.zslFallbackReason = "not_armed"
             return false
         }
+        if (!ringMatchesCurrentLens()) {
+            timing.zslFallbackReason = "zoom_changed"
+            return false
+        }
         if (profile != Profile.SINGLE_RAW) {
             timing.zslFallbackReason = "profile"
             return false
@@ -228,9 +245,12 @@ class ZslCaptureController(
             return false
         }
         timing.recordShutterReady()
+        env.runtimeState.isBurstActive = false
+        env.cameraViewModel.setBurstActive(false)
         noteCapture("single · offset ${timing.zslFrameOffsetMs}ms")
         env.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             ui.resetBurstUi()
+            ui.showProcessingAnimation()
         }
         // The ring can refill while the single frame is processed.
         return true
@@ -256,6 +276,10 @@ class ZslCaptureController(
         }
         if (profile != Profile.HDR_PLUS) {
             timing.zslFallbackReason = "profile"
+            return false
+        }
+        if (!ringMatchesCurrentLens()) {
+            timing.zslFallbackReason = "zoom_changed"
             return false
         }
         val seed = prepareHdrPlusSeed(timing) ?: return false
@@ -333,6 +357,14 @@ class ZslCaptureController(
             ring.releaseFrames(taken)
             return null
         }
+        val isoUpper = env.runtimeState.isoRange?.upper
+        val exposureUpper = env.runtimeState.exposureTimeRange?.upper ?: Long.MAX_VALUE
+        val exposureCap = minOf(66_666_667L, exposureUpper)
+        if (isoUpper != null && iso.toFloat() >= isoUpper * 0.8f && exposure >= exposureCap) {
+            timing.zslFallbackReason = "low_light"
+            ring.releaseFrames(taken)
+            return null
+        }
         timing.zslFrameOffsetMs = abs(base.timestamp - t0) / 1_000_000L
         return ZslBurstSeed(
             frames = ordered,
@@ -342,6 +374,15 @@ class ZslCaptureController(
             digitalGain = hdrDigitalGain,
             targetFrameCount = burst
         )
+    }
+
+    private fun currentZoom(): Float =
+        pipeline.specAssembler.resolveEffectiveZoom(env.runtimeState.currentLens, null)
+
+    private fun ringMatchesCurrentLens(): Boolean {
+        val ring = ring ?: return false
+        val cameraId = env.runtimeState.currentLens?.id ?: "0"
+        return ring.matches(cameraId, env.runtimeState.currentLens?.id, currentZoom())
     }
 
     private fun scheduleEvaluate() {
@@ -434,28 +475,32 @@ class ZslCaptureController(
             limitedConfig = limitedConfig.copy(depth = depth)
         }
 
-        if (profile == targetProfile && activeConfig == limitedConfig && ring != null) {
+        val lens = env.runtimeState.currentLens
+        val zoom = pipeline.specAssembler.resolveEffectiveZoom(lens, null)
+        if (profile == targetProfile && activeConfig == limitedConfig &&
+            ring?.matches(cameraId, lens?.id, zoom) == true
+        ) {
             publishDebug(armed = true, reason = "", report = report)
             return
         }
 
         disarm("rearming")
-        val lens = env.runtimeState.currentLens
         val rotation = try {
             CameraRepository.getCharacteristics(env.camera2Manager, cameraId)
                 .get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         } catch (_: Exception) {
             0
         }
-        val zoom = pipeline.specAssembler.resolveEffectiveZoom(lens, null)
+        val aeStepEv = report.aeCompensationStepEv.takeIf { it > 0f } ?: (1f / 3f)
         hdrEvSteps = if (targetProfile == Profile.HDR_PLUS) {
-            maxOf(resolveHdrEvSteps(prefs), report.minAeCompensationSteps)
+            val desiredSteps = (resolveHdrTargetEv(prefs) / aeStepEv).roundToInt()
+            maxOf(desiredSteps, report.minAeCompensationSteps)
         } else {
             0
         }
         realtimeTimestamp = report.timestampRealtime
-        hdrDigitalGain = 2.0.pow((-hdrEvSteps).toDouble() / 3.0).toFloat()
-        val newRing = ZslRawRing(limitedConfig, cameraId, zoom, rotation)
+        hdrDigitalGain = 2.0.pow(-(hdrEvSteps * aeStepEv).toDouble()).toFloat()
+        val newRing = ZslRawRing(limitedConfig, cameraId, lens?.id, zoom, rotation)
         val router = env.sessionArbiter.rawFrameRouter
         if (router == null) {
             disarm("no_router")
@@ -648,11 +693,10 @@ class ZslCaptureController(
         return config.copy(depth = maxDepth)
     }
 
-    private fun resolveHdrEvSteps(prefs: DarkbagPreferences): Int = when {
-        prefs.hdrUnderexposureMode.startsWith("Off") -> 0
-        prefs.hdrUnderexposureMode.startsWith("-2") -> -6
-        prefs.hdrUnderexposureMode.startsWith("-1") -> -3
-        else -> -3 // Dynamic is fixed for ZSL; clipping feedback is unreliable on an underexposed preview.
+    private fun resolveHdrTargetEv(prefs: DarkbagPreferences): Float = when {
+        prefs.hdrUnderexposureMode.startsWith("Off") -> 0f
+        prefs.hdrUnderexposureMode.startsWith("-2") -> -2f
+        else -> -1f // -1 EV and Dynamic; clipping feedback is unreliable on an underexposed preview.
     }
 
     private fun pressTimestampNs(timing: StandardTimingTracker): Long {

@@ -51,6 +51,7 @@ data class ZslCameraFacts(
     val manualPostProcessing: Boolean = false,
     val timestampSource: Int = 0,
     val aeCompensationRange: IntRange? = null,
+    val aeCompensationStepEv: Float = 1f / 3f,
     val fpsRanges: List<IntRange> = emptyList(),
     val isLowRam: Boolean = false,
     val availableMemoryBytes: Long = Long.MAX_VALUE,
@@ -70,6 +71,7 @@ data class ZslCapabilityReport(
     val supportsHdrPlusZsl: Boolean = false,
     val supportsRawReprocess: Boolean = false,
     val minAeCompensationSteps: Int = 0,
+    val aeCompensationStepEv: Float = 1f / 3f,
     val hdrFpsRange: IntRange? = null,
     val timestampRealtime: Boolean = true
 ) {
@@ -121,7 +123,7 @@ data class ZslRingConfig(
 /** Immutable decision produced by the pure admission evaluator. */
 object ZslCapabilityEvaluator {
     private const val MAX_FRAME_BYTES = 32L * 1024L * 1024L
-    private const val MIN_HDR_NEGATIVE_EV_STEPS = -3 // -1 EV in 1/3 steps
+    private const val MIN_HDR_NEGATIVE_EV = -1f // at least one stop of negative AE range
     private const val MIN_FPS_UPPER = 24
     private const val MIN_FPS_LOWER = 15
 
@@ -177,7 +179,9 @@ object ZslCapabilityEvaluator {
             )
         }
 
-        val hasNegativeEv = facts.aeCompensationRange?.let { it.first <= MIN_HDR_NEGATIVE_EV_STEPS } == true
+        val hasNegativeEv = facts.aeCompensationRange?.let {
+            it.first * facts.aeCompensationStepEv <= MIN_HDR_NEGATIVE_EV
+        } == true
         val hdrFpsRange = facts.fpsRanges
             .filter { it.first <= MIN_FPS_LOWER && it.last >= MIN_FPS_UPPER }
             .minWithOrNull(compareBy<IntRange>({ it.last }, { kotlin.math.abs(it.first - MIN_FPS_LOWER) }))
@@ -192,6 +196,7 @@ object ZslCapabilityEvaluator {
             supportsHdrPlusZsl = hdrPlus,
             supportsRawReprocess = supportsReprocess,
             minAeCompensationSteps = facts.aeCompensationRange?.first ?: 0,
+            aeCompensationStepEv = facts.aeCompensationStepEv,
             hdrFpsRange = hdrFpsRange,
             timestampRealtime = facts.timestampSource == 1
         )

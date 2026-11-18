@@ -76,6 +76,18 @@ class ZslFrameSelectorTest {
     }
 
     @Test
+    fun nearestRejectsUnfocusedFrame() {
+        val samples = listOf(sample(100, af = true), sample(200, af = false), sample(300, af = true))
+        assertEquals(0, ZslFrameSelector.nearestIndex(samples, 190, 300))
+    }
+
+    @Test
+    fun stableRunRequiresEveryFrameFocused() {
+        val samples = (0 until 3).map { sample(1_000L + it * 33L, af = it != 1) }
+        assertTrue(ZslFrameSelector.stableRunIndices(samples, 1_066, 3, 300).isEmpty())
+    }
+
+    @Test
     fun afOutlierOlderThanTimeoutRejectsRun() {
         val samples = listOf(
             sample(0, af = false),

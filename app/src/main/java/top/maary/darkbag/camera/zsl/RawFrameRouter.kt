@@ -64,7 +64,7 @@ class RawFrameRouter(
                 Mode.RING -> {
                     val activeRing = synchronized(lock) { ring }
                     if (activeRing != null && image.format == ImageFormat.RAW_SENSOR) {
-                        activeRing.offer(image, resultLookup(image.timestamp))
+                        activeRing.offer(image, resultLookup(image.timestamp), resultLookup)
                     } else {
                         image.close()
                     }

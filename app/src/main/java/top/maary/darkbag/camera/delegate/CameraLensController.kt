@@ -254,35 +254,9 @@ class CameraLensController(
     }
 
     fun updateZoomCamera2() {
-        val arbiter = env.sessionArbiter
-        val state = env.runtimeState
-        val session = arbiter.camera2Session ?: return
-        val device = arbiter.camera2Device ?: return
-        val chars = CameraRepository.getCharacteristics(env.camera2Manager, device.id)
-        val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
-
-        val cropRegion: Rect = arbiter.computeCropRegion(activeArray, state.currentLens)
-
-        val handler = arbiter.camera2Handler ?: return
-        handler.post {
-            val activeSession = arbiter.camera2Session ?: return@post
-            val activeDevice = arbiter.camera2Device ?: return@post
-            val surface = arbiter.camera2PreviewSurface ?: return@post
-            try {
-                val request = activeDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                request.addTarget(surface)
-                coordinator.applyManualSettingsToRequest(request)
-                request.set(CaptureRequest.SCALER_CROP_REGION, cropRegion)
-
-                activeSession.setRepeatingRequest(request.build(), object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                        coordinator.handleCaptureResult(result)
-                    }
-                }, handler)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to update Camera2 zoom", e)
-            }
-        }
+        // Route every preview change through the single request factory: it re-adds the RAW
+        // ZSL target, applies the ZSL exposure/FPS profile and the current crop region.
+        coordinator.applyCameraControls()
     }
 
     fun animateSwitch(onMidPoint: () -> Unit) {

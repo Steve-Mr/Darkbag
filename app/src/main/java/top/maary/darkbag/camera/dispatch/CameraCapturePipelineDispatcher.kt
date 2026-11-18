@@ -148,7 +148,8 @@ class CameraCapturePipelineDispatcher(
     fun enqueueZslSingle(holder: RawImageHolder): Boolean {
         val app = env.hostContext.applicationContext as? MainApplication ?: return false
         app.applicationScope.launch {
-            processImageAsync(app, holder)
+            holder.timing?.enqueued = System.currentTimeMillis()
+            processingChannel.send(holder)
         }
         return true
     }

@@ -26,6 +26,7 @@ class MainApplication : Application() {
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
             level == android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
             top.maary.darkbag.processor.ColorProcessor.clearSabreTexturePoolAsync()
+            top.maary.darkbag.camera.zsl.ZslRuntimeHooks.onTrimMemory()
             top.maary.darkbag.repository.GalleryCacheStore.getInstance().onTrimMemory(level)
         }
     }

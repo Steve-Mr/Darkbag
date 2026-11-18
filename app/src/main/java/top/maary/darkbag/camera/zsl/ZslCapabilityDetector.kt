@@ -77,6 +77,8 @@ object ZslCapabilityDetector {
         }
         val aeRange = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
             ?.let { it.lower..it.upper }
+        val aeStepEv = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)
+            ?.toFloat() ?: (1f / 3f)
         val fpsRanges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
             ?.map { it.lower..it.upper }
             .orEmpty()
@@ -98,6 +100,7 @@ object ZslCapabilityDetector {
             manualPostProcessing = CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING in capabilities,
             timestampSource = timestampSource,
             aeCompensationRange = aeRange,
+            aeCompensationStepEv = aeStepEv,
             fpsRanges = fpsRanges,
             isLowRam = isLowRam,
             availableMemoryBytes = memoryInfo.availMem,

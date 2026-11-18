@@ -15,6 +15,7 @@ class ZslCapabilityEvaluatorTest {
         manualPost: Boolean = true,
         lowRam: Boolean = false,
         ae: IntRange? = -6..6,
+        aeStep: Float = 1f / 3f,
         fps: List<IntRange> = listOf(15..30),
         capabilities: Set<Int> = setOf(3, 5, 2)
     ) = ZslCameraFacts(
@@ -26,6 +27,7 @@ class ZslCapabilityEvaluatorTest {
         manualPostProcessing = manualPost,
         timestampSource = 1,
         aeCompensationRange = ae,
+        aeCompensationStepEv = aeStep,
         fpsRanges = fps,
         isLowRam = lowRam,
         availableMemoryBytes = 4L * 1024L * 1024L * 1024L
@@ -128,6 +130,20 @@ class ZslCapabilityEvaluatorTest {
         val report = ZslCapabilityEvaluator.evaluate(facts(lowRam = true))
         assertEquals(ZslRoute.NONE, report.route)
         assertEquals(ZslReason.LOW_RAM, report.reason)
+    }
+
+    @Test
+    fun reportsActualAeStepAndUsesEvForHdrAdmission() {
+        val oneStopHalfStep = ZslCapabilityEvaluator.evaluate(
+            facts(ae = -4..4, aeStep = 0.5f)
+        )
+        assertEquals(0.5f, oneStopHalfStep.aeCompensationStepEv, 0.001f)
+        assertTrue(oneStopHalfStep.supportsHdrPlusZsl)
+
+        val tooLittleRange = ZslCapabilityEvaluator.evaluate(
+            facts(ae = -1..1, aeStep = 0.5f)
+        )
+        assertFalse(tooLittleRange.supportsHdrPlusZsl)
     }
 
     @Test
