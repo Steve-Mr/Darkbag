@@ -240,6 +240,11 @@ class ZslCaptureController(
     ): Boolean {
         val activeRing = ring ?: return false
         val frame = activeRing.latestValid() ?: return false
+        val t0 = pressTimestampNs(timing)
+        if (abs(frame.timestamp - t0) > activeRing.config.maxAgeNs) {
+            timing.zslFallbackReason = "instant_too_old"
+            return false
+        }
         val taken = activeRing.take(listOf(frame))
         if (taken.isEmpty()) return false
         timing.zslFallbackReason = reason
