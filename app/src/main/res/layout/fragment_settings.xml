@@ -1668,16 +1668,38 @@
                         app:cardBackgroundColor="?attr/colorSurface"
                         app:strokeWidth="0dp">
 
-                        <TextView
-                            android:id="@+id/tv_zsl_status"
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:paddingHorizontal="12dp"
-                            android:paddingVertical="8dp"
-                            android:maxLines="2"
-                            android:ellipsize="end"
-                            android:textColor="?attr/colorOnSurface"
-                            tools:text="ZSL ROUTE&#10;HDR+ pre-roll · 5/5" />
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/tv_zsl_status"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:paddingHorizontal="12dp"
+                                android:paddingVertical="8dp"
+                                android:maxLines="2"
+                                android:ellipsize="end"
+                                android:textColor="?attr/colorOnSurface"
+                                tools:text="ZSL ROUTE&#10;HDR+ pre-roll · 5/5" />
+
+                            <TextView
+                                android:id="@+id/tv_zsl_debug"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:paddingHorizontal="12dp"
+                                android:paddingTop="2dp"
+                                android:paddingBottom="8dp"
+                                android:fontFamily="monospace"
+                                android:textSize="9.5sp"
+                                android:maxLines="8"
+                                android:ellipsize="end"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:visibility="gone"
+                                tools:visibility="visible"
+                                tools:text="ZSL OFF · motion_photo&#10;route: raw_ring · 4096x3072&#10;ring: 0/5&#10;last: forward: forward" />
+                        </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 
                     <!-- Custom Lens Calibration Bento Button -->

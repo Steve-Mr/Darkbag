@@ -69,6 +69,37 @@ class StandardTimingTrackerTest {
     }
 
     @Test
+    fun testBuildSummaryReport_includesZslTelemetry() {
+        val timing = StandardTimingTracker(
+            shutterClick = 1000L,
+            captureMode = CaptureTimingMode.HDR_BURST
+        )
+        timing.zslRoute = "raw_ring"
+        timing.zslPreRollFrames = 5
+        timing.zslPostRollFrames = 3
+        timing.zslFrameOffsetMs = 12L
+
+        val report = timing.buildSummaryReport()
+        assertTrue(report.contains("🎯 ZSL:"))
+        assertTrue(report.contains("route=raw_ring"))
+        assertTrue(report.contains("pre=5"))
+        assertTrue(report.contains("post=3"))
+        assertTrue(report.contains("offset=12ms"))
+    }
+
+    @Test
+    fun testBuildSummaryReport_includesZslFallbackReason() {
+        val timing = StandardTimingTracker(
+            shutterClick = 1000L,
+            captureMode = CaptureTimingMode.SINGLE_RAW
+        )
+        timing.zslFallbackReason = "no_stable_run"
+
+        val report = timing.buildSummaryReport()
+        assertTrue(report.contains("fallback=no_stable_run"))
+    }
+
+    @Test
     fun testBuildSummaryReport_withEnvironmentMetadata() {
         val timing = StandardTimingTracker(
             shutterClick = 1000L,

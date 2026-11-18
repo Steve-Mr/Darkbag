@@ -247,6 +247,18 @@ data class StandardTimingTracker(
             sensorSection.append("      - 流式累加完成: $accumulationStr$pushDetail\n")
         }
 
+        val zslParts = mutableListOf<String>()
+        if (zslRoute.isNotBlank()) zslParts.add("route=$zslRoute")
+        if (zslPreRollFrames > 0) zslParts.add("pre=$zslPreRollFrames")
+        if (zslPostRollFrames > 0) zslParts.add("post=$zslPostRollFrames")
+        if (zslFrameOffsetMs > 0) zslParts.add("offset=${zslFrameOffsetMs}ms")
+        if (zslFallbackReason.isNotBlank()) zslParts.add("fallback=$zslFallbackReason")
+        val zslSection = if (zslParts.isEmpty()) {
+            ""
+        } else {
+            "\n🎯 ZSL:\n  • ${zslParts.joinToString("\n  • ")}\n"
+        }
+
         return """
 ========================================
 [$modeHeader] $timeStr
@@ -259,7 +271,7 @@ $envLine========================================
 📊 阶段耗时分解:
 $sensorSection  [2] 并发排队等待: $queueWait
   [3] Stage 1 计算 (管线解算/融合): $stage1Cost$stage1Detail
-$exportSection========================================
+$exportSection$zslSection========================================
         """.trimIndent()
     }
 }

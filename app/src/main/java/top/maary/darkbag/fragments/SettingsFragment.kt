@@ -26,6 +26,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 import top.maary.darkbag.camera.zsl.ZslCapabilityDetector
+import top.maary.darkbag.camera.zsl.ZslDebugFormatter
+import top.maary.darkbag.camera.zsl.ZslDebugLabels
+import top.maary.darkbag.camera.zsl.ZslDebugRegistry
+import top.maary.darkbag.camera.zsl.ZslDebugState
 import top.maary.darkbag.camera.zsl.ZslReason
 import top.maary.darkbag.camera.zsl.ZslRoute
 import top.maary.darkbag.databinding.FragmentSettingsBinding
@@ -145,6 +149,15 @@ class SettingsFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 settingsViewModel.preferences.collect { prefsState ->
                     bentoDelegate.renderPreferences(binding, prefsState)
+                    renderZslDebug(ZslDebugRegistry.state.value)
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                ZslDebugRegistry.state.collect { state ->
+                    renderZslDebug(state)
                 }
             }
         }
@@ -557,6 +570,31 @@ class SettingsFragment : Fragment() {
             ZslRoute.REPROCESS_RAW -> getString(R.string.zsl_status_reprocess)
             ZslRoute.NONE -> getString(R.string.zsl_status_unavailable)
         }
+    }
+
+    private fun renderZslDebug(state: ZslDebugState) {
+        if (!settingsViewModel.preferences.value.zslEnabled) {
+            binding.tvZslDebug.visibility = View.GONE
+            return
+        }
+        binding.tvZslDebug.visibility = View.VISIBLE
+        binding.tvZslDebug.text = ZslDebugFormatter.format(
+            state,
+            ZslDebugLabels(
+                armed = getString(R.string.zsl_debug_armed),
+                off = getString(R.string.zsl_debug_off),
+                stateFormat = getString(R.string.zsl_debug_state),
+                reasonFormat = getString(R.string.zsl_debug_reason),
+                routeFormat = getString(R.string.zsl_debug_route),
+                ringFormat = getString(R.string.zsl_debug_ring),
+                ringFpsFormat = getString(R.string.zsl_debug_ring_fps),
+                lastFormat = getString(R.string.zsl_debug_last),
+                waiting = getString(R.string.zsl_debug_waiting),
+                profileHdrPlus = getString(R.string.zsl_debug_profile_hdr_plus),
+                profileSingle = getString(R.string.zsl_debug_profile_single),
+                profileOff = getString(R.string.zsl_debug_profile_off)
+            )
+        )
     }
 
     private fun setupMultiCameraSettings() {

@@ -341,7 +341,7 @@ class CameraModeController(
                 timing: StandardTimingTracker
             ) = onCameraThread {
                 if (parts.zsl?.tryCaptureHdrPlus(sink, isFrame1, hfMetadata, timing) == true) return@onCameraThread
-                parts.zsl?.onForwardCaptureStarting()
+                parts.zsl?.onForwardCaptureStarting(timing)
                 parts.pipeline.triggerHdrPlusBurstCamera2(sink, isFrame1, hfMetadata, timing)
             }
 
@@ -352,7 +352,7 @@ class CameraModeController(
                 timing: StandardTimingTracker
             ) = onCameraThread {
                 if (parts.zsl?.tryCaptureSingle(sink, isFrame1, hfMetadata, timing) == true) return@onCameraThread
-                parts.zsl?.onForwardCaptureStarting()
+                parts.zsl?.onForwardCaptureStarting(timing)
                 parts.pipeline.takeSinglePictureCamera2(sink, timing, isFrame1, hfMetadata)
             }
 
