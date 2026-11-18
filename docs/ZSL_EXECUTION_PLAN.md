@@ -26,10 +26,12 @@
 | Adaptive ZSL | 已实现 | `66763ff4`：稳定 3–5 帧直接用实际帧数做 HDR+；无稳定段取最新有效 RAW 走非 HDR+ 单帧；严格模式必须满预卷，否则 forward；`hdrBurstCount` 为上限 |
 | 快门反馈 | 已实现 | `67572b76`：ZSL 命中时轻触觉 + 快门短暂缩放脉冲，不增加相机主线程工作 |
 | Pixel 3 验证 | 部分通过 | 已修复 Android 14 display NPE；adaptive 5/3 帧和 Z8 lazy 3 帧均成功出 DNG/JPG；Motion JPG PTS 已确认；连续场景/热数据待测 |
-| Z9 核心测试 | 基本完成 | trim/迟到 result、RawRouterState、lazy take 所有权 helper 已覆盖；真机并发矩阵仍待测 |
-| 真机矩阵 | 部分开始 | Pixel 3 (`8BVX1FW0X`) 已连接并完成 adaptive ZSL 样张；moto 29.9fps ring；redroid 不作为相机设备 |
+| Z9 核心测试 | 已完成 | `98` 测试套件 / `584` 单测 100% 通过（`--rerun-tasks`）；`design_and_code_reviewer` 终审签发 `APPROVED` |
+| Review R2 收敛 | 已完成 | `f201ed4d` / `0ed9621b` / `1b9a65e5` / `1de3a9ea`：前置 low_light 与 `captureInstantSingle` AF+低光门禁、`INACTIVE+STATIONARY`、Lazy `copyLock+clearEpoch` 防 `SIGSEGV`、`!adaptive` 完整 burst、pool 保护、变焦就地换环、per-shot `MotionPhotoStillTimestampSlot`、前向 HDR+ `previewGain` 保持、ZSL 子项显隐与 i18n |
+| 运动去重影 | 已完成 | `8240ca58` (`hdr-plus` @ `45ac75b`)：`merge.cpp` 位深阈值收敛、`HdrPlusAccumulatePipeline` 2×2 Quad 残差门控、`GpuSabreShader.h` & `SabreEngine.cpp` 双线性光流与方差钳位，`:app:buildCMakeRelease[arm64-v8a]` 通过 |
+| 真机矩阵 | 部分开始 | Pixel 3 (`8BVX1FW0X`) 已连接并完成 adaptive ZSL 样张；moto 29.9fps ring；redroid 不作为相机设备；待真机复测修复后快速运动手部与 Motion 连拍 PTS 实测偏差 |
 
-**剩余优先项**：Motion PTS 实测偏差；Z8 真机带宽/槽位/热对比；完整真机矩阵。
+**剩余优先项**：真机复测快速运动去重影效果与 Motion PTS 实测偏差；Z8 真机带宽/槽位/热对比；完整真机矩阵。
 
 ---
 
