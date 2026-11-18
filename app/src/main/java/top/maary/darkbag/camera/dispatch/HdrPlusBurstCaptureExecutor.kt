@@ -215,7 +215,11 @@ internal class HdrPlusBurstCaptureExecutor(
                     env.cameraViewModel.setBurstActive(false)
                     env.runtimeState.hdrPlusStreamingBurstHelper?.abort()
                     env.runtimeState.hdrPlusStreamingBurstHelper = null
-                    env.sessionArbiter.rawFrameRouter?.endCapture()
+                    // A full-pre-roll ZSL seed never switched the router to CAPTURE; keep the
+                    // ring RING so it can refill after a native failure.
+                    if (seed == null || seed.remainingCount > 0) {
+                        env.sessionArbiter.rawFrameRouter?.endCapture()
+                    }
                     env.lifecycleScope.launch(Dispatchers.Main) {
                         ui.hideProcessingAnimation()
                         ui.resetBurstUi()
@@ -371,7 +375,9 @@ internal class HdrPlusBurstCaptureExecutor(
             if (seed != null) {
                 seed.releaseFrom(seedEnqueued)
             }
-            env.sessionArbiter.rawFrameRouter?.endCapture()
+            if (seed == null || seed.remainingCount > 0) {
+                env.sessionArbiter.rawFrameRouter?.endCapture()
+            }
             if (isTaskStarted.compareAndSet(true, false)) HdrPlusRequestManager.onTaskFinished()
             if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
             onNotifySinkFailure(appContext, sink, hfMetadata, e, currentZoom, burstLensId, captureStartTime)

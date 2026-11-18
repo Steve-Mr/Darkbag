@@ -551,7 +551,7 @@ class SettingsFragment : Fragment() {
 
     private fun zslStatusValue(state: top.maary.darkbag.repository.DarkbagPreferences): String {
         if (!state.zslEnabled) return getString(R.string.zsl_status_off)
-        if (state.motionPhotoEnabled || state.force60Fps) {
+        if (state.force60Fps) {
             return getString(R.string.zsl_status_inactive_mode)
         }
         val route = ZslRoute.fromKey(state.zslRoute)

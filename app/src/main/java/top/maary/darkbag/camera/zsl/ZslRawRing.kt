@@ -6,7 +6,7 @@ import android.media.Image
 import android.util.Log
 import kotlin.math.abs
 import top.maary.darkbag.processor.ColorProcessor
-import top.maary.darkbag.processor.StreamingBufferPool
+import top.maary.darkbag.fragments.HdrPlusBurst
 import java.nio.ByteBuffer
 import java.util.ArrayDeque
 import kotlin.math.abs
@@ -43,12 +43,14 @@ class ZslRawRing(
     val config: ZslRingConfig,
     val cameraId: String,
     private val lensId: String?,
+    private val physicalId: String?,
     private val zoomRatio: Float,
     private val rotationDegrees: Int
 ) {
-    fun matches(cameraId: String, lensId: String?, zoomRatio: Float): Boolean =
+    fun matches(cameraId: String, lensId: String?, physicalId: String?, zoomRatio: Float): Boolean =
         this.cameraId == cameraId &&
             this.lensId == lensId &&
+            this.physicalId == physicalId &&
             abs(this.zoomRatio - zoomRatio) < 0.01f
 
     companion object {
@@ -95,8 +97,8 @@ class ZslRawRing(
             }
         }
         if (buffer == null || buffer.capacity() < dataLength) {
-            StreamingBufferPool.release(buffer)
-            buffer = StreamingBufferPool.acquire(dataLength)
+            HdrPlusBurst.releaseBuffer(buffer)
+            buffer = HdrPlusBurst.acquireBuffer(dataLength)
         }
         try {
             copyPlane(plane.buffer, rowStride, rowLength, width, height, buffer, dataLength)
@@ -135,7 +137,7 @@ class ZslRawRing(
             return true
         } catch (e: Exception) {
             Log.w(TAG, "Failed to copy ZSL RAW frame", e)
-            StreamingBufferPool.release(buffer)
+            HdrPlusBurst.releaseBuffer(buffer)
             return false
         } finally {
             image.close()
@@ -274,6 +276,6 @@ class ZslRawRing(
     }
 
     private fun releaseFrame(frame: ZslFrame) {
-        StreamingBufferPool.release(frame.buffer)
+        HdrPlusBurst.releaseBuffer(frame.buffer)
     }
 }

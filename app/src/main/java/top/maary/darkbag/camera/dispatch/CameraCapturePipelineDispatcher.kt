@@ -117,6 +117,11 @@ class CameraCapturePipelineDispatcher(
     fun stopProcessingWorker() {
         processingChannelJob?.cancel()
         processingChannelJob = null
+        while (true) {
+            val holder = processingChannel.tryReceive().getOrNull() ?: break
+            HdrPlusBurst.releaseBuffer(holder.data)
+            HdrPlusRequestManager.onTaskFinished()
+        }
     }
 
     fun triggerAutoBurst() {
@@ -146,11 +151,9 @@ class CameraCapturePipelineDispatcher(
 
     /** Enqueues a single RAW frame selected by the ZSL ring. */
     fun enqueueZslSingle(holder: RawImageHolder): Boolean {
-        val app = env.hostContext.applicationContext as? MainApplication ?: return false
-        app.applicationScope.launch {
-            holder.timing?.enqueued = System.currentTimeMillis()
-            processingChannel.send(holder)
-        }
+        val result = processingChannel.trySend(holder)
+        if (!result.isSuccess) return false
+        holder.timing?.enqueued = System.currentTimeMillis()
         return true
     }
 

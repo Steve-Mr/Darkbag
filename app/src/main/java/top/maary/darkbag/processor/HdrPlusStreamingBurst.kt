@@ -3,6 +3,7 @@ package top.maary.darkbag.processor
 import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import top.maary.darkbag.fragments.HdrPlusBurst
 import top.maary.darkbag.models.StandardTimingTracker
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -47,9 +48,12 @@ class HdrPlusStreamingBurst(
         const val STEADY_SCORE_THRESHOLD = 25.0f
     }
 
+    private enum class BufferOwner { STREAMING, HDR_PLUS }
+
     private class QueuedFrame(
         val buffer: ByteBuffer,
         val frame: StreamingBurstFrame,
+        val owner: BufferOwner = BufferOwner.STREAMING,
         var isReleased: Boolean = false
     )
 
@@ -68,7 +72,7 @@ class HdrPlusStreamingBurst(
             if (frameCount <= 1) {
                 for (item in frameChannel) {
                     if (isAborted) {
-                        StreamingBufferPool.release(item.buffer)
+                        releaseQueued(item)
                         continue
                     }
 
@@ -82,7 +86,7 @@ class HdrPlusStreamingBurst(
                         }
                         Log.d(TAG, "Streaming frame 1/$frameCount accumulated (single frame)")
                     } finally {
-                        StreamingBufferPool.release(item.buffer)
+                        releaseQueued(item)
                     }
 
                     if (processedFrames.size == frameCount) {
@@ -94,7 +98,7 @@ class HdrPlusStreamingBurst(
                 val item0 = frameChannel.receiveCatching().getOrNull()
                 if (item0 != null) {
                     if (isAborted) {
-                        StreamingBufferPool.release(item0.buffer)
+                        releaseQueued(item0)
                     } else {
                         val score0 = if (lockFirstFrameAsReference) {
                             // ZSL pre-roll is ordered base-first and captured before the shutter;
@@ -127,13 +131,13 @@ class HdrPlusStreamingBurst(
                                 }
                                 Log.d(TAG, "Streaming frame 1/$frameCount accumulated (Fast Path steady base frame, score=$score0)")
                             } finally {
-                                StreamingBufferPool.release(item0.buffer)
+                                releaseQueued(item0)
                             }
 
                             // Stream subsequent frames normally with zero buffering
                             for (item in frameChannel) {
                                 if (isAborted) {
-                                    StreamingBufferPool.release(item.buffer)
+                                    releaseQueued(item)
                                     continue
                                 }
 
@@ -147,7 +151,7 @@ class HdrPlusStreamingBurst(
                                     }
                                     Log.d(TAG, "Streaming frame ${processedFrames.size}/$frameCount accumulated")
                                 } finally {
-                                    StreamingBufferPool.release(item.buffer)
+                                    releaseQueued(item)
                                 }
 
                                 if (processedFrames.size == frameCount) {
@@ -164,7 +168,7 @@ class HdrPlusStreamingBurst(
                             fun safeRelease(item: QueuedFrame) {
                                 if (!item.isReleased) {
                                     item.isReleased = true
-                                    StreamingBufferPool.release(item.buffer)
+                                    releaseQueued(item)
                                 }
                             }
 
@@ -243,7 +247,7 @@ class HdrPlusStreamingBurst(
                             if (!isAborted && processedFrames.size < frameCount) {
                                 for (item in frameChannel) {
                                     if (isAborted) {
-                                        StreamingBufferPool.release(item.buffer)
+                                        releaseQueued(item)
                                         continue
                                     }
 
@@ -257,7 +261,7 @@ class HdrPlusStreamingBurst(
                                         }
                                         Log.d(TAG, "Streaming frame ${processedFrames.size}/$frameCount accumulated")
                                     } finally {
-                                        StreamingBufferPool.release(item.buffer)
+                                        releaseQueued(item)
                                     }
 
                                     if (processedFrames.size == frameCount) {
@@ -293,8 +297,15 @@ class HdrPlusStreamingBurst(
             // Drain and return any remaining buffers in frameChannel
             while (true) {
                 val item = frameChannel.tryReceive().getOrNull() ?: break
-                StreamingBufferPool.release(item.buffer)
+                releaseQueued(item)
             }
+        }
+    }
+
+    private fun releaseQueued(item: QueuedFrame) {
+        when (item.owner) {
+            BufferOwner.HDR_PLUS -> HdrPlusBurst.releaseBuffer(item.buffer)
+            BufferOwner.STREAMING -> StreamingBufferPool.release(item.buffer)
         }
     }
 
@@ -311,7 +322,7 @@ class HdrPlusStreamingBurst(
             if (isCompleted || isAborted || enqueuedCount >= frameCount) return false
             buffer.position(0)
             buffer.limit(expected)
-            val sendResult = frameChannel.trySend(QueuedFrame(buffer, frame))
+            val sendResult = frameChannel.trySend(QueuedFrame(buffer, frame, BufferOwner.HDR_PLUS))
             if (!sendResult.isSuccess) return false
             enqueuedCount++
             if (enqueuedCount == frameCount) {
@@ -384,7 +395,7 @@ class HdrPlusStreamingBurst(
                 noiseProfileO = noiseProfileO
             )
 
-            val sendResult = frameChannel.trySend(QueuedFrame(cleanBuffer, frame))
+            val sendResult = frameChannel.trySend(QueuedFrame(cleanBuffer, frame, BufferOwner.STREAMING))
             if (!sendResult.isSuccess) {
                 Log.e(TAG, "Failed to enqueue frame to frameChannel (capacity full or closed)")
                 StreamingBufferPool.release(cleanBuffer)
@@ -428,7 +439,7 @@ class HdrPlusStreamingBurst(
             // Drain any pending frames waiting in channel
             while (true) {
                 val item = frameChannel.tryReceive().getOrNull() ?: break
-                StreamingBufferPool.release(item.buffer)
+                releaseQueued(item)
             }
             workerJob.cancel()
 

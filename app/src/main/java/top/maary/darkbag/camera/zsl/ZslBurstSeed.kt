@@ -1,7 +1,7 @@
 package top.maary.darkbag.camera.zsl
 
 import android.hardware.camera2.TotalCaptureResult
-import top.maary.darkbag.processor.StreamingBufferPool
+import top.maary.darkbag.fragments.HdrPlusBurst
 
 /**
  * Pre-roll frames selected at shutter time, base frame first.
@@ -28,7 +28,7 @@ data class ZslBurstSeed(
         synchronized(releasedIndices) {
             for (i in startIndex.coerceAtLeast(0) until frames.size) {
                 if (releasedIndices.add(i)) {
-                    StreamingBufferPool.release(frames[i].buffer)
+                    HdrPlusBurst.releaseBuffer(frames[i].buffer)
                 }
             }
         }

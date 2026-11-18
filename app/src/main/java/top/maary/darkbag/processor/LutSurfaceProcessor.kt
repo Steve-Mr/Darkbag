@@ -272,7 +272,9 @@ class LutSurfaceProcessor {
         // Branch 2: Render to MediaCodec Encoder Surface for Motion Photo (never bake focus peaking lines)
         if (isEncoderActive && encoderEglSurface != EGL14.EGL_NO_SURFACE && encoderWidth > 0 && encoderHeight > 0) {
             EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
-            shaderPipeline.setPreviewGain(1.0f)
+            // Match the viewfinder gain: HDR+ ZSL physically underexposes the sensor, so a
+            // 1.0 encoder gain would record a dark Motion Photo. Focus peaking stays off.
+            shaderPipeline.setPreviewGain(previewGain)
             shaderPipeline.drawFrame(
                 targetWidth = encoderWidth,
                 targetHeight = encoderHeight,

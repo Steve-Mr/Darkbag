@@ -352,7 +352,7 @@ class SettingsBentoDelegate(
 
     private fun zslStatusValue(state: DarkbagPreferences): String {
         if (!state.zslEnabled) return context.getString(R.string.zsl_status_off)
-        if (state.motionPhotoEnabled || state.force60Fps) {
+        if (state.force60Fps) {
             return context.getString(R.string.zsl_status_inactive_mode)
         }
         return when (state.zslRoute) {
