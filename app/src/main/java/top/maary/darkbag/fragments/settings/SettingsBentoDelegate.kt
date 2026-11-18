@@ -287,6 +287,7 @@ class SettingsBentoDelegate(
         binding.switchHdrPlusOis.isChecked = state.hdrPlusOis
         binding.switchUseInternalViewer.isChecked = state.useInternalViewer
         binding.switchForce60fps.isChecked = state.force60Fps
+        binding.switchZsl.isChecked = state.zslEnabled
 
         // Half Frame
         binding.switchHalfFrameMode.isChecked = state.halfFrameMode
@@ -340,6 +341,37 @@ class SettingsBentoDelegate(
 
         // Debug section
         binding.sectionDebug.visibility = if (state.debugEnabled) View.VISIBLE else View.GONE
+        binding.tvZslStatus.text = CameraBentoDeckView.formatProTelemetry(
+            label = context.getString(R.string.zsl_status_label),
+            value = zslStatusValue(state),
+            isTabActive = state.zslEnabled,
+            isValueManual = state.zslEnabled,
+            context = context
+        )
+    }
+
+    private fun zslStatusValue(state: DarkbagPreferences): String {
+        if (!state.zslEnabled) return context.getString(R.string.zsl_status_off)
+        if (state.motionPhotoEnabled || state.force60Fps) {
+            return context.getString(R.string.zsl_status_inactive_mode)
+        }
+        return when (state.zslRoute) {
+            "raw_ring" -> when {
+                state.hdrPlusEnabled && state.zslReason == "hdr_unsupported" ->
+                    context.getString(R.string.zsl_status_inactive_hdr)
+
+                state.hdrPlusEnabled -> context.getString(
+                    R.string.zsl_status_hdr_format,
+                    minOf(state.hdrBurstCount, 5),
+                    state.hdrBurstCount
+                )
+
+                else -> context.getString(R.string.zsl_status_single_format, 3)
+            }
+
+            "reprocess_raw" -> context.getString(R.string.zsl_status_reprocess)
+            else -> context.getString(R.string.zsl_status_unavailable)
+        }
     }
 
     fun updateSaveFormatCardStyling(binding: FragmentSettingsBinding, isJpg: Boolean, isRaw: Boolean) {

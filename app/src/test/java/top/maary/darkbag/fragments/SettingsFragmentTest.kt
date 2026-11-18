@@ -328,6 +328,9 @@ class SettingsFragmentTest {
         // Section 5: Experimental Lab
         org.junit.Assert.assertNotNull(binding.sectionDebug)
         org.junit.Assert.assertNotNull(binding.switchForce60fps)
+        org.junit.Assert.assertNotNull(binding.switchZsl)
+        org.junit.Assert.assertNotNull(binding.cardZslStatus)
+        org.junit.Assert.assertNotNull(binding.tvZslStatus)
         org.junit.Assert.assertNotNull(binding.tvDebugStats)
         org.junit.Assert.assertNotNull(binding.btnCopyDebugLogs)
         org.junit.Assert.assertNotNull(binding.btnClearDebugLogs)

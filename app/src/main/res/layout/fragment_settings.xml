@@ -1649,6 +1649,37 @@
                         app:bentoSwitchBadge="60 FPS"
                         app:bentoSwitchBadgeStyle="secondary" />
 
+                    <!-- Row 1b: Experimental ZSL toggle + two-line route telemetry -->
+                    <top.maary.darkbag.ui.bento.BentoSwitchTile
+                        android:id="@+id/switch_zsl"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginBottom="8dp"
+                        app:bentoSwitchTitle="@string/pref_zsl_enable"
+                        app:bentoSwitchBadge="@string/pref_zsl_badge"
+                        app:bentoSwitchBadgeStyle="secondary" />
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/card_zsl_status"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        app:cardCornerRadius="14dp"
+                        app:cardBackgroundColor="?attr/colorSurface"
+                        app:strokeWidth="0dp">
+
+                        <TextView
+                            android:id="@+id/tv_zsl_status"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingHorizontal="12dp"
+                            android:paddingVertical="8dp"
+                            android:maxLines="2"
+                            android:ellipsize="end"
+                            android:textColor="?attr/colorOnSurface"
+                            tools:text="ZSL ROUTE&#10;HDR+ pre-roll · 5/5" />
+                    </com.google.android.material.card.MaterialCardView>
+
                     <!-- Custom Lens Calibration Bento Button -->
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_open_lens_calibration"

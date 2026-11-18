@@ -25,6 +25,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
+import top.maary.darkbag.camera.zsl.ZslCapabilityDetector
+import top.maary.darkbag.camera.zsl.ZslReason
+import top.maary.darkbag.camera.zsl.ZslRoute
 import top.maary.darkbag.databinding.FragmentSettingsBinding
 import top.maary.darkbag.fragments.settings.SettingsBentoDelegate
 import top.maary.darkbag.fragments.settings.SettingsSheetDispatcher
@@ -52,6 +55,7 @@ class SettingsFragment : Fragment() {
 
     private var isAdvancedExpanded = false
     private var aboutClickCount = 0
+    private var zslToggleGuard = false
 
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -130,6 +134,7 @@ class SettingsFragment : Fragment() {
         setupMenus()
         setupStartupSettings()
         setupCheckboxes()
+        setupZslSettings()
         setupStoragePickers()
         setupCacheManagement()
         setupNavigation()
@@ -444,6 +449,113 @@ class SettingsFragment : Fragment() {
             } else {
                 Toast.makeText(requireContext(), "No logs to copy", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    private fun setupZslSettings() {
+        binding.switchZsl.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering || zslToggleGuard) return@setOnCheckedChangeListener
+            if (!isChecked) {
+                settingsViewModel.updateZslEnabled(false)
+                updateZslStatus()
+                return@setOnCheckedChangeListener
+            }
+            viewLifecycleOwner.lifecycleScope.launch {
+                val report = withContext(Dispatchers.Default) {
+                    ZslCapabilityDetector.inspectDefaultBackCamera(requireContext().applicationContext)
+                }
+                val hdrPlus = settingsViewModel.preferences.value.hdrPlusEnabled
+                when {
+                    report.route == ZslRoute.RAW_RING && hdrPlus && !report.supportsHdrPlusZsl -> {
+                        revertZslToggle()
+                        Toast.makeText(
+                            requireContext(),
+                            R.string.zsl_reason_hdr_unsupported,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+
+                    report.route == ZslRoute.RAW_RING -> {
+                        settingsViewModel.updateZslEnabled(true)
+                        settingsViewModel.updateZslCapability(
+                            report.route.key,
+                            if (report.supportsHdrPlusZsl) report.reason.key else ZslReason.HDR_UNSUPPORTED.key
+                        )
+                        updateZslStatus()
+                    }
+
+                    report.route == ZslRoute.REPROCESS_RAW -> {
+                        revertZslToggle()
+                        Toast.makeText(
+                            requireContext(),
+                            R.string.zsl_toast_reprocess_not_enabled,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+
+                    else -> {
+                        revertZslToggle()
+                        Toast.makeText(
+                            requireContext(),
+                            zslReasonText(report.reason),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }
+        }
+        updateZslStatus()
+    }
+
+    private fun revertZslToggle() {
+        settingsViewModel.updateZslEnabled(false)
+        zslToggleGuard = true
+        binding.switchZsl.isChecked = false
+        zslToggleGuard = false
+        updateZslStatus()
+    }
+
+    private fun zslReasonText(reason: ZslReason): String = when (reason) {
+        ZslReason.NO_RAW -> getString(R.string.zsl_reason_no_raw)
+        ZslReason.RAW_TOO_LARGE -> getString(R.string.zsl_reason_raw_too_large)
+        ZslReason.NO_READ_SENSOR_SETTINGS -> getString(R.string.zsl_reason_no_sensor_settings)
+        ZslReason.LOW_RAM -> getString(R.string.zsl_reason_low_ram)
+        ZslReason.NO_CAMERA -> getString(R.string.zsl_reason_no_camera)
+        ZslReason.UNKNOWN -> getString(R.string.zsl_reason_unknown)
+        else -> getString(R.string.zsl_toast_unavailable)
+    }
+
+    private fun updateZslStatus() {
+        val state = settingsViewModel.preferences.value
+        binding.tvZslStatus.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
+            label = getString(R.string.zsl_status_label),
+            value = zslStatusValue(state),
+            isTabActive = state.zslEnabled,
+            isValueManual = state.zslEnabled,
+            context = requireContext()
+        )
+    }
+
+    private fun zslStatusValue(state: top.maary.darkbag.repository.DarkbagPreferences): String {
+        if (!state.zslEnabled) return getString(R.string.zsl_status_off)
+        if (state.motionPhotoEnabled || state.force60Fps) {
+            return getString(R.string.zsl_status_inactive_mode)
+        }
+        val route = ZslRoute.fromKey(state.zslRoute)
+        return when (route) {
+            ZslRoute.RAW_RING -> {
+                if (state.hdrPlusEnabled && state.zslReason == ZslReason.HDR_UNSUPPORTED.key) {
+                    getString(R.string.zsl_status_inactive_hdr)
+                } else if (state.hdrPlusEnabled) {
+                    val preRoll = minOf(state.hdrBurstCount, 5)
+                    getString(R.string.zsl_status_hdr_format, preRoll, state.hdrBurstCount)
+                } else {
+                    getString(R.string.zsl_status_single_format, 3)
+                }
+            }
+
+            ZslRoute.REPROCESS_RAW -> getString(R.string.zsl_status_reprocess)
+            ZslRoute.NONE -> getString(R.string.zsl_status_unavailable)
         }
     }
 

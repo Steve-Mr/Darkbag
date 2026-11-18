@@ -46,6 +46,9 @@ object PreferenceKeys {
     const val KEY_MIRROR_FRONT_CAMERA = "mirror_front_camera"
     const val KEY_HDR_PLUS_OIS = "hdr_plus_ois_enabled"
     const val KEY_FORCE_60FPS = "force_60fps"
+    const val KEY_ZSL_ENABLED = "zsl_enabled"
+    const val KEY_ZSL_ROUTE = "zsl_route"
+    const val KEY_ZSL_REASON = "zsl_reason"
     const val KEY_DEBUG_ENABLED = "debug_enabled"
     const val KEY_MOTION_PHOTO = "motion_photo_enabled"
     const val KEY_MOTION_PHOTO_AUDIO = "motion_photo_audio_enabled"
@@ -142,6 +145,9 @@ object PreferenceKeys {
     val MIRROR_FRONT_CAMERA = booleanPreferencesKey(KEY_MIRROR_FRONT_CAMERA)
     val HDR_PLUS_OIS = booleanPreferencesKey(KEY_HDR_PLUS_OIS)
     val FORCE_60FPS = booleanPreferencesKey(KEY_FORCE_60FPS)
+    val ZSL_ENABLED = booleanPreferencesKey(KEY_ZSL_ENABLED)
+    val ZSL_ROUTE = stringPreferencesKey(KEY_ZSL_ROUTE)
+    val ZSL_REASON = stringPreferencesKey(KEY_ZSL_REASON)
     val DEBUG_ENABLED = booleanPreferencesKey(KEY_DEBUG_ENABLED)
     val MOTION_PHOTO = booleanPreferencesKey(KEY_MOTION_PHOTO)
     val MOTION_PHOTO_AUDIO = booleanPreferencesKey(KEY_MOTION_PHOTO_AUDIO)

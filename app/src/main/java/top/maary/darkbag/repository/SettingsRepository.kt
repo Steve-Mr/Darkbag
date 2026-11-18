@@ -154,6 +154,9 @@ class SettingsRepository(context: Context) {
             mirrorFrontCamera = bool(PreferenceKeys.KEY_MIRROR_FRONT_CAMERA, true),
             hdrPlusOis = bool(PreferenceKeys.KEY_HDR_PLUS_OIS, true),
             force60Fps = bool(PreferenceKeys.KEY_FORCE_60FPS, false),
+            zslEnabled = bool(PreferenceKeys.KEY_ZSL_ENABLED, false),
+            zslRoute = str(PreferenceKeys.KEY_ZSL_ROUTE, "none") ?: "none",
+            zslReason = str(PreferenceKeys.KEY_ZSL_REASON, "none") ?: "none",
             debugEnabled = bool(PreferenceKeys.KEY_DEBUG_ENABLED, false),
             motionPhotoEnabled = bool(PreferenceKeys.KEY_MOTION_PHOTO, false),
             motionPhotoAudioEnabled = bool(PreferenceKeys.KEY_MOTION_PHOTO_AUDIO, true),
@@ -414,6 +417,17 @@ class SettingsRepository(context: Context) {
 
     fun setForce60Fps(enabled: Boolean) {
         edit { this[PreferenceKeys.FORCE_60FPS] = enabled }
+    }
+
+    fun setZslEnabled(enabled: Boolean) {
+        edit { this[PreferenceKeys.ZSL_ENABLED] = enabled }
+    }
+
+    fun setZslCapability(route: String, reason: String) {
+        edit {
+            this[PreferenceKeys.ZSL_ROUTE] = route
+            this[PreferenceKeys.ZSL_REASON] = reason
+        }
     }
 
     fun setDebugEnabled(enabled: Boolean) {
