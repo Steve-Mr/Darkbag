@@ -423,6 +423,23 @@ class ZslCaptureController(
             timing.zslFallbackReason = "no_stable_run"
             return null
         }
+        val targetFrames = if (adaptive) selected.size else burst
+        if (!adaptive && selected.size < targetFrames) {
+            timing.zslFallbackReason = "pre_roll_short"
+            return null
+        }
+        val preBase = selected.first()
+        val preResult = preBase.result
+        val preIso = preBase.iso
+        val preExposure = preBase.exposureTimeNs
+        if (preResult == null || preIso == null || preExposure == null || preExposure <= 0) {
+            timing.zslFallbackReason = "missing_metadata"
+            return null
+        }
+        if (ZslAdaptivePolicy.isLowLight(preIso, preExposure, isoUpper, exposureUpper)) {
+            timing.zslFallbackReason = "low_light"
+            return null
+        }
         val taken = ring.take(selected)
         if (taken.size < 3) {
             timing.zslFallbackReason = "frame_race"
@@ -431,14 +448,8 @@ class ZslCaptureController(
         }
         val byTimestamp = taken.associateBy { it.timestamp }
         val ordered = selected.mapNotNull { byTimestamp[it.timestamp] }
-        if (ordered.size < 3) {
+        if (ordered.size < 3 || (!adaptive && ordered.size < targetFrames)) {
             timing.zslFallbackReason = "frame_race"
-            ring.releaseFrames(taken)
-            return null
-        }
-        val targetFrames = if (adaptive) ordered.size else burst
-        if (!adaptive && ordered.size < targetFrames) {
-            timing.zslFallbackReason = "pre_roll_short"
             ring.releaseFrames(taken)
             return null
         }

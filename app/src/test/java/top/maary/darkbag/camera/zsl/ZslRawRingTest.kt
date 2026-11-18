@@ -68,4 +68,16 @@ class ZslRawRingTest {
         assertFalse(isAfStateFocused(CaptureResult.CONTROL_AF_MODE_CONTINUOUS_PICTURE, CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN, CaptureResult.LENS_STATE_STATIONARY))
         assertFalse(isAfStateFocused(CaptureResult.CONTROL_AF_MODE_CONTINUOUS_PICTURE, CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED, CaptureResult.LENS_STATE_STATIONARY))
     }
+
+    @Test
+    fun clearAdvancesEpochAndInvalidatesInFlightLazyTake() {
+        val ring = ring()
+        val before = ring.currentClearEpoch()
+        assertTrue(ring.isEpochCurrent(before))
+        ring.clear()
+        val after = ring.currentClearEpoch()
+        assertTrue(after > before)
+        assertFalse(ring.isEpochCurrent(before))
+        assertTrue(ring.isEpochCurrent(after))
+    }
 }

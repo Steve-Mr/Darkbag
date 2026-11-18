@@ -9,6 +9,7 @@ import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.fragments.HdrPlusBurst
 import java.nio.ByteBuffer
 import java.util.ArrayDeque
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * One RAW frame plus the exact CaptureResult it belongs to.
@@ -82,7 +83,12 @@ class ZslRawRing(
     }
 
     private val lock = Any()
+    private val copyLock = Any()
+    private val clearEpoch = AtomicLong(0L)
     private val frames = ArrayDeque<ZslFrame>()
+
+    internal fun currentClearEpoch(): Long = clearEpoch.get()
+    internal fun isEpochCurrent(capturedEpoch: Long): Boolean = clearEpoch.get() == capturedEpoch
 
     @Volatile var receivedFrames: Int = 0
         private set
@@ -248,13 +254,20 @@ class ZslRawRing(
     fun take(framesToTake: List<ZslFrame>): List<ZslFrame> {
         if (framesToTake.isEmpty()) return emptyList()
         val wanted = framesToTake.map { it.timestamp }.toHashSet()
-        val taken = synchronized(lock) {
+        val (taken, capturedEpoch) = synchronized(lock) {
             val selected = frames.filter { it.timestamp in wanted }
             frames.removeAll { it.timestamp in wanted }
-            selected
+            selected to clearEpoch.get()
         }
         if (config.mode != ZslRingMode.LAZY_IMAGE) return taken
-        return taken.mapNotNull { frame -> copyRetainedFrame(frame) }
+        return synchronized(copyLock) {
+            if (clearEpoch.get() != capturedEpoch) {
+                taken.forEach { it.image?.close() }
+                emptyList()
+            } else {
+                taken.mapNotNull { frame -> copyRetainedFrame(frame) }
+            }
+        }
     }
 
     private fun copyRetainedFrame(frame: ZslFrame): ZslFrame? {
@@ -324,10 +337,14 @@ class ZslRawRing(
 
     fun clear() {
         val old = synchronized(lock) {
+            clearEpoch.incrementAndGet()
             val copy = frames.toList()
             frames.clear()
             copy
         }
+        // Wait for any in-flight LAZY_IMAGE copy in take() to finish before returning,
+        // so rawImageReader.close() cannot unmap native image buffers mid-copy.
+        synchronized(copyLock) {}
         old.forEach { releaseFrame(it) }
     }
 
