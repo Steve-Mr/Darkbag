@@ -104,13 +104,16 @@ object ZslAdaptivePolicy {
         adaptive && reason in INSTANT_FALLBACK_REASONS
 }
 
+enum class ZslRingMode { EAGER_COPY, LAZY_IMAGE }
+
 /** Ring sizing rules. All time budgets are deliberately simple and measurable. */
 data class ZslRingConfig(
     val depth: Int,
     val targetFps: Int,
     val maxBytes: Long,
     val frameBytes: Long,
-    val maxAgeNs: Long
+    val maxAgeNs: Long,
+    val mode: ZslRingMode = ZslRingMode.EAGER_COPY
 ) {
     val totalBytes: Long get() = depth * frameBytes
 
@@ -126,16 +129,20 @@ data class ZslRingConfig(
             return (MAX_RING_BYTES / frameBytes).toInt().coerceAtLeast(0)
         }
 
-        fun forSingle(frameBytes: Long): ZslRingConfig? {
+        fun forSingle(frameBytes: Long, mode: ZslRingMode = ZslRingMode.EAGER_COPY): ZslRingConfig? {
             val depth = minOf(SINGLE_DEPTH, maxByBudget(frameBytes))
             if (depth <= 0) return null
-            return ZslRingConfig(depth, TARGET_FPS, MAX_RING_BYTES, frameBytes, MAX_AGE_NS)
+            return ZslRingConfig(depth, TARGET_FPS, MAX_RING_BYTES, frameBytes, MAX_AGE_NS, mode)
         }
 
-        fun forHdrPlus(burstCount: Int, frameBytes: Long): ZslRingConfig? {
+        fun forHdrPlus(
+            burstCount: Int,
+            frameBytes: Long,
+            mode: ZslRingMode = ZslRingMode.EAGER_COPY
+        ): ZslRingConfig? {
             val depth = minOf(burstCount.coerceAtLeast(0), 8, maxByBudget(frameBytes))
             if (depth < MIN_HDR_DEPTH) return null
-            return ZslRingConfig(depth, TARGET_FPS, MAX_RING_BYTES, frameBytes, MAX_AGE_NS)
+            return ZslRingConfig(depth, TARGET_FPS, MAX_RING_BYTES, frameBytes, MAX_AGE_NS, mode)
         }
     }
 }

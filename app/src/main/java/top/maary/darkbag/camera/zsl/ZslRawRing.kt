@@ -11,13 +11,13 @@ import java.nio.ByteBuffer
 import java.util.ArrayDeque
 
 /**
- * One copied RAW frame plus the exact CaptureResult it belongs to.
+ * One RAW frame plus the exact CaptureResult it belongs to.
  *
- * The ring never retains [android.media.Image] objects: it copies into a direct buffer and closes
- * the Image immediately. That keeps [android.media.ImageReader] slots available for bursts.
+ * EAGER_COPY closes the Image after copying. LAZY_IMAGE retains it until take(), where selected
+ * frames are copied and closed; evicted frames are closed by the ring.
  */
 data class ZslFrame(
-    val buffer: ByteBuffer,
+    val buffer: ByteBuffer?,
     val width: Int,
     val height: Int,
     val rowStride: Int,
@@ -31,7 +31,8 @@ data class ZslFrame(
     val lensId: String?,
     val zoomRatio: Float,
     val rotationDegrees: Int,
-    val rowLength: Int
+    val rowLength: Int,
+    val image: Image? = null
 )
 
 /**
@@ -95,9 +96,15 @@ class ZslRawRing(
             image.close()
             return false
         }
+        if (config.mode == ZslRingMode.LAZY_IMAGE) {
+            return offerLazy(image, result, resultLookup)
+        }
         var buffer = synchronized(lock) {
             if (frames.size >= config.depth && frames.isNotEmpty()) {
-                frames.removeFirst().buffer
+                val old = frames.removeFirst()
+                val reused = old.buffer
+                old.image?.close()
+                reused
             } else {
                 null
             }
@@ -129,7 +136,8 @@ class ZslRawRing(
                     lensId = lensId,
                     zoomRatio = zoomRatio,
                     rotationDegrees = rotationDegrees,
-                    rowLength = rowLength
+                    rowLength = rowLength,
+                    image = null
                 )
                 while (frames.size >= config.depth) {
                     if (frames.isEmpty()) break
@@ -150,6 +158,60 @@ class ZslRawRing(
         }
     }
 
+    /** Retains the Image without copying; take() copies the selected frames. */
+    private fun offerLazy(
+        image: Image,
+        result: TotalCaptureResult?,
+        resultLookup: ((Long) -> TotalCaptureResult?)?
+    ): Boolean {
+        val width = image.width
+        val height = image.height
+        val plane = image.planes.firstOrNull() ?: run { image.close(); return false }
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        val rowLength = width * pixelStride
+        if (width <= 0 || height <= 0 || rowLength <= 0) {
+            image.close()
+            return false
+        }
+        try {
+            synchronized(lock) {
+                val resolvedResult = resolveLateResult(result, image.timestamp, resultLookup)
+                val frame = ZslFrame(
+                    buffer = null,
+                    width = width,
+                    height = height,
+                    rowStride = rowStride,
+                    timestamp = image.timestamp,
+                    result = resolvedResult,
+                    iso = resolvedResult?.get(CaptureResult.SENSOR_SENSITIVITY),
+                    exposureTimeNs = resolvedResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+                    wb = extractWb(resolvedResult),
+                    cropKey = resolvedResult?.get(CaptureResult.SCALER_CROP_REGION)?.toString(),
+                    afFocused = isAfFocused(resolvedResult),
+                    lensId = lensId,
+                    zoomRatio = zoomRatio,
+                    rotationDegrees = rotationDegrees,
+                    rowLength = rowLength,
+                    image = image
+                )
+                while (frames.size >= config.depth) {
+                    if (frames.isEmpty()) break
+                    releaseFrame(frames.removeFirst())
+                }
+                frames.addLast(frame)
+                receivedFrames++
+                if (firstFrameTimestampNs == 0L) firstFrameTimestampNs = image.timestamp
+                lastFrameTimestampNs = image.timestamp
+            }
+            return true
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to retain lazy ZSL RAW frame", e)
+            image.close()
+            return false
+        }
+    }
+
     fun snapshot(): List<ZslFrame> = synchronized(lock) { frames.toList() }
 
     /** Binds a CaptureResult that arrived after its Image (sync latency > 0). */
@@ -165,14 +227,47 @@ class ZslRawRing(
         }
     }
 
-    /** Removes exactly the supplied frame timestamps and transfers ownership to the caller. */
+    /** Removes selected frames and copies any retained Images before transferring ownership. */
     fun take(framesToTake: List<ZslFrame>): List<ZslFrame> {
         if (framesToTake.isEmpty()) return emptyList()
         val wanted = framesToTake.map { it.timestamp }.toHashSet()
-        synchronized(lock) {
-            val taken = frames.filter { it.timestamp in wanted }
+        val taken = synchronized(lock) {
+            val selected = frames.filter { it.timestamp in wanted }
             frames.removeAll { it.timestamp in wanted }
-            return taken
+            selected
+        }
+        if (config.mode != ZslRingMode.LAZY_IMAGE) return taken
+        return taken.mapNotNull { frame -> copyRetainedFrame(frame) }
+    }
+
+    private fun copyRetainedFrame(frame: ZslFrame): ZslFrame? {
+        val image = frame.image ?: return frame
+        val plane = image.planes.firstOrNull()
+        if (plane == null) {
+            image.close()
+            return null
+        }
+        val dataLength = frame.rowLength * frame.height
+        val buffer = HdrPlusBurst.acquireBuffer(dataLength)
+        return try {
+            copyPlane(
+                plane.buffer,
+                frame.rowStride,
+                frame.rowLength,
+                frame.width,
+                frame.height,
+                buffer,
+                dataLength
+            )
+            buffer.position(0)
+            buffer.limit(dataLength)
+            frame.copy(buffer = buffer, image = null)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to copy selected lazy ZSL frame", e)
+            HdrPlusBurst.releaseBuffer(buffer)
+            null
+        } finally {
+            image.close()
         }
     }
 
@@ -287,6 +382,7 @@ class ZslRawRing(
     }
 
     private fun releaseFrame(frame: ZslFrame) {
-        HdrPlusBurst.releaseBuffer(frame.buffer)
+        frame.image?.close()
+        frame.buffer?.let { HdrPlusBurst.releaseBuffer(it) }
     }
 }

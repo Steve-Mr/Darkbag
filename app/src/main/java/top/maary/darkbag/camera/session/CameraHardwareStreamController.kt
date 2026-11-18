@@ -357,7 +357,9 @@ class CameraHardwareStreamController(
         if (isRawSupportedLocally) {
             val rawSizes = map?.getOutputSizes(ImageFormat.RAW_SENSOR) ?: emptyArray()
             targetCaptureSize = rawSizes.maxByOrNull { it.width * it.height } ?: Size(4000, 3000)
-            env.sessionArbiter.rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, ImageFormat.RAW_SENSOR, 8)
+            // 14 slots cover a 5-frame lazy ZSL ring plus forward captures. The lazy ring is
+            // feature-flagged off by default, so slots are only consumed when it is enabled.
+            env.sessionArbiter.rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, ImageFormat.RAW_SENSOR, 14)
         } else {
             val jpegSizes = map?.getOutputSizes(ImageFormat.JPEG) ?: emptyArray()
             targetCaptureSize = jpegSizes.maxByOrNull { it.width * it.height } ?: Size(4000, 3000)

@@ -34,6 +34,7 @@ data class DarkbagPreferences(
     val force60Fps: Boolean = false,
     val zslEnabled: Boolean = false,
     val zslAdaptive: Boolean = true,
+    val zslLazyRing: Boolean = false,
     val zslRoute: String = "none",
     val zslReason: String = "none",
     val debugEnabled: Boolean = false,

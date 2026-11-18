@@ -316,7 +316,9 @@ internal class HdrPlusBurstCaptureExecutor(
                         noiseProfileS = npS,
                         noiseProfileO = npO
                     )
-                    if (!burstHelper.enqueuePreloadedFrame(frame.buffer, streamingFrame)) {
+                    val frameBuffer = frame.buffer
+                        ?: throw IllegalStateException("HDR+ ZSL ring frame has no buffer")
+                    if (!burstHelper.enqueuePreloadedFrame(frameBuffer, streamingFrame)) {
                         throw IllegalStateException("HDR+ ZSL ring frame was rejected by the burst")
                     }
                     seedEnqueued++

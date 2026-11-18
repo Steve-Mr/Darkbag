@@ -289,6 +289,7 @@ class SettingsBentoDelegate(
         binding.switchForce60fps.isChecked = state.force60Fps
         binding.switchZsl.isChecked = state.zslEnabled
         binding.switchZslAdaptive.isChecked = state.zslAdaptive
+        binding.switchZslLazyRing.isChecked = state.zslLazyRing
 
         // Half Frame
         binding.switchHalfFrameMode.isChecked = state.halfFrameMode

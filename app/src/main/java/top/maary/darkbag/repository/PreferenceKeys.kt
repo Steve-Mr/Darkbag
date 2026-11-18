@@ -48,6 +48,7 @@ object PreferenceKeys {
     const val KEY_FORCE_60FPS = "force_60fps"
     const val KEY_ZSL_ENABLED = "zsl_enabled"
     const val KEY_ZSL_ADAPTIVE = "zsl_adaptive"
+    const val KEY_ZSL_LAZY_RING = "zsl_lazy_ring"
     const val KEY_ZSL_ROUTE = "zsl_route"
     const val KEY_ZSL_REASON = "zsl_reason"
     const val KEY_DEBUG_ENABLED = "debug_enabled"
@@ -148,6 +149,7 @@ object PreferenceKeys {
     val FORCE_60FPS = booleanPreferencesKey(KEY_FORCE_60FPS)
     val ZSL_ENABLED = booleanPreferencesKey(KEY_ZSL_ENABLED)
     val ZSL_ADAPTIVE = booleanPreferencesKey(KEY_ZSL_ADAPTIVE)
+    val ZSL_LAZY_RING = booleanPreferencesKey(KEY_ZSL_LAZY_RING)
     val ZSL_ROUTE = stringPreferencesKey(KEY_ZSL_ROUTE)
     val ZSL_REASON = stringPreferencesKey(KEY_ZSL_REASON)
     val DEBUG_ENABLED = booleanPreferencesKey(KEY_DEBUG_ENABLED)

@@ -1,5 +1,6 @@
 package top.maary.darkbag.camera.zsl
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,6 +14,13 @@ class ZslRawRingTest {
         zoomRatio = 1.0f,
         rotationDegrees = 90
     )
+
+    @Test
+    fun lazyModeIsCarriedByConfig() {
+        val mode = ZslRingMode.LAZY_IMAGE
+        assertEquals(mode, ZslRingConfig.forHdrPlus(5, 24L * 1024L * 1024L, mode)?.mode)
+        assertEquals(mode, ZslRingConfig.forSingle(24L * 1024L * 1024L, mode)?.mode)
+    }
 
     @Test
     fun matchesCameraLensAndZoom() {

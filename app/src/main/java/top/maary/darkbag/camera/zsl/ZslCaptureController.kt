@@ -77,6 +77,7 @@ class ZslCaptureController(
         private set
     private var realtimeTimestamp = true
     private var rearmRetries = 0
+    @Volatile private var lazyRingFailed = false
     private val jobs = mutableListOf<Job>()
     private val rearmRunnable = Runnable { attemptRearm() }
     private val armProbeRunnable = Runnable { runArmProbe() }
@@ -108,6 +109,7 @@ class ZslCaptureController(
                     ZslPreferenceSnapshot(
                         enabled = it.zslEnabled,
                         adaptive = it.zslAdaptive,
+                        lazyRing = it.zslLazyRing,
                         burstCount = it.hdrBurstCount,
                         underexposureMode = it.hdrUnderexposureMode,
                         motionPhoto = it.motionPhotoEnabled,
@@ -266,9 +268,13 @@ class ZslCaptureController(
         digitalGain: Float,
         label: String
     ): Boolean {
+        val frameBuffer = frame.buffer ?: run {
+            timing.zslFallbackReason = "missing_buffer"
+            return false
+        }
         val lens = env.runtimeState.currentLens
         val holder = RawImageHolder(
-            data = frame.buffer,
+            data = frameBuffer,
             width = frame.width,
             height = frame.height,
             timestamp = frame.timestamp,
@@ -293,7 +299,7 @@ class ZslCaptureController(
         HdrPlusRequestManager.onTaskStarted()
         if (!pipeline.enqueueZslSingle(holder)) {
             timing.zslFallbackReason = "enqueue_failed"
-            HdrPlusBurst.releaseBuffer(frame.buffer)
+            HdrPlusBurst.releaseBuffer(frameBuffer)
             HdrPlusRequestManager.onTaskFinished()
             timing.zslRoute = ""
             timing.zslPreRollFrames = 0
@@ -533,10 +539,16 @@ class ZslCaptureController(
             disarm("no_frame_size")
             return
         }
-        val desiredConfig = if (targetProfile == Profile.HDR_PLUS) {
-            ZslRingConfig.forHdrPlus(prefs.hdrBurstCount, frameBytes)
+        val ringMode = if (prefs.zslLazyRing && !lazyRingFailed) {
+            ZslRingMode.LAZY_IMAGE
         } else {
-            ZslRingConfig.forSingle(frameBytes)
+            ZslRingMode.EAGER_COPY
+        }
+        Log.i(TAG, "ZSL ring mode=$ringMode lazyFailed=$lazyRingFailed")
+        val desiredConfig = if (targetProfile == Profile.HDR_PLUS) {
+            ZslRingConfig.forHdrPlus(prefs.hdrBurstCount, frameBytes, ringMode)
+        } else {
+            ZslRingConfig.forSingle(frameBytes, ringMode)
         } ?: run {
             disarm("ring_config")
             return
@@ -620,6 +632,10 @@ class ZslCaptureController(
         val minFrames = if (profile == Profile.HDR_PLUS) ZslRingConfig.MIN_HDR_DEPTH else 1
         if (count < minFrames) {
             Log.w(TAG, "ZSL arm probe failed: only $count RAW frames in ${ARM_PROBE_MS}ms")
+            if (activeConfig?.mode == ZslRingMode.LAZY_IMAGE) {
+                lazyRingFailed = true
+                Log.w(TAG, "Lazy RAW ring failed arm probe; falling back to eager copy")
+            }
             disarm("probe_no_frames")
             return
         }
@@ -628,6 +644,10 @@ class ZslCaptureController(
         val fps = (count - 1) * 1_000_000_000f / spanNs.toFloat()
         if (fps < MIN_PROBE_FPS) {
             Log.w(TAG, "ZSL arm probe failed: ${"%.1f".format(fps)} fps < $MIN_PROBE_FPS")
+            if (activeConfig?.mode == ZslRingMode.LAZY_IMAGE) {
+                lazyRingFailed = true
+                Log.w(TAG, "Lazy RAW ring failed FPS probe; falling back to eager copy")
+            }
             disarm("probe_low_fps")
             return
         }
@@ -764,6 +784,7 @@ class ZslCaptureController(
     private data class ZslPreferenceSnapshot(
         val enabled: Boolean,
         val adaptive: Boolean,
+        val lazyRing: Boolean,
         val burstCount: Int,
         val underexposureMode: String,
         val motionPhoto: Boolean,

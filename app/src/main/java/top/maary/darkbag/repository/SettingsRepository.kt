@@ -156,6 +156,7 @@ class SettingsRepository(context: Context) {
             force60Fps = bool(PreferenceKeys.KEY_FORCE_60FPS, false),
             zslEnabled = bool(PreferenceKeys.KEY_ZSL_ENABLED, false),
             zslAdaptive = bool(PreferenceKeys.KEY_ZSL_ADAPTIVE, true),
+            zslLazyRing = bool(PreferenceKeys.KEY_ZSL_LAZY_RING, false),
             zslRoute = str(PreferenceKeys.KEY_ZSL_ROUTE, "none") ?: "none",
             zslReason = str(PreferenceKeys.KEY_ZSL_REASON, "none") ?: "none",
             debugEnabled = bool(PreferenceKeys.KEY_DEBUG_ENABLED, false),
@@ -422,6 +423,10 @@ class SettingsRepository(context: Context) {
 
     fun setZslAdaptive(enabled: Boolean) {
         edit { this[PreferenceKeys.ZSL_ADAPTIVE] = enabled }
+    }
+
+    fun setZslLazyRing(enabled: Boolean) {
+        edit { this[PreferenceKeys.ZSL_LAZY_RING] = enabled }
     }
 
     fun setZslEnabled(enabled: Boolean) {

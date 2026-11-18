@@ -1681,6 +1681,15 @@
                     </com.google.android.material.card.MaterialCardView>
 
                     <top.maary.darkbag.ui.bento.BentoSwitchTile
+                        android:id="@+id/switch_zsl_lazy_ring"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginBottom="8dp"
+                        app:bentoSwitchTitle="@string/pref_zsl_lazy_ring"
+                        app:bentoSwitchBadge="Z8"
+                        app:bentoSwitchBadgeStyle="secondary" />
+
+                    <top.maary.darkbag.ui.bento.BentoSwitchTile
                         android:id="@+id/switch_zsl_adaptive"
                         android:layout_width="match_parent"
                         android:layout_height="48dp"

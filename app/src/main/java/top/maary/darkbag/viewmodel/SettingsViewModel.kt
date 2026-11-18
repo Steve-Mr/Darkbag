@@ -183,6 +183,10 @@ class SettingsViewModel @JvmOverloads constructor(
         settingsRepository.setZslAdaptive(enabled)
     }
 
+    fun updateZslLazyRing(enabled: Boolean) {
+        settingsRepository.setZslLazyRing(enabled)
+    }
+
     fun updateZslEnabled(enabled: Boolean) {
         settingsRepository.setZslEnabled(enabled)
     }

@@ -28,7 +28,7 @@ data class ZslBurstSeed(
         synchronized(releasedIndices) {
             for (i in startIndex.coerceAtLeast(0) until frames.size) {
                 if (releasedIndices.add(i)) {
-                    HdrPlusBurst.releaseBuffer(frames[i].buffer)
+                    frames[i].buffer?.let { HdrPlusBurst.releaseBuffer(it) }
                 }
             }
         }
