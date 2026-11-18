@@ -11,6 +11,36 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
+
+internal enum class RawRouterMode { IDLE, RING, CAPTURE }
+
+/** Pure routing state; all fields are guarded by RawFrameRouter.lock. */
+internal data class RawRouterState(
+    val mode: RawRouterMode = RawRouterMode.IDLE,
+    val captureStarted: Boolean = false,
+    val captureStartTimestampNs: Long = Long.MIN_VALUE,
+    val activeCaptureGeneration: Long = 0L
+) {
+    fun beginCapture(generation: Long): RawRouterState = RawRouterState(
+        mode = RawRouterMode.CAPTURE,
+        captureStarted = false,
+        captureStartTimestampNs = Long.MIN_VALUE,
+        activeCaptureGeneration = generation
+    )
+
+    fun onCaptureStarted(timestampNs: Long): RawRouterState =
+        if (mode != RawRouterMode.CAPTURE || captureStarted) this
+        else copy(captureStarted = true, captureStartTimestampNs = timestampNs)
+
+    fun canDeliver(imageTimestampNs: Long): Boolean =
+        RawFrameRouter.isFreshCaptureFrame(captureStarted, captureStartTimestampNs, imageTimestampNs)
+
+    fun endCapture(hasRing: Boolean): RawRouterState =
+        RawRouterState(mode = if (hasRing) RawRouterMode.RING else RawRouterMode.IDLE)
+
+    fun idle(): RawRouterState = RawRouterState()
+}
+
 /**
  * Single owner of the RAW ImageReader listener.
  *
@@ -38,22 +68,17 @@ class RawFrameRouter(
         ): Boolean = captureStarted && imageTimestampNs >= captureStartTimestampNs
     }
 
-    private enum class Mode { IDLE, RING, CAPTURE }
-
     private val lock = Any()
-    private var mode = Mode.IDLE
+    private var state = RawRouterState()
     private var ring: ZslRawRing? = null
     private var captureConsumer: ((Image) -> Unit)? = null
     private var closed = false
-    @Volatile private var captureStarted = false
-    @Volatile private var captureStartTimestampNs = Long.MIN_VALUE
     private val captureGeneration = AtomicLong(0)
-    @Volatile private var activeCaptureGeneration = 0L
 
     private val listener = ImageReader.OnImageAvailableListener { r ->
-        val currentMode = synchronized(lock) { mode }
+        val currentMode = synchronized(lock) { state.mode }
         val image = try {
-            if (currentMode == Mode.CAPTURE) r.acquireNextImage() else r.acquireLatestImage()
+            if (currentMode == RawRouterMode.CAPTURE) r.acquireNextImage() else r.acquireLatestImage()
         } catch (e: Exception) {
             Log.w(TAG, "Failed to acquire RAW image", e)
             null
@@ -61,7 +86,7 @@ class RawFrameRouter(
 
         try {
             when (currentMode) {
-                Mode.RING -> {
+                RawRouterMode.RING -> {
                     val activeRing = synchronized(lock) { ring }
                     if (activeRing != null && image.format == ImageFormat.RAW_SENSOR) {
                         activeRing.offer(image, resultLookup(image.timestamp), resultLookup)
@@ -70,11 +95,10 @@ class RawFrameRouter(
                     }
                 }
 
-                Mode.CAPTURE -> {
-                    val started = captureStarted
-                    val startTs = captureStartTimestampNs
+                RawRouterMode.CAPTURE -> {
+                    val snapshot = synchronized(lock) { state }
                     val consumer = synchronized(lock) { captureConsumer }
-                    if (!isFreshCaptureFrame(started, startTs, image.timestamp)) {
+                    if (!snapshot.canDeliver(image.timestamp)) {
                         // A frame exposed before onCaptureStarted belongs to the old repeating
                         // request; feeding it to the still/burst consumer would capture the
                         // wrong moment.
@@ -86,7 +110,7 @@ class RawFrameRouter(
                     }
                 }
 
-                Mode.IDLE -> image.close()
+                RawRouterMode.IDLE -> image.close()
             }
         } catch (e: Exception) {
             Log.w(TAG, "RAW frame dispatch failed", e)
@@ -107,12 +131,12 @@ class RawFrameRouter(
         handler.post {
             synchronized(lock) {
                 if (closed) return@post
-                if (activeCaptureGeneration != 0L) {
+                if (state.activeCaptureGeneration != 0L) {
                     Log.w(TAG, "Ignoring ring install while a capture is active")
                     return@post
                 }
                 captureConsumer = null
-                mode = if (newRing != null) Mode.RING else Mode.IDLE
+                state = state.endCapture(hasRing = newRing != null)
                 ring = newRing
             }
             drainQueued()
@@ -134,10 +158,7 @@ class RawFrameRouter(
                 detachedRing = ring
                 ring = null
                 captureConsumer = consumer
-                mode = Mode.CAPTURE
-                captureStarted = false
-                captureStartTimestampNs = Long.MIN_VALUE
-                activeCaptureGeneration = generation
+                state = state.beginCapture(generation)
                 activated.set(true)
             }
             drainQueued()
@@ -154,12 +175,9 @@ class RawFrameRouter(
             captureGeneration.incrementAndGet()
             handler.post {
                 synchronized(lock) {
-                    if (activeCaptureGeneration == generation && mode == Mode.CAPTURE) {
-                        activeCaptureGeneration = 0L
-                        mode = Mode.IDLE
+                    if (state.activeCaptureGeneration == generation && state.mode == RawRouterMode.CAPTURE) {
+                        state = state.idle()
                         captureConsumer = null
-                        captureStarted = false
-                        captureStartTimestampNs = Long.MIN_VALUE
                     }
                 }
                 drainQueued()
@@ -182,10 +200,7 @@ class RawFrameRouter(
                 detached = ring
                 ring = null
                 captureConsumer = null
-                mode = Mode.IDLE
-                captureStarted = false
-                captureStartTimestampNs = Long.MIN_VALUE
-                activeCaptureGeneration = 0L
+                state = state.idle()
             }
             drainQueued()
             latch.countDown()
@@ -199,13 +214,7 @@ class RawFrameRouter(
     }
 
     fun onCaptureStarted(timestampNs: Long) {
-        synchronized(lock) {
-            if (mode != Mode.CAPTURE) return
-            if (!captureStarted) {
-                captureStartTimestampNs = timestampNs
-                captureStarted = true
-            }
-        }
+        synchronized(lock) { state = state.onCaptureStarted(timestampNs) }
     }
 
     fun endCapture(restoreRing: ZslRawRing? = null) {
@@ -215,10 +224,7 @@ class RawFrameRouter(
                 if (closed) return@post
                 captureConsumer = null
                 ring = restoreRing
-                mode = if (restoreRing != null) Mode.RING else Mode.IDLE
-                captureStarted = false
-                captureStartTimestampNs = Long.MIN_VALUE
-                activeCaptureGeneration = 0L
+                state = state.endCapture(hasRing = restoreRing != null)
             }
         }
     }
@@ -230,10 +236,7 @@ class RawFrameRouter(
                 if (closed) return@post
                 ring = null
                 captureConsumer = null
-                mode = Mode.IDLE
-                captureStarted = false
-                captureStartTimestampNs = Long.MIN_VALUE
-                activeCaptureGeneration = 0L
+                state = state.idle()
             }
         }
     }
@@ -245,10 +248,7 @@ class RawFrameRouter(
                 closed = true
                 ring = null
                 captureConsumer = null
-                mode = Mode.IDLE
-                captureStarted = false
-                captureStartTimestampNs = Long.MIN_VALUE
-                activeCaptureGeneration = 0L
+                state = state.idle()
             }
             reader.setOnImageAvailableListener(null, null)
             drainQueued()
