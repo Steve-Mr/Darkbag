@@ -149,11 +149,48 @@ class CameraCapturePipelineDispatcher(
         seed: ZslBurstSeed? = null
     ): Boolean = burstExecutor.triggerHdrPlusBurstCamera2(sink, isFrame1Trigger, hfMetadata, timing, seed)
 
-    /** Enqueues a single RAW frame selected by the ZSL ring. */
-    fun enqueueZslSingle(holder: RawImageHolder): Boolean {
-        val result = processingChannel.trySend(holder)
-        if (!result.isSuccess) return false
-        holder.timing?.enqueued = System.currentTimeMillis()
+    fun dispatchZslSingleFrame(
+        frame: top.maary.darkbag.camera.zsl.ZslFrame,
+        sink: CaptureSink?,
+        isFrame1Trigger: Boolean,
+        hfMetadata: HalfFrameManager.Metadata?,
+        timing: StandardTimingTracker,
+        digitalGain: Float
+    ): Boolean {
+        val buffer = frame.buffer ?: return false
+        val holder = RawImageHolder(
+            data = buffer,
+            width = frame.width,
+            height = frame.height,
+            timestamp = frame.timestamp,
+            rotationDegrees = frame.rotationDegrees,
+            combinedOrientation = coordinator.getCombinedOrientation(),
+            zoomRatio = frame.zoomRatio,
+            physicalId = frame.lensId,
+            timing = timing,
+            halfFrameMetadata = hfMetadata?.copy(digitalGain = digitalGain),
+            digitalGain = digitalGain,
+            sink = sink,
+            capturedLens = env.runtimeState.currentLens,
+            captureResult = frame.result
+        )
+        val sendResult = processingChannel.trySend(holder)
+        if (!sendResult.isSuccess) {
+            Log.w(TAG, "ZSL single frame rejected by processing queue")
+            HdrPlusBurst.releaseBuffer(buffer)
+            return false
+        }
+        HdrPlusRequestManager.onTaskStarted()
+        timing.enqueued = System.currentTimeMillis()
+        timing.recordFrameArrival()
+        timing.recordShutterReady()
+        env.runtimeState.isBurstActive = false
+        env.cameraViewModel.setBurstActive(false)
+        env.lifecycleScope.launch(Dispatchers.Main) {
+            ui.resetBurstUi()
+            if (!isFrame1Trigger) ui.showProcessingAnimation()
+            ui.showZslCaptureFeedback()
+        }
         return true
     }
 

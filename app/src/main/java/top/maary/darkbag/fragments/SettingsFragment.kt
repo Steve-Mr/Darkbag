@@ -470,7 +470,6 @@ class SettingsFragment : Fragment() {
             if (bentoDelegate.isRendering || zslToggleGuard) return@setOnCheckedChangeListener
             if (!isChecked) {
                 settingsViewModel.updateZslEnabled(false)
-                updateZslStatus()
                 return@setOnCheckedChangeListener
             }
             viewLifecycleOwner.lifecycleScope.launch {
@@ -494,7 +493,6 @@ class SettingsFragment : Fragment() {
                             report.route.key,
                             if (report.supportsHdrPlusZsl) report.reason.key else ZslReason.HDR_UNSUPPORTED.key
                         )
-                        updateZslStatus()
                     }
 
                     report.route == ZslRoute.REPROCESS_RAW -> {
@@ -525,7 +523,6 @@ class SettingsFragment : Fragment() {
             if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
             settingsViewModel.updateZslLazyRing(isChecked)
         }
-        updateZslStatus()
     }
 
     private fun revertZslToggle() {
@@ -533,7 +530,6 @@ class SettingsFragment : Fragment() {
         zslToggleGuard = true
         binding.switchZsl.isChecked = false
         zslToggleGuard = false
-        updateZslStatus()
     }
 
     private fun zslReasonText(reason: ZslReason): String = when (reason) {
@@ -544,40 +540,6 @@ class SettingsFragment : Fragment() {
         ZslReason.NO_CAMERA -> getString(R.string.zsl_reason_no_camera)
         ZslReason.UNKNOWN -> getString(R.string.zsl_reason_unknown)
         else -> getString(R.string.zsl_toast_unavailable)
-    }
-
-    private fun updateZslStatus() {
-        val state = settingsViewModel.preferences.value
-        binding.tvZslStatus.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = getString(R.string.zsl_status_label),
-            value = zslStatusValue(state),
-            isTabActive = state.zslEnabled,
-            isValueManual = state.zslEnabled,
-            context = requireContext()
-        )
-    }
-
-    private fun zslStatusValue(state: top.maary.darkbag.repository.DarkbagPreferences): String {
-        if (!state.zslEnabled) return getString(R.string.zsl_status_off)
-        if (state.force60Fps) {
-            return getString(R.string.zsl_status_inactive_mode)
-        }
-        val route = ZslRoute.fromKey(state.zslRoute)
-        return when (route) {
-            ZslRoute.RAW_RING -> {
-                if (state.hdrPlusEnabled && state.zslReason == ZslReason.HDR_UNSUPPORTED.key) {
-                    getString(R.string.zsl_status_inactive_hdr)
-                } else if (state.hdrPlusEnabled) {
-                    val preRoll = minOf(state.hdrBurstCount, 5)
-                    getString(R.string.zsl_status_hdr_format, preRoll, state.hdrBurstCount)
-                } else {
-                    getString(R.string.zsl_status_single_format, 3)
-                }
-            }
-
-            ZslRoute.REPROCESS_RAW -> getString(R.string.zsl_status_reprocess)
-            ZslRoute.NONE -> getString(R.string.zsl_status_unavailable)
-        }
     }
 
     private fun renderZslDebug(state: ZslDebugState) {

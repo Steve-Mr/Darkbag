@@ -365,11 +365,14 @@ class SettingsBentoDelegate(
                 state.hdrPlusEnabled && state.zslReason == "hdr_unsupported" ->
                     context.getString(R.string.zsl_status_inactive_hdr)
 
-                state.hdrPlusEnabled -> context.getString(
-                    R.string.zsl_status_hdr_format,
-                    minOf(state.hdrBurstCount, 5),
-                    state.hdrBurstCount
-                )
+                state.hdrPlusEnabled -> {
+                    val preRoll = minOf(state.hdrBurstCount, 5)
+                    context.getString(
+                        R.string.zsl_status_hdr_format,
+                        preRoll,
+                        state.hdrBurstCount
+                    )
+                }
 
                 else -> context.getString(R.string.zsl_status_single_format, 3)
             }

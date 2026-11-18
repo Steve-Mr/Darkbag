@@ -1,14 +1,16 @@
 package top.maary.darkbag.camera.zsl
 
 import android.app.ActivityManager
+import android.content.Context
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.os.Build
 import android.os.Handler
 import android.os.PowerManager
 import android.os.SystemClock
-import android.util.Range
 import android.util.Log
+import android.util.Range
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -17,28 +19,20 @@ import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
 import top.maary.darkbag.camera.delegate.CameraUiHost
 import top.maary.darkbag.camera.dispatch.CameraCapturePipelineDispatcher
-import top.maary.darkbag.camera.dispatch.RawImageHolder
 import top.maary.darkbag.camera.session.CameraHardwareStreamController
 import top.maary.darkbag.models.CaptureTimingMode
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.pipeline.sink.CaptureSink
-import top.maary.darkbag.processor.HdrPlusRequestManager
-import top.maary.darkbag.processor.StreamingBufferPool
-import top.maary.darkbag.fragments.HdrPlusBurst
-import top.maary.darkbag.repository.DarkbagPreferences
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.HalfFrameManager
 import kotlin.math.abs
-import kotlin.math.pow
-import kotlin.math.roundToInt
 
 /**
- * Owns experimental ZSL arming, frame selection, and handoff.
- *
- * Runs on the camera2 handler. The UI thread only samples the shutter timestamp and asks this
- * controller whether the capture was consumed.
+ * Lean facade owning experimental ZSL capture dispatch, frame selection, and hardware handoff.
+ * Delegates lifecycle, probes, and ring attachment to [ZslRingSupervisor], and admission/EV rules
+ * to [ZslArmingPolicy].
  */
 class ZslCaptureController(
     private val env: CameraEnvironmentHost,
@@ -49,49 +43,23 @@ class ZslCaptureController(
 ) {
     companion object {
         private const val TAG = "ZslCaptureController"
-        private const val MEMORY_HEADROOM_BYTES = 600L * 1024L * 1024L
-        private const val REARM_RETRY_MS = 1500L
-        private const val MAX_REARM_RETRIES = 8
-        private const val ARM_PROBE_MS = 2000L
-        private const val MIN_PROBE_FPS = 15f
     }
 
-    private enum class Profile { OFF, SINGLE_RAW, HDR_PLUS }
-
-    private val settings: SettingsRepository
-        get() = SettingsRepository.getInstance(env.hostContext)
-
-    private val cameraHandler: Handler?
-        get() = env.sessionArbiter.camera2Handler
+    private val settings: SettingsRepository get() = SettingsRepository.getInstance(env.hostContext)
+    private val cameraHandler: Handler? get() = env.sessionArbiter.camera2Handler
 
     @Volatile private var sessionActive = false
     @Volatile private var started = false
-    private var profile = Profile.OFF
-    private var ring: ZslRawRing? = null
-    private var activeConfig: ZslRingConfig? = null
-    private var hdrEvSteps = 0
-    private var hdrDigitalGain = 1.0f
-    @Volatile var lastSelectedSensorTimestampNs: Long = 0L
-        private set
-    @Volatile var lastTimestampRealtime: Boolean = true
-        private set
+    private var profile = ZslProfile.OFF
     private var realtimeTimestamp = true
-    private var rearmRetries = 0
-    @Volatile private var lazyRingFailed = false
     private val jobs = mutableListOf<Job>()
-    private val rearmRunnable = Runnable { attemptRearm() }
-    private val armProbeRunnable = Runnable { runArmProbe() }
-    private var probePassed = false
-    private var probeDroppedBaseline = 0L
+
+    private val supervisor = ZslRingSupervisor(env, stream) { evaluate() }
+
+    val ring: ZslRawRing? get() = supervisor.ring
 
     private val trimListener: () -> Unit = {
-        cameraHandler?.post {
-            disarm("memory_trim")
-            if (!env.runtimeState.isBurstActive) {
-                StreamingBufferPool.clear()
-                HdrPlusBurst.clearPool()
-            }
-        }
+        cameraHandler?.post { supervisor.disarm("memory_trim", profile); profile = ZslProfile.OFF; supervisor.clearBufferPools() }
     }
 
     fun start() {
@@ -99,763 +67,206 @@ class ZslCaptureController(
         started = true
         ZslRuntimeHooks.registerTrimListener(trimListener)
         jobs += env.lifecycleScope.launch {
-            env.cameraViewModel.uiState
-                .map { it.isHdrPlusEnabled }
-                .distinctUntilChanged()
-                .collect { scheduleEvaluate() }
+            settings.preferences.map { PrefSnapshot(it.zslEnabled, it.zslLazyRing, it.hdrBurstCount, it.hdrUnderexposureMode, it.force60Fps) }
+                .distinctUntilChanged().collect { scheduleEvaluate() }
         }
         jobs += env.lifecycleScope.launch {
-            settings.preferences
-                .map {
-                    ZslPreferenceSnapshot(
-                        enabled = it.zslEnabled,
-                        adaptive = it.zslAdaptive,
-                        lazyRing = it.zslLazyRing,
-                        burstCount = it.hdrBurstCount,
-                        underexposureMode = it.hdrUnderexposureMode,
-                        motionPhoto = it.motionPhotoEnabled,
-                        force60Fps = it.force60Fps
-                    )
-                }
-                .distinctUntilChanged()
-                .collect { scheduleEvaluate() }
+            env.cameraViewModel.uiState.map { it.activeLensId to it.isHdrPlusEnabled }
+                .distinctUntilChanged().collect { scheduleEvaluate() }
         }
     }
 
     fun stop() {
-        ZslRuntimeHooks.unregisterTrimListener(trimListener)
-        jobs.forEach { it.cancel() }
-        jobs.clear()
-        cameraHandler?.removeCallbacks(rearmRunnable)
-        cameraHandler?.removeCallbacks(armProbeRunnable)
-        sessionActive = false
+        if (!started) return
         started = false
-        val handler = cameraHandler
-        if (handler != null) {
-            handler.post {
-                if (profile != Profile.OFF || ring != null) disarm("stopped")
-                restorePoolLimits()
-            }
-        } else {
-            if (profile != Profile.OFF || ring != null) disarm("stopped")
-            restorePoolLimits()
-        }
+        ZslRuntimeHooks.unregisterTrimListener(trimListener)
+        jobs.forEach { it.cancel() }; jobs.clear()
+        sessionActive = false
+        disarmOnCameraThread("stop")
     }
 
     fun onSessionConfigured() {
         sessionActive = true
-        // A lens/rebind creates a new RAW router; never keep the previous ring attached to it.
-        // All profile/ring mutation stays serialized on the camera2 handler.
         cameraHandler?.post {
-            probePassed = false
-            disarm("reconfigured")
+            supervisor.disarm("reconfigured", profile)
+            profile = ZslProfile.OFF
             evaluate()
-        }
+        } ?: scheduleEvaluate()
     }
 
     fun onSessionClosed() {
         sessionActive = false
-        cameraHandler?.removeCallbacks(rearmRunnable)
-        cameraHandler?.removeCallbacks(armProbeRunnable)
-        val handler = cameraHandler
-        if (handler != null) handler.post { disarm("session_closed") } else disarm("session_closed")
+        disarmOnCameraThread("session_closed")
     }
 
-    fun onCaptureStateChanged() {
-        scheduleEvaluate()
+    private fun disarmOnCameraThread(reason: String) {
+        val action = { supervisor.cancelPendingTasks(); supervisor.disarm(reason, profile); profile = ZslProfile.OFF }
+        cameraHandler?.post(action) ?: action()
     }
 
-    /** Called before a normal forward capture so the ring cannot steal that capture's RAW frames. */
+    fun onLensOrZoomChanged() { scheduleEvaluate() }
+    fun onCaptureStateChanged() { scheduleEvaluate() }
+
     fun onForwardCaptureStarting(timing: StandardTimingTracker? = null) {
-        val zslWanted = settings.current().zslEnabled
-        if (timing != null && zslWanted && timing.zslFallbackReason.isBlank()) {
-            timing.zslFallbackReason = "forward"
+        if (timing != null && settings.current().zslEnabled) {
+            if (timing.zslFallbackReason.isBlank()) timing.zslFallbackReason = "forward"
+            supervisor.noteCapture("forward: ${timing.zslFallbackReason}")
         }
-        if (timing != null && zslWanted) {
-            noteCapture("forward: ${timing.zslFallbackReason}")
-        }
-        if (profile != Profile.OFF) {
-            disarm("forward_capture")
-            scheduleRearm()
+        if (profile != ZslProfile.OFF) {
+            supervisor.disarm("forward_capture", profile); profile = ZslProfile.OFF; supervisor.scheduleRearm()
         }
     }
 
-    /**
-     * @return true when the single frame was consumed from the ring; false means the caller
-     * must run the normal forward single capture.
-     */
-    fun tryCaptureSingle(
-        sink: CaptureSink?,
-        isFrame1Trigger: Boolean,
-        hfMetadata: HalfFrameManager.Metadata?,
-        timing: StandardTimingTracker
-    ): Boolean {
-        if (!settings.current().zslEnabled) return false
+    private fun validateCapture(expected: ZslProfile, timing: StandardTimingTracker): String? {
         timing.zslFallbackReason = ""
-        if (env.sessionArbiter.camera2Session == null ||
-            env.sessionArbiter.rawImageReader?.imageFormat != ImageFormat.RAW_SENSOR
-        ) {
-            timing.zslFallbackReason = "no_session"
-            return false
-        }
-        val ring = ring ?: run {
-            timing.zslFallbackReason = "not_armed"
-            return false
-        }
-        if (!ringMatchesCurrentLens()) {
-            timing.zslFallbackReason = "zoom_changed"
-            return false
-        }
-        if (profile != Profile.SINGLE_RAW) {
-            timing.zslFallbackReason = "profile"
-            return false
-        }
-        val t0 = pressTimestampNs(timing)
-        val frame = ring.nearest(t0) ?: run {
-            timing.zslFallbackReason = "no_frame"
-            return false
-        }
-        val taken = ring.take(listOf(frame))
-        if (taken.isEmpty()) {
-            timing.zslFallbackReason = "frame_race"
-            return false
-        }
-
-        return captureFrameFromRing(
-            frame = taken.firstOwnedFrame() ?: taken.first(),
-            sink = sink,
-            hfMetadata = hfMetadata,
-            timing = timing,
-            digitalGain = 1.0f,
-            label = "single"
-        )
+        if (!settings.current().zslEnabled) return "zsl_disabled"
+        if (env.sessionArbiter.camera2Session == null || env.sessionArbiter.rawImageReader?.imageFormat != ImageFormat.RAW_SENSOR) return "no_session"
+        if (profile != expected) return "profile"
+        if (supervisor.ring == null) return "not_armed"
+        if (!ringMatchesCurrentLens()) return "zoom_changed"
+        return null
     }
 
-    /**
-     * Adaptive fallback: newest focused frame with metadata, no multi-frame stability gate. This is
-     * a deliberate quality downgrade to guarantee a sharp, properly-lit frame for fast scenes.
-     */
+    fun tryCaptureSingle(
+        sink: CaptureSink?, isFrame1Trigger: Boolean, hfMetadata: HalfFrameManager.Metadata?, timing: StandardTimingTracker
+    ): ZslDispatchOutcome {
+        val err = validateCapture(ZslProfile.SINGLE_RAW, timing)
+        if (err != null) { timing.zslFallbackReason = err; return ZslDispatchOutcome.Fallback(err) }
+        val t0 = pressTimestampNs(timing)
+        val candidate = supervisor.ring?.nearest(t0) ?: run { timing.zslFallbackReason = "no_frame"; return ZslDispatchOutcome.Fallback("no_frame") }
+        val taken = supervisor.ring?.take(listOf(candidate)).orEmpty()
+        if (taken.isEmpty()) { timing.zslFallbackReason = "frame_race"; return ZslDispatchOutcome.Fallback("frame_race") }
+        return dispatchSingle(taken.firstOwnedFrame() ?: taken.first(), sink, isFrame1Trigger, hfMetadata, timing, 1.0f, "single", t0)
+    }
+
+    fun tryCaptureHdrPlus(
+        sink: CaptureSink?, isFrame1Trigger: Boolean, hfMetadata: HalfFrameManager.Metadata?, timing: StandardTimingTracker
+    ): ZslDispatchOutcome {
+        val err = validateCapture(ZslProfile.HDR_PLUS, timing)
+        if (err != null) { timing.zslFallbackReason = err; return ZslDispatchOutcome.Fallback(err) }
+
+        val seed = prepareHdrPlusSeed(timing)
+        if (seed == null) {
+            if (ZslAdaptivePolicy.shouldUseInstantSingle(settings.current().zslAdaptive, timing.zslFallbackReason)) {
+                val instant = captureInstantSingle(sink, hfMetadata, timing, "instant_single")
+                if (instant is ZslDispatchOutcome.Consumed) return instant
+            }
+            return ZslDispatchOutcome.Fallback(timing.zslFallbackReason.ifBlank { "no_seed" })
+        }
+        timing.captureMode = CaptureTimingMode.HDR_BURST; timing.zslRoute = ZslRoute.RAW_RING.key
+        timing.zslPreRollFrames = seed.preRollCount; timing.zslPostRollFrames = seed.remainingCount
+
+        val isHybrid = seed.remainingCount > 0
+        if (isHybrid) { supervisor.disarm("hybrid_burst", profile, resetPreviewGain = false); profile = ZslProfile.OFF }
+
+        val started = try {
+            pipeline.triggerHdrPlusBurstCamera2(sink, isFrame1Trigger, hfMetadata, timing, seed)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start HDR+ ZSL burst", e); false
+        }
+        if (started) {
+            supervisor.noteCapture("hdr+ · pre ${timing.zslPreRollFrames} · post ${timing.zslPostRollFrames} · offset ${timing.zslFrameOffsetMs}ms")
+            env.lifecycleScope.launch(Dispatchers.Main) { ui.showZslCaptureFeedback() }
+            if (!isHybrid) supervisor.publishDebug(armed = true, reason = "", activeProfile = profile)
+        } else {
+            if (isHybrid) env.sessionArbiter.lutProcessor?.setPreviewGain(1.0f)
+            timing.zslFallbackReason = "burst_start_failed"; timing.zslRoute = ""
+            timing.zslPreRollFrames = 0; timing.zslPostRollFrames = 0
+        }
+        if (!started || isHybrid || profile == ZslProfile.OFF) supervisor.scheduleRearm()
+
+        return if (started) ZslDispatchOutcome.Consumed(seed.frames.firstOrNull()?.timestamp ?: 0L, realtimeTimestamp, seed.preRollCount, seed.remainingCount)
+        else ZslDispatchOutcome.Fallback(timing.zslFallbackReason.ifBlank { "burst_failed" })
+    }
+
     private fun captureInstantSingle(
-        sink: CaptureSink?,
-        hfMetadata: HalfFrameManager.Metadata?,
-        timing: StandardTimingTracker,
-        reason: String
-    ): Boolean {
-        val activeRing = ring ?: return false
-        val frame = activeRing.latestValid() ?: return false
-        val isoUpper = env.runtimeState.isoRange?.upper
-        val exposureUpper = env.runtimeState.exposureTimeRange?.upper
-        if (ZslAdaptivePolicy.isLowLight(frame.iso, frame.exposureTimeNs, isoUpper, exposureUpper)) {
-            timing.zslFallbackReason = "low_light"
-            return false
+        sink: CaptureSink?, hfMetadata: HalfFrameManager.Metadata?, timing: StandardTimingTracker, reason: String
+    ): ZslDispatchOutcome {
+        val activeRing = supervisor.ring ?: return ZslDispatchOutcome.Fallback("not_armed")
+        val frame = activeRing.latestValid() ?: return ZslDispatchOutcome.Fallback("no_valid_frame")
+        if (ZslAdaptivePolicy.isLowLight(frame.iso, frame.exposureTimeNs, env.runtimeState.isoRange?.upper, env.runtimeState.exposureTimeRange?.upper)) {
+            timing.zslFallbackReason = "low_light"; return ZslDispatchOutcome.Fallback("low_light")
         }
         val t0 = pressTimestampNs(timing)
         if (abs(frame.timestamp - t0) > activeRing.config.maxAgeNs) {
-            timing.zslFallbackReason = "instant_too_old"
-            return false
+            timing.zslFallbackReason = "instant_too_old"; return ZslDispatchOutcome.Fallback("instant_too_old")
         }
         val taken = activeRing.take(listOf(frame))
-        if (taken.isEmpty()) return false
+        if (taken.isEmpty()) return ZslDispatchOutcome.Fallback("frame_race")
         timing.zslFallbackReason = reason
-        return captureFrameFromRing(
-            frame = taken.firstOwnedFrame() ?: taken.first(),
-            sink = sink,
-            hfMetadata = hfMetadata,
-            timing = timing,
-            digitalGain = hdrDigitalGain,
-            label = "instant"
-        )
+        return dispatchSingle(taken.firstOwnedFrame() ?: taken.first(), sink, false, hfMetadata, timing, supervisor.hdrDigitalGain, "instant", t0)
     }
 
-    private fun captureFrameFromRing(
-        frame: ZslFrame,
-        sink: CaptureSink?,
-        hfMetadata: HalfFrameManager.Metadata?,
-        timing: StandardTimingTracker,
-        digitalGain: Float,
-        label: String
-    ): Boolean {
-        val frameBuffer = frame.buffer ?: run {
-            timing.zslFallbackReason = "missing_buffer"
-            return false
-        }
-        val lens = env.runtimeState.currentLens
-        val holder = RawImageHolder(
-            data = frameBuffer,
-            width = frame.width,
-            height = frame.height,
-            timestamp = frame.timestamp,
-            rotationDegrees = frame.rotationDegrees,
-            combinedOrientation = coordinator.getCombinedOrientation(),
-            zoomRatio = frame.zoomRatio,
-            physicalId = frame.lensId,
-            timing = timing,
-            halfFrameMetadata = hfMetadata,
-            digitalGain = digitalGain,
-            sink = sink,
-            capturedLens = lens,
-            captureResult = frame.result
-        )
-        lastSelectedSensorTimestampNs = frame.timestamp
-        lastTimestampRealtime = realtimeTimestamp
-        timing.captureMode = CaptureTimingMode.SINGLE_RAW
-        timing.zslRoute = ZslRoute.RAW_RING.key
-        timing.zslPreRollFrames = 1
-        timing.zslPostRollFrames = 0
-        timing.zslFrameOffsetMs = abs(frame.timestamp - pressTimestampNs(timing)) / 1_000_000L
-        HdrPlusRequestManager.onTaskStarted()
-        if (!pipeline.enqueueZslSingle(holder)) {
-            timing.zslFallbackReason = "enqueue_failed"
-            HdrPlusBurst.releaseBuffer(frameBuffer)
-            HdrPlusRequestManager.onTaskFinished()
-            timing.zslRoute = ""
-            timing.zslPreRollFrames = 0
-            timing.zslFrameOffsetMs = 0L
-            return false
-        }
-        timing.recordFrameArrival()
-        timing.recordShutterReady()
-        env.runtimeState.isBurstActive = false
-        env.cameraViewModel.setBurstActive(false)
-        noteCapture("$label · offset ${timing.zslFrameOffsetMs}ms")
-        env.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Main) {
-            ui.resetBurstUi()
-            ui.showProcessingAnimation()
-        }
-        return true
+    private fun dispatchSingle(
+        frame: ZslFrame, sink: CaptureSink?, isFrame1: Boolean,
+        hfMetadata: HalfFrameManager.Metadata?, timing: StandardTimingTracker,
+        gain: Float, tag: String, t0Ns: Long
+    ): ZslDispatchOutcome {
+        if (!pipeline.dispatchZslSingleFrame(frame, sink, isFrame1, hfMetadata, timing, gain)) return ZslDispatchOutcome.Fallback("dispatch_failed")
+        timing.captureMode = CaptureTimingMode.SINGLE_RAW; timing.zslRoute = ZslRoute.RAW_RING.key
+        timing.zslPreRollFrames = 1; timing.zslPostRollFrames = 0
+        timing.zslFrameOffsetMs = abs(frame.timestamp - t0Ns) / 1_000_000L
+        supervisor.noteCapture("$tag · pre 1 · offset ${timing.zslFrameOffsetMs}ms")
+        return ZslDispatchOutcome.Consumed(frame.timestamp, realtimeTimestamp, 1, 0)
     }
 
-    /**
-     * @return true when an HDR+ ZSL burst was started; false means the caller must use the
-     * normal forward HDR+ path.
-     */
-    fun tryCaptureHdrPlus(
-        sink: CaptureSink?,
-        isFrame1Trigger: Boolean,
-        hfMetadata: HalfFrameManager.Metadata?,
-        timing: StandardTimingTracker
-    ): Boolean {
-        if (!settings.current().zslEnabled) return false
-        timing.zslFallbackReason = ""
-        if (env.sessionArbiter.camera2Session == null ||
-            env.sessionArbiter.rawImageReader?.imageFormat != ImageFormat.RAW_SENSOR
-        ) {
-            timing.zslFallbackReason = "no_session"
-            return false
-        }
-        if (profile != Profile.HDR_PLUS) {
-            timing.zslFallbackReason = "profile"
-            return false
-        }
-        if (!ringMatchesCurrentLens()) {
-            timing.zslFallbackReason = "zoom_changed"
-            return false
-        }
-        val seed = prepareHdrPlusSeed(timing)
-        if (seed == null) {
-            if (ZslAdaptivePolicy.shouldUseInstantSingle(
-                    settings.current().zslAdaptive,
-                    timing.zslFallbackReason
-                )
-            ) {
-                if (captureInstantSingle(sink, hfMetadata, timing, "instant_single")) return true
-            }
-            return false
-        }
-        timing.captureMode = CaptureTimingMode.HDR_BURST
-        timing.zslRoute = ZslRoute.RAW_RING.key
-        timing.zslPreRollFrames = seed.preRollCount
-        timing.zslPostRollFrames = seed.remainingCount
-
-        val isHybridBurst = seed.remainingCount > 0
-        if (isHybridBurst) {
-            // A hybrid burst extends the window with a hardware burst, switching RawFrameRouter to CAPTURE.
-            // Disarm ZSL now so repeating request drops -1 EV / raw target, and the ring is reset cleanly.
-            // Keep preview gain active since HdrPlusBurstCaptureExecutor will manage burstGain during capture.
-            disarm(reason = "hybrid_burst", resetPreviewGain = false)
-        }
-
-        val started = try {
-            pipeline.triggerHdrPlusBurstCamera2(
-                sink = sink,
-                isFrame1Trigger = isFrame1Trigger,
-                hfMetadata = hfMetadata,
-                timing = timing,
-                seed = seed
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start HDR+ ZSL burst", e)
-            false
-        }
-        if (started) {
-            noteCapture("hdr+ · pre ${timing.zslPreRollFrames} · post ${timing.zslPostRollFrames} · offset ${timing.zslFrameOffsetMs}ms")
-            env.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Main) {
-                ui.showZslCaptureFeedback()
-            }
-        } else {
-            if (isHybridBurst) {
-                env.sessionArbiter.lutProcessor?.setPreviewGain(1.0f)
-            }
-            timing.zslFallbackReason = "burst_start_failed"
-            timing.zslRoute = ""
-            timing.zslPreRollFrames = 0
-            timing.zslPostRollFrames = 0
-            timing.zslFrameOffsetMs = 0L
-        }
-        if (started && !isHybridBurst) {
-            publishDebug(armed = true, reason = "", fps = ZslDebugRegistry.state.value.fps)
-        }
-        Log.i(TAG, "ZSL HDR+ shot started=$started pre=${seed.preRollCount} post=${seed.remainingCount}")
-        if (!started || isHybridBurst || profile == Profile.OFF) {
-            scheduleRearm()
-        }
-        return started
-    }
-
-    fun prepareHdrPlusSeed(timing: StandardTimingTracker): ZslBurstSeed? {
-        val prefs = settings.current()
-        val adaptive = prefs.zslAdaptive
-        val ring = ring ?: run {
-            timing.zslFallbackReason = "not_armed"
-            return null
-        }
-        val isoUpper = env.runtimeState.isoRange?.upper
-        val exposureUpper = env.runtimeState.exposureTimeRange?.upper
-        val probe = ring.latestWithMetadata()
-        val probeIso = probe?.iso ?: env.runtimeState.liveIso.takeIf { it > 0 }
-        val probeExposure = probe?.exposureTimeNs ?: env.runtimeState.liveExposureTime.takeIf { it > 0L }
-        if (ZslAdaptivePolicy.isLowLight(probeIso, probeExposure, isoUpper, exposureUpper)) {
-            timing.zslFallbackReason = "low_light"
-            return null
-        }
-        val t0 = pressTimestampNs(timing)
-        val requestedBurst = prefs.hdrBurstCount.coerceIn(3, 8)
-        val maxRingBurst = minOf(requestedBurst, ring.config.depth).coerceAtLeast(3)
-        // In strict mode (!adaptive), we allow a stable run down to MIN_HYBRID_PRE_ROLL (2 frames)
-        // to extend the window with post-roll capture rather than completely falling back to forward burst.
-        // In adaptive mode, we require at least MIN_HDR_FRAMES (3 frames) for pure pre-roll contraction.
-        val minRequiredRun = if (adaptive) ZslAdaptivePolicy.MIN_HDR_FRAMES else ZslAdaptivePolicy.MIN_HYBRID_PRE_ROLL
-        val ringSize = ring.size
-        val selected = ring.stableRun(t0, maxRingBurst, minRunCount = minRequiredRun)
-        if (selected.size < minRequiredRun) {
-            timing.zslFallbackReason = if (!adaptive && ringSize < minRequiredRun) "pre_roll_short" else "no_stable_run"
-            return null
-        }
-        val preBase = selected.first()
-        val preResult = preBase.result
-        val preIso = preBase.iso
-        val preExposure = preBase.exposureTimeNs
-        if (preResult == null || preIso == null || preExposure == null || preExposure <= 0) {
-            timing.zslFallbackReason = "missing_metadata"
-            return null
-        }
-        if (ZslAdaptivePolicy.isLowLight(preIso, preExposure, isoUpper, exposureUpper)) {
-            timing.zslFallbackReason = "low_light"
-            return null
-        }
-        val taken = ring.take(selected)
-        if (taken.size < minRequiredRun) {
-            timing.zslFallbackReason = "frame_race"
-            ring.releaseFrames(taken)
-            return null
-        }
-        val byTimestamp = taken.associateBy { it.timestamp }
-        val ordered = selected.mapNotNull { byTimestamp[it.timestamp] }
-        if (ordered.size < minRequiredRun) {
-            timing.zslFallbackReason = "frame_race"
-            ring.releaseFrames(taken)
-            return null
-        }
-        val base = ordered.first()
-        lastSelectedSensorTimestampNs = base.timestamp
-        lastTimestampRealtime = realtimeTimestamp
-        val baseResult = base.result
-        val iso = base.iso
-        val exposure = base.exposureTimeNs
-        if (baseResult == null || iso == null || exposure == null || exposure <= 0) {
-            timing.zslFallbackReason = "missing_metadata"
-            ring.releaseFrames(taken)
-            return null
-        }
-        if (ZslAdaptivePolicy.isLowLight(iso, exposure, isoUpper, exposureUpper)) {
-            timing.zslFallbackReason = "low_light"
-            ring.releaseFrames(taken)
-            return null
-        }
-        timing.zslFrameOffsetMs = abs(base.timestamp - t0) / 1_000_000L
-        val isExtendingWindow = !adaptive && ZslAdaptivePolicy.canExtendWindow(ordered.size, requestedBurst)
-        val targetFrameCount = if (isExtendingWindow) requestedBurst else (if (adaptive) ordered.size else requestedBurst)
-        return ZslBurstSeed(
-            frames = ordered,
-            baseResult = baseResult,
-            iso = iso,
-            exposureTimeNs = exposure,
-            digitalGain = hdrDigitalGain,
-            targetFrameCount = targetFrameCount
-        )
-    }
-
-    private fun currentZoom(): Float =
-        pipeline.specAssembler.resolveEffectiveZoom(env.runtimeState.currentLens, null)
-
-    private fun ringMatchesCurrentLens(): Boolean {
-        val ring = ring ?: return false
-        val cameraId = env.runtimeState.currentLens?.id ?: "0"
-        return ring.matches(
-            cameraId,
-            env.runtimeState.currentLens?.id,
-            env.runtimeState.currentLens?.physicalId,
-            currentZoom()
-        )
-    }
-
-    private fun scheduleEvaluate() {
-        cameraHandler?.post { evaluate() }
-    }
+    fun prepareHdrPlusSeed(timing: StandardTimingTracker): ZslBurstSeed? = supervisor.prepareHdrPlusSeed(
+        timing = timing, adaptive = settings.current().zslAdaptive, requestedBurst = settings.current().hdrBurstCount,
+        isoUpper = env.runtimeState.isoRange?.upper, exposureUpper = env.runtimeState.exposureTimeRange?.upper,
+        hdrDigitalGain = supervisor.hdrDigitalGain, liveIso = env.runtimeState.liveIso, liveExposure = env.runtimeState.liveExposureTime,
+        t0Ns = pressTimestampNs(timing)
+    )
 
     private fun evaluate() {
-        // Never detach the router while an HDR+ burst is in flight.
-        if (env.runtimeState.isBurstActive) return
-        if (!sessionActive) {
-            disarm("session_closed")
-            return
-        }
+        if (env.runtimeState.isBurstActive || !sessionActive) return
         val prefs = settings.current()
-        val mode = coordinator.effectiveCaptureMode
-        val inactiveReason = when {
-            !prefs.zslEnabled -> "zsl_off"
-            mode != CaptureMode.NORMAL -> "mode"
-            env.runtimeState.isManualExposure -> "manual_exposure"
-            env.runtimeState.isFlashEnabled -> "flash"
-            prefs.force60Fps -> "force_60fps"
-            env.sessionArbiter.isMultiCameraMode -> "multi_camera"
-            else -> null
-        }
-        if (inactiveReason != null) {
-            disarm(inactiveReason)
-            return
-        }
-        var thermalStatus = PowerManager.THERMAL_STATUS_NONE
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            thermalStatus = env.hostContext.getSystemService(PowerManager::class.java)
-                ?.currentThermalStatus ?: PowerManager.THERMAL_STATUS_NONE
-            if (thermalStatus >= PowerManager.THERMAL_STATUS_SEVERE) {
-                disarm("thermal_severe")
-                return
-            }
-        }
-
-        val cameraId = env.runtimeState.currentLens?.id ?: "0"
-        val report = ZslCapabilityDetector.inspect(env.hostContext, cameraId)
-        if (report.route != ZslRoute.RAW_RING) {
-            disarm(
-                if (report.route == ZslRoute.REPROCESS_RAW) "reprocess_not_enabled"
-                else report.reason.key
-            )
-            return
-        }
-        // The evaluator trusts RAW output sizes, but the session may still have created a
-        // JPEG fallback reader. Never arm a ring that would store compressed bytes as RAW.
-        if (env.sessionArbiter.rawImageReader?.imageFormat != ImageFormat.RAW_SENSOR) {
-            disarm("reader_not_raw")
-            return
-        }
-
-        val wantHdrPlus = env.isHdrPlusEnabled
-        if (wantHdrPlus && !report.supportsHdrPlusZsl) {
-            disarm("hdr_unsupported")
-            return
-        }
-        val targetProfile = if (wantHdrPlus) Profile.HDR_PLUS else Profile.SINGLE_RAW
-        if (targetProfile == Profile.HDR_PLUS && env.sessionArbiter.lutProcessor == null) {
-            disarm("lut_missing")
-            return
-        }
-        val frameBytes = report.frameBytes
-        if (frameBytes <= 0L) {
-            disarm("no_frame_size")
-            return
-        }
-        val ringMode = if (prefs.zslLazyRing && !lazyRingFailed) {
-            ZslRingMode.LAZY_IMAGE
-        } else {
-            ZslRingMode.EAGER_COPY
-        }
-        Log.i(TAG, "ZSL ring mode=$ringMode lazyFailed=$lazyRingFailed")
-        val desiredConfig = if (targetProfile == Profile.HDR_PLUS) {
-            ZslRingConfig.forHdrPlus(prefs.hdrBurstCount, frameBytes, ringMode)
-        } else {
-            ZslRingConfig.forSingle(frameBytes, ringMode)
-        } ?: run {
-            disarm("ring_config")
-            return
-        }
-        var limitedConfig = limitByMemory(desiredConfig, targetProfile) ?: run {
-            disarm("low_memory")
-            return
-        }
-        if (thermalStatus >= PowerManager.THERMAL_STATUS_MODERATE) {
-            val cap = if (targetProfile == Profile.HDR_PLUS) ZslRingConfig.MIN_HDR_DEPTH else 2
-            val depth = minOf(limitedConfig.depth, cap)
-            if (depth < (if (targetProfile == Profile.HDR_PLUS) ZslRingConfig.MIN_HDR_DEPTH else 1)) {
-                disarm("thermal_depth")
-                return
-            }
-            limitedConfig = limitedConfig.copy(depth = depth)
-        }
-
         val lens = env.runtimeState.currentLens
+        val cameraId = lens?.id ?: "0"
+        val report = ZslCapabilityDetector.inspect(env.hostContext, cameraId)
+        val facts = ZslArmingPolicy.ContextFacts(
+            zslEnabled = prefs.zslEnabled, sessionActive = sessionActive,
+            isNormalCaptureMode = coordinator.effectiveCaptureMode == CaptureMode.NORMAL,
+            force60Fps = prefs.force60Fps, isMultiCamera = env.sessionArbiter.isMultiCameraMode,
+            isManualExposure = env.runtimeState.isManualExposure, isFlashActive = env.runtimeState.isFlashEnabled,
+            isPowerSaveOrThermalSevere = isThermalSevere(), isHdrPlusEnabled = env.isHdrPlusEnabled, capabilityReport = report
+        )
+        val mem = ActivityManager.MemoryInfo().also { (env.hostContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.getMemoryInfo(it) }
+        val plan = ZslArmingPolicy.planArming(
+            facts, env.sessionArbiter.rawImageReader?.imageFormat == ImageFormat.RAW_SENSOR,
+            env.sessionArbiter.lutProcessor != null, prefs.zslLazyRing,
+            supervisor.lazyRingFailed, prefs.hdrBurstCount, prefs.hdrUnderexposureMode, mem.availMem
+        )
+        if (plan.profile == ZslProfile.OFF || plan.ringConfig == null) {
+            supervisor.disarm(plan.disarmReason, profile); profile = ZslProfile.OFF; return
+        }
         val zoom = pipeline.specAssembler.resolveEffectiveZoom(lens, null)
-        if (profile == targetProfile && activeConfig == limitedConfig &&
-            ring?.matches(cameraId, lens?.id, lens?.physicalId, zoom) == true
-        ) {
-            publishDebug(armed = true, reason = "", report = report)
-            return
+        if (profile == plan.profile && supervisor.activeConfig == plan.ringConfig && supervisor.activeEvSteps == (plan.evConfig?.steps ?: 0) && supervisor.hdrDigitalGain == (plan.evConfig?.digitalGain ?: 1.0f) && supervisor.ring?.matches(cameraId, lens?.id, lens?.physicalId, zoom) == true) {
+            supervisor.publishDebug(armed = true, reason = "", activeProfile = profile, report = plan.report); return
         }
-
-        val router = env.sessionArbiter.rawFrameRouter
-        if (router == null) {
-            disarm("no_router")
-            return
-        }
-        if (profile != Profile.OFF) {
-            if (profile == targetProfile) {
-                // Swap only the ring when zoom/depth changes within the same profile so preview gain
-                // and the active repeating request do not flicker through an OFF cycle.
-                detachAndClearRing()
-                ring = null
-            } else {
-                disarm("rearming")
-            }
-        }
-        val rotation = try {
-            CameraRepository.getCharacteristics(env.camera2Manager, cameraId)
-                .get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-        } catch (_: Exception) {
-            0
-        }
-        val aeStepEv = report.aeCompensationStepEv.takeIf { it > 0f } ?: (1f / 3f)
-        hdrEvSteps = if (targetProfile == Profile.HDR_PLUS) {
-            val desiredSteps = (resolveHdrTargetEv(prefs) / aeStepEv).roundToInt()
-            maxOf(desiredSteps, report.minAeCompensationSteps)
-        } else {
-            0
-        }
-        realtimeTimestamp = report.timestampRealtime
-        hdrDigitalGain = 2.0.pow(-(hdrEvSteps * aeStepEv).toDouble()).toFloat()
-        val newRing = ZslRawRing(limitedConfig, cameraId, lens?.id, lens?.physicalId, zoom, rotation)
-        profile = targetProfile
-        activeConfig = limitedConfig
-        ring = newRing
-        StreamingBufferPool.setRetentionLimit(0)
-        HdrPlusBurst.setPoolLimit(0)
-        val hdrRange = report.hdrFpsRange?.let { Range(it.first, it.last) }
-        stream.setZslPreviewProfile(
-            enabled = targetProfile == Profile.HDR_PLUS,
-            aeCompensationSteps = hdrEvSteps,
-            fpsRange = if (targetProfile == Profile.HDR_PLUS) hdrRange else null
-        )
-        stream.setZslRawTargetEnabled(true)
-        env.sessionArbiter.lutProcessor?.setPreviewGain(hdrDigitalGain)
-        router.installRing(newRing)
-        Log.i(
-            TAG,
-            "ZSL armed: ${targetProfile.name} depth=${limitedConfig.depth} mode=${limitedConfig.mode} " +
-                "slots=${env.sessionArbiter.rawImageReader?.maxImages} raw=${report.rawWidth}x${report.rawHeight}"
-        )
-        publishDebug(armed = true, reason = "", report = report)
-        if (!probePassed) {
-            probeDroppedBaseline = env.sessionArbiter.rawFrameRouter?.droppedImages ?: 0L
-            cameraHandler?.removeCallbacks(armProbeRunnable)
-            cameraHandler?.postDelayed(armProbeRunnable, ARM_PROBE_MS)
-        }
-    }
-
-    /**
-     * Minimal arm probe: a ring that receives no usable frames, or fewer than 15 fps of sensor
-     * frames, is not allowed to stay armed. Full preview-drop/copy probes remain device work.
-     */
-    private fun runArmProbe() {
-        if (!sessionActive || profile == Profile.OFF) return
-        val activeRing = ring ?: return
-        val count = activeRing.receivedFrames
-        val dropped = (env.sessionArbiter.rawFrameRouter?.droppedImages ?: 0L) - probeDroppedBaseline
-        val lazyMode = activeConfig?.mode == ZslRingMode.LAZY_IMAGE
-        val minFrames = if (profile == Profile.HDR_PLUS) ZslRingConfig.MIN_HDR_DEPTH else 1
-        if (lazyMode && dropped > 2L) {
-            lazyRingFailed = true
-            Log.w(TAG, "Lazy RAW ring dropped $dropped frames; falling back to eager copy")
-            disarm("lazy_dropped")
-            scheduleRearm()
-            return
-        }
-        if (count < minFrames) {
-            Log.w(TAG, "ZSL arm probe failed: only $count RAW frames in ${ARM_PROBE_MS}ms")
-            if (lazyMode) {
-                lazyRingFailed = true
-                Log.w(TAG, "Lazy RAW ring failed arm probe; falling back to eager copy")
-            }
-            disarm("probe_no_frames")
-            if (lazyMode) scheduleRearm()
-            return
-        }
-        val spanNs = activeRing.lastFrameTimestampNs - activeRing.firstFrameTimestampNs
-        if (spanNs <= 0L) return
-        val fps = (count - 1) * 1_000_000_000f / spanNs.toFloat()
-        if (fps < MIN_PROBE_FPS) {
-            Log.w(TAG, "ZSL arm probe failed: ${"%.1f".format(fps)} fps < $MIN_PROBE_FPS")
-            if (lazyMode) {
-                lazyRingFailed = true
-                Log.w(TAG, "Lazy RAW ring failed FPS probe; falling back to eager copy")
-            }
-            disarm("probe_low_fps")
-            if (lazyMode) scheduleRearm()
-            return
-        }
-        probePassed = true
-        publishDebug(armed = true, reason = "", fps = fps)
-    }
-
-    private fun publishDebug(
-        armed: Boolean,
-        reason: String,
-        report: ZslCapabilityReport? = null,
-        fps: Float? = null,
-        profileOverride: String? = null,
-        depthOverride: Int? = null,
-        framesOverride: Int? = null
-    ) {
-        val prefs = settings.current()
-        ZslDebugRegistry.update { current ->
-            current.copy(
-                enabled = prefs.zslEnabled,
-                armed = armed,
-                profile = profileOverride ?: profile.name.lowercase(),
-                reason = reason,
-                route = report?.route?.key ?: current.route,
-                cameraId = report?.cameraId ?: current.cameraId,
-                rawSize = if (report != null && report.rawWidth > 0) {
-                    "${report.rawWidth}x${report.rawHeight}"
-                } else {
-                    current.rawSize
-                },
-                depth = depthOverride ?: activeConfig?.depth ?: current.depth,
-                frames = framesOverride ?: ring?.size ?: 0,
-                fps = fps ?: current.fps,
-                ringMode = activeConfig?.mode?.name?.lowercase() ?: current.ringMode,
-                slots = env.sessionArbiter.rawImageReader?.maxImages ?: current.slots,
-                droppedImages = env.sessionArbiter.rawFrameRouter?.droppedImages ?: current.droppedImages
-            )
-        }
-    }
-
-    private fun noteCapture(text: String) {
-        ZslDebugRegistry.update { it.copy(lastCapture = text) }
-    }
-
-    private fun disarm(reason: String = "unknown", resetPreviewGain: Boolean = true) {
-        val previous = ZslDebugRegistry.state.value
-        val snapshot = previous.afterDisarm(
-            reason = reason,
-            profile = if (profile != Profile.OFF) profile.name.lowercase() else null,
-            depth = if (ring != null || activeConfig != null) activeConfig?.depth else null,
-            frames = ring?.size
-        )
-        val lastProfile = snapshot.profile
-        val lastDepth = snapshot.depth
-        val lastFrames = snapshot.frames
-        val lastFps = previous.fps
-        cameraHandler?.removeCallbacks(armProbeRunnable)
-        probePassed = false
-        detachAndClearRing()
-        ring = null
-        activeConfig = null
-        if (profile != Profile.OFF) {
-            stream.setZslRawTargetEnabled(false)
-            stream.setZslPreviewProfile(false)
-            if (resetPreviewGain) {
-                env.sessionArbiter.lutProcessor?.setPreviewGain(1.0f)
-            }
-        }
-        profile = Profile.OFF
-        hdrEvSteps = 0
-        hdrDigitalGain = 1.0f
-        restorePoolLimits()
-        Log.i(TAG, "ZSL disarm: $reason")
-        publishDebug(
-            armed = false,
-            reason = reason,
-            fps = lastFps,
-            profileOverride = lastProfile,
-            depthOverride = lastDepth,
-            framesOverride = lastFrames
+        if (env.sessionArbiter.rawFrameRouter == null) { supervisor.disarm("no_router", profile); profile = ZslProfile.OFF; return }
+        val rotation = try { CameraRepository.getCharacteristics(env.camera2Manager, cameraId).get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0 } catch (_: Exception) { 0 }
+        profile = plan.profile
+        realtimeTimestamp = plan.report?.timestampRealtime == true
+        supervisor.arm(
+            plan.ringConfig, plan.profile, cameraId, lens?.id, lens?.physicalId,
+            zoom, rotation, plan.evConfig?.steps ?: 0, plan.evConfig?.digitalGain ?: 1.0f,
+            plan.report?.hdrFpsRange?.let { Range(it.first, it.last) }, plan.report
         )
     }
 
-    private fun detachAndClearRing() {
-        val old = env.sessionArbiter.rawFrameRouter?.detachRing()
-        old?.clear()
-        if (old !== ring) ring?.clear()
+    private fun isThermalSevere(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+        (env.hostContext.getSystemService(PowerManager::class.java)?.currentThermalStatus ?: 0) >= PowerManager.THERMAL_STATUS_SEVERE
+
+    private fun ringMatchesCurrentLens(): Boolean = env.runtimeState.currentLens.let { l ->
+        supervisor.ring?.matches(l?.id ?: "0", l?.id, l?.physicalId, pipeline.specAssembler.resolveEffectiveZoom(l, null)) == true
     }
 
-    private fun restorePoolLimits() {
-        StreamingBufferPool.setRetentionLimit(12)
-        HdrPlusBurst.setPoolLimit(3)
-    }
+    private fun scheduleEvaluate() { cameraHandler?.post { evaluate() } }
 
-    private fun scheduleRearm() {
-        cameraHandler?.removeCallbacks(rearmRunnable)
-        rearmRetries = 0
-        cameraHandler?.postDelayed(rearmRunnable, REARM_RETRY_MS)
-    }
+    private fun pressTimestampNs(timing: StandardTimingTracker): Long =
+        if (!realtimeTimestamp) SystemClock.uptimeMillis() * 1_000_000L
+        else if (timing.shutterPressElapsedNs > 0L) timing.shutterPressElapsedNs
+        else SystemClock.elapsedRealtimeNanos()
 
-    private fun attemptRearm() {
-        if (!sessionActive) return
-        if (HdrPlusRequestManager.pendingTasksCount.value > 0 || env.runtimeState.isBurstActive) {
-            if (rearmRetries++ < MAX_REARM_RETRIES) {
-                cameraHandler?.postDelayed(rearmRunnable, REARM_RETRY_MS)
-            } else if (profile == Profile.OFF) {
-                Log.w(TAG, "ZSL rearm gave up while processing; restoring buffer pools")
-                restorePoolLimits()
-            }
-            return
-        }
-        rearmRetries = 0
-        evaluate()
-    }
-
-    private fun limitByMemory(config: ZslRingConfig, target: Profile): ZslRingConfig? {
-        val memoryInfo = ActivityManager.MemoryInfo().also {
-            (env.hostContext.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? ActivityManager)
-                ?.getMemoryInfo(it)
-        }
-        val usable = memoryInfo.availMem - MEMORY_HEADROOM_BYTES
-        if (usable < config.frameBytes) return null
-        val maxDepth = (usable / config.frameBytes).toInt().coerceAtMost(config.depth)
-        val minDepth = if (target == Profile.HDR_PLUS) ZslRingConfig.MIN_HDR_DEPTH else 1
-        if (maxDepth < minDepth) return null
-        return config.copy(depth = maxDepth)
-    }
-
-    private fun resolveHdrTargetEv(prefs: DarkbagPreferences): Float = when {
-        prefs.hdrUnderexposureMode.startsWith("Off") -> 0f
-        prefs.hdrUnderexposureMode.startsWith("-2") -> -2f
-        else -> -1f // -1 EV and Dynamic; clipping feedback is unreliable on an underexposed preview.
-    }
-
-    private fun pressTimestampNs(timing: StandardTimingTracker): Long {
-        if (!realtimeTimestamp) return SystemClock.uptimeMillis() * 1_000_000L
-        return if (timing.shutterPressElapsedNs > 0L) timing.shutterPressElapsedNs
-        else SystemClock.uptimeMillis() * 1_000_000L
-    }
-
-    private data class ZslPreferenceSnapshot(
-        val enabled: Boolean,
-        val adaptive: Boolean,
-        val lazyRing: Boolean,
-        val burstCount: Int,
-        val underexposureMode: String,
-        val motionPhoto: Boolean,
-        val force60Fps: Boolean
-    )
+    private data class PrefSnapshot(val zsl: Boolean, val lazy: Boolean, val burst: Int, val ev: String, val f60: Boolean)
 }

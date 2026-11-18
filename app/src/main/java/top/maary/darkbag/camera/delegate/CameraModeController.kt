@@ -340,14 +340,13 @@ class CameraModeController(
                 hfMetadata: HalfFrameManager.Metadata?,
                 timing: StandardTimingTracker
             ) = onCameraThread {
-                if (parts.zsl?.tryCaptureHdrPlus(sink, isFrame1, hfMetadata, timing) == true) {
-                    parts.zsl?.let { zsl ->
-                        if (zsl.lastSelectedSensorTimestampNs > 0L) {
-                            parts.motionPhoto.updatePendingStillTimestamp(
-                                zsl.lastSelectedSensorTimestampNs,
-                                zsl.lastTimestampRealtime
-                            )
-                        }
+                val outcome = parts.zsl?.tryCaptureHdrPlus(sink, isFrame1, hfMetadata, timing)
+                if (outcome is top.maary.darkbag.camera.zsl.ZslDispatchOutcome.Consumed) {
+                    if (outcome.sensorTimestampNs > 0L) {
+                        parts.motionPhoto.updatePendingStillTimestamp(
+                            outcome.sensorTimestampNs,
+                            outcome.realtimeTimestamp
+                        )
                     }
                     return@onCameraThread
                 }
@@ -361,14 +360,13 @@ class CameraModeController(
                 hfMetadata: HalfFrameManager.Metadata?,
                 timing: StandardTimingTracker
             ) = onCameraThread {
-                if (parts.zsl?.tryCaptureSingle(sink, isFrame1, hfMetadata, timing) == true) {
-                    parts.zsl?.let { zsl ->
-                        if (zsl.lastSelectedSensorTimestampNs > 0L) {
-                            parts.motionPhoto.updatePendingStillTimestamp(
-                                zsl.lastSelectedSensorTimestampNs,
-                                zsl.lastTimestampRealtime
-                            )
-                        }
+                val outcome = parts.zsl?.tryCaptureSingle(sink, isFrame1, hfMetadata, timing)
+                if (outcome is top.maary.darkbag.camera.zsl.ZslDispatchOutcome.Consumed) {
+                    if (outcome.sensorTimestampNs > 0L) {
+                        parts.motionPhoto.updatePendingStillTimestamp(
+                            outcome.sensorTimestampNs,
+                            outcome.realtimeTimestamp
+                        )
                     }
                     return@onCameraThread
                 }
