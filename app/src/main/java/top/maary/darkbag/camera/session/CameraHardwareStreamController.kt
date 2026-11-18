@@ -202,8 +202,8 @@ class CameraHardwareStreamController(
                 if (zslRawTargetEnabled) {
                     env.sessionArbiter.rawImageReader?.surface?.let { request.addTarget(it) }
                 }
-                val isMainLens = env.runtimeState.currentLens == null || (env.runtimeState.currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
-                if ((env.runtimeState.isManualExposure || env.isHdrPlusEnabled) && isMainLens) {
+                val shouldArmAnalysis = env.runtimeState.isManualExposure || env.isHdrPlusEnabled || env.settings.current().zslEnabled
+                if (shouldArmAnalysis) {
                     env.sessionArbiter.analysisImageReader?.surface?.let { request.addTarget(it) }
                 }
                 applyManualSettingsToRequest(request, isHdrBurst)
@@ -348,6 +348,7 @@ class CameraHardwareStreamController(
         val handler = env.sessionArbiter.sessionController.backgroundHandler ?: return
 
         Log.d(TAG, "Creating Camera2 Capture Session for device: ${device.id}")
+        env.sessionArbiter.sceneMotionMonitor.reset()
 
         val chars = CameraRepository.getCharacteristics(env.camera2Manager, device.id)
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
@@ -400,6 +401,7 @@ class CameraHardwareStreamController(
                     }
                 }
                 env.runtimeState.lastClippingRatio = if (totalSampled > 0) highlightCount.toDouble() / totalSampled else 0.0
+                env.sessionArbiter.sceneMotionMonitor.processAnalysisImage(image)
             } catch (e: Exception) {
                 Log.e(TAG, "Error analyzing image", e)
             } finally {
@@ -441,8 +443,8 @@ class CameraHardwareStreamController(
                                         env.sessionArbiter.rawImageReader?.surface?.let { previewRequest.addTarget(it) }
                                     }
 
-                                    val isMainLens = env.runtimeState.currentLens == null || (env.runtimeState.currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
-                                    if ((env.runtimeState.isManualExposure || env.isHdrPlusEnabled) && isMainLens) {
+                                    val shouldArmAnalysis = env.runtimeState.isManualExposure || env.isHdrPlusEnabled || env.settings.current().zslEnabled
+                                    if (shouldArmAnalysis) {
                                         env.sessionArbiter.analysisImageReader?.surface?.let { previewRequest.addTarget(it) }
                                     }
 

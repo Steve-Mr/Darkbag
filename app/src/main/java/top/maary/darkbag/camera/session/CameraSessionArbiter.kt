@@ -17,6 +17,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.camera.ConcurrentFrontCameraManager
 import top.maary.darkbag.camera.MultiCameraCaptureManager
+import top.maary.darkbag.camera.motion.SceneMotionMonitor
 import top.maary.darkbag.camera.state.CameraRuntimeStateHolder
 import top.maary.darkbag.camera.zsl.RawFrameRouter
 import top.maary.darkbag.processor.LutSurfaceProcessor
@@ -48,6 +49,7 @@ class CameraSessionArbiter(
     var rawImageReader: ImageReader? = null
     var analysisImageReader: ImageReader? = null
     var lutProcessor: LutSurfaceProcessor? = null
+    val sceneMotionMonitor = SceneMotionMonitor()
     @Volatile var rawFrameRouter: RawFrameRouter? = null
     private var zslRawThread: HandlerThread? = null
 
@@ -207,6 +209,7 @@ class CameraSessionArbiter(
             analysisImageReader = null
             camera2PreviewSurface = null
             lutProcessor?.releaseInputSurface()
+            sceneMotionMonitor.reset()
         }
     }
 
