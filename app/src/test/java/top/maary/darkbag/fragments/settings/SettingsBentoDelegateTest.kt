@@ -147,23 +147,28 @@ class SettingsBentoDelegateTest {
     }
 
     @Test
-    fun testZslBentoSubTray_WhenConflict_HalfFrameAndMultiCamera() {
+    fun testZslBentoSubTray_HalfFrameIsCompatibleAndDoesNotConflict() {
         val hfPrefs = DarkbagPreferences(
             debugEnabled = true,
             zslEnabled = true,
             halfFrameMode = true,
+            activeCaptureMode = "half_frame_sbs",
             zslRoute = "raw_ring"
         )
         delegate.renderPreferences(binding, hfPrefs)
-        assertEquals(themedContext.getString(R.string.badge_zsl_conflict), binding.badgeZslStatus.text)
-        assertEquals(BentoContainerRole.SURFACE_CONTAINER_HIGH, binding.cardTrayExpZsl.containerRole)
-        assertTrue(binding.cardTrayExpZsl.strokeWidth > 0)
-        assertTrue(binding.tvZslStatus.text.contains(themedContext.getString(R.string.zsl_status_inactive_half_frame)))
+        assertEquals(themedContext.getString(R.string.badge_zsl_armed), binding.badgeZslStatus.text)
+        assertEquals(BentoContainerRole.TERTIARY_CONTAINER, binding.cardTrayExpZsl.containerRole)
+        assertEquals(0, binding.cardTrayExpZsl.strokeWidth)
+        assertTrue(binding.switchZslAdaptive.isEnabled)
+    }
 
+    @Test
+    fun testZslBentoSubTray_WhenConflict_MultiCameraActive() {
         val mcPrefs = DarkbagPreferences(
             debugEnabled = true,
             zslEnabled = true,
             multiCameraModeEnabled = true,
+            activeCaptureMode = "multi_camera",
             zslRoute = "raw_ring"
         )
         delegate.renderPreferences(binding, mcPrefs)
@@ -171,6 +176,45 @@ class SettingsBentoDelegateTest {
         assertEquals(BentoContainerRole.SURFACE_CONTAINER_HIGH, binding.cardTrayExpZsl.containerRole)
         assertTrue(binding.cardTrayExpZsl.strokeWidth > 0)
         assertTrue(binding.tvZslStatus.text.contains(themedContext.getString(R.string.zsl_status_inactive_multi_camera)))
+    }
+
+    @Test
+    fun testMultiCameraBentoStylingAndOptionsVisibility() {
+        // Multi-Camera enabled
+        val mcEnabledPrefs = DarkbagPreferences(
+            multiCameraModeEnabled = true
+        )
+        delegate.renderPreferences(binding, mcEnabledPrefs)
+        assertEquals(android.view.View.VISIBLE, binding.layoutMultiCameraOptions.visibility)
+        assertEquals(BentoContainerRole.SECONDARY_CONTAINER, binding.cardTrayAdvMulticam.containerRole)
+        // On non-native multi-camera devices/environment, bypass switch stays visible
+        assertEquals(android.view.View.VISIBLE, binding.switchMultiCameraForceEnable.visibility)
+
+        // Multi-Camera disabled
+        val mcDisabledPrefs = DarkbagPreferences(
+            multiCameraModeEnabled = false
+        )
+        delegate.renderPreferences(binding, mcDisabledPrefs)
+        assertEquals(android.view.View.GONE, binding.layoutMultiCameraOptions.visibility)
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER_HIGH, binding.cardTrayAdvMulticam.containerRole)
+        // Force enable switch stays visible even when multiCameraModeEnabled is false, so user can unlock it
+        assertEquals(android.view.View.VISIBLE, binding.switchMultiCameraForceEnable.visibility)
+    }
+
+    @Test
+    fun testZslBentoSubTray_WhenMultiCameraDisabled_DoesNotConflictEvenIfActiveModeIsStale() {
+        val stalePrefs = DarkbagPreferences(
+            debugEnabled = true,
+            zslEnabled = true,
+            multiCameraModeEnabled = false,
+            activeCaptureMode = "multi_camera",
+            zslRoute = "raw_ring"
+        )
+        delegate.renderPreferences(binding, stalePrefs)
+        assertEquals(themedContext.getString(R.string.badge_zsl_armed), binding.badgeZslStatus.text)
+        assertEquals(BentoContainerRole.TERTIARY_CONTAINER, binding.cardTrayExpZsl.containerRole)
+        assertEquals(0, binding.cardTrayExpZsl.strokeWidth)
+        assertTrue(binding.switchZslAdaptive.isEnabled)
     }
 
     @Test

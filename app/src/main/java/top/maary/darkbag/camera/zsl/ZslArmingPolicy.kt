@@ -16,7 +16,7 @@ object ZslArmingPolicy {
     data class ContextFacts(
         val zslEnabled: Boolean,
         val sessionActive: Boolean,
-        val isNormalCaptureMode: Boolean,
+        val isSupportedCaptureMode: Boolean,
         val force60Fps: Boolean,
         val isMultiCamera: Boolean,
         val isManualExposure: Boolean,
@@ -34,7 +34,7 @@ object ZslArmingPolicy {
     fun evaluate(facts: ContextFacts): EvaluationResult {
         if (!facts.zslEnabled) return EvaluationResult(ZslProfile.OFF, "disabled")
         if (!facts.sessionActive) return EvaluationResult(ZslProfile.OFF, "session_closed")
-        if (!facts.isNormalCaptureMode) return EvaluationResult(ZslProfile.OFF, "current_mode")
+        if (!facts.isSupportedCaptureMode) return EvaluationResult(ZslProfile.OFF, "current_mode")
         if (facts.force60Fps) return EvaluationResult(ZslProfile.OFF, "force_60fps")
         if (facts.isMultiCamera) return EvaluationResult(ZslProfile.OFF, "multi_camera")
         if (facts.isManualExposure) return EvaluationResult(ZslProfile.OFF, "manual_exposure")

@@ -9,6 +9,7 @@ import com.google.android.material.color.MaterialColors
 import com.google.android.material.shape.ShapeAppearanceModel
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentSettingsBinding
+import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.repository.DarkbagPreferences
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.ui.CameraBentoDeckView
@@ -17,6 +18,7 @@ import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.DualLensPairPreference
 import top.maary.darkbag.utils.LutManager
 import top.maary.darkbag.utils.MultiCameraCountPreference
+import top.maary.darkbag.utils.MultiCameraHelper
 import top.maary.darkbag.viewmodel.CameraUiTier
 import kotlin.math.roundToInt
 
@@ -309,9 +311,17 @@ class SettingsBentoDelegate(
     private fun renderStylingAndVisibility(binding: FragmentSettingsBinding, state: DarkbagPreferences) {
         // Multi-Camera visibility
         val mcEnabled = state.multiCameraModeEnabled
-        binding.btnMenuMultiCameraCount.visibility = if (mcEnabled) View.VISIBLE else View.GONE
-        binding.btnMenuMultiCameraDualPair.visibility = if (mcEnabled && state.multiCameraCountPref == MultiCameraCountPreference.DUAL.key) View.VISIBLE else View.GONE
-        binding.tileMultiCameraSaveRaw.visibility = if (mcEnabled) View.VISIBLE else View.GONE
+        val nativeSupported = MultiCameraHelper.isMultiCameraSupported(context, forceEnable = false)
+        binding.switchMultiCameraForceEnable.visibility = if (nativeSupported) View.GONE else View.VISIBLE
+        if (mcEnabled) {
+            binding.layoutMultiCameraOptions.visibility = View.VISIBLE
+            binding.btnMenuMultiCameraCount.visibility = View.VISIBLE
+            binding.btnMenuMultiCameraDualPair.visibility = if (state.multiCameraCountPref == MultiCameraCountPreference.DUAL.key) View.VISIBLE else View.GONE
+            binding.tileMultiCameraSaveRaw.visibility = View.VISIBLE
+        } else {
+            binding.layoutMultiCameraOptions.visibility = View.GONE
+        }
+        updateMultiCameraCardStyling(binding, mcEnabled, animated = false)
 
         // Storage visibility & paths
         binding.layoutJpgStorage.visibility = if (state.saveJpg) View.VISIBLE else View.GONE
@@ -382,7 +392,9 @@ class SettingsBentoDelegate(
             return false
         }
 
-        val hasConflict = state.force60Fps || state.halfFrameMode || state.multiCameraModeEnabled
+        val activeMode = CaptureMode.fromKey(state.activeCaptureMode)
+        val isMultiCamConflict = state.multiCameraModeEnabled && (activeMode == CaptureMode.MULTI_CAMERA)
+        val hasConflict = state.force60Fps || isMultiCamConflict
         val isHdrUnsupported = state.hdrPlusEnabled && state.zslReason == "hdr_unsupported"
         val isArmed = !hasConflict && !isHdrUnsupported && state.zslRoute == "raw_ring"
         val isUnavailable = !hasConflict && !isHdrUnsupported && state.zslRoute != "raw_ring"
@@ -442,10 +454,9 @@ class SettingsBentoDelegate(
         if (state.force60Fps) {
             return context.getString(R.string.zsl_status_inactive_60fps)
         }
-        if (state.halfFrameMode) {
-            return context.getString(R.string.zsl_status_inactive_half_frame)
-        }
-        if (state.multiCameraModeEnabled) {
+        val activeMode = CaptureMode.fromKey(state.activeCaptureMode)
+        val isMultiCamConflict = state.multiCameraModeEnabled && (activeMode == CaptureMode.MULTI_CAMERA)
+        if (isMultiCamConflict) {
             return context.getString(R.string.zsl_status_inactive_multi_camera)
         }
         return when (state.zslRoute) {
@@ -524,6 +535,23 @@ class SettingsBentoDelegate(
             binding.txtSubHalfFrame.setTextColor(colorOnSurfaceVariant)
         }
         binding.cardTrayHalfFrame.strokeWidth = 0
+    }
+
+    fun updateMultiCameraCardStyling(binding: FragmentSettingsBinding, enabled: Boolean, animated: Boolean = true) {
+        val colorSecondary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondary, Color.GRAY)
+        val colorOnSecondaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSecondaryContainer, Color.BLACK)
+        val colorOnSurfaceVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY)
+
+        if (enabled) {
+            binding.cardTrayAdvMulticam.setContainerRole(BentoContainerRole.SECONDARY_CONTAINER, animated)
+            binding.txtTitleAdvMulticam.setTextColor(colorOnSecondaryContainer)
+            binding.tvMultiCameraStatus.setTextColor(colorOnSecondaryContainer)
+        } else {
+            binding.cardTrayAdvMulticam.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated)
+            binding.txtTitleAdvMulticam.setTextColor(colorOnSurfaceVariant)
+            binding.tvMultiCameraStatus.setTextColor(colorOnSurfaceVariant)
+        }
+        binding.cardTrayAdvMulticam.strokeWidth = 0
     }
 
     fun updateStartupCards(binding: FragmentSettingsBinding, defaultStartup: String, enableCamera: Boolean, enablePlayground: Boolean) {

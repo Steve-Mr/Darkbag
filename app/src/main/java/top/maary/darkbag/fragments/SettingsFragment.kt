@@ -595,6 +595,8 @@ class SettingsFragment : Fragment() {
         val physLenses = multiCamInfo?.physicalLenses?.joinToString { "${it.name} (${it.type})" } ?: "None"
         binding.tvMultiCameraStatus.text = "$hwDesc\n" + getString(R.string.multi_camera_detected_lenses, physLenses)
         binding.switchMultiCameraMode.isEnabled = true
+        binding.btnMenuMultiCameraCount.isEnabled = true
+        binding.btnMenuMultiCameraDualPair.isEnabled = true
         binding.cbMultiCameraSaveRaw.isEnabled = true
         binding.tileMultiCameraSaveRaw.isEnabled = true
 

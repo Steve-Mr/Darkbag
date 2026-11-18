@@ -158,6 +158,16 @@ class CameraCapturePipelineDispatcher(
         digitalGain: Float
     ): Boolean {
         val buffer = frame.buffer ?: return false
+        val effectiveGain = if (isFrame1Trigger) {
+            if (env.isHdrPlusEnabled || digitalGain != 1.0f) {
+                coordinator.writeScopedHalfFrameStep(
+                    1, timing.shutterClick, digitalGain = digitalGain, flareType = hfMetadata?.flareType ?: -1
+                )
+                digitalGain
+            } else {
+                coordinator.getDigitalGainAndUpdateStep(frame.timestamp, true, timing.shutterClick)
+            }
+        } else digitalGain
         val holder = RawImageHolder(
             data = buffer,
             width = frame.width,
@@ -168,8 +178,8 @@ class CameraCapturePipelineDispatcher(
             zoomRatio = frame.zoomRatio,
             physicalId = frame.lensId,
             timing = timing,
-            halfFrameMetadata = hfMetadata?.copy(digitalGain = digitalGain),
-            digitalGain = digitalGain,
+            halfFrameMetadata = hfMetadata?.copy(digitalGain = effectiveGain),
+            digitalGain = effectiveGain,
             sink = sink,
             capturedLens = env.runtimeState.currentLens,
             captureResult = frame.result
@@ -179,6 +189,9 @@ class CameraCapturePipelineDispatcher(
             Log.w(TAG, "ZSL single frame rejected by processing queue")
             HdrPlusBurst.releaseBuffer(buffer)
             return false
+        }
+        if (isFrame1Trigger) {
+            coordinator.triggerAutoBurst()
         }
         HdrPlusRequestManager.onTaskStarted()
         timing.enqueued = System.currentTimeMillis()

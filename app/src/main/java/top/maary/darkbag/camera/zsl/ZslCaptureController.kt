@@ -148,7 +148,7 @@ class ZslCaptureController(
         val seed = prepareHdrPlusSeed(timing)
         if (seed == null) {
             if (ZslAdaptivePolicy.shouldUseInstantSingle(settings.current().zslAdaptive, timing.zslFallbackReason)) {
-                val instant = captureInstantSingle(sink, hfMetadata, timing, timing.zslFallbackReason)
+                val instant = captureInstantSingle(sink, isFrame1Trigger, hfMetadata, timing, timing.zslFallbackReason)
                 if (instant is ZslDispatchOutcome.Consumed) return instant
             }
             return ZslDispatchOutcome.Fallback(timing.zslFallbackReason.ifBlank { "no_seed" })
@@ -180,7 +180,7 @@ class ZslCaptureController(
     }
 
     private fun captureInstantSingle(
-        sink: CaptureSink?, hfMetadata: HalfFrameManager.Metadata?, timing: StandardTimingTracker, reason: String
+        sink: CaptureSink?, isFrame1Trigger: Boolean, hfMetadata: HalfFrameManager.Metadata?, timing: StandardTimingTracker, reason: String
     ): ZslDispatchOutcome {
         val activeRing = supervisor.ring ?: return ZslDispatchOutcome.Fallback("not_armed")
         val frame = activeRing.latestValid() ?: return ZslDispatchOutcome.Fallback("no_valid_frame")
@@ -194,7 +194,7 @@ class ZslCaptureController(
         val taken = activeRing.take(listOf(frame))
         if (taken.isEmpty()) return ZslDispatchOutcome.Fallback("frame_race")
         timing.zslFallbackReason = reason
-        return dispatchSingle(taken.firstOwnedFrame() ?: taken.first(), sink, false, hfMetadata, timing, supervisor.hdrDigitalGain, reason, t0)
+        return dispatchSingle(taken.firstOwnedFrame() ?: taken.first(), sink, isFrame1Trigger, hfMetadata, timing, supervisor.hdrDigitalGain, reason, t0)
     }
 
     private fun dispatchSingle(
@@ -225,7 +225,7 @@ class ZslCaptureController(
         val report = ZslCapabilityDetector.inspect(env.hostContext, cameraId)
         val facts = ZslArmingPolicy.ContextFacts(
             zslEnabled = prefs.zslEnabled, sessionActive = sessionActive,
-            isNormalCaptureMode = coordinator.effectiveCaptureMode == CaptureMode.NORMAL,
+            isSupportedCaptureMode = coordinator.effectiveCaptureMode == CaptureMode.NORMAL || coordinator.effectiveCaptureMode.isHalfFrame,
             force60Fps = prefs.force60Fps, isMultiCamera = env.sessionArbiter.isMultiCameraMode,
             isManualExposure = env.runtimeState.isManualExposure, isFlashActive = env.runtimeState.isFlashEnabled,
             isPowerSaveOrThermalSevere = isThermalSevere(), isHdrPlusEnabled = env.isHdrPlusEnabled, capabilityReport = report

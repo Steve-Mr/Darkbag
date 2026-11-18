@@ -561,8 +561,7 @@
                                 android:layout_weight="1"
                                 app:cardCornerRadius="14dp"
                                 app:cardBackgroundColor="?attr/colorSurface"
-                                app:strokeWidth="1dp"
-                                app:strokeColor="?attr/colorOutlineVariant">
+                                app:strokeWidth="0dp">
 
                                 <LinearLayout
                                     android:layout_width="match_parent"
@@ -947,12 +946,13 @@
                         </top.maary.darkbag.ui.bento.BentoTrayCard>
 
                         <top.maary.darkbag.ui.bento.BentoTrayCard
+                            android:id="@+id/card_tray_adv_multicam"
                             style="@style/Widget.Darkbag.BentoTray"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             app:cardCornerRadius="18dp"
                             app:strokeWidth="0dp"
-                            app:bentoContainerRole="tertiaryContainer"
+                            app:bentoContainerRole="secondaryContainer"
                             android:layout_marginBottom="10dp">
 
                             <LinearLayout
@@ -971,13 +971,14 @@
                                     android:layout_marginBottom="4dp">
 
                                     <TextView
+                                        android:id="@+id/txt_title_adv_multicam"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
                                         android:text="@string/settings_adv_multicam_title"
                                         android:textSize="10.5sp"
                                         android:textStyle="bold"
                                         android:letterSpacing="0.06"
-                                        android:textColor="?attr/colorTertiary" />
+                                        android:textColor="?attr/colorSecondary" />
                                 </LinearLayout>
 
                                 <!-- Multi-camera status text -->
@@ -989,7 +990,7 @@
                                     android:paddingHorizontal="4dp"
                                     android:fontFamily="monospace"
                                     android:textSize="10sp"
-                                    android:textColor="?attr/colorOnTertiaryContainer" />
+                                    android:textColor="?attr/colorOnSecondaryContainer" />
 
                                 <!-- Row 1: switch_multi_camera_mode -->
                                 <top.maary.darkbag.ui.bento.BentoSwitchTile
@@ -1001,59 +1002,50 @@
                                     app:bentoSwitchBadge="MULTI"
                                     app:bentoSwitchBadgeStyle="secondary" />
 
-                                <!-- Row 2: btn_menu_multi_camera_count + btn_menu_multi_camera_dual_pair -->
-                                <top.maary.darkbag.ui.bento.BentoRowLayout
+                                <LinearLayout
+                                    android:id="@+id/layout_multi_camera_options"
                                     android:layout_width="match_parent"
-                                    android:layout_height="54dp"
-                                    android:layout_marginBottom="8dp">
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical">
 
-                                    <com.google.android.material.button.MaterialButton
-                                        android:id="@+id/btn_menu_multi_camera_count"
-                                        style="@style/Widget.Darkbag.BentoTile.Button"
-                                        android:layout_width="0dp"
-                                        android:layout_height="match_parent"
-                                        android:layout_weight="1.0"
-                                        app:backgroundTint="?attr/colorSurface"
-                                        android:textColor="?attr/colorOnSurface"
-                                        app:strokeWidth="0dp"
-                                        android:text="CAMERA COUNT\nAuto (Max 3)" />
+                                    <!-- Row 2: btn_menu_multi_camera_count + btn_menu_multi_camera_dual_pair -->
+                                    <top.maary.darkbag.ui.bento.BentoRowLayout
+                                        android:layout_width="match_parent"
+                                        android:layout_height="54dp"
+                                        android:layout_marginBottom="8dp">
 
-                                    <com.google.android.material.button.MaterialButton
-                                        android:id="@+id/btn_menu_multi_camera_dual_pair"
-                                        style="@style/Widget.Darkbag.BentoTile.Button"
-                                        android:layout_width="0dp"
-                                        android:layout_height="match_parent"
-                                        android:layout_weight="1.1"
-                                        app:backgroundTint="?attr/colorSurface"
-                                        android:textColor="?attr/colorOnSurface"
-                                        app:strokeWidth="0dp"
-                                        android:text="MULTI-CAMERA\nUW + Wide Dual Pair" />
-                                </top.maary.darkbag.ui.bento.BentoRowLayout>
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btn_menu_multi_camera_count"
+                                            style="@style/Widget.Darkbag.BentoTile.Button"
+                                            android:layout_width="0dp"
+                                            android:layout_height="match_parent"
+                                            android:layout_weight="1.0"
+                                            app:backgroundTint="?attr/colorSurface"
+                                            android:textColor="?attr/colorOnSurface"
+                                            app:strokeWidth="0dp"
+                                            tools:text="CAMERA COUNT\nAuto (Max 3)" />
 
-                                <!-- Row 3: switch_multi_camera_force_enable + cb_multi_camera_save_raw -->
-                                <top.maary.darkbag.ui.bento.BentoRowLayout
-                                    android:layout_width="match_parent"
-                                    android:layout_height="48dp"
-                                    android:layout_marginBottom="4dp">
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btn_menu_multi_camera_dual_pair"
+                                            style="@style/Widget.Darkbag.BentoTile.Button"
+                                            android:layout_width="0dp"
+                                            android:layout_height="match_parent"
+                                            android:layout_weight="1.1"
+                                            app:backgroundTint="?attr/colorSurface"
+                                            android:textColor="?attr/colorOnSurface"
+                                            app:strokeWidth="0dp"
+                                            tools:text="MULTI-CAMERA\nUW + Wide Dual Pair" />
+                                    </top.maary.darkbag.ui.bento.BentoRowLayout>
 
-                                    <top.maary.darkbag.ui.bento.BentoSwitchTile
-                                        android:id="@+id/switch_multi_camera_force_enable"
-                                        android:layout_width="0dp"
-                                        android:layout_height="match_parent"
-                                        android:layout_weight="1.1"
-                                        app:bentoSwitchTitle="@string/pref_multi_camera_force_enable"
-                                        app:bentoSwitchBadge="BYPASS"
-                                        app:bentoSwitchBadgeStyle="primary" />
-
+                                    <!-- Row 3: cb_multi_camera_save_raw -->
                                     <com.google.android.material.card.MaterialCardView
                                         android:id="@+id/tile_multi_camera_save_raw"
-                                        android:layout_width="0dp"
-                                        android:layout_height="match_parent"
-                                        android:layout_weight="1.0"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="48dp"
+                                        android:layout_marginBottom="8dp"
                                         app:cardCornerRadius="14dp"
                                         app:cardBackgroundColor="?attr/colorSurface"
-                                        app:strokeWidth="1dp"
-                                        app:strokeColor="?attr/colorOutlineVariant">
+                                        app:strokeWidth="0dp">
 
                                         <LinearLayout
                                             android:layout_width="match_parent"
@@ -1087,7 +1079,17 @@
                                                 android:textColor="?attr/colorSecondary" />
                                         </LinearLayout>
                                     </com.google.android.material.card.MaterialCardView>
-                                </top.maary.darkbag.ui.bento.BentoRowLayout>
+                                </LinearLayout>
+
+                                <!-- Row 4: switch_multi_camera_force_enable (BYPASS for non-native hardware) -->
+                                <top.maary.darkbag.ui.bento.BentoSwitchTile
+                                    android:id="@+id/switch_multi_camera_force_enable"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="48dp"
+                                    android:layout_marginBottom="4dp"
+                                    app:bentoSwitchTitle="@string/pref_multi_camera_force_enable"
+                                    app:bentoSwitchBadge="BYPASS"
+                                    app:bentoSwitchBadgeStyle="primary" />
                             </LinearLayout>
                         </top.maary.darkbag.ui.bento.BentoTrayCard>
 

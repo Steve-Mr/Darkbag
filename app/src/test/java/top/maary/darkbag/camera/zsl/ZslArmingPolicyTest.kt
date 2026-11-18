@@ -30,7 +30,7 @@ class ZslArmingPolicyTest {
     private fun sampleFacts(
         zslEnabled: Boolean = true,
         sessionActive: Boolean = true,
-        isNormal: Boolean = true,
+        isSupportedMode: Boolean = true,
         force60Fps: Boolean = false,
         isMultiCamera: Boolean = false,
         isManualExposure: Boolean = false,
@@ -41,7 +41,7 @@ class ZslArmingPolicyTest {
     ) = ZslArmingPolicy.ContextFacts(
         zslEnabled = zslEnabled,
         sessionActive = sessionActive,
-        isNormalCaptureMode = isNormal,
+        isSupportedCaptureMode = isSupportedMode,
         force60Fps = force60Fps,
         isMultiCamera = isMultiCamera,
         isManualExposure = isManualExposure,
@@ -59,8 +59,8 @@ class ZslArmingPolicyTest {
         assertEquals(ZslProfile.OFF, ZslArmingPolicy.evaluate(sampleFacts(sessionActive = false)).profile)
         assertEquals("session_closed", ZslArmingPolicy.evaluate(sampleFacts(sessionActive = false)).disarmReason)
 
-        assertEquals(ZslProfile.OFF, ZslArmingPolicy.evaluate(sampleFacts(isNormal = false)).profile)
-        assertEquals("current_mode", ZslArmingPolicy.evaluate(sampleFacts(isNormal = false)).disarmReason)
+        assertEquals(ZslProfile.OFF, ZslArmingPolicy.evaluate(sampleFacts(isSupportedMode = false)).profile)
+        assertEquals("current_mode", ZslArmingPolicy.evaluate(sampleFacts(isSupportedMode = false)).disarmReason)
 
         assertEquals(ZslProfile.OFF, ZslArmingPolicy.evaluate(sampleFacts(force60Fps = true)).profile)
         assertEquals("force_60fps", ZslArmingPolicy.evaluate(sampleFacts(force60Fps = true)).disarmReason)
