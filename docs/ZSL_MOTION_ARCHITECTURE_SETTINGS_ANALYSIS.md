@@ -1,6 +1,6 @@
 # ZSL 运动自适应降帧、架构内聚度审查与设置联动分析报告
 
-> **范围说明**：本报告基于当前工作区代码静态审计编写，**未对任何源代码或布局文件做实现修改**。所有现状描述均对应当前仓库源码及行号；改进方案均为后续实施前的架构设计提案。
+> **范围说明**：本报告基于 Darkbag 当前工作区代码审计与架构设计演进编写，作为 ZSL 机制优化、架构解耦、设置聚合与场景运动监测的**唯一权威基准文档（Single Source of Truth）**。所有改动均须严格对照本报告中的硬性要求进行验收。
 
 ---
 
@@ -9,7 +9,9 @@
 1. [议题一：场景快速变化 / 运动监测与 ZSL HDR+ 自适应降帧及单帧回退可行性](#1-议题一场景快速变化--运动监测与-zsl-hdr-自适应降帧及单帧回退可行性)
 2. [议题二：当前 ZSL 改动的高内聚 / 低耦合与防超级类规范审计](#2-议题二当前-zsl-改动的高内聚--低耦合与防超级类规范审计)
 3. [议题三：Experimental 设置中的 ZSL 聚合与 ZSL ↔ HDR+ 联动矩阵](#3-议题三experimental-设置中的-zsl-聚合与-zsl--hdr-联动矩阵)
-4. [综合演进路线图（建议实施顺序）](#4-综合演进路线图建议实施顺序)
+4. [议题四：组合 D 混合延长窗口（Hybrid ZSL）机制与 HDR+/ZSL/Motion Photo 三位一体时序](#4-议题四组合-d-混合延长窗口hybrid-zsl机制与-hdrzslmotion-photo-三位一体时序)
+5. [架构瘦身与解耦的明确硬性要求（Hard Metrics & Invariants）](#5-架构瘦身与解耦的明确硬性要求hard-metrics--invariants)
+6. [综合演进路线图与阶段实施顺序](#6-综合演进路线图与阶段实施顺序)
 
 ---
 
@@ -197,22 +199,128 @@
 
 ---
 
-## 4. 综合演进路线图（建议实施顺序）
+## 4. 议题四：组合 D 混合延长窗口（Hybrid ZSL）机制与 HDR+/ZSL/Motion Photo 三位一体时序
 
-遵循仓库的阶段原子提交与先重构后扩展原则，建议按以下 4 个小阶段推进实施：
+### 4.1 核心问题：组合 D 为什么需要“延长窗口”而非直接放弃？
 
-1. **阶段 A — 架构瘦身与状态同源（高内聚低耦合前置）**：
-   - 将 `ZslCaptureController`（848 行）拆分为 `ZslArmingPolicy`、`ZslRingSupervisor` 与精简的 `ZslCaptureFacade`；将单帧 `RawImageHolder` 入队与 `HdrPlusRequestManager` 记账归还给 `SingleRawCaptureExecutor`；消除 `lastSelectedSensorTimestampNs` 隐式属性传递与 `PreviewGain` 双头写入。
-   - 消除 `SettingsFragment` 与 `SettingsBentoDelegate` 之间重复的 `zslStatusValue`，并将 `halfFrameMode` / `multiCameraModeEnabled` / 动态 `maxPreRollFrames` 纳入共享的 `ZslActivationPolicy`。
-2. **阶段 B — Experimental ZSL Bento 子托盘聚合与 HDR+ 联动升级**：
-   - 重构 `fragment_settings.xml` 的 `section_debug`：把 `switch_zsl`、`card_zsl_status`、`switch_zsl_adaptive`、`switch_zsl_lazy_ring` 与 `tv_zsl_debug` 聚合成独立的同心嵌套 `BentoTrayCard`，移出打断布局的 `btn_open_lens_calibration`，并清理硬编码字符串。
-   - 补齐 `hdrBurstCount > maxPreRollFrames && !zslAdaptive`、`force60Fps`、`hdrPlusEnabled`、`hdrUnderexposureMode`（EV 透出）及 `halfFrame/multiCam` 的联动表现与约束提示。
-3. **阶段 C — 轻量级场景运动监测器（`SceneMotionMonitor`）**：
-   - 复用并扩展 `analysisImageReader`（4:3 最小 YUV_420_888）的 Y 平面采样，新增低成本 `16×12` 亮度归一化分块残差计算（`globalDelta` + `movingAreaRatio`），输出连续 `MotionLevel`（`STILL` / `MODERATE` / `FAST`）并可选叠加陀螺仪角速度辅助。
-   - 附带纯 JVM 单元测试验证局部手部快速挥动、全局平移、低光噪声防误触及 AE ±5% 波动鲁棒性。
-4. **阶段 D — ZSL HDR+ 与前向 HDR+ 运动自适应降帧集成**：
-   - 在 `ZslAdaptivePolicy` 与 `ZslCaptureController` / `ZslFrameSelector` 中接入 `MotionLevel` 与光照门禁联合决策：`MODERATE` 时收缩至最近 3 帧（~66ms 窗口）；`FAST` 且亮光时回退 `motion_single_fallback`（单帧直出 + Gain 补偿）；中暗光维持 3 帧 + Stage 5 `2×2 quad_gate` 去重影；在 `tv_zsl_debug` 中可观测回退/降帧原因。
+在原设计中，当用户启用 **组合 D（`zslEnabled = true` + `hdrPlusEnabled = true` + `zslAdaptive = false` 严格连拍模式）** 时：
+- 用户明确要求拍摄完整目标帧数（例如 `requestedBurst = 5` 或 `8` 帧）。
+- 若按快门瞬间由于对焦切换、小幅 AE 微调或刚开机，环中稳定预卷帧不足（例如仅有 2~3 帧有效稳定帧，未达到 5 帧），原控制器直接标记 `timing.zslFallbackReason = "pre_roll_short"`，并**彻底放弃本次 ZSL 机会**，全量回退至前向连拍（Forward Burst）。
+- **痛点分析**：
+  1. 前向连拍需要耗费 100~300ms 重新协商 Camera2 IPC 并重新经历发拍排队，错过了快门按下瞬间最佳的决定性瞬间（Decisive Moment）；
+  2. 环中已经采到的 2~3 帧稳定帧（尤其是快门时刻 $t_0$ 及紧邻的 $t_{-1}$）本是定格手部与画面的最关键资产，全盘抛弃属于算力与画质双重浪费；
+  3. 采用**混合延长窗口（Hybrid ZSL Window Extension）**：将预卷中的稳定帧（$\ge 2$ 帧，以 $t_0$ 为基准帧）作为种子锁定，并在快门后让窗口顺延通过 Camera2 `session.captureBurst` 实时补拍剩余的 $N - K$ 帧，拼接成完整的 5 帧交付 HDR+，既完全满足用户“拍满 5 帧”的高画质降噪诉求，又彻底消除了决定性瞬间的时延！
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User as 用户
+    participant Ring as ZslRawRing
+    participant Ctrl as ZslCaptureController
+    participant Exec as HdrPlusBurstCaptureExecutor
+    participant Pipe as HdrPlusStreamingBurst (Native)
+    participant Cam2 as Camera2 Session
+
+    Note over Ring: 环中持续滚动缓存预卷帧
+    User->>Ctrl: 按下快门 (t0 时刻)
+    Ctrl->>Ring: 筛选稳定帧 (获得 2 帧: t-1, t0)
+    Note over Ctrl: 发现 2 < 5 帧，判定触发延长窗口 (Hybrid Burst)
+    Ctrl->>Ring: take() 取出 2 帧转移所有权
+    Ctrl->>Ctrl: disarm(reason="hybrid_burst", resetPreviewGain=false)
+    Ctrl->>Exec: 传入 ZslBurstSeed (preRoll=2, target=5, remaining=3)
+    Exec->>Pipe: 注入前 2 帧预卷 (基准帧锁定为 t0)
+    Exec->>Cam2: 发送 captureBurst (3 帧后卷请求，锁定同一 burstIso & burstTime)
+    Cam2-->>Exec: 后卷 3 帧到达 (t1, t2, t3)
+    Exec->>Pipe: 注入后卷 3 帧
+    Note over Pipe: 5 帧集齐，执行多帧对齐与融合导出
+    Exec->>Ctrl: 连拍完成，调度 scheduleRearm() 重新武装环
+```
 
 ---
 
-*报告生成完毕。当前分支代码树保持原状未作任何源码改动。*
+### 4.2 HDR+、ZSL 与 Motion Photo 的“三位一体”底层映射逻辑
+
+许多开发者曾疑虑：**ZSL 与 Motion Photo 能否共存？Motion Photo 会不会破坏 HDR+ 的曝光？**
+通过对 Darkbag 底层时序与 Google Camera 工业实践的审计，两者不仅完全可以共存，而且构成了高度互补的系统闭环：
+
+1. **决定性基准帧时间戳对齐（Timestamp Synchronization）**：
+   - Motion Photo 的核心是录制快门前后一段高帧率视频（例如 1.5 秒环形微视频），并在视频中嵌入快门瞬时帧的 `VHDR / Still Timestamp`。
+   - 在 ZSL HDR+ 下，选取的基准帧（Reference Frame）正是最接近快门瞬间的帧 $t_0$（传感器时间戳 `sensorTimestampNs`）。
+   - 控制器在选出 $t_0$ 后，将其时间戳透传给 `MotionPhotoController.updatePendingStillTimestamp(sensorTimestampNs)`，使视频播放器能够在进度条正中央精准呈现那一帧照片时刻。
+2. **预览提亮与色彩统一（LUT & Digital Gain Consistency）**：
+   - ZSL 预卷工作在 `-1 EV`（或固定负曝光）下，取景器与视频编码器通过 OpenGL 片段着色器应用 `hdrDigitalGain = 2.0f` 与统一的 3D Film LUT。
+   - 无论是拍摄前取景、Motion Photo 视频帧、还是 HDR+ 最终合成出的 DNG/JPG，色彩科学基准完全一致，绝无明暗跳变。
+3. **异步缝合与零排队开销**：
+   - Motion Photo 的 MP4 封装在独立的后台线程（`Mp4VideoMuxerPipeline`）运行，HDR+ 多帧融合在 C++ 线程池运行，两者仅在最后的 `DirectMediaStoreSink` 阶段将 MP4 作为附录字节以 XMP 格式追加缝合至 JPEG 文件尾部（MicroVideo 格式），零主线程开销。
+
+---
+
+## 5. 架构瘦身与解耦的明确硬性要求（Hard Metrics & Invariants）
+
+为避免口号化重构或中途过早放弃，**阶段 A（Stage A）的架构治理制定以下 3 项不可违背的硬性验收指标**。任何未全部达成下述指标的代码提交均视为未完成阶段目标：
+
+### 5.1 硬性指标 1：代码规模与职责边界硬上限（文件级物理拆分）
+
+| 目标文件 | 重构前规模 | **硬性上限要求** | 职责边界与契约约束 |
+| :--- | :---: | :---: | :--- |
+| **`ZslCaptureController.kt`** | **860 行** | **$\le 280$ 行**<br>*(缩减率 $> 65\%$)* | **彻底解除上帝类状态**：仅作为对外的外观接入点（Facade）。仅负责响应拍照意图、调度选帧和结果分发；**严禁**直接管理 Arm Probe 定时器、**严禁**直接修改静态池配额、**严禁**直接操作 UI 进度条动画。 |
+| **`ZslArmingPolicy.kt`**<br>*(新建纯领域策略)* | — | **$\le 180$ 行** | **纯 Kotlin 领域策略**，零 Android SDK / Camera2 依赖。统一管理 ZSL 运行时准入矩阵（60fps 互斥、半格互斥、双摄互斥、热节流、动态内存预算）与模式策略，**必须保证 100% JVM 单元测试覆盖**。供控制器与设置页共同消费！ |
+| **`ZslRingSupervisor.kt`**<br>*(新建环与探针生命周期主管)* | — | **$\le 260$ 行** | 专职管理 `ZslRawRing` 实例的创建、销毁、清空、2 秒帧率检测探针（Arm Probe）、`scheduleRearm()` 重试状态机，以及与 `RawFrameRouter` 的 `installRing` / `detachRing` 挂载交互。 |
+| **`ZslDispatchOutcome.kt`**<br>*(强类型调用结果)* | — | **$\le 60$ 行** | **彻底消灭隐式时间耦合**：`tryCaptureHdrPlus` 与 `tryCaptureSingle` 必须返回密封类 `ZslDispatchOutcome`（`Consumed(sensorTimestampNs, realtimeTimestamp, timing)` vs `Fallback(reason)`），废除跨类外露的 `@Volatile` 可变属性传递。 |
+
+### 5.2 硬性指标 2：消除设置页代码重复（重复率归零）
+
+1. **`SettingsFragment.kt` 瘦身与去重**：
+   - 彻底删除 [SettingsFragment.kt#L560-L581](file:///home/maary/.gemini/antigravity/worktrees/Darkbag/review_zsl_implementation/app/src/main/java/top/maary/darkbag/fragments/SettingsFragment.kt#L560-L581) 中与 Delegate 完全逐行复制的 `zslStatusValue()` 与 `updateZslStatus()`；
+   - 整个 `SettingsFragment` 中的 ZSL 状态呈现**完全收拢到 `SettingsBentoDelegate` 单一出口**；
+   - 重构后 `SettingsFragment.kt` 缩减不少于 50 行代码。
+2. **消灭魔数与动态同步**：
+   - 彻底消除 `SettingsBentoDelegate.kt#L370` 与 `SettingsFragment` 中写死的 `minOf(state.hdrBurstCount, 5)` 魔数；
+   - 统一消费动态检测到的 `maxPreRollFrames`。
+
+### 5.3 硬性指标 3：管道职责边界与生命周期归位
+
+1. **单帧抓拍生命周期归还**：
+   - 将 `captureFrameFromRing` 中的 `RawImageHolder` 组装、`HdrPlusRequestManager.onTaskStarted()` / `onTaskFinished()` 计数记账代码归还给 `SingleRawCaptureExecutor`，实现与 `HdrPlusBurstCaptureExecutor` 完全对称的架构模式（“ZSL 只出数据帧，Executor 负责管线与生命周期”）。
+2. **预览增益出口统一**：
+   - 彻底消除 `ZslCaptureController` 与连拍执行器对 `lutProcessor?.setPreviewGain` 的双头竞态。
+
+---
+
+## 6. 综合演进路线图与阶段实施顺序
+
+结合当前已落地的底层混合连拍基线与上述硬性要求，综合演进路线图确定如下：
+
+```
+[基线已达成: Commit c5f224c4]
+└─ 组合 D 混合延长窗口抓拍引擎 (Hybrid ZSL: 预卷 K ≥ 2 锁定 t0 + 后卷拼接补齐 5 帧)
+   │
+   ▼
+[阶段 A: 架构瘦身与状态同源 (当前阶段)] <── 必须 100% 达成第 5 节三大硬性指标
+├─ 1. 拆解 ZslCaptureController (≤ 280行) -> ZslArmingPolicy (纯Kotlin) + ZslRingSupervisor + ZslDispatchOutcome
+├─ 2. 单帧入队与生命周期记账归还 SingleRawCaptureExecutor
+├─ 3. 消除 SettingsFragment 与 SettingsBentoDelegate 间 100% 重复代码，统一消费动态 maxPreRollFrames
+└─ 4. 门禁验证: 全部单测通过 + CMake 0错误 + 子代理签发 APPROVED 并原子提交推送
+   │
+   ▼
+[阶段 B: Experimental ZSL Bento 子托盘聚合与设置联动]
+├─ 1. 重构 fragment_settings.xml: 创建专属 card_tray_exp_zsl 同心子托盘 (18dp)
+├─ 2. 补齐 8 项 ZSL ↔ HDR+ 联动矩阵 (60fps 冲突、帧数越界警示、预卷 EV 透出)
+└─ 3. 清理 Exp 实验室内的硬编码字符串并资源化
+   │
+   ▼
+[阶段 C: 轻量级场景运动监测器 (SceneMotionMonitor)]
+├─ 1. 挂载 analysisImageReader 提取 16×12 亮度分块残差与 movingAreaRatio
+├─ 2. 输出连续 MotionLevel (STILL / MODERATE / FAST) 并可选融合陀螺仪角速度
+└─ 3. 编写针对局部挥手、全景平移与低光噪声防误触的独立 JVM 测试套件
+   │
+   ▼
+[阶段 D: ZSL HDR+ 与前向 HDR+ 运动自适应降帧落地]
+├─ 1. MODERATE 场景自动收敛至 3 帧 (~66ms 窗口)
+├─ 2. FAST 亮光场景自动回退单帧直出 (motion_single_fallback + Gain 补偿)
+└─ 3. 前向非 ZSL 连拍同步接入运动降帧，全面消除快速挥手重影
+```
+
+---
+
+*文档修订完毕，作为后续实施与质量门禁验收的唯一判定标准。*
