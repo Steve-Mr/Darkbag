@@ -81,7 +81,7 @@ class ZslCaptureController(
     private val jobs = mutableListOf<Job>()
     private val rearmRunnable = Runnable { attemptRearm() }
     private val armProbeRunnable = Runnable { runArmProbe() }
-    private var probeAttempted = false
+    private var probePassed = false
     private var probeDroppedBaseline = 0L
 
     private val trimListener: () -> Unit = {
@@ -147,7 +147,7 @@ class ZslCaptureController(
         // A lens/rebind creates a new RAW router; never keep the previous ring attached to it.
         // All profile/ring mutation stays serialized on the camera2 handler.
         cameraHandler?.post {
-            probeAttempted = false
+            probePassed = false
             disarm("reconfigured")
             evaluate()
         }
@@ -395,7 +395,9 @@ class ZslCaptureController(
             publishDebug(armed = true, reason = "", fps = ZslDebugRegistry.state.value.fps)
         }
         Log.i(TAG, "ZSL HDR+ shot started=$started frames=${seed.preRollCount}")
-        scheduleRearm()
+        if (!started || profile == Profile.OFF) {
+            scheduleRearm()
+        }
         return started
     }
 
@@ -417,13 +419,13 @@ class ZslCaptureController(
         }
         val t0 = pressTimestampNs(timing)
         val requestedBurst = prefs.hdrBurstCount.coerceIn(3, 8)
-        val burst = minOf(requestedBurst, ring.config.depth).coerceAtLeast(3)
-        val selected = ring.stableRun(t0, burst)
+        val maxRingBurst = minOf(requestedBurst, ring.config.depth).coerceAtLeast(3)
+        val selected = ring.stableRun(t0, maxRingBurst)
         if (selected.size < ZslAdaptivePolicy.MIN_HDR_FRAMES) {
             timing.zslFallbackReason = "no_stable_run"
             return null
         }
-        val targetFrames = if (adaptive) selected.size else burst
+        val targetFrames = ZslAdaptivePolicy.hdrTargetFrameCount(adaptive, selected.size, requestedBurst)
         if (!adaptive && selected.size < targetFrames) {
             timing.zslFallbackReason = "pre_roll_short"
             return null
@@ -448,7 +450,8 @@ class ZslCaptureController(
         }
         val byTimestamp = taken.associateBy { it.timestamp }
         val ordered = selected.mapNotNull { byTimestamp[it.timestamp] }
-        if (ordered.size < 3 || (!adaptive && ordered.size < targetFrames)) {
+        val takenTargetFrames = ZslAdaptivePolicy.hdrTargetFrameCount(adaptive, ordered.size, requestedBurst)
+        if (ordered.size < 3 || (!adaptive && ordered.size < takenTargetFrames)) {
             timing.zslFallbackReason = "frame_race"
             ring.releaseFrames(taken)
             return null
@@ -476,9 +479,8 @@ class ZslCaptureController(
             iso = iso,
             exposureTimeNs = exposure,
             digitalGain = hdrDigitalGain,
-            // Adaptive uses whatever stable pre-roll exists (3..burst); quality mode still
-            // fills the configured burst with post-roll captures.
-            targetFrameCount = ZslAdaptivePolicy.hdrTargetFrameCount(adaptive, ordered.size, burst)
+            // Adaptive uses stable pre-roll (3..depth); strict mode requires full requestedBurst.
+            targetFrameCount = takenTargetFrames
         )
     }
 
@@ -600,7 +602,21 @@ class ZslCaptureController(
             return
         }
 
-        disarm("rearming")
+        val router = env.sessionArbiter.rawFrameRouter
+        if (router == null) {
+            disarm("no_router")
+            return
+        }
+        if (profile != Profile.OFF) {
+            if (profile == targetProfile) {
+                // Swap only the ring when zoom/depth changes within the same profile so preview gain
+                // and the active repeating request do not flicker through an OFF cycle.
+                detachAndClearRing()
+                ring = null
+            } else {
+                disarm("rearming")
+            }
+        }
         val rotation = try {
             CameraRepository.getCharacteristics(env.camera2Manager, cameraId)
                 .get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
@@ -617,11 +633,6 @@ class ZslCaptureController(
         realtimeTimestamp = report.timestampRealtime
         hdrDigitalGain = 2.0.pow(-(hdrEvSteps * aeStepEv).toDouble()).toFloat()
         val newRing = ZslRawRing(limitedConfig, cameraId, lens?.id, lens?.physicalId, zoom, rotation)
-        val router = env.sessionArbiter.rawFrameRouter
-        if (router == null) {
-            disarm("no_router")
-            return
-        }
         profile = targetProfile
         activeConfig = limitedConfig
         ring = newRing
@@ -642,8 +653,7 @@ class ZslCaptureController(
                 "slots=${env.sessionArbiter.rawImageReader?.maxImages} raw=${report.rawWidth}x${report.rawHeight}"
         )
         publishDebug(armed = true, reason = "", report = report)
-        if (!probeAttempted) {
-            probeAttempted = true
+        if (!probePassed) {
             probeDroppedBaseline = env.sessionArbiter.rawFrameRouter?.droppedImages ?: 0L
             cameraHandler?.removeCallbacks(armProbeRunnable)
             cameraHandler?.postDelayed(armProbeRunnable, ARM_PROBE_MS)
@@ -691,6 +701,7 @@ class ZslCaptureController(
             if (lazyMode) scheduleRearm()
             return
         }
+        probePassed = true
         publishDebug(armed = true, reason = "", fps = fps)
     }
 
@@ -744,6 +755,7 @@ class ZslCaptureController(
         val lastFrames = snapshot.frames
         val lastFps = previous.fps
         cameraHandler?.removeCallbacks(armProbeRunnable)
+        probePassed = false
         detachAndClearRing()
         ring = null
         activeConfig = null
@@ -789,7 +801,7 @@ class ZslCaptureController(
         if (HdrPlusRequestManager.pendingTasksCount.value > 0 || env.runtimeState.isBurstActive) {
             if (rearmRetries++ < MAX_REARM_RETRIES) {
                 cameraHandler?.postDelayed(rearmRunnable, REARM_RETRY_MS)
-            } else {
+            } else if (profile == Profile.OFF) {
                 Log.w(TAG, "ZSL rearm gave up while processing; restoring buffer pools")
                 restorePoolLimits()
             }

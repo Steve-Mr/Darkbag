@@ -204,6 +204,7 @@ class ZslAdaptivePolicyTest {
     @Test
     fun qualityModeKeepsConfiguredBurstTarget() {
         assertEquals(5, ZslAdaptivePolicy.hdrTargetFrameCount(adaptive = false, stableFrames = 4, requestedBurst = 5))
+        assertEquals(8, ZslAdaptivePolicy.hdrTargetFrameCount(adaptive = false, stableFrames = 5, requestedBurst = 8))
         assertEquals(8, ZslAdaptivePolicy.hdrTargetFrameCount(adaptive = false, stableFrames = 1, requestedBurst = 8))
     }
 
@@ -211,6 +212,7 @@ class ZslAdaptivePolicyTest {
     fun instantSingleOnlyForAdaptiveStabilityFailures() {
         assertTrue(ZslAdaptivePolicy.shouldUseInstantSingle(true, "no_stable_run"))
         assertTrue(ZslAdaptivePolicy.shouldUseInstantSingle(true, "missing_metadata"))
+        assertFalse(ZslAdaptivePolicy.shouldUseInstantSingle(true, "pre_roll_short"))
         assertFalse(ZslAdaptivePolicy.shouldUseInstantSingle(true, "low_light"))
         assertFalse(ZslAdaptivePolicy.shouldUseInstantSingle(false, "no_stable_run"))
     }
