@@ -343,6 +343,9 @@ class SettingsBentoDelegate(
 
         // Debug section
         binding.sectionDebug.visibility = if (state.debugEnabled) View.VISIBLE else View.GONE
+        val zslSubVisibility = if (state.zslEnabled) View.VISIBLE else View.GONE
+        binding.switchZslAdaptive.visibility = zslSubVisibility
+        binding.switchZslLazyRing.visibility = zslSubVisibility
         binding.tvZslStatus.text = CameraBentoDeckView.formatProTelemetry(
             label = context.getString(R.string.zsl_status_label),
             value = zslStatusValue(state),

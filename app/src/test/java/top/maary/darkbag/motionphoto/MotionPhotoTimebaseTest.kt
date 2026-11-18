@@ -20,4 +20,16 @@ class MotionPhotoTimebaseTest {
         assertEquals(0L, MotionPhotoTimebase.sensorToMonotonic(0L, true, 1L, 2L))
         assertEquals(0L, MotionPhotoTimebase.sensorToMonotonic(1L, false, 0L, 2L))
     }
+
+    @Test
+    fun stillTimestampSlotsAreIsolatedPerShot() {
+        val shot1 = MotionPhotoStillTimestampSlot(triggerNs = 1_000L)
+        shot1.resolve(950L)
+        val shot2 = MotionPhotoStillTimestampSlot(triggerNs = 2_000L)
+        shot2.resolve(1_920L)
+        assertEquals(950L, shot1.get())
+        assertEquals(1_920L, shot2.get())
+        shot2.resolve(0L)
+        assertEquals(1_920L, shot2.get())
+    }
 }

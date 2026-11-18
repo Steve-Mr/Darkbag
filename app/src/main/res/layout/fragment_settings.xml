@@ -1686,7 +1686,7 @@
                         android:layout_height="48dp"
                         android:layout_marginBottom="8dp"
                         app:bentoSwitchTitle="@string/pref_zsl_lazy_ring"
-                        app:bentoSwitchBadge="Z8"
+                        app:bentoSwitchBadge="@string/pref_zsl_lazy_ring_badge"
                         app:bentoSwitchBadgeStyle="secondary" />
 
                     <top.maary.darkbag.ui.bento.BentoSwitchTile
@@ -1695,7 +1695,7 @@
                         android:layout_height="48dp"
                         android:layout_marginBottom="8dp"
                         app:bentoSwitchTitle="@string/pref_zsl_adaptive"
-                        app:bentoSwitchBadge="AUTO"
+                        app:bentoSwitchBadge="@string/pref_zsl_adaptive_badge"
                         app:bentoSwitchBadgeStyle="secondary" />
 
                     <!-- Custom Lens Calibration Bento Button -->
