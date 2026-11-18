@@ -340,7 +340,17 @@ class CameraModeController(
                 hfMetadata: HalfFrameManager.Metadata?,
                 timing: StandardTimingTracker
             ) = onCameraThread {
-                if (parts.zsl?.tryCaptureHdrPlus(sink, isFrame1, hfMetadata, timing) == true) return@onCameraThread
+                if (parts.zsl?.tryCaptureHdrPlus(sink, isFrame1, hfMetadata, timing) == true) {
+                    parts.zsl?.let { zsl ->
+                        if (zsl.lastSelectedSensorTimestampNs > 0L) {
+                            parts.motionPhoto.updatePendingStillTimestamp(
+                                zsl.lastSelectedSensorTimestampNs,
+                                zsl.lastTimestampRealtime
+                            )
+                        }
+                    }
+                    return@onCameraThread
+                }
                 parts.zsl?.onForwardCaptureStarting(timing)
                 parts.pipeline.triggerHdrPlusBurstCamera2(sink, isFrame1, hfMetadata, timing)
             }
@@ -351,7 +361,17 @@ class CameraModeController(
                 hfMetadata: HalfFrameManager.Metadata?,
                 timing: StandardTimingTracker
             ) = onCameraThread {
-                if (parts.zsl?.tryCaptureSingle(sink, isFrame1, hfMetadata, timing) == true) return@onCameraThread
+                if (parts.zsl?.tryCaptureSingle(sink, isFrame1, hfMetadata, timing) == true) {
+                    parts.zsl?.let { zsl ->
+                        if (zsl.lastSelectedSensorTimestampNs > 0L) {
+                            parts.motionPhoto.updatePendingStillTimestamp(
+                                zsl.lastSelectedSensorTimestampNs,
+                                zsl.lastTimestampRealtime
+                            )
+                        }
+                    }
+                    return@onCameraThread
+                }
                 parts.zsl?.onForwardCaptureStarting(timing)
                 parts.pipeline.takeSinglePictureCamera2(sink, timing, isFrame1, hfMetadata)
             }

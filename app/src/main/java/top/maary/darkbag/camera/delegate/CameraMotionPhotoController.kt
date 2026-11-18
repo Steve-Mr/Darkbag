@@ -2,11 +2,13 @@ package top.maary.darkbag.camera.delegate
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import android.view.View
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CompletableDeferred
 import top.maary.darkbag.R
 import top.maary.darkbag.motionphoto.MotionPhotoEncoder
+import top.maary.darkbag.motionphoto.MotionPhotoTimebase
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import java.io.File
@@ -21,6 +23,7 @@ class CameraMotionPhotoController(
     private val coordinator: CameraCoordinatorHost
 ) {
     private var encoder: MotionPhotoEncoder? = null
+    @Volatile private var pendingStillTimestampNs: Long? = null
     var isEnabled = false
         private set
 
@@ -91,6 +94,19 @@ class CameraMotionPhotoController(
         }
     }
 
+    /** Called by ZSL after it selects a RAW frame; maps sensor time to encoder monotonic time. */
+    fun updatePendingStillTimestamp(sensorTimestampNs: Long, realtime: Boolean) {
+        val sensorNow = if (realtime) SystemClock.elapsedRealtimeNanos()
+        else SystemClock.uptimeMillis() * 1_000_000L
+        val mapped = MotionPhotoTimebase.sensorToMonotonic(
+            sensorTimestampNs = sensorTimestampNs,
+            realtime = realtime,
+            sensorNowNs = sensorNow,
+            monotonicNowNs = System.nanoTime()
+        )
+        if (mapped > 0L) pendingStillTimestampNs = mapped
+    }
+
     /**
      * Requests a pre/post-roll MP4 around [timestamp]. Returns null (and clears the pending task)
      * when the encoder is not running.
@@ -103,12 +119,15 @@ class CameraMotionPhotoController(
         }
         val deferred = CompletableDeferred<Pair<String?, Long>>()
         env.runtimeState.pendingMotionPhotoTask = deferred
+        val triggerNs = System.nanoTime()
+        pendingStillTimestampNs = null
         active.captureSnapshot(
-            captureTimestampNs = System.nanoTime(),
+            captureTimestampNs = triggerNs,
             preDurationMs = 1500L,
             postDurationMs = 1500L,
             outputFile = File(env.hostContext.cacheDir, "motion_${timestamp}.mp4"),
-            orientationDegrees = orientationDegrees
+            orientationDegrees = orientationDegrees,
+            stillTimestampProvider = { pendingStillTimestampNs ?: triggerNs }
         ) { file, stillPtsUs ->
             deferred.complete(Pair(file?.absolutePath, stillPtsUs))
         }

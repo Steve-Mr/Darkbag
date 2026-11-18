@@ -71,6 +71,10 @@ class ZslCaptureController(
     private var activeConfig: ZslRingConfig? = null
     private var hdrEvSteps = 0
     private var hdrDigitalGain = 1.0f
+    @Volatile var lastSelectedSensorTimestampNs: Long = 0L
+        private set
+    @Volatile var lastTimestampRealtime: Boolean = true
+        private set
     private var realtimeTimestamp = true
     private var rearmRetries = 0
     private val jobs = mutableListOf<Job>()
@@ -274,6 +278,8 @@ class ZslCaptureController(
             capturedLens = lens,
             captureResult = frame.result
         )
+        lastSelectedSensorTimestampNs = frame.timestamp
+        lastTimestampRealtime = realtimeTimestamp
         timing.captureMode = CaptureTimingMode.SINGLE_RAW
         timing.zslRoute = ZslRoute.RAW_RING.key
         timing.zslPreRollFrames = 1
@@ -407,6 +413,8 @@ class ZslCaptureController(
             return null
         }
         val base = ordered.first()
+        lastSelectedSensorTimestampNs = base.timestamp
+        lastTimestampRealtime = realtimeTimestamp
         val baseResult = base.result
         val iso = base.iso
         val exposure = base.exposureTimeNs
