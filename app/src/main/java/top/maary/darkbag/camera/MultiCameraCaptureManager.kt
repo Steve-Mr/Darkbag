@@ -223,6 +223,8 @@ class MultiCameraCaptureManager(
             }
         }
 
+    fun isRawSupportedForLens(lens: PhysicalLensInfo): Boolean = dngWriter.isRawSupportedForLens(lens)
+
     fun captureMultiCamera(
         orientationDegrees: Int,
         isHdrPlusActive: Boolean = false,
@@ -234,7 +236,7 @@ class MultiCameraCaptureManager(
             MultiCameraHardwareType.NATIVE_LOGICAL ->
                 nativeLogicalStrategy.capture(orientationDegrees, isHdrPlusActive, manualConfig, onResult, onError)
             MultiCameraHardwareType.CONCURRENT_STANDALONE ->
-                concurrentStandaloneStrategy.capture(orientationDegrees, manualConfig, onResult, onError)
+                concurrentStandaloneStrategy.capture(orientationDegrees, isHdrPlusActive, manualConfig, onResult, onError)
             MultiCameraHardwareType.FAST_RELAY_BURST, MultiCameraHardwareType.NONE ->
                 fastRelayStrategy.capture(orientationDegrees, isHdrPlusActive, manualConfig, onResult, onError)
         }

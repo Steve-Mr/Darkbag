@@ -163,7 +163,7 @@ class SettingsBentoDelegateTest {
     }
 
     @Test
-    fun testZslBentoSubTray_WhenConflict_MultiCameraActive() {
+    fun testZslBentoSubTray_WhenUnavailable_MultiCameraActive() {
         val mcPrefs = DarkbagPreferences(
             debugEnabled = true,
             zslEnabled = true,
@@ -172,9 +172,9 @@ class SettingsBentoDelegateTest {
             zslRoute = "raw_ring"
         )
         delegate.renderPreferences(binding, mcPrefs)
-        assertEquals(themedContext.getString(R.string.badge_zsl_conflict), binding.badgeZslStatus.text)
+        assertEquals(themedContext.getString(R.string.badge_zsl_unavailable), binding.badgeZslStatus.text)
         assertEquals(BentoContainerRole.SURFACE_CONTAINER_HIGH, binding.cardTrayExpZsl.containerRole)
-        assertTrue(binding.cardTrayExpZsl.strokeWidth > 0)
+        assertEquals(0, binding.cardTrayExpZsl.strokeWidth)
         assertTrue(binding.tvZslStatus.text.contains(themedContext.getString(R.string.zsl_status_inactive_multi_camera)))
     }
 

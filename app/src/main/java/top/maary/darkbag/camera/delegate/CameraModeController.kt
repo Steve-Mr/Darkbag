@@ -259,6 +259,8 @@ class CameraModeController(
                 saveRaw = saveRaw,
                 initialLensMultiplier = env.runtimeState.currentLens?.multiplier
             )
+            val primary = manager.resolveActivePreviewLens()
+            env.runtimeState.isRawSupported = primary != null && manager.isRawSupportedForLens(primary)
         }
         multiCamBindJob = job
         job.invokeOnCompletion {

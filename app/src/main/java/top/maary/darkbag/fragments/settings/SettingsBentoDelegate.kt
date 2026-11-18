@@ -393,14 +393,14 @@ class SettingsBentoDelegate(
         }
 
         val activeMode = CaptureMode.fromKey(state.activeCaptureMode)
-        val isMultiCamConflict = state.multiCameraModeEnabled && (activeMode == CaptureMode.MULTI_CAMERA)
-        val hasConflict = state.force60Fps || isMultiCamConflict
-        val isHdrUnsupported = state.hdrPlusEnabled && state.zslReason == "hdr_unsupported"
-        val isArmed = !hasConflict && !isHdrUnsupported && state.zslRoute == "raw_ring"
-        val isUnavailable = !hasConflict && !isHdrUnsupported && state.zslRoute != "raw_ring"
+        val is60FpsConflict = state.force60Fps
+        val isMultiCam = state.multiCameraModeEnabled && (activeMode == CaptureMode.MULTI_CAMERA)
+        val isHdrUnsupported = !is60FpsConflict && !isMultiCam && state.hdrPlusEnabled && state.zslReason == "hdr_unsupported"
+        val isArmed = !is60FpsConflict && !isMultiCam && !isHdrUnsupported && state.zslRoute == "raw_ring"
+        val isUnavailable = isMultiCam || (!is60FpsConflict && !isHdrUnsupported && state.zslRoute != "raw_ring")
 
         when {
-            hasConflict -> {
+            is60FpsConflict -> {
                 binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_conflict)
                 binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_error)
                 binding.badgeZslStatus.setTextColor(colorError)
@@ -455,8 +455,8 @@ class SettingsBentoDelegate(
             return context.getString(R.string.zsl_status_inactive_60fps)
         }
         val activeMode = CaptureMode.fromKey(state.activeCaptureMode)
-        val isMultiCamConflict = state.multiCameraModeEnabled && (activeMode == CaptureMode.MULTI_CAMERA)
-        if (isMultiCamConflict) {
+        val isMultiCam = state.multiCameraModeEnabled && (activeMode == CaptureMode.MULTI_CAMERA)
+        if (isMultiCam) {
             return context.getString(R.string.zsl_status_inactive_multi_camera)
         }
         return when (state.zslRoute) {

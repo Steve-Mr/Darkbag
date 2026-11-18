@@ -156,7 +156,9 @@ internal class MultiCameraPreviewController(
 
             if (dngWriter.isRawSupportedForLens(lens)) {
                 val rawSize = dngWriter.getOptimalOutputSize(lens, ImageFormat.RAW_SENSOR)
-                val rawReader = ImageReader.newInstance(rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2)
+                val isPrimary = lens.physicalId == currentPrimaryLens?.physicalId
+                val rawCapacity = if (isPrimary) 6 else 2
+                val rawReader = ImageReader.newInstance(rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, rawCapacity)
                 rawImageReaders[lens.physicalId] = rawReader
                 outputConfigs.add(OutputConfiguration(rawReader.surface).apply { setPhysicalCameraId(lens.physicalId) })
             }

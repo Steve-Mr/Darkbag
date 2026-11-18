@@ -17,12 +17,13 @@ import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.DarkbagIdentity
 import top.maary.darkbag.utils.PhysicalLensInfo
 import java.io.File
+import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 internal class MultiCamDngMetadataWriter(
-    private val context: Context,
+    internal val context: Context,
     private val cameraManager: CameraManager
 ) {
     companion object {
@@ -71,22 +72,134 @@ internal class MultiCamDngMetadataWriter(
         metadata: CaptureMetadata? = null,
         digitalGain: Float = 1.0f
     ): String? {
+        val plane = rawImage.planes[0]
+        return writeRawBufferToDng(
+            rawBuffer = plane.buffer,
+            width = rawImage.width,
+            height = rawImage.height,
+            rowStride = plane.rowStride,
+            pixelStride = plane.pixelStride,
+            chars = chars,
+            captureResult = captureResult,
+            orientationDegrees = orientationDegrees,
+            lens = lens,
+            isHdrPlus = isHdrPlus,
+            metadata = metadata,
+            digitalGain = digitalGain
+        )
+    }
+
+    fun writeRawBufferToDng(
+        rawBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int,
+        chars: CameraCharacteristics,
+        captureResult: CaptureResult?,
+        orientationDegrees: Int,
+        lens: PhysicalLensInfo,
+        isHdrPlus: Boolean = false,
+        metadata: CaptureMetadata? = null,
+        digitalGain: Float = 1.0f
+    ): String? {
         return try {
             if (captureResult == null) {
                 Log.e(TAG, "Cannot create DNG: captureResult is null for lens ${lens.name}")
                 return null
             }
             val tempFile = File(context.cacheDir, "dng_${lens.physicalId}_${System.currentTimeMillis()}.dng")
-            val success = ColorProcessor.writeRawImageToDng(
-                rawImage = rawImage,
-                chars = chars,
-                captureResult = captureResult,
-                orientationDegrees = orientationDegrees,
+            val whiteLevel = chars.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
+            val cfaPattern = chars.get(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
+            val dynamicBl = captureResult.get(CaptureResult.SENSOR_DYNAMIC_BLACK_LEVEL)
+            val blPattern = if (dynamicBl != null && dynamicBl.size >= 4) {
+                dynamicBl
+            } else {
+                val staticBl = chars.get(CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
+                if (staticBl != null) {
+                    floatArrayOf(
+                        staticBl.getOffsetForIndex(0, 0).toFloat(),
+                        staticBl.getOffsetForIndex(1, 0).toFloat(),
+                        staticBl.getOffsetForIndex(0, 1).toFloat(),
+                        staticBl.getOffsetForIndex(1, 1).toFloat()
+                    )
+                } else {
+                    floatArrayOf(64f, 64f, 64f, 64f)
+                }
+            }
+
+            val calib = SensorCalibrationHelper.extractCalibration(chars, captureResult)
+            val lscTriple = SensorCalibrationHelper.extractLensShading(captureResult)
+            val activeRect = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+            val activeArea = if (activeRect != null) intArrayOf(activeRect.top, activeRect.left, activeRect.bottom, activeRect.right) else null
+            val noisePairs = captureResult.get(CaptureResult.SENSOR_NOISE_PROFILE)
+            val noiseProfile = if (noisePairs != null && noisePairs.isNotEmpty()) {
+                val arr = DoubleArray(noisePairs.size * 2)
+                for (i in noisePairs.indices) {
+                    arr[i * 2] = noisePairs[i].first
+                    arr[i * 2 + 1] = noisePairs[i].second
+                }
+                arr
+            } else null
+
+            val iso = captureResult.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+            val exposureTime = captureResult.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+            val focalLength = captureResult.get(CaptureResult.LENS_FOCAL_LENGTH) ?: 5.0f
+            val fNumber = captureResult.get(CaptureResult.LENS_APERTURE) ?: 1.8f
+            val sensorPhysicalSize = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+            val focalLength35mm = if (sensorPhysicalSize != null && sensorPhysicalSize.width > 0f) {
+                (focalLength * 36f / sensorPhysicalSize.width).toInt()
+            } else 24
+
+            val lensDistortion = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                chars.get(CameraCharacteristics.LENS_DISTORTION)
+            } else null
+            val intrinsicCalibration = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                chars.get(CameraCharacteristics.LENS_INTRINSIC_CALIBRATION)
+            } else null
+            val hwDistortionMode = top.maary.darkbag.pipeline.model.HardwareProfile(
+                lensDistortion = lensDistortion,
+                intrinsicCalibration = intrinsicCalibration,
+                focalLength = focalLength
+            ).getDistortionMode()
+
+            val success = ColorProcessor.nativeWriteRawImageDng(
+                rawBuffer = rawBuffer,
+                bufferOffset = rawBuffer.position(),
+                width = width,
+                height = height,
+                rowStrideBytes = rowStride,
+                pixelStrideBytes = pixelStride,
                 outputPath = tempFile.absolutePath,
-                dngCompressionMode = 0, // Lossless JPEG 16-bit compression (Invariant 1)
+                outFd = -1,
+                orientationDegrees = orientationDegrees,
+                whiteLevel = whiteLevel,
+                blackLevelPattern = blPattern,
+                cfaPattern = cfaPattern,
+                colorMatrix1 = calib.colorMatrix1,
+                colorMatrix2 = calib.colorMatrix2,
+                forwardMatrix1 = calib.forwardMatrix1,
+                forwardMatrix2 = calib.forwardMatrix2,
+                calibrationIlluminant1 = calib.calibrationIlluminant1,
+                calibrationIlluminant2 = calib.calibrationIlluminant2,
+                neutralColorPoint = calib.neutralColorPoint,
+                lensShadingMap = lscTriple.first,
+                lensShadingRows = lscTriple.second,
+                lensShadingCols = lscTriple.third,
+                activeArea = activeArea,
+                noiseProfile = noiseProfile,
+                iso = iso,
+                exposureTimeNanos = exposureTime,
+                focalLength = focalLength,
+                focalLength35mm = focalLength35mm,
+                fNumber = fNumber,
+                dngCompressionMode = 0,
                 isHdrPlus = isHdrPlus,
                 metadata = metadata,
-                digitalGain = digitalGain
+                digitalGain = digitalGain,
+                distortionMode = hwDistortionMode,
+                distortionCoeffs = lensDistortion,
+                intrinsicCalibration = intrinsicCalibration
             )
             if (success) {
                 Log.i(TAG, "Successfully written compressed DNG via native write_dng to ${tempFile.absolutePath} (${tempFile.length()} bytes)")
@@ -154,11 +267,12 @@ internal class MultiCamDngMetadataWriter(
         captureResult: CaptureResult?,
         orientationDegrees: Int,
         captureTimestamp: Long,
-        targetExposureProduct: Double = 0.0
+        targetExposureProduct: Double = 0.0,
+        forcedDigitalGain: Float? = null
     ): PhysicalCapturedFrame {
         val chars = lens.characteristics ?: CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
         val metadata = createMetadataFromCaptureResult(captureResult, lens, captureTimestamp)
-        val digitalGain = calculateDigitalGain(captureResult, chars, targetExposureProduct)
+        val digitalGain = forcedDigitalGain ?: calculateDigitalGain(captureResult, chars, targetExposureProduct)
         val lscTriple = SensorCalibrationHelper.extractLensShading(captureResult)
         return PhysicalCapturedFrame(
             lens = lens,
