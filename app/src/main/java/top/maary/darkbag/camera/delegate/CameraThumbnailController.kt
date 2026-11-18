@@ -11,6 +11,8 @@ import com.bumptech.glide.load.resource.bitmap.DownsampleStrategy
 import com.bumptech.glide.request.RequestOptions
 import com.bumptech.glide.signature.ObjectKey
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
@@ -18,6 +20,7 @@ import top.maary.darkbag.fragments.CameraFragmentDirections
 import top.maary.darkbag.rawvideo.RawVideoNative
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
+import top.maary.darkbag.utils.GalleryThumbnailLoader
 import top.maary.darkbag.utils.LutManager
 import top.maary.darkbag.utils.MediaStoreUtils
 import java.io.File
@@ -37,6 +40,7 @@ class CameraThumbnailController(
     var currentThumbnailUri: Uri? = null
         private set
     private var currentThumbnailTimestamp: Long = 0L
+    private var thumbnailLoadJob: Job? = null
 
     /** Updates the cached thumbnail URI; stale (older) timestamps never override a newer one. */
     fun updateCurrentThumbnail(uri: Uri?, timestamp: Long = System.currentTimeMillis()) {
@@ -62,8 +66,12 @@ class CameraThumbnailController(
     }
 
     fun setGalleryThumbnail(filename: String?) {
+        thumbnailLoadJob?.cancel()
+        thumbnailLoadJob = null
+
         val photoViewButton = ui.cameraUiContainerBinding?.photoViewButton ?: return
         photoViewButton.post {
+            thumbnailLoadJob?.cancel()
             val shouldHide = (coordinator.activeCoordinator?.shouldHideGalleryThumbnail() == true) ||
                 env.runtimeState.isProcessing
             if (filename == null) {
@@ -80,14 +88,37 @@ class CameraThumbnailController(
             if (!shouldHide) photoViewButton.alpha = 1f
             photoViewButton.setPadding(0, 0, 0, 0)
 
-            env.lifecycleScope.launch(Dispatchers.Main) {
+            thumbnailLoadJob = env.lifecycleScope.launch(Dispatchers.Main) {
+                fun canBind(): Boolean {
+                    return coroutineContext.isActive &&
+                        env.isHostAdded &&
+                        ui.cameraUiContainerBinding?.photoViewButton === photoViewButton &&
+                        photoViewButton.isAttachedToWindow
+                }
+
                 val uri = try { Uri.parse(filename) } catch (_: Exception) { null }
                 val isRawVid = filename.endsWith(".rawvid", ignoreCase = true) ||
                     uri?.toString()?.endsWith(".rawvid", ignoreCase = true) == true
                 if (isRawVid && uri != null) {
                     val bmp = withContext(Dispatchers.IO) { decodeRawVideoThumbnail(uri) }
                     if (bmp != null) {
-                        Glide.with(photoViewButton).load(bmp).apply(RequestOptions.centerCropTransform()).into(photoViewButton)
+                        if (canBind()) {
+                            Glide.with(photoViewButton).load(bmp).apply(RequestOptions.centerCropTransform()).into(photoViewButton)
+                        }
+                        return@launch
+                    }
+                }
+                val isDng = filename.endsWith(".dng", ignoreCase = true) ||
+                    uri?.toString()?.endsWith(".dng", ignoreCase = true) == true ||
+                    (uri != null && withContext(Dispatchers.IO) {
+                        try { env.hostContext.contentResolver.getType(uri)?.contains("dng", ignoreCase = true) == true } catch (_: Exception) { false }
+                    })
+                if (isDng && uri != null) {
+                    val bmp = withContext(Dispatchers.IO) { GalleryThumbnailLoader.loadDngThumbnail(env.hostContext, uri) }
+                    if (bmp != null) {
+                        if (canBind()) {
+                            Glide.with(photoViewButton).load(bmp).apply(RequestOptions.centerCropTransform()).into(photoViewButton)
+                        }
                         return@launch
                     }
                 }
@@ -101,14 +132,16 @@ class CameraThumbnailController(
                     val target: Any = if (file.exists()) file else filename
                     Pair(target, lm)
                 }
-                val thumbSizePx = env.hostContext.resources.getDimensionPixelSize(R.dimen.round_button_medium)
-                Glide.with(photoViewButton)
-                    .load(loadTarget)
-                    .override(thumbSizePx, thumbSizePx)
-                    .downsample(DownsampleStrategy.CENTER_INSIDE)
-                    .apply(RequestOptions.centerCropTransform())
-                    .signature(ObjectKey(lastModified))
-                    .into(photoViewButton)
+                if (canBind()) {
+                    val thumbSizePx = env.hostContext.resources.getDimensionPixelSize(R.dimen.round_button_medium)
+                    Glide.with(photoViewButton)
+                        .load(loadTarget)
+                        .override(thumbSizePx, thumbSizePx)
+                        .downsample(DownsampleStrategy.CENTER_INSIDE)
+                        .apply(RequestOptions.centerCropTransform())
+                        .signature(ObjectKey(lastModified))
+                        .into(photoViewButton)
+                }
             }
         }
     }

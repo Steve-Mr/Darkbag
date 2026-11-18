@@ -7,6 +7,7 @@ import android.view.HapticFeedbackConstants
 import com.bumptech.glide.Glide
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
@@ -199,15 +200,26 @@ class ViewerMediaPreloadDelegate(
         }
     }
 
-    fun handleBackgroundSaveEvent(@Suppress("UNUSED_PARAMETER") event: ColorProcessor.BackgroundSaveEvent) {
+    private var backgroundSaveRefreshJob: Job? = null
+
+    fun handleBackgroundSaveEvent(event: ColorProcessor.BackgroundSaveEvent) {
         val adapter = getAdapter() ?: return
-        lifecycleScope.launch {
+        backgroundSaveRefreshJob?.cancel()
+        backgroundSaveRefreshJob = lifecycleScope.launch {
             repository.invalidateCache()
             val newGroups = repository.getGroupedImages(forceRefresh = true)
-            adapter.updateGroups(newGroups)
-            val currentIndex = binding.imagePager.currentItem
-            if (currentIndex in newGroups.indices) {
-                onPrepareEditConfig(newGroups[currentIndex])
+            if (!isBindingAlive()) return@launch
+            val wasAtFirst = (binding.imagePager.currentItem == 0)
+            adapter.updateGroups(newGroups) {
+                if (!isBindingAlive()) return@updateGroups
+                if (wasAtFirst && newGroups.isNotEmpty()) {
+                    binding.imagePager.setCurrentItem(0, false)
+                }
+                val currentIndex = binding.imagePager.currentItem
+                if (currentIndex in newGroups.indices) {
+                    onPrepareEditConfig(newGroups[currentIndex])
+                    chromeDelegate.updateGalleryPill(currentIndex, newGroups.size)
+                }
             }
         }
     }

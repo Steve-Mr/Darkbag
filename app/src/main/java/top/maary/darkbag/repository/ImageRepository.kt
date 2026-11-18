@@ -116,9 +116,34 @@ class ImageRepository(
             emit(sorted)
         }
 
+        fun matchesTargetUri(group: ImageGroup, target: String): Boolean {
+            val base = getBaseName(target)
+            return (base.isNotEmpty() && group.baseName == base) ||
+                group.rawVideoUri?.toString() == target ||
+                group.mp4VideoUri?.toString() == target ||
+                group.jpgUri?.toString() == target ||
+                group.dngUri?.toString() == target ||
+                group.dngUri1?.toString() == target ||
+                group.dngUri2?.toString() == target ||
+                group.derivativeJpgUris.any { it.toString() == target } ||
+                group.derivativeMp4Uris.any { it.toString() == target } ||
+                group.multiJpgUris.any { it.toString() == target } ||
+                group.multiDngUris.any { it.toString() == target }
+        }
+
+        val cacheContainsTarget = initialUri == null || (initialCache != null && initialCache.any { matchesTargetUri(it, initialUri) })
+
         // Stage 0: Stale-While-Revalidate instant T2 delivery (0ms)
-        if (groups.isNotEmpty()) {
-            emitCurrent()
+        // Skip Stage 0 if initialUri is specified but missing from cache to prevent ViewPager2 initializing with stale index 0.
+        if (groups.isNotEmpty() && cacheContainsTarget) {
+            val sorted = groups.values
+                .map { it.build() }
+                .filter { it.hasAny() && !it.isInProgress }
+                .sortedByDescending { it.captureTime }
+            if (cacheStore.cachedGroups != null) {
+                cacheStore.cachedGroups = sorted
+            }
+            emit(sorted)
         }
 
         val safJpgUri = currentPrefs.jpgStorageUri

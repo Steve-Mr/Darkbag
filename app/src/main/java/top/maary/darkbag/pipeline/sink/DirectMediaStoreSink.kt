@@ -6,6 +6,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import top.maary.darkbag.pipeline.model.CaptureTaskSpec
 import top.maary.darkbag.processor.ColorProcessor
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.ImageSaver
 
 /**
@@ -24,6 +25,7 @@ class DirectMediaStoreSink(
     private var pfdDng: Pair<ParcelFileDescriptor, Uri>? = null
     private var pfdJpgFinalized = false
     private var pfdDngFinalized = false
+    private var jpgExportSucceeded = false
 
     private fun createPfd(context: Context, displayName: String, mimeType: String): Pair<ParcelFileDescriptor, Uri>? {
         return pfdProvider?.invoke(context, displayName, mimeType)
@@ -69,6 +71,9 @@ class DirectMediaStoreSink(
         outputPath: String?,
         outputFd: Int
     ) {
+        if (success) {
+            jpgExportSucceeded = true
+        }
         val jpgPfd = pfdJpg
         if (jpgPfd != null) {
             pfdJpgFinalized = true
@@ -85,17 +90,19 @@ class DirectMediaStoreSink(
                 } else {
                     spec.linearDngPath
                 }
+                val targetUriStr = jpgPfd.second.toString()
                 ColorProcessor.backgroundSaveFlow.tryEmit(
                     ColorProcessor.BackgroundSaveEvent(
                         baseName = spec.baseName,
                         dngPath = if (spec.saveRaw) dngPathToUse else null,
                         jpgPath = null,
-                        targetUri = jpgPfd.second.toString(),
+                        targetUri = targetUriStr,
                         zoomFactor = spec.zoomFactor,
                         orientation = spec.orientation,
                         saveJpg = true
                     )
                 )
+                SettingsRepository.getInstance(context).setLastCaptureUri(targetUriStr)
             }
         }
     }
@@ -117,23 +124,26 @@ class DirectMediaStoreSink(
                 editConfig = spec.renderRecipe.editConfig,
                 captureMetadata = spec.frameMetadata.captureMetadata
             )
-            if (success && pfdJpg == null) {
+            val shouldEmitDng = success && (!spec.saveJpg || (pfdJpg == null && !jpgExportSucceeded))
+            if (shouldEmitDng) {
                 val dngPathToUse = if (spec.rawOutputType == 0 && spec.linearDngPath.endsWith("_linear.dng")) {
                     spec.linearDngPath.removeSuffix("_linear.dng") + ".dng"
                 } else {
                     spec.linearDngPath
                 }
+                val targetUriStr = dngPfd.second.toString()
                 ColorProcessor.backgroundSaveFlow.tryEmit(
                     ColorProcessor.BackgroundSaveEvent(
                         baseName = spec.baseName,
                         dngPath = dngPathToUse,
                         jpgPath = null,
-                        targetUri = dngPfd.second.toString(),
+                        targetUri = targetUriStr,
                         zoomFactor = spec.zoomFactor,
                         orientation = spec.orientation,
                         saveJpg = false
                     )
                 )
+                SettingsRepository.getInstance(context).setLastCaptureUri(targetUriStr)
             }
         }
     }

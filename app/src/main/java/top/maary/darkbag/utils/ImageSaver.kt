@@ -17,6 +17,7 @@ import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.rawvideo.RawVideoNative
 import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
@@ -255,24 +256,23 @@ object ImageSaver {
             )
         }
 
-        if (!isFastPath && finalJpgUri != null) {
+        val finalTargetUri = if (isHalfFrameActive && finalJpgUri == null) null else (finalJpgUri ?: finalRawUri)
+        if (!isFastPath && finalTargetUri != null) {
             ColorProcessor.backgroundSaveFlow.tryEmit(
                 ColorProcessor.BackgroundSaveEvent(
                     baseName = baseName,
                     dngPath = linearDngPath,
                     jpgPath = bmpPath,
-                    targetUri = finalJpgUri.toString(),
+                    targetUri = finalTargetUri.toString(),
                     zoomFactor = zoomFactor,
                     orientation = rotationDegrees,
-                    saveJpg = saveJpg
+                    saveJpg = (finalJpgUri != null)
                 )
             )
+            SettingsRepository.getInstance(context).setLastCaptureUri(finalTargetUri.toString())
         }
 
-        // For half-frame mode, strictly avoid DNG thumbnails to prevent showing single frames
-        if (isHalfFrameActive && finalJpgUri == null) return null
-
-        return finalJpgUri ?: finalRawUri
+        return finalTargetUri
     }
 
     private fun applyOrientationAndCrop(

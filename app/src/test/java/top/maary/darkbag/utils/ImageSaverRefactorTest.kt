@@ -21,6 +21,8 @@ import top.maary.darkbag.models.BasicAdjustments
 import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.repository.SettingsRepository
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.io.FileOutputStream
 
@@ -225,5 +227,40 @@ class ImageSaverRefactorTest {
         }
         assertNull(store.readSession(profile = HalfFrameSessionStore.PROFILE_HALF_SIDE).tempDngPath)
         outDir.deleteRecursively()
+    }
+
+    @Test
+    fun imageSaver_suppressesDngThumbnailEmissionInHalfFrameWhenJpgIsNull() = runBlocking {
+        val events = mutableListOf<top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent>()
+        val job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined).launch {
+            top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.collect { events.add(it) }
+        }
+
+        val dngFile = File(context.cacheDir, "hf_f1_test.dng").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
+        val meta1 = HalfFrameManager.Metadata(
+            profile = HalfFrameSessionStore.PROFILE_HALF_SIDE,
+            dateStamp = false,
+            frame1BaseName = null
+        )
+
+        val resultUri = ImageSaver.saveProcessedImage(
+            context = context,
+            inputBitmap = null,
+            bmpPath = null,
+            rotationDegrees = 0,
+            zoomFactor = 1.0f,
+            baseName = "20261115_120000_HF1",
+            linearDngPath = dngFile.absolutePath,
+            saveJpg = false,
+            saveRaw = true,
+            jpgFolderUri = null,
+            rawFolderUri = null,
+            isFastPath = false,
+            halfFrameMetadata = meta1
+        )
+
+        job.cancel()
+        assertNull("Half-frame Frame 1 must return null URI to prevent showing unstiched DNG", resultUri)
+        assertTrue("Half-frame Frame 1 must not emit backgroundSaveFlow for DNG", events.isEmpty())
     }
 }

@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import top.maary.darkbag.fragments.GallerySelectedItem
 import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.models.MultiCameraLensItem
+import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.repository.ImageRepository
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.bento.BentoContainerRole
@@ -114,6 +115,15 @@ class DarkroomGalleryViewModel @JvmOverloads constructor(
 
     private var loadJob: Job? = null
 
+    init {
+        viewModelScope.launch {
+            ColorProcessor.backgroundSaveFlow.collect { event ->
+                repository.invalidateCache()
+                loadImages(event.targetUri, scrollToTopOnDone = true)
+            }
+        }
+    }
+
     fun processIntent(intent: DarkroomGalleryUserIntent) {
         when (intent) {
             is DarkroomGalleryUserIntent.LoadImages -> loadImages(intent.targetUri)
@@ -129,7 +139,7 @@ class DarkroomGalleryViewModel @JvmOverloads constructor(
         }
     }
 
-    fun loadImages(targetUri: String? = null) {
+    fun loadImages(targetUri: String? = null, scrollToTopOnDone: Boolean = false) {
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
@@ -158,6 +168,9 @@ class DarkroomGalleryViewModel @JvmOverloads constructor(
                         }
                     )
                 }
+            }
+            if (scrollToTopOnDone) {
+                _effects.send(DarkroomGalleryEffect.ScrollToPosition(0))
             }
         }
     }
