@@ -288,6 +288,11 @@ class ZslCaptureController(
             // A partial pre-roll needs a new captureBurst, which changes preview exposure while
             // Motion Photo is still recording. Keep the conservative forward fallback.
             timing.zslFallbackReason = "motion_photo_postroll"
+            timing.zslRoute = ""
+            timing.zslPreRollFrames = 0
+            timing.zslPostRollFrames = 0
+            timing.zslFrameOffsetMs = 0L
+            seed.release()
             return false
         }
         timing.captureMode = CaptureTimingMode.HDR_BURST

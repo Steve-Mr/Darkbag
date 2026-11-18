@@ -9,7 +9,6 @@ import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.fragments.HdrPlusBurst
 import java.nio.ByteBuffer
 import java.util.ArrayDeque
-import kotlin.math.abs
 
 /**
  * One copied RAW frame plus the exact CaptureResult it belongs to.

@@ -20,7 +20,7 @@
 | Z4 元数据竞态 | 已完成 | `1e9c93d6`：ring 锁内二次查询迟到结果 |
 | Z5 预卷参考帧 | 已完成 | `1e9c93d6`：seed 首帧锁定 |
 | Z6 状态/池/trim | 已完成（真机待验） | `36863c9c`：HdrPlusBurst 池统一、trySend/drain、MVI 状态复位、trim hook |
-| Z7.1 单帧 + Motion | 已完成（真机待验） | `36863c9c`：不再硬互斥；MP4 等待由现有 pending task 处理 |
+| Z7.1 单帧 + Motion | 部分完成 | `36863c9c`：不再硬互斥；MP4 等待由现有 pending task 处理。still PTS 尚未映射到选中 RAW 帧，≤1 帧验收未达成 |
 | Z7.2 HDR+ + Motion | 部分完成 | `36863c9c`：encoder 使用 previewGain；全预卷不 disarm；部分预卷回退 forward。尚未做 still PTS 时钟域对齐 |
 | Z8 零拷贝 ring | 未开始 | 实验项，需 feature flag 与真机帧率/热验证 |
 | Z9 核心测试 | 部分完成 | AF/ring/EV/formatter 已有；RawFrameRouter 状态机、trim、迟到 result 仍缺 |
