@@ -139,7 +139,11 @@ object ZslCapabilityEvaluator {
         val supportsReprocess = ZslImageFormats.PRIVATE in facts.inputFormats &&
             ZslImageFormats.RAW_SENSOR in facts.reprocessOutputFormats
 
-        if (ZslImageFormats.RAW_SENSOR !in facts.capabilities) {
+        // RAW output sizes are the actual ImageReader constraint. Trust them instead of
+        // the declared capability bit: a wrong/missing bit must not disable a working DNG
+        // path, and the arm probe plus forward fallback cover a reader that cannot start.
+        // (Do not compare ImageFormat.RAW_SENSOR (32) with capability ids; RAW capability is 3.)
+        if (facts.rawSizes.isEmpty()) {
             return if (supportsReprocess) {
                 ZslCapabilityReport(
                     route = ZslRoute.REPROCESS_RAW,
@@ -148,13 +152,6 @@ object ZslCapabilityEvaluator {
             } else {
                 ZslCapabilityReport(ZslRoute.NONE, ZslReason.NO_RAW)
             }
-        }
-        if (facts.rawSizes.isEmpty()) {
-            return ZslCapabilityReport(
-                route = ZslRoute.NONE,
-                reason = ZslReason.NO_RAW,
-                supportsRawReprocess = supportsReprocess
-            )
         }
         val hasRaw = rawCandidate != null && rawCandidate.third <= MAX_FRAME_BYTES
         if (!hasRaw) {

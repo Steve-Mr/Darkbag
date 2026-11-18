@@ -2,6 +2,7 @@ package top.maary.darkbag.camera.zsl
 
 import android.hardware.camera2.TotalCaptureResult
 import android.media.Image
+import android.graphics.ImageFormat
 import android.media.ImageReader
 import android.os.Handler
 import android.util.Log
@@ -62,7 +63,7 @@ class RawFrameRouter(
             when (currentMode) {
                 Mode.RING -> {
                     val activeRing = synchronized(lock) { ring }
-                    if (activeRing != null) {
+                    if (activeRing != null && image.format == ImageFormat.RAW_SENSOR) {
                         activeRing.offer(image, resultLookup(image.timestamp))
                     } else {
                         image.close()

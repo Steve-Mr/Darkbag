@@ -105,6 +105,12 @@ object ZslCapabilityDetector {
             reprocessOutputFormats = reprocessOutputs,
             flashAvailable = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
         )
+        if (CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW !in capabilities && rawSizes.isNotEmpty()) {
+            Log.i(
+                TAG,
+                "Camera $cameraId exposes RAW output sizes but omits the RAW capability bit; trusting output sizes"
+            )
+        }
         val report = ZslCapabilityEvaluator.evaluate(facts)
         // The ring reuses the session's existing RAW reader, which is the maximum RAW size.
         val candidate = rawSizes.firstOrNull()

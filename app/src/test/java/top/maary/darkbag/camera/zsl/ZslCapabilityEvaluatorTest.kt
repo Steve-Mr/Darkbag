@@ -16,7 +16,7 @@ class ZslCapabilityEvaluatorTest {
         lowRam: Boolean = false,
         ae: IntRange? = -6..6,
         fps: List<IntRange> = listOf(15..30),
-        capabilities: Set<Int> = setOf(32)
+        capabilities: Set<Int> = setOf(3, 5, 2)
     ) = ZslCameraFacts(
         apiLevel = api,
         hardwareLevel = 3,
@@ -73,10 +73,54 @@ class ZslCapabilityEvaluatorTest {
     }
 
     @Test
-    fun missingRawCapabilityIsRejected() {
-        val report = ZslCapabilityEvaluator.evaluate(facts(capabilities = emptySet()))
+    fun rawOutputSizesWithoutCapabilityBitAreAccepted() {
+        // Realistic vendor-HAL fixture: READ_SENSOR_SETTINGS(5) and
+        // MANUAL_POST_PROCESSING(2) are declared, but RAW(3) is missing while
+        // RAW_SENSOR output sizes (and DNG capture) still work.
+        val report = ZslCapabilityEvaluator.evaluate(
+            facts(capabilities = setOf(5, 2))
+        )
+        assertEquals(ZslRoute.RAW_RING, report.route)
+        assertTrue(report.supportsHdrPlusZsl)
+    }
+
+    @Test
+    fun missingRawOutputSizesIsRejected() {
+        val report = ZslCapabilityEvaluator.evaluate(
+            facts(raw = emptyList(), capabilities = setOf(5, 2))
+        )
         assertEquals(ZslRoute.NONE, report.route)
         assertEquals(ZslReason.NO_RAW, report.reason)
+    }
+
+    @Test
+    fun rawCapabilityWithoutOutputSizesIsRejected() {
+        val report = ZslCapabilityEvaluator.evaluate(
+            facts(raw = emptyList(), capabilities = setOf(3, 5, 2))
+        )
+        assertEquals(ZslRoute.NONE, report.route)
+        assertEquals(ZslReason.NO_RAW, report.reason)
+    }
+
+    @Test
+    fun rawOutputSizesWithoutReadSensorSettingsAreRejected() {
+        val report = ZslCapabilityEvaluator.evaluate(
+            facts(capabilities = setOf(3, 2), readSensor = false)
+        )
+        assertEquals(ZslRoute.NONE, report.route)
+        assertEquals(ZslReason.NO_READ_SENSOR_SETTINGS, report.reason)
+    }
+
+    @Test
+    fun rawSizesEmptyWithCapabilityAndReprocessingUsesReprocessRoute() {
+        val report = ZslCapabilityEvaluator.evaluate(
+            facts(raw = emptyList(), capabilities = setOf(3, 5, 2)).copy(
+                inputFormats = setOf(34),
+                reprocessOutputFormats = setOf(32)
+            )
+        )
+        assertEquals(ZslRoute.REPROCESS_RAW, report.route)
+        assertTrue(report.supportsRawReprocess)
     }
 
     @Test

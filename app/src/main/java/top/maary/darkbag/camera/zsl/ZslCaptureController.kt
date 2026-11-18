@@ -1,6 +1,7 @@
 package top.maary.darkbag.camera.zsl
 
 import android.app.ActivityManager
+import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.os.Build
 import android.os.Handler
@@ -161,7 +162,9 @@ class ZslCaptureController(
         hfMetadata: HalfFrameManager.Metadata?,
         timing: StandardTimingTracker
     ): Boolean {
-        if (env.sessionArbiter.camera2Session == null || env.sessionArbiter.rawImageReader == null) return false
+        if (env.sessionArbiter.camera2Session == null ||
+            env.sessionArbiter.rawImageReader?.imageFormat != ImageFormat.RAW_SENSOR
+        ) return false
         val ring = ring ?: return false
         if (profile != Profile.SINGLE_RAW) return false
         val t0 = pressTimestampNs(timing)
@@ -217,7 +220,9 @@ class ZslCaptureController(
         hfMetadata: HalfFrameManager.Metadata?,
         timing: StandardTimingTracker
     ): Boolean {
-        if (env.sessionArbiter.camera2Session == null || env.sessionArbiter.rawImageReader == null) return false
+        if (env.sessionArbiter.camera2Session == null ||
+            env.sessionArbiter.rawImageReader?.imageFormat != ImageFormat.RAW_SENSOR
+        ) return false
         if (profile != Profile.HDR_PLUS) return false
         val seed = prepareHdrPlusSeed(timing) ?: return false
         timing.captureMode = CaptureTimingMode.HDR_BURST
@@ -321,6 +326,12 @@ class ZslCaptureController(
         val cameraId = env.runtimeState.currentLens?.id ?: "0"
         val report = ZslCapabilityDetector.inspect(env.hostContext, cameraId)
         if (report.route != ZslRoute.RAW_RING) {
+            disarm()
+            return
+        }
+        // The evaluator trusts RAW output sizes, but the session may still have created a
+        // JPEG fallback reader. Never arm a ring that would store compressed bytes as RAW.
+        if (env.sessionArbiter.rawImageReader?.imageFormat != ImageFormat.RAW_SENSOR) {
             disarm()
             return
         }

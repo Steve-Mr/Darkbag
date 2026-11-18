@@ -18,6 +18,7 @@
 | Stage 1：A 单帧 ZSL | 已实现 | `RawFrameRouter`、`ZslRawRing`、`ZslCaptureController`，单帧从环取出后进入现有 `processImageAsync` |
 | Stage 2：HDR+ ZSL | 已实现（代码） | 预卷稳定段选择、`ZslBurstSeed`、`HdrPlusStreamingBurst.enqueuePreloadedFrame`、补拍、viewfinder-only 增益、失败回前向 HDR+ |
 | 运行时 arm 探针 | 最小版已实现 | arm 后 2s 检查环帧数与 sensor fps；<15fps 或无足够帧则 disarm。完整 preview-drop/copy P95 探针仍需真机标定 |
+| RAW capability 误判 | 已修复 | 旧判定把 `ImageFormat.RAW_SENSOR`（32）当作 capability id；真实 `REQUEST_AVAILABLE_CAPABILITIES_RAW` 是 3，导致所有设备被误判为无 RAW。现以实际 RAW 输出尺寸为准，capability 仅用于诊断；ring 同时要求 reader/frame 为 `RAW_SENSOR`，否则回退 |
 | B1 | 仅检测 | 没有实验室设备证明 `getValidOutputFormatsForInput(PRIVATE)` 含 RAW，因此不写 session 路径 |
 | 真机验证 | 未完成 | 当前连接的 `redroid11_x86_64` 无相机；画质/帧率/热/内存目标仍需设备矩阵 |
 
