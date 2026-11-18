@@ -346,19 +346,87 @@ class SettingsBentoDelegate(
         val zslSubVisibility = if (state.zslEnabled) View.VISIBLE else View.GONE
         binding.switchZslAdaptive.visibility = zslSubVisibility
         binding.switchZslLazyRing.visibility = zslSubVisibility
+        binding.cardZslDebug.visibility = zslSubVisibility
+
+        renderZslBadgeAndContainer(binding, state)
+
         binding.tvZslStatus.text = CameraBentoDeckView.formatProTelemetry(
             label = context.getString(R.string.zsl_status_label),
             value = zslStatusValue(state),
             isTabActive = state.zslEnabled,
             isValueManual = state.zslEnabled,
-            context = context
+            context = context,
+            maxChars = 0
         )
+    }
+
+    private fun renderZslBadgeAndContainer(binding: FragmentSettingsBinding, state: DarkbagPreferences) {
+        val colorSecondary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondary, Color.GRAY)
+        val colorTertiary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiary, Color.WHITE)
+        val colorError = MaterialColors.getColor(binding.root, androidx.appcompat.R.attr.colorError, Color.RED)
+        val colorOnSurfaceVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY)
+        val colorOnErrorContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnErrorContainer, Color.RED)
+        val colorOnTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnTertiaryContainer, Color.WHITE)
+
+        binding.cardTrayExpZsl.strokeWidth = 0
+
+        if (!state.zslEnabled) {
+            binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_off)
+            binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_secondary)
+            binding.badgeZslStatus.setTextColor(colorSecondary)
+            binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated = false)
+            binding.txtTitleExpZsl.setTextColor(colorOnSurfaceVariant)
+            binding.switchZslAdaptive.isEnabled = true
+            binding.switchZslLazyRing.isEnabled = true
+            return
+        }
+
+        val hasConflict = state.force60Fps || state.halfFrameMode || state.multiCameraModeEnabled
+        val isHdrUnsupported = state.hdrPlusEnabled && state.zslReason == "hdr_unsupported"
+
+        when {
+            hasConflict -> {
+                binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_conflict)
+                binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_error)
+                binding.badgeZslStatus.setTextColor(colorError)
+                binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.ERROR_CONTAINER, animated = false)
+                binding.txtTitleExpZsl.setTextColor(colorOnErrorContainer)
+                binding.switchZslAdaptive.isEnabled = false
+                binding.switchZslLazyRing.isEnabled = false
+            }
+
+            isHdrUnsupported -> {
+                binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_hdr_incompat)
+                binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_error)
+                binding.badgeZslStatus.setTextColor(colorError)
+                binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.ERROR_CONTAINER, animated = false)
+                binding.txtTitleExpZsl.setTextColor(colorOnErrorContainer)
+                binding.switchZslAdaptive.isEnabled = false
+                binding.switchZslLazyRing.isEnabled = false
+            }
+
+            else -> {
+                binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_armed)
+                binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_tertiary)
+                binding.badgeZslStatus.setTextColor(colorTertiary)
+                binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.TERTIARY_CONTAINER, animated = false)
+                binding.txtTitleExpZsl.setTextColor(colorOnTertiaryContainer)
+                binding.switchZslAdaptive.isEnabled = true
+                binding.switchZslLazyRing.isEnabled = true
+            }
+        }
     }
 
     private fun zslStatusValue(state: DarkbagPreferences): String {
         if (!state.zslEnabled) return context.getString(R.string.zsl_status_off)
         if (state.force60Fps) {
-            return context.getString(R.string.zsl_status_inactive_mode)
+            return context.getString(R.string.zsl_status_inactive_60fps)
+        }
+        if (state.halfFrameMode) {
+            return context.getString(R.string.zsl_status_inactive_half_frame)
+        }
+        if (state.multiCameraModeEnabled) {
+            return context.getString(R.string.zsl_status_inactive_multi_camera)
         }
         return when (state.zslRoute) {
             "raw_ring" -> when {
@@ -366,12 +434,18 @@ class SettingsBentoDelegate(
                     context.getString(R.string.zsl_status_inactive_hdr)
 
                 state.hdrPlusEnabled -> {
-                    val preRoll = minOf(state.hdrBurstCount, 5)
-                    context.getString(
+                    val preRoll = minOf(state.hdrBurstCount, 8)
+                    val baseHdr = context.getString(
                         R.string.zsl_status_hdr_format,
                         preRoll,
                         state.hdrBurstCount
                     )
+                    val evIndicator = formatUnderexposureEv(state.hdrUnderexposureMode)
+                    if (evIndicator.isNotEmpty()) {
+                        "$baseHdr · $evIndicator"
+                    } else {
+                        baseHdr
+                    }
                 }
 
                 else -> context.getString(R.string.zsl_status_single_format, 3)
@@ -379,6 +453,17 @@ class SettingsBentoDelegate(
 
             "reprocess_raw" -> context.getString(R.string.zsl_status_reprocess)
             else -> context.getString(R.string.zsl_status_unavailable)
+        }
+    }
+
+    private fun formatUnderexposureEv(mode: String): String {
+        return when {
+            mode.startsWith("Dynamic") -> "-1.0 EV"
+            mode.startsWith("-1") -> "-1.0 EV"
+            mode.startsWith("-2") -> "-2.0 EV"
+            mode.startsWith("Off") -> "0.0 EV"
+            mode.contains("EV") -> mode.trim()
+            else -> ""
         }
     }
 

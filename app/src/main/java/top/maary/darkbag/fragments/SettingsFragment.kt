@@ -450,7 +450,7 @@ class SettingsFragment : Fragment() {
         binding.btnClearDebugLogs.setOnClickListener {
             DebugLogManager.clearLogs()
             updateDebugStats()
-            Toast.makeText(requireContext(), "Debug logs cleared", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), R.string.toast_debug_logs_cleared, Toast.LENGTH_SHORT).show()
         }
 
         binding.btnCopyDebugLogs.setOnClickListener {
@@ -458,9 +458,9 @@ class SettingsFragment : Fragment() {
             if (logs.isNotBlank() && logs != "No logs yet.") {
                 val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Darkbag Timing Logs", logs))
-                Toast.makeText(requireContext(), "Logs copied to clipboard", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), R.string.toast_debug_logs_copied, Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(requireContext(), "No logs to copy", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), R.string.toast_no_logs_to_copy, Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -544,9 +544,11 @@ class SettingsFragment : Fragment() {
 
     private fun renderZslDebug(state: ZslDebugState) {
         if (!settingsViewModel.preferences.value.zslEnabled) {
+            binding.cardZslDebug.visibility = View.GONE
             binding.tvZslDebug.visibility = View.GONE
             return
         }
+        binding.cardZslDebug.visibility = View.VISIBLE
         binding.tvZslDebug.visibility = View.VISIBLE
         binding.tvZslDebug.text = ZslDebugFormatter.format(
             state,
