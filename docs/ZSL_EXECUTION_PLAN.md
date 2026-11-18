@@ -9,6 +9,27 @@
 
 ---
 
+## 实施进度（2026-11-18）
+
+| 项 | 状态 | 提交/说明 |
+|---|---|---|
+| Phase 0 诊断归位 | 已完成 | `36863c9c`：debug 块移到性能诊断卡，ZSL 卡恢复两行 |
+| Z1 焦段切换 | 已完成 | `1e9c93d6`：zoom 请求收敛，ring camera/lens/physical/zoom 身份校验 |
+| Z2 AF 门禁 | 已完成 | `1e9c93d6`：扫描/未锁定帧拒绝，手动对焦豁免 |
+| Z3 AE step/低光 | 已完成 | `1e9c93d6`：真实 `CONTROL_AE_COMPENSATION_STEP`、低光回退 |
+| Z4 元数据竞态 | 已完成 | `1e9c93d6`：ring 锁内二次查询迟到结果 |
+| Z5 预卷参考帧 | 已完成 | `1e9c93d6`：seed 首帧锁定 |
+| Z6 状态/池/trim | 已完成（真机待验） | `36863c9c`：HdrPlusBurst 池统一、trySend/drain、MVI 状态复位、trim hook |
+| Z7.1 单帧 + Motion | 已完成（真机待验） | `36863c9c`：不再硬互斥；MP4 等待由现有 pending task 处理 |
+| Z7.2 HDR+ + Motion | 部分完成 | `36863c9c`：encoder 使用 previewGain；全预卷不 disarm；部分预卷回退 forward。尚未做 still PTS 时钟域对齐 |
+| Z8 零拷贝 ring | 未开始 | 实验项，需 feature flag 与真机帧率/热验证 |
+| Z9 核心测试 | 部分完成 | AF/ring/EV/formatter 已有；RawFrameRouter 状态机、trim、迟到 result 仍缺 |
+| 真机矩阵 | 未开始 | 当前无可用物理设备 |
+
+**剩余优先项**：Z7.2 still PTS 对齐 + 真机 Motion 亮度/连续快拍；Z4/Z5/Z6 的专项测试；再评估 Z8。
+
+---
+
 ## 0. 结论与决策
 
 1. **路线 A（应用层 RAW 环）继续**：Camera2 标准路径无法稳定拿到 HAL HDR+ 预卷；当前方向是保住 RAW/HDR+/DNG 的唯一可行路径。
