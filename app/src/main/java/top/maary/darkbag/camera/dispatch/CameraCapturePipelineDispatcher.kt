@@ -238,6 +238,7 @@ class CameraCapturePipelineDispatcher(
                     )
                     motionMp4Path = path
                     motionStillPtsUs = pts
+                    timing?.motionPhotoStillPtsUs = pts
                 }
 
                 val singleCalib = metadataExtractor.extractSensorCalibration(chars, captureResult, wb)

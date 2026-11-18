@@ -48,7 +48,8 @@ data class StandardTimingTracker(
     @Volatile var zslPreRollFrames: Int = 0,
     @Volatile var zslPostRollFrames: Int = 0,
     @Volatile var zslFrameOffsetMs: Long = 0L,
-    @Volatile var zslFallbackReason: String = ""
+    @Volatile var zslFallbackReason: String = "",
+    @Volatile var motionPhotoStillPtsUs: Long = 0L
 ) {
     val frameArrivalTimes = mutableListOf<Long>()
 
@@ -253,6 +254,7 @@ data class StandardTimingTracker(
         if (zslPostRollFrames > 0) zslParts.add("post=$zslPostRollFrames")
         if (zslFrameOffsetMs > 0) zslParts.add("offset=${zslFrameOffsetMs}ms")
         if (zslFallbackReason.isNotBlank()) zslParts.add("fallback=$zslFallbackReason")
+        if (motionPhotoStillPtsUs > 0L) zslParts.add("motionPts=${motionPhotoStillPtsUs / 1000}ms")
         val zslSection = if (zslParts.isEmpty()) {
             ""
         } else {
