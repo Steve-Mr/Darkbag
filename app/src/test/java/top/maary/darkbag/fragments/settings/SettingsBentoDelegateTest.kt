@@ -118,6 +118,7 @@ class SettingsBentoDelegateTest {
 
         assertEquals(themedContext.getString(R.string.badge_zsl_armed), binding.badgeZslStatus.text)
         assertEquals(BentoContainerRole.TERTIARY_CONTAINER, binding.cardTrayExpZsl.containerRole)
+        assertEquals(0, binding.cardTrayExpZsl.strokeWidth)
         assertEquals(android.view.View.VISIBLE, binding.switchZslAdaptive.visibility)
         assertEquals(android.view.View.VISIBLE, binding.switchZslLazyRing.visibility)
         assertEquals(android.view.View.VISIBLE, binding.cardZslDebug.visibility)
@@ -138,7 +139,8 @@ class SettingsBentoDelegateTest {
         delegate.renderPreferences(binding, prefs)
 
         assertEquals(themedContext.getString(R.string.badge_zsl_conflict), binding.badgeZslStatus.text)
-        assertEquals(BentoContainerRole.ERROR_CONTAINER, binding.cardTrayExpZsl.containerRole)
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER_HIGH, binding.cardTrayExpZsl.containerRole)
+        assertTrue(binding.cardTrayExpZsl.strokeWidth > 0)
         assertFalse(binding.switchZslAdaptive.isEnabled)
         assertFalse(binding.switchZslLazyRing.isEnabled)
         assertTrue(binding.tvZslStatus.text.contains(themedContext.getString(R.string.zsl_status_inactive_60fps)))
@@ -154,7 +156,8 @@ class SettingsBentoDelegateTest {
         )
         delegate.renderPreferences(binding, hfPrefs)
         assertEquals(themedContext.getString(R.string.badge_zsl_conflict), binding.badgeZslStatus.text)
-        assertEquals(BentoContainerRole.ERROR_CONTAINER, binding.cardTrayExpZsl.containerRole)
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER_HIGH, binding.cardTrayExpZsl.containerRole)
+        assertTrue(binding.cardTrayExpZsl.strokeWidth > 0)
         assertTrue(binding.tvZslStatus.text.contains(themedContext.getString(R.string.zsl_status_inactive_half_frame)))
 
         val mcPrefs = DarkbagPreferences(
@@ -165,7 +168,8 @@ class SettingsBentoDelegateTest {
         )
         delegate.renderPreferences(binding, mcPrefs)
         assertEquals(themedContext.getString(R.string.badge_zsl_conflict), binding.badgeZslStatus.text)
-        assertEquals(BentoContainerRole.ERROR_CONTAINER, binding.cardTrayExpZsl.containerRole)
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER_HIGH, binding.cardTrayExpZsl.containerRole)
+        assertTrue(binding.cardTrayExpZsl.strokeWidth > 0)
         assertTrue(binding.tvZslStatus.text.contains(themedContext.getString(R.string.zsl_status_inactive_multi_camera)))
     }
 
@@ -181,9 +185,27 @@ class SettingsBentoDelegateTest {
         delegate.renderPreferences(binding, prefs)
 
         assertEquals(themedContext.getString(R.string.badge_zsl_hdr_incompat), binding.badgeZslStatus.text)
-        assertEquals(BentoContainerRole.ERROR_CONTAINER, binding.cardTrayExpZsl.containerRole)
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER_HIGH, binding.cardTrayExpZsl.containerRole)
+        assertTrue(binding.cardTrayExpZsl.strokeWidth > 0)
         assertFalse(binding.switchZslAdaptive.isEnabled)
         assertFalse(binding.switchZslLazyRing.isEnabled)
         assertTrue(binding.tvZslStatus.text.contains(themedContext.getString(R.string.zsl_status_inactive_hdr)))
+    }
+
+    @Test
+    fun testZslBentoSubTray_WhenRouteUnavailable() {
+        val prefs = DarkbagPreferences(
+            debugEnabled = true,
+            zslEnabled = true,
+            zslRoute = "none"
+        )
+        delegate.renderPreferences(binding, prefs)
+
+        assertEquals(themedContext.getString(R.string.badge_zsl_unavailable), binding.badgeZslStatus.text)
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER_HIGH, binding.cardTrayExpZsl.containerRole)
+        assertEquals(0, binding.cardTrayExpZsl.strokeWidth)
+        assertFalse(binding.switchZslAdaptive.isEnabled)
+        assertFalse(binding.switchZslLazyRing.isEnabled)
+        assertTrue(binding.tvZslStatus.text.contains(themedContext.getString(R.string.zsl_status_unavailable)))
     }
 }

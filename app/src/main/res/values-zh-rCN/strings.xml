@@ -439,6 +439,7 @@
     <string name="badge_zsl_armed">已就绪</string>
     <string name="badge_zsl_conflict">互斥</string>
     <string name="badge_zsl_hdr_incompat">HDR+ 不兼容</string>
+    <string name="badge_zsl_unavailable">不可用</string>
     <string name="toast_debug_logs_cleared">调试日志已清空</string>
     <string name="toast_debug_logs_copied">日志已复制到剪贴板</string>
     <string name="toast_no_logs_to_copy">没有可复制的日志</string>

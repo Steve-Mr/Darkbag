@@ -18,6 +18,7 @@ import top.maary.darkbag.utils.DualLensPairPreference
 import top.maary.darkbag.utils.LutManager
 import top.maary.darkbag.utils.MultiCameraCountPreference
 import top.maary.darkbag.viewmodel.CameraUiTier
+import kotlin.math.roundToInt
 
 /**
  * Delegate responsible for rendering DarkbagPreferences into Bento Matrix tiles,
@@ -348,49 +349,53 @@ class SettingsBentoDelegate(
         binding.switchZslLazyRing.visibility = zslSubVisibility
         binding.cardZslDebug.visibility = zslSubVisibility
 
-        renderZslBadgeAndContainer(binding, state)
+        val isArmed = renderZslBadgeAndContainer(binding, state)
 
         binding.tvZslStatus.text = CameraBentoDeckView.formatProTelemetry(
             label = context.getString(R.string.zsl_status_label),
             value = zslStatusValue(state),
-            isTabActive = state.zslEnabled,
-            isValueManual = state.zslEnabled,
+            isTabActive = false,
+            isValueManual = isArmed,
             context = context,
             maxChars = 0
         )
     }
 
-    private fun renderZslBadgeAndContainer(binding: FragmentSettingsBinding, state: DarkbagPreferences) {
+    private fun renderZslBadgeAndContainer(binding: FragmentSettingsBinding, state: DarkbagPreferences): Boolean {
         val colorSecondary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondary, Color.GRAY)
         val colorTertiary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiary, Color.WHITE)
         val colorError = MaterialColors.getColor(binding.root, androidx.appcompat.R.attr.colorError, Color.RED)
         val colorOnSurfaceVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY)
-        val colorOnErrorContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnErrorContainer, Color.RED)
         val colorOnTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnTertiaryContainer, Color.WHITE)
-
-        binding.cardTrayExpZsl.strokeWidth = 0
+        val density = context.resources.displayMetrics.density
+        val stroke1_5dp = (1.5f * density).roundToInt()
 
         if (!state.zslEnabled) {
             binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_off)
             binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_secondary)
             binding.badgeZslStatus.setTextColor(colorSecondary)
             binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated = false)
+            binding.cardTrayExpZsl.strokeWidth = 0
             binding.txtTitleExpZsl.setTextColor(colorOnSurfaceVariant)
             binding.switchZslAdaptive.isEnabled = true
             binding.switchZslLazyRing.isEnabled = true
-            return
+            return false
         }
 
         val hasConflict = state.force60Fps || state.halfFrameMode || state.multiCameraModeEnabled
         val isHdrUnsupported = state.hdrPlusEnabled && state.zslReason == "hdr_unsupported"
+        val isArmed = !hasConflict && !isHdrUnsupported && state.zslRoute == "raw_ring"
+        val isUnavailable = !hasConflict && !isHdrUnsupported && state.zslRoute != "raw_ring"
 
         when {
             hasConflict -> {
                 binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_conflict)
                 binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_error)
                 binding.badgeZslStatus.setTextColor(colorError)
-                binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.ERROR_CONTAINER, animated = false)
-                binding.txtTitleExpZsl.setTextColor(colorOnErrorContainer)
+                binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated = false)
+                binding.cardTrayExpZsl.strokeColor = colorError
+                binding.cardTrayExpZsl.strokeWidth = stroke1_5dp
+                binding.txtTitleExpZsl.setTextColor(colorError)
                 binding.switchZslAdaptive.isEnabled = false
                 binding.switchZslLazyRing.isEnabled = false
             }
@@ -399,22 +404,37 @@ class SettingsBentoDelegate(
                 binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_hdr_incompat)
                 binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_error)
                 binding.badgeZslStatus.setTextColor(colorError)
-                binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.ERROR_CONTAINER, animated = false)
-                binding.txtTitleExpZsl.setTextColor(colorOnErrorContainer)
+                binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated = false)
+                binding.cardTrayExpZsl.strokeColor = colorError
+                binding.cardTrayExpZsl.strokeWidth = stroke1_5dp
+                binding.txtTitleExpZsl.setTextColor(colorError)
                 binding.switchZslAdaptive.isEnabled = false
                 binding.switchZslLazyRing.isEnabled = false
             }
 
-            else -> {
+            isUnavailable -> {
+                binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_unavailable)
+                binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_secondary)
+                binding.badgeZslStatus.setTextColor(colorSecondary)
+                binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated = false)
+                binding.cardTrayExpZsl.strokeWidth = 0
+                binding.txtTitleExpZsl.setTextColor(colorOnSurfaceVariant)
+                binding.switchZslAdaptive.isEnabled = false
+                binding.switchZslLazyRing.isEnabled = false
+            }
+
+            isArmed -> {
                 binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_armed)
                 binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_tertiary)
                 binding.badgeZslStatus.setTextColor(colorTertiary)
                 binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.TERTIARY_CONTAINER, animated = false)
+                binding.cardTrayExpZsl.strokeWidth = 0
                 binding.txtTitleExpZsl.setTextColor(colorOnTertiaryContainer)
                 binding.switchZslAdaptive.isEnabled = true
                 binding.switchZslLazyRing.isEnabled = true
             }
         }
+        return isArmed
     }
 
     private fun zslStatusValue(state: DarkbagPreferences): String {

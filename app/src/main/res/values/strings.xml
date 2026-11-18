@@ -465,6 +465,7 @@
     <string name="badge_zsl_armed">ARMED</string>
     <string name="badge_zsl_conflict">CONFLICT</string>
     <string name="badge_zsl_hdr_incompat">HDR+ INCOMPAT</string>
+    <string name="badge_zsl_unavailable">UNAVAILABLE</string>
     <string name="toast_debug_logs_cleared">Debug logs cleared</string>
     <string name="toast_debug_logs_copied">Logs copied to clipboard</string>
     <string name="toast_no_logs_to_copy">No logs to copy</string>
