@@ -155,6 +155,7 @@ class SettingsRepository(context: Context) {
             hdrPlusOis = bool(PreferenceKeys.KEY_HDR_PLUS_OIS, true),
             force60Fps = bool(PreferenceKeys.KEY_FORCE_60FPS, false),
             zslEnabled = bool(PreferenceKeys.KEY_ZSL_ENABLED, false),
+            zslAdaptive = bool(PreferenceKeys.KEY_ZSL_ADAPTIVE, true),
             zslRoute = str(PreferenceKeys.KEY_ZSL_ROUTE, "none") ?: "none",
             zslReason = str(PreferenceKeys.KEY_ZSL_REASON, "none") ?: "none",
             debugEnabled = bool(PreferenceKeys.KEY_DEBUG_ENABLED, false),
@@ -417,6 +418,10 @@ class SettingsRepository(context: Context) {
 
     fun setForce60Fps(enabled: Boolean) {
         edit { this[PreferenceKeys.FORCE_60FPS] = enabled }
+    }
+
+    fun setZslAdaptive(enabled: Boolean) {
+        edit { this[PreferenceKeys.ZSL_ADAPTIVE] = enabled }
     }
 
     fun setZslEnabled(enabled: Boolean) {

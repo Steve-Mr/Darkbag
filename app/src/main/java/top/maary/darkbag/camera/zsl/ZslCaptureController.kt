@@ -103,6 +103,7 @@ class ZslCaptureController(
                 .map {
                     ZslPreferenceSnapshot(
                         enabled = it.zslEnabled,
+                        adaptive = it.zslAdaptive,
                         burstCount = it.hdrBurstCount,
                         underexposureMode = it.hdrUnderexposureMode,
                         motionPhoto = it.motionPhotoEnabled,
@@ -213,6 +214,49 @@ class ZslCaptureController(
             return false
         }
 
+        return captureFrameFromRing(
+            frame = frame,
+            sink = sink,
+            hfMetadata = hfMetadata,
+            timing = timing,
+            digitalGain = 1.0f,
+            label = "single"
+        )
+    }
+
+    /**
+     * Adaptive fallback: newest frame with metadata, no stability/AF fusion gate. This is a
+     * deliberate quality downgrade to guarantee a frame is captured for fast scenes.
+     */
+    private fun captureInstantSingle(
+        sink: CaptureSink?,
+        hfMetadata: HalfFrameManager.Metadata?,
+        timing: StandardTimingTracker,
+        reason: String
+    ): Boolean {
+        val activeRing = ring ?: return false
+        val frame = activeRing.latestValid() ?: return false
+        val taken = activeRing.take(listOf(frame))
+        if (taken.isEmpty()) return false
+        timing.zslFallbackReason = reason
+        return captureFrameFromRing(
+            frame = frame,
+            sink = sink,
+            hfMetadata = hfMetadata,
+            timing = timing,
+            digitalGain = hdrDigitalGain,
+            label = "instant"
+        )
+    }
+
+    private fun captureFrameFromRing(
+        frame: ZslFrame,
+        sink: CaptureSink?,
+        hfMetadata: HalfFrameManager.Metadata?,
+        timing: StandardTimingTracker,
+        digitalGain: Float,
+        label: String
+    ): Boolean {
         val lens = env.runtimeState.currentLens
         val holder = RawImageHolder(
             data = frame.buffer,
@@ -225,7 +269,7 @@ class ZslCaptureController(
             physicalId = frame.lensId,
             timing = timing,
             halfFrameMetadata = hfMetadata,
-            digitalGain = 1.0f,
+            digitalGain = digitalGain,
             sink = sink,
             capturedLens = lens,
             captureResult = frame.result
@@ -233,7 +277,8 @@ class ZslCaptureController(
         timing.captureMode = CaptureTimingMode.SINGLE_RAW
         timing.zslRoute = ZslRoute.RAW_RING.key
         timing.zslPreRollFrames = 1
-        timing.zslFrameOffsetMs = abs(frame.timestamp - t0) / 1_000_000L
+        timing.zslPostRollFrames = 0
+        timing.zslFrameOffsetMs = abs(frame.timestamp - pressTimestampNs(timing)) / 1_000_000L
         HdrPlusRequestManager.onTaskStarted()
         if (!pipeline.enqueueZslSingle(holder)) {
             timing.zslFallbackReason = "enqueue_failed"
@@ -248,12 +293,11 @@ class ZslCaptureController(
         timing.recordShutterReady()
         env.runtimeState.isBurstActive = false
         env.cameraViewModel.setBurstActive(false)
-        noteCapture("single · offset ${timing.zslFrameOffsetMs}ms")
+        noteCapture("$label · offset ${timing.zslFrameOffsetMs}ms")
         env.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             ui.resetBurstUi()
             ui.showProcessingAnimation()
         }
-        // The ring can refill while the single frame is processed.
         return true
     }
 
@@ -283,25 +327,22 @@ class ZslCaptureController(
             timing.zslFallbackReason = "zoom_changed"
             return false
         }
-        val seed = prepareHdrPlusSeed(timing) ?: return false
-        if (settings.current().motionPhotoEnabled && seed.remainingCount > 0) {
-            // A partial pre-roll needs a new captureBurst, which changes preview exposure while
-            // Motion Photo is still recording. Keep the conservative forward fallback.
-            timing.zslFallbackReason = "motion_photo_postroll"
-            timing.zslRoute = ""
-            timing.zslPreRollFrames = 0
-            timing.zslPostRollFrames = 0
-            timing.zslFrameOffsetMs = 0L
-            seed.release()
+        val seed = prepareHdrPlusSeed(timing)
+        if (seed == null) {
+            if (ZslAdaptivePolicy.shouldUseInstantSingle(
+                    settings.current().zslAdaptive,
+                    timing.zslFallbackReason
+                )
+            ) {
+                if (captureInstantSingle(sink, hfMetadata, timing, "instant_single")) return true
+            }
             return false
         }
         timing.captureMode = CaptureTimingMode.HDR_BURST
         timing.zslRoute = ZslRoute.RAW_RING.key
         timing.zslPreRollFrames = seed.preRollCount
-        timing.zslPostRollFrames = seed.remainingCount
-        // Full pre-roll needs no new camera request: keep RAW target/profile armed so Motion
-        // Photo's post-roll sees constant exposure. A partial burst must detach the router.
-        val shotDebug = if (seed.remainingCount > 0) disarmForShot() else null
+        timing.zslPostRollFrames = 0
+        // ZSL plans are always complete pre-roll sets now: keep RAW target/profile armed.
         val started = try {
             pipeline.triggerHdrPlusBurstCamera2(
                 sink = sink,
@@ -323,36 +364,26 @@ class ZslCaptureController(
             timing.zslPostRollFrames = 0
             timing.zslFrameOffsetMs = 0L
         }
-        if (shotDebug != null) {
-            publishDebug(
-                armed = false,
-                reason = if (started) "hdr_zsl_shot" else "burst_start_failed",
-                fps = shotDebug.fps,
-                profileOverride = shotDebug.profile,
-                depthOverride = shotDebug.depth,
-                framesOverride = shotDebug.frames
-            )
-        } else if (started) {
-            publishDebug(
-                armed = true,
-                reason = "",
-                fps = ZslDebugRegistry.state.value.fps
-            )
+        if (started) {
+            publishDebug(armed = true, reason = "", fps = ZslDebugRegistry.state.value.fps)
         }
-        Log.i(TAG, "ZSL HDR+ shot started=$started postRoll=${seed.remainingCount}")
+        Log.i(TAG, "ZSL HDR+ shot started=$started frames=${seed.preRollCount}")
         scheduleRearm()
         return started
     }
 
     fun prepareHdrPlusSeed(timing: StandardTimingTracker): ZslBurstSeed? {
+        val prefs = settings.current()
+        val adaptive = prefs.zslAdaptive
         val ring = ring ?: run {
             timing.zslFallbackReason = "not_armed"
             return null
         }
         val t0 = pressTimestampNs(timing)
-        val burst = settings.current().hdrBurstCount.coerceIn(3, 8)
+        val requestedBurst = prefs.hdrBurstCount.coerceIn(3, 8)
+        val burst = minOf(requestedBurst, ring.config.depth).coerceAtLeast(3)
         val selected = ring.stableRun(t0, burst)
-        if (selected.size < 3) {
+        if (selected.size < ZslAdaptivePolicy.MIN_HDR_FRAMES) {
             timing.zslFallbackReason = "no_stable_run"
             return null
         }
@@ -366,6 +397,12 @@ class ZslCaptureController(
         val ordered = selected.mapNotNull { byTimestamp[it.timestamp] }
         if (ordered.size < 3) {
             timing.zslFallbackReason = "frame_race"
+            ring.releaseFrames(taken)
+            return null
+        }
+        val targetFrames = if (adaptive) ordered.size else burst
+        if (!adaptive && ordered.size < targetFrames) {
+            timing.zslFallbackReason = "pre_roll_short"
             ring.releaseFrames(taken)
             return null
         }
@@ -393,7 +430,9 @@ class ZslCaptureController(
             iso = iso,
             exposureTimeNs = exposure,
             digitalGain = hdrDigitalGain,
-            targetFrameCount = burst
+            // Adaptive uses whatever stable pre-roll exists (3..burst); quality mode still
+            // fills the configured burst with post-roll captures.
+            targetFrameCount = ZslAdaptivePolicy.hdrTargetFrameCount(adaptive, ordered.size, burst)
         )
     }
 
@@ -649,30 +688,6 @@ class ZslCaptureController(
         )
     }
 
-    private fun disarmForShot(): ZslShotDebugSnapshot {
-        val snapshot = ZslShotDebugSnapshot(
-            profile = profile.name.lowercase(),
-            depth = activeConfig?.depth ?: 0,
-            frames = ring?.size ?: 0,
-            fps = ZslDebugRegistry.state.value.fps
-        )
-        detachAndClearRing()
-        ring = null
-        activeConfig = null
-        stream.setZslRawTargetEnabled(false)
-        stream.setZslPreviewProfile(false)
-        env.sessionArbiter.lutProcessor?.setPreviewGain(1.0f)
-        profile = Profile.OFF
-        return snapshot
-    }
-
-    private data class ZslShotDebugSnapshot(
-        val profile: String,
-        val depth: Int,
-        val frames: Int,
-        val fps: Float?
-    )
-
     private fun detachAndClearRing() {
         val old = env.sessionArbiter.rawFrameRouter?.detachRing()
         old?.clear()
@@ -732,6 +747,7 @@ class ZslCaptureController(
 
     private data class ZslPreferenceSnapshot(
         val enabled: Boolean,
+        val adaptive: Boolean,
         val burstCount: Int,
         val underexposureMode: String,
         val motionPhoto: Boolean,

@@ -288,6 +288,7 @@ class SettingsBentoDelegate(
         binding.switchUseInternalViewer.isChecked = state.useInternalViewer
         binding.switchForce60fps.isChecked = state.force60Fps
         binding.switchZsl.isChecked = state.zslEnabled
+        binding.switchZslAdaptive.isChecked = state.zslAdaptive
 
         // Half Frame
         binding.switchHalfFrameMode.isChecked = state.halfFrameMode

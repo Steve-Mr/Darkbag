@@ -517,6 +517,10 @@ class SettingsFragment : Fragment() {
                 }
             }
         }
+        binding.switchZslAdaptive.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateZslAdaptive(isChecked)
+        }
         updateZslStatus()
     }
 

@@ -84,6 +84,26 @@ private object ZslImageFormats {
     const val PRIVATE = 34
 }
 
+
+/** Pure policy used by the controller for adaptive ZSL; kept JVM-testable. */
+object ZslAdaptivePolicy {
+    const val MIN_HDR_FRAMES = 3
+
+    val INSTANT_FALLBACK_REASONS = setOf(
+        "no_stable_run",
+        "frame_race",
+        "missing_metadata"
+    )
+
+    fun hdrTargetFrameCount(adaptive: Boolean, stableFrames: Int, requestedBurst: Int): Int {
+        val requested = requestedBurst.coerceAtLeast(MIN_HDR_FRAMES)
+        return if (adaptive) stableFrames.coerceIn(0, requested) else requested
+    }
+
+    fun shouldUseInstantSingle(adaptive: Boolean, reason: String): Boolean =
+        adaptive && reason in INSTANT_FALLBACK_REASONS
+}
+
 /** Ring sizing rules. All time budgets are deliberately simple and measurable. */
 data class ZslRingConfig(
     val depth: Int,

@@ -192,3 +192,26 @@ class ZslCapabilityEvaluatorTest {
         assertEquals(ZslReason.NO_RAW, ZslReason.fromKey("no_raw"))
     }
 }
+
+class ZslAdaptivePolicyTest {
+    @Test
+    fun adaptiveUsesActualStablePreRollAsTarget() {
+        assertEquals(4, ZslAdaptivePolicy.hdrTargetFrameCount(adaptive = true, stableFrames = 4, requestedBurst = 5))
+        assertEquals(3, ZslAdaptivePolicy.hdrTargetFrameCount(adaptive = true, stableFrames = 3, requestedBurst = 8))
+        assertEquals(0, ZslAdaptivePolicy.hdrTargetFrameCount(adaptive = true, stableFrames = 0, requestedBurst = 5))
+    }
+
+    @Test
+    fun qualityModeKeepsConfiguredBurstTarget() {
+        assertEquals(5, ZslAdaptivePolicy.hdrTargetFrameCount(adaptive = false, stableFrames = 4, requestedBurst = 5))
+        assertEquals(8, ZslAdaptivePolicy.hdrTargetFrameCount(adaptive = false, stableFrames = 1, requestedBurst = 8))
+    }
+
+    @Test
+    fun instantSingleOnlyForAdaptiveStabilityFailures() {
+        assertTrue(ZslAdaptivePolicy.shouldUseInstantSingle(true, "no_stable_run"))
+        assertTrue(ZslAdaptivePolicy.shouldUseInstantSingle(true, "missing_metadata"))
+        assertFalse(ZslAdaptivePolicy.shouldUseInstantSingle(true, "low_light"))
+        assertFalse(ZslAdaptivePolicy.shouldUseInstantSingle(false, "no_stable_run"))
+    }
+}

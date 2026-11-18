@@ -33,6 +33,7 @@ data class DarkbagPreferences(
     val hdrPlusOis: Boolean = true,
     val force60Fps: Boolean = false,
     val zslEnabled: Boolean = false,
+    val zslAdaptive: Boolean = true,
     val zslRoute: String = "none",
     val zslReason: String = "none",
     val debugEnabled: Boolean = false,

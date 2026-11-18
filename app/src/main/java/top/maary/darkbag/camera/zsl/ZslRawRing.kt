@@ -169,6 +169,11 @@ class ZslRawRing(
         }
     }
 
+    /** Newest frame with enough metadata for the instant single-frame fallback. */
+    fun latestValid(): ZslFrame? = synchronized(lock) {
+        frames.lastOrNull { it.result != null && it.iso != null && it.exposureTimeNs != null }
+    }
+
     fun nearest(t0Ns: Long): ZslFrame? {
         val all = synchronized(lock) { frames.toList() }
         val index = ZslFrameSelector.nearestIndex(all.map { it.toSample() }, t0Ns, config.maxAgeNs) ?: return null

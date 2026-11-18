@@ -332,6 +332,7 @@ class SettingsFragmentTest {
         org.junit.Assert.assertNotNull(binding.cardZslStatus)
         org.junit.Assert.assertNotNull(binding.tvZslStatus)
         org.junit.Assert.assertNotNull(binding.tvZslDebug)
+        org.junit.Assert.assertNotNull(binding.switchZslAdaptive)
         org.junit.Assert.assertNotNull(binding.tvDebugStats)
         org.junit.Assert.assertNotNull(binding.btnCopyDebugLogs)
         org.junit.Assert.assertNotNull(binding.btnClearDebugLogs)

@@ -179,6 +179,10 @@ class SettingsViewModel @JvmOverloads constructor(
         settingsRepository.setForce60Fps(enabled)
     }
 
+    fun updateZslAdaptive(enabled: Boolean) {
+        settingsRepository.setZslAdaptive(enabled)
+    }
+
     fun updateZslEnabled(enabled: Boolean) {
         settingsRepository.setZslEnabled(enabled)
     }

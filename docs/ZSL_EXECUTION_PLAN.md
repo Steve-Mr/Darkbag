@@ -20,9 +20,12 @@
 | Z4 元数据竞态 | 已完成 | `1e9c93d6`：ring 锁内二次查询迟到结果 |
 | Z5 预卷参考帧 | 已完成 | `1e9c93d6`：seed 首帧锁定 |
 | Z6 状态/池/trim | 已完成（真机待验） | `36863c9c`：HdrPlusBurst 池统一、trySend/drain、MVI 状态复位、trim hook |
-| Z7.1 单帧 + Motion | 部分完成 | `36863c9c`：不再硬互斥；MP4 等待由现有 pending task 处理。still PTS 尚未映射到选中 RAW 帧，≤1 帧验收未达成 |
-| Z7.2 HDR+ + Motion | 部分完成 | `36863c9c`：encoder 使用 previewGain；全预卷不 disarm；部分预卷回退 forward。尚未做 still PTS 时钟域对齐 |
+| Z7.1 单帧 + Motion | 部分完成 | 单帧/Instant Single 可与 Motion 共存；still PTS 尚未映射到选中 RAW 帧，≤1 帧验收未达成 |
+| Z7.2 HDR+ + Motion | 部分完成 | encoder 使用 previewGain；HDR+ ZSL 只使用完整预卷（adaptive 3–5 帧，strict 必须满 burst），不补拍/不 disarm；still PTS 未对齐 |
 | Z8 零拷贝 ring | 未开始 | 实验项，需 feature flag 与真机帧率/热验证 |
+| Adaptive ZSL | 已实现 | `zslAdaptive` 开关：稳定 3–5 帧直接用实际帧数做 HDR+；无稳定段取最新有效 RAW 走非 HDR+ 单帧；严格模式必须满预卷，否则 forward |
+| 快门动画 | 未实现 | 计划中的 ZSL 快门反馈/降级提示 |
+| Pixel 3 验证 | 部分通过 | 已修复 Android 14 display NPE；Pixel 3 上 adaptive 5 帧 ZSL 成功出 DNG/JPG；still PTS/连续场景待测 |
 | Z9 核心测试 | 部分完成 | AF/ring/EV/formatter 已有；RawFrameRouter 状态机、trim、迟到 result 仍缺 |
 | 真机矩阵 | 未开始 | 当前无可用物理设备 |
 
