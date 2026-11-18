@@ -7,6 +7,7 @@ import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
+import android.media.Image
 import android.media.ImageReader
 import android.util.Log
 import android.util.Range
@@ -18,12 +19,16 @@ import kotlinx.coroutines.launch
 import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
 import top.maary.darkbag.camera.delegate.CameraUiHost
+import top.maary.darkbag.camera.zsl.ZslBurstSeed
+import top.maary.darkbag.camera.zsl.RawFrameRouter
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.pipeline.sink.CaptureSink
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.processor.HdrPlusRequestManager
 import top.maary.darkbag.processor.HdrPlusStreamingBurst
+import top.maary.darkbag.processor.StreamingBurstFrame
 import top.maary.darkbag.processor.StreamingBurstResult
+import top.maary.darkbag.processor.StreamingBufferPool
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.ExposureUtils
@@ -51,13 +56,26 @@ internal class HdrPlusBurstCaptureExecutor(
         sink: CaptureSink? = null,
         isFrame1Trigger: Boolean = false,
         hfMetadata: HalfFrameManager.Metadata? = null,
-        timing: StandardTimingTracker? = null
-    ) {
+        timing: StandardTimingTracker? = null,
+        seed: ZslBurstSeed? = null
+    ): Boolean {
         val appContext = env.hostContext.applicationContext
-        val device = env.sessionArbiter.camera2Device ?: run { onAbortCapture(); return }
-        val session = env.sessionArbiter.camera2Session ?: run { onAbortCapture(); return }
-        val reader = env.sessionArbiter.rawImageReader ?: run { onAbortCapture(); return }
-        val handler = env.sessionArbiter.camera2Handler ?: run { onAbortCapture(); return }
+        val device = env.sessionArbiter.camera2Device ?: run {
+            if (seed != null) seed.release() else onAbortCapture()
+            return false
+        }
+        val session = env.sessionArbiter.camera2Session ?: run {
+            if (seed != null) seed.release() else onAbortCapture()
+            return false
+        }
+        val reader = env.sessionArbiter.rawImageReader ?: run {
+            if (seed != null) seed.release() else onAbortCapture()
+            return false
+        }
+        val handler = env.sessionArbiter.camera2Handler ?: run {
+            if (seed != null) seed.release() else onAbortCapture()
+            return false
+        }
 
         env.runtimeState.isBurstActive = true
         val captureStartTime = hfMetadata?.captureTimeMillis ?: System.currentTimeMillis()
@@ -69,8 +87,9 @@ internal class HdrPlusBurstCaptureExecutor(
         val currentZoom = specAssembler.resolveEffectiveZoom(capturedLens, null)
         var watchdog: Job? = null
 
+        var seedEnqueued = 0
         try {
-            val result = env.runtimeState.captureResultFlow.replayCache.lastOrNull()
+            val result = seed?.baseResult ?: env.runtimeState.captureResultFlow.replayCache.lastOrNull()
             val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
             val curTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
             val validIsoRange = env.runtimeState.isoRange ?: Range(100, 3200)
@@ -80,14 +99,15 @@ internal class HdrPlusBurstCaptureExecutor(
                 curIso, curTime, validIsoRange, validTimeRange,
                 currentPrefs.hdrUnderexposureMode, env.runtimeState.lastClippingRatio
             )
-            val burstIso = if (env.runtimeState.isManualIso) env.runtimeState.currentIso else config.iso
-            val burstTime = if (env.runtimeState.isManualShutter) env.runtimeState.currentExposureTime else config.exposureTime
-            val burstGain = if (env.runtimeState.isManualExposure) {
+            val burstIso = seed?.iso ?: if (env.runtimeState.isManualIso) env.runtimeState.currentIso else config.iso
+            val burstTime = seed?.exposureTimeNs
+                ?: if (env.runtimeState.isManualShutter) env.runtimeState.currentExposureTime else config.exposureTime
+            val burstGain = seed?.digitalGain ?: if (env.runtimeState.isManualExposure) {
                 if (env.runtimeState.currentEvIndex != 0) (2.0).pow(env.runtimeState.currentEvIndex.toDouble() / 3.0).toFloat() else 1.0f
             } else {
                 config.digitalGain
             }
-            val burstSize = currentPrefs.hdrBurstCount
+            val burstSize = seed?.targetFrameCount ?: currentPrefs.hdrBurstCount
 
             if (isFrame1Trigger) {
                 coordinator.writeScopedHalfFrameStep(
@@ -132,6 +152,13 @@ internal class HdrPlusBurstCaptureExecutor(
             )
             if (sessionHandle == 0L) {
                 Log.e(TAG, "Failed to create native streaming session")
+                if (seed != null) {
+                    // Let the caller fall back to the forward burst without emitting a sink error.
+                    seed.release()
+                    env.runtimeState.isBurstActive = false
+                    env.cameraViewModel.setBurstActive(false)
+                    return false
+                }
                 if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
                 onNotifySinkFailure(
                     appContext, sink, hfMetadata,
@@ -139,7 +166,7 @@ internal class HdrPlusBurstCaptureExecutor(
                     currentZoom, burstLensId, captureStartTime
                 )
                 onAbortCapture()
-                return
+                return false
             }
 
             HdrPlusRequestManager.onTaskStarted()
@@ -185,7 +212,9 @@ internal class HdrPlusBurstCaptureExecutor(
                     onNotifySinkFailure(appContext, sink, hfMetadata, error, currentZoom, burstLensId, captureStartTime)
                     env.runtimeState.isBurstActive = false
                     env.cameraViewModel.setBurstActive(false)
+                    env.runtimeState.hdrPlusStreamingBurstHelper?.abort()
                     env.runtimeState.hdrPlusStreamingBurstHelper = null
+                    env.sessionArbiter.rawFrameRouter?.endCapture()
                     env.lifecycleScope.launch(Dispatchers.Main) {
                         ui.hideProcessingAnimation()
                         ui.resetBurstUi()
@@ -200,20 +229,33 @@ internal class HdrPlusBurstCaptureExecutor(
                 ui.cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
             }
 
-            val burstRequests = buildBurstRequests(
-                device, reader, burstChars, combinedOrientation, burstIso, burstTime, burstSize
-            )
-            val framesCaptured = AtomicInteger(0)
-            watchdog = launchBurstWatchdog(
-                appContext, sink, isFrame1Trigger, hfMetadata, captureStartTime,
-                currentZoom, burstLensId, burstSize, framesCaptured, isTaskStarted, burstHelper
-            )
+            val framesCaptured = AtomicInteger(seed?.preRollCount ?: 0)
+            val framesComplete = AtomicBoolean(false)
+            var router: RawFrameRouter? = null
 
-            reader.setOnImageAvailableListener({ r ->
-                val image = r.acquireNextImage() ?: return@setOnImageAvailableListener
+            fun onBurstFramesComplete() {
+                if (!framesComplete.compareAndSet(false, true)) return
+                watchdog?.cancel()
+                router?.endCapture()
+                timing?.captureCallback = System.currentTimeMillis()
+                timing?.recordShutterReady()
+                env.lifecycleScope.launch(Dispatchers.Main) {
+                    if (isTaskStarted.compareAndSet(false, true)) HdrPlusRequestManager.onTaskStarted()
+                    env.runtimeState.isBurstActive = false
+                    env.cameraViewModel.setBurstActive(false)
+                    ui.resetBurstUi()
+                    if (!isFrame1Trigger && ui.cameraUiContainerBinding?.processingProgress?.visibility != View.VISIBLE) {
+                        ui.showProcessingAnimation()
+                    }
+                    if (isFrame1Trigger) coordinator.triggerAutoBurst()
+                }
+            }
+
+            fun handleIncomingImage(image: Image) {
                 val frameAccepted = try {
                     val plane = image.planes[0]
-                    val frameResult = metadataExtractor.findCaptureResultSync(image.timestamp)
+                    val frameResult = metadataExtractor.findCaptureResultExact(image.timestamp)
+                        ?: metadataExtractor.findCaptureResultSync(image.timestamp)
                     val exposureTimeNs = frameResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: burstTime
                     val noisePair = frameResult?.get(CaptureResult.SENSOR_NOISE_PROFILE)
                     val npS = noisePair?.firstOrNull()?.first?.toFloat()
@@ -245,35 +287,90 @@ internal class HdrPlusBurstCaptureExecutor(
                         ui.cameraUiContainerBinding?.cameraCaptureButton?.setProgress(count.toFloat() / burstSize)
                     }
                     if (count >= burstSize) {
-                        watchdog?.cancel()
-                        timing?.captureCallback = System.currentTimeMillis()
-                        timing?.recordShutterReady()
-                        env.lifecycleScope.launch(Dispatchers.Main) {
-                            if (isTaskStarted.compareAndSet(false, true)) HdrPlusRequestManager.onTaskStarted()
-                            env.runtimeState.isBurstActive = false
-                            env.cameraViewModel.setBurstActive(false)
-                            ui.resetBurstUi()
-                            if (!isFrame1Trigger && ui.cameraUiContainerBinding?.processingProgress?.visibility != View.VISIBLE) {
-                                ui.showProcessingAnimation()
-                            }
-                            if (isFrame1Trigger) coordinator.triggerAutoBurst()
-                        }
+                        onBurstFramesComplete()
                     }
                 }
-            }, handler)
+            }
 
-            session.captureBurst(burstRequests, object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(
-                    session: CameraCaptureSession,
-                    request: CaptureRequest,
-                    result: TotalCaptureResult
-                ) {
-                    onRecordCaptureResult(result)
+            if (seed != null) {
+                val seedFrames = seed.frames
+                for (frame in seedFrames) {
+                    val frameResult = frame.result
+                    val noisePair = frameResult?.get(CaptureResult.SENSOR_NOISE_PROFILE)
+                    val npS = noisePair?.firstOrNull()?.first?.toFloat()
+                        ?: noiseProfileFlat?.getOrNull(0)?.toFloat() ?: 0.0001f
+                    val npO = noisePair?.firstOrNull()?.second?.toFloat()
+                        ?: noiseProfileFlat?.getOrNull(1)?.toFloat() ?: 0.00001f
+                    val streamingFrame = StreamingBurstFrame(
+                        width = frame.width,
+                        height = frame.height,
+                        timestampNs = frame.timestamp,
+                        exposureTimeNs = frame.exposureTimeNs ?: burstTime,
+                        rotationDegrees = burstSensorOrientation,
+                        physicalId = burstLensId,
+                        noiseProfileS = npS,
+                        noiseProfileO = npO
+                    )
+                    if (!burstHelper.enqueuePreloadedFrame(frame.buffer, streamingFrame)) {
+                        throw IllegalStateException("HDR+ ZSL ring frame was rejected by the burst")
+                    }
+                    seedEnqueued++
                 }
-            }, handler)
+                env.lifecycleScope.launch(Dispatchers.Main) {
+                    ui.cameraUiContainerBinding?.cameraCaptureButton?.setProgress(
+                        seed.preRollCount.toFloat() / burstSize
+                    )
+                }
+            }
+
+            if (framesCaptured.get() >= burstSize) {
+                router?.endCapture()
+                onBurstFramesComplete()
+            } else {
+                val remaining = burstSize - framesCaptured.get()
+                val burstRequests = buildBurstRequests(
+                    device, reader, burstChars, combinedOrientation, burstIso, burstTime, remaining
+                )
+                watchdog = launchBurstWatchdog(
+                    appContext, sink, isFrame1Trigger, hfMetadata, captureStartTime,
+                    currentZoom, burstLensId, burstSize, framesCaptured, isTaskStarted, burstHelper
+                )
+                router = env.sessionArbiter.rawFrameRouter
+                if (router != null) {
+                    if (!router.beginCapture(::handleIncomingImage)) {
+                        throw IllegalStateException("Failed to switch RAW router to capture mode")
+                    }
+                } else {
+                    reader.setOnImageAvailableListener({ r ->
+                        r.acquireNextImage()?.let(::handleIncomingImage)
+                    }, handler)
+                }
+                session.captureBurst(burstRequests, object : CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureStarted(
+                        session: CameraCaptureSession,
+                        request: CaptureRequest,
+                        timestamp: Long,
+                        frameNumber: Long
+                    ) {
+                        env.sessionArbiter.rawFrameRouter?.onCaptureStarted(timestamp)
+                    }
+
+                    override fun onCaptureCompleted(
+                        session: CameraCaptureSession,
+                        request: CaptureRequest,
+                        result: TotalCaptureResult
+                    ) {
+                        onRecordCaptureResult(result)
+                    }
+                }, handler)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Camera2 burst failed", e)
             watchdog?.cancel()
+            if (seed != null) {
+                seed.releaseFrom(seedEnqueued)
+            }
+            env.sessionArbiter.rawFrameRouter?.endCapture()
             if (isTaskStarted.compareAndSet(true, false)) HdrPlusRequestManager.onTaskFinished()
             if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
             onNotifySinkFailure(appContext, sink, hfMetadata, e, currentZoom, burstLensId, captureStartTime)
@@ -282,7 +379,11 @@ internal class HdrPlusBurstCaptureExecutor(
             env.runtimeState.hdrPlusStreamingBurstHelper?.abort()
             env.runtimeState.hdrPlusStreamingBurstHelper = null
             env.lifecycleScope.launch(Dispatchers.Main) { ui.resetBurstUi() }
+            // A seed-backed failure has already been surfaced through the sink; returning true
+            // prevents CameraModeController from launching a second forward burst.
+            return seed != null
         }
+        return true
     }
 
     private fun launchBurstWatchdog(
@@ -302,6 +403,7 @@ internal class HdrPlusBurstCaptureExecutor(
         val capturedCount = framesCaptured.get()
         if (env.runtimeState.isBurstActive && capturedCount < burstSize) {
             Log.e(TAG, "Burst capture timed out! Captured $capturedCount/$burstSize frames.")
+            env.sessionArbiter.rawFrameRouter?.endCapture()
             env.runtimeState.isBurstActive = false
             ui.resetBurstUi()
             if (capturedCount > 0) {

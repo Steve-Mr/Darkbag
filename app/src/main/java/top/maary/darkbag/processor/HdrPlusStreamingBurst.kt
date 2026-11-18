@@ -291,6 +291,29 @@ class HdrPlusStreamingBurst(
     }
 
     /**
+     * Enqueues a frame buffer whose ownership has already been transferred to this burst.
+     * Used by HDR+ ZSL to avoid a second copy of pre-roll frames. Returns false when the
+     * buffer was not accepted; the caller must then release it.
+     */
+    fun enqueuePreloadedFrame(buffer: ByteBuffer, frame: StreamingBurstFrame): Boolean {
+        if (!buffer.isDirect) return false
+        val expected = frame.width * frame.height * 2
+        if (buffer.capacity() < expected) return false
+        synchronized(lock) {
+            if (isCompleted || isAborted || enqueuedCount >= frameCount) return false
+            buffer.position(0)
+            buffer.limit(expected)
+            val sendResult = frameChannel.trySend(QueuedFrame(buffer, frame))
+            if (!sendResult.isSuccess) return false
+            enqueuedCount++
+            if (enqueuedCount == frameCount) {
+                frameChannel.close()
+            }
+            return true
+        }
+    }
+
+    /**
      * Rapidly receives an incoming Camera2 RAW frame, copies it into a pooled DirectByteBuffer (~2ms),
      * enqueues it for background accumulation, and returns immediately so the caller can close the Image.
      */

@@ -9,12 +9,16 @@ import android.hardware.camera2.CaptureRequest
 import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.view.Surface
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import top.maary.darkbag.camera.ConcurrentFrontCameraManager
 import top.maary.darkbag.camera.MultiCameraCaptureManager
 import top.maary.darkbag.camera.state.CameraRuntimeStateHolder
+import top.maary.darkbag.camera.zsl.RawFrameRouter
 import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.LensInfo
@@ -44,6 +48,8 @@ class CameraSessionArbiter(
     var rawImageReader: ImageReader? = null
     var analysisImageReader: ImageReader? = null
     var lutProcessor: LutSurfaceProcessor? = null
+    @Volatile var rawFrameRouter: RawFrameRouter? = null
+    private var zslRawThread: HandlerThread? = null
 
     val camera2Device: CameraDevice?
         get() = sessionController.cameraDevice
@@ -169,9 +175,31 @@ class CameraSessionArbiter(
         }
     }
 
+    fun ensureRawFrameRouter(
+        reader: ImageReader,
+        resultLookup: (Long) -> android.hardware.camera2.TotalCaptureResult?
+    ): RawFrameRouter {
+        rawFrameRouter?.close()
+        zslRawThread?.quitSafely()
+        val thread = HandlerThread("ZslRawThread").apply { start() }
+        zslRawThread = thread
+        val router = RawFrameRouter(reader, Handler(thread.looper), resultLookup)
+        rawFrameRouter = router
+        return router
+    }
+
+    fun closeRawFrameRouter() {
+        rawFrameRouter?.detachRing()?.clear()
+        rawFrameRouter?.close()
+        rawFrameRouter = null
+        zslRawThread?.quitSafely()
+        zslRawThread = null
+    }
+
     suspend fun closeSingleCameraResources() {
         camera2Lock.withLock {
             state.captureResults.clear()
+            withContext(Dispatchers.Default) { closeRawFrameRouter() }
             sessionController.closeCamera()
             rawImageReader?.close()
             rawImageReader = null

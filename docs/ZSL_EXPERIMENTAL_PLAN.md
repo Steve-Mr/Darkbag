@@ -10,6 +10,23 @@
 
 ---
 
+## 实现状态（2026-11-18）
+
+| 阶段 | 状态 | 说明 |
+|---|---|---|
+| Stage 0：检测 + 设置 | 已实现 | `ZslModels.kt`、`ZslCapabilityDetector.kt`、DataStore 键、实验性 Bento 开关/双行状态、按下时刻记录、CaptureResult 有界缓存/精确查找、preview ZSL profile |
+| Stage 1：A 单帧 ZSL | 已实现 | `RawFrameRouter`、`ZslRawRing`、`ZslCaptureController`，单帧从环取出后进入现有 `processImageAsync` |
+| Stage 2：HDR+ ZSL | 已实现（代码） | 预卷稳定段选择、`ZslBurstSeed`、`HdrPlusStreamingBurst.enqueuePreloadedFrame`、补拍、viewfinder-only 增益、失败回前向 HDR+ |
+| 运行时 arm 探针 | 最小版已实现 | arm 后 2s 检查环帧数与 sensor fps；<15fps 或无足够帧则 disarm。完整 preview-drop/copy P95 探针仍需真机标定 |
+| B1 | 仅检测 | 没有实验室设备证明 `getValidOutputFormatsForInput(PRIVATE)` 含 RAW，因此不写 session 路径 |
+| 真机验证 | 未完成 | 当前连接的 `redroid11_x86_64` 无相机；画质/帧率/热/内存目标仍需设备矩阵 |
+
+**当前质量门禁**：`testDebugUnitTest` 全绿；`:app:buildCMakeRelease[arm64-v8a]` 可链接（libraw 子模块在本 worktree 为本地复制，构建输出仍有 libraw 既有的 `NO_JPEG` 宏重定义 warning，不是本次改动引入）。没有设备，因此不声称已达到文档中的画质/延迟数值目标。
+
+**Reviewer 记录**：首轮独立 review 为 `REVISE_REQUIRED`，已修复 P0（RAW router 用 `onCaptureStarted` 时间戳拒绝旧预览帧）、P1（burst 中禁止 disarm、seed 失败不重复触发前向 burst、router/helper 收尾、seed 释放）与若干 P2（generation token、AE clamp、pool 恢复、单帧 watchdog）。复审（source-only）为 `APPROVED`。仍未覆盖：设置状态与实际 arm 状态的一致性、真机画质/热/延迟。
+
+---
+
 ## 0. 决策摘要（已锁定）
 
 1. **保留 HDR+ ZSL，且列入本期**。它不是“HDR+ Enhanced”的替代，而是 GCam 的 “HDR+ On”：用按下快门前的环形帧快速合成；画质低于/接近前向 HDR+，低光或不稳定时自动回前向 HDR+。

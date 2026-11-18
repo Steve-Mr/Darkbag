@@ -4,6 +4,7 @@ import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.pipeline.sink.CaptureSink
 import top.maary.darkbag.utils.HalfFrameManager
 import top.maary.darkbag.utils.LensInfo
+import android.hardware.camera2.TotalCaptureResult
 import java.nio.ByteBuffer
 
 /**
@@ -25,5 +26,6 @@ data class RawImageHolder(
     val motionPhotoMp4Path: String? = null,
     val motionPhotoStillPtsUs: Long = 0L,
     val sink: CaptureSink? = null,
-    val capturedLens: LensInfo? = null
+    val capturedLens: LensInfo? = null,
+    val captureResult: TotalCaptureResult? = null
 )

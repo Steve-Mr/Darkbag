@@ -3,6 +3,7 @@ package top.maary.darkbag.camera.delegate
 import android.Manifest
 import android.animation.ValueAnimator
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import android.view.OrientationEventListener
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.core.content.ContextCompat
@@ -68,7 +69,10 @@ class CameraShutterController(
         }
         shutter.onLongPressHoldReleased = { videoController.handleShutterLongPressReleased() }
         shutter.setOnClickListener {
-            val timing = StandardTimingTracker(shutterClick = System.currentTimeMillis())
+            val timing = StandardTimingTracker(
+                shutterClick = System.currentTimeMillis(),
+                shutterPressElapsedNs = SystemClock.elapsedRealtimeNanos()
+            )
             coordinator.ensureActiveCoordinator()?.onShutterTriggered(timing)
         }
     }

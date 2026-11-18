@@ -32,6 +32,8 @@ internal class LutGlShaderPipeline {
     private var lutSizeLoc = -1
     private var focusPeakingLoc = -1
     private var texelSizeLoc = -1
+    private var previewGainLoc = -1
+    @Volatile private var previewGain = 1.0f
     private var posHandle = -1
     private var texHandle = -1
 
@@ -49,6 +51,10 @@ internal class LutGlShaderPipeline {
     fun initProgramAndDummyLut() {
         createProgram()
         createDummyLut()
+    }
+
+    fun setPreviewGain(gain: Float) {
+        previewGain = gain.coerceIn(1.0f, 4.0f)
     }
 
     fun uploadLutTexture(lutData: FloatArray, size: Int) {
@@ -98,6 +104,7 @@ internal class LutGlShaderPipeline {
         if (lutSizeLoc >= 0) GLES30.glUniform1i(lutSizeLoc, currentLutSize)
         if (colorEngineModeLoc >= 0) GLES30.glUniform1i(colorEngineModeLoc, currentColorEngineMode)
         if (focusPeakingLoc >= 0) GLES30.glUniform1i(focusPeakingLoc, if (focusPeakingEnabled) 1 else 0)
+        if (previewGainLoc >= 0) GLES30.glUniform1f(previewGainLoc, previewGain)
         if (focusPeakingEnabled && texelSizeLoc >= 0) {
             val tw = if (inputWidth > 0) 1.0f / inputWidth.toFloat() else 1.0f / 1080f
             val th = if (inputHeight > 0) 1.0f / inputHeight.toFloat() else 1.0f / 1920f
@@ -176,6 +183,7 @@ internal class LutGlShaderPipeline {
         colorEngineModeLoc = GLES30.glGetUniformLocation(program, "uColorEngineMode")
         focusPeakingLoc = GLES30.glGetUniformLocation(program, "uFocusPeakingEnabled")
         texelSizeLoc = GLES30.glGetUniformLocation(program, "uTexelSize")
+        previewGainLoc = GLES30.glGetUniformLocation(program, "uPreviewGain")
 
         posHandle = GLES30.glGetAttribLocation(program, "aPosition")
         texHandle = GLES30.glGetAttribLocation(program, "aTexCoord")
@@ -272,6 +280,7 @@ internal class LutGlShaderPipeline {
             uniform int uColorEngineMode;
             uniform int uFocusPeakingEnabled;
             uniform vec2 uTexelSize;
+            uniform float uPreviewGain;
             in vec2 vTexCoord;
             out vec4 outColor;
 
@@ -373,18 +382,19 @@ internal class LutGlShaderPipeline {
             void main() {
                 vec4 src = texture(uTexture, vTexCoord);
                 vec3 finalRgb;
+                vec3 srcLinear = srgbToLinear(src.rgb) * uPreviewGain;
                 if (uLutSize > 0) {
-                    vec3 wideGamutRgb = max(vec3(0.0), uGamutMatrix * srgbToLinear(src.rgb));
+                    vec3 wideGamutRgb = max(vec3(0.0), uGamutMatrix * srcLinear);
                     vec3 logRgb = vec3(applyLogCurve(wideGamutRgb.r, uLogType), applyLogCurve(wideGamutRgb.g, uLogType), applyLogCurve(wideGamutRgb.b, uLogType));
                     float lutSizeFloat = float(uLutSize);
                     vec3 lutCoord = logRgb * ((lutSizeFloat - 1.0) / lutSizeFloat) + vec3(0.5 / lutSizeFloat);
                     finalRgb = triangularDither(texture(uLut, lutCoord).rgb, gl_FragCoord.xy);
                 } else if (uLogType > 0) {
-                    vec3 wideGamutRgb = max(vec3(0.0), uGamutMatrix * srgbToLinear(src.rgb));
+                    vec3 wideGamutRgb = max(vec3(0.0), uGamutMatrix * srcLinear);
                     vec3 logRgb = vec3(applyLogCurve(wideGamutRgb.r, uLogType), applyLogCurve(wideGamutRgb.g, uLogType), applyLogCurve(wideGamutRgb.b, uLogType));
                     finalRgb = triangularDither(logRgb, gl_FragCoord.xy);
                 } else {
-                    vec3 linearRgb = srgbToLinear(src.rgb);
+                    vec3 linearRgb = srcLinear;
                     vec3 mapped = uColorEngineMode == 0 ? applyPbrNeutral(linearRgb)
                         : (uColorEngineMode == 1 ? applyPureLuma(linearRgb)
                         : (uColorEngineMode == 2 ? applySonyUchimura(linearRgb) : applyAcesFit(linearRgb)));

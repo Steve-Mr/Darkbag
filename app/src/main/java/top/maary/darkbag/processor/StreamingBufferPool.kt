@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 object StreamingBufferPool {
     private const val TAG = "StreamingBufferPool"
     private const val MAX_CACHED_BUFFERS = 12 // Up to 12 frames (~288MB max), supports dual concurrent bursts with zero allocation
+    @Volatile private var retentionLimit = MAX_CACHED_BUFFERS
     private val pool = ConcurrentLinkedQueue<ByteBuffer>()
 
     private fun safeAllocate(capacity: Long): ByteBuffer? {
@@ -49,12 +50,24 @@ object StreamingBufferPool {
     @Synchronized
     fun release(buffer: ByteBuffer?) {
         if (buffer != null && buffer.isDirect) {
-            if (pool.size < MAX_CACHED_BUFFERS) {
+            if (pool.size < retentionLimit) {
                 buffer.clear()
                 pool.offer(buffer)
             } else {
                 safeFree(buffer)
             }
+        }
+    }
+
+    /**
+     * Bounds retained direct buffers while ZSL is armed. A limit of 0 makes release() free
+     * immediately, so the ring's own budget is the only retained RAW memory.
+     */
+    @Synchronized
+    fun setRetentionLimit(limit: Int) {
+        retentionLimit = limit.coerceIn(0, MAX_CACHED_BUFFERS)
+        while (pool.size > retentionLimit) {
+            pool.poll()?.let { safeFree(it) }
         }
     }
 

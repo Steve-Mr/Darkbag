@@ -22,6 +22,7 @@ import top.maary.darkbag.R
 import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
 import top.maary.darkbag.camera.delegate.CameraUiHost
+import top.maary.darkbag.camera.zsl.ZslBurstSeed
 import top.maary.darkbag.fragments.BurstResult
 import top.maary.darkbag.fragments.HdrPlusBurst
 import top.maary.darkbag.models.CaptureMetadata
@@ -139,8 +140,18 @@ class CameraCapturePipelineDispatcher(
         sink: CaptureSink? = null,
         isFrame1Trigger: Boolean = false,
         hfMetadata: HalfFrameManager.Metadata? = null,
-        timing: StandardTimingTracker? = null
-    ) = burstExecutor.triggerHdrPlusBurstCamera2(sink, isFrame1Trigger, hfMetadata, timing)
+        timing: StandardTimingTracker? = null,
+        seed: ZslBurstSeed? = null
+    ): Boolean = burstExecutor.triggerHdrPlusBurstCamera2(sink, isFrame1Trigger, hfMetadata, timing, seed)
+
+    /** Enqueues a single RAW frame selected by the ZSL ring. */
+    fun enqueueZslSingle(holder: RawImageHolder): Boolean {
+        val app = env.hostContext.applicationContext as? MainApplication ?: return false
+        app.applicationScope.launch {
+            processImageAsync(app, holder)
+        }
+        return true
+    }
 
     fun copyAndroidImageToHolder(
         image: Image,
@@ -182,7 +193,7 @@ class CameraCapturePipelineDispatcher(
             timing?.processingStart = System.currentTimeMillis()
             var enqueued = false
             try {
-                val captureResult = metadataExtractor.findCaptureResult(image.timestamp)
+                val captureResult = image.captureResult ?: metadataExtractor.findCaptureResult(image.timestamp)
                 val targetCharId = activePhysicalId(captureResult)
                     ?: image.physicalId
                     ?: image.capturedLens?.id
@@ -328,7 +339,14 @@ class CameraCapturePipelineDispatcher(
     private fun recordCaptureResult(result: TotalCaptureResult) {
         val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
         if (timestamp != null) {
-            env.runtimeState.captureResults[timestamp] = result
+            synchronized(env.runtimeState.captureResults) {
+                if (env.runtimeState.captureResults.size >= 32) {
+                    env.runtimeState.captureResults.keys.firstOrNull()?.let {
+                        env.runtimeState.captureResults.remove(it)
+                    }
+                }
+                env.runtimeState.captureResults[timestamp] = result
+            }
         }
         (env.runtimeState.captureResultFlow as? MutableSharedFlow)?.tryEmit(result)
     }

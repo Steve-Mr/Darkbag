@@ -63,6 +63,13 @@ class CameraCaptureMetadataExtractor(
         }
     }
 
+    /** ZSL binding: exact sensor timestamp only; never a 5 ms near-match. */
+    fun findCaptureResultExact(timestamp: Long): TotalCaptureResult? {
+        synchronized(captureResults) {
+            return captureResults[timestamp]
+        }
+    }
+
     fun createCaptureMetadataFromTimestamp(
         timestamp: Long,
         capturedLens: LensInfo? = null
