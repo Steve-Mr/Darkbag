@@ -505,9 +505,6 @@
     <string name="onboarding_step_format">STEP %1$02d / %2$02d</string>
     <string name="onboarding_section_permissions">CORE PERMISSIONS</string>
     <string name="onboarding_badge_step_1">STEP 1</string>
-    <string name="onboarding_badge_required">Required</string>
-    <string name="onboarding_badge_recommended">Recommended</string>
-    <string name="onboarding_badge_optional_video">Video Optional</string>
     <string name="onboarding_badge_format">FORMAT</string>
     <string name="onboarding_section_optics">1.0X FOCAL BASE &amp; METADATA</string>
     <string name="onboarding_badge_optics">OPTICS</string>

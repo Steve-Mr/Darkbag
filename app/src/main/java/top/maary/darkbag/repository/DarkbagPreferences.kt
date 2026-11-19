@@ -34,7 +34,7 @@ data class DarkbagPreferences(
     val force60Fps: Boolean = false,
     val debugEnabled: Boolean = false,
     val motionPhotoEnabled: Boolean = false,
-    val motionPhotoAudioEnabled: Boolean = false,
+    val motionPhotoAudioEnabled: Boolean = true,
     val saveLocationEnabled: Boolean = false,
     val rawOutputType: String = "Bayer CFA RAW (~12MB, Default)",
     val dngCompressionMode: Int = 0,

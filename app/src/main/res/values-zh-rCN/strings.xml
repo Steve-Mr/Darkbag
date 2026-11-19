@@ -481,9 +481,6 @@
     <string name="onboarding_step_format">步骤 %1$02d / %2$02d</string>
     <string name="onboarding_section_permissions">核心权限</string>
     <string name="onboarding_badge_step_1">步骤 1</string>
-    <string name="onboarding_badge_required">必选</string>
-    <string name="onboarding_badge_recommended">推荐</string>
-    <string name="onboarding_badge_optional_video">视频可选</string>
     <string name="onboarding_badge_format">格式</string>
     <string name="onboarding_section_optics">1.0x 默认焦段与元数据</string>
     <string name="onboarding_badge_optics">光学</string>

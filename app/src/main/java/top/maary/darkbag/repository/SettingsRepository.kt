@@ -156,7 +156,7 @@ class SettingsRepository(context: Context) {
             force60Fps = bool(PreferenceKeys.KEY_FORCE_60FPS, false),
             debugEnabled = bool(PreferenceKeys.KEY_DEBUG_ENABLED, false),
             motionPhotoEnabled = bool(PreferenceKeys.KEY_MOTION_PHOTO, false),
-            motionPhotoAudioEnabled = bool(PreferenceKeys.KEY_MOTION_PHOTO_AUDIO, false),
+            motionPhotoAudioEnabled = bool(PreferenceKeys.KEY_MOTION_PHOTO_AUDIO, true),
             saveLocationEnabled = bool(PreferenceKeys.KEY_SAVE_LOCATION, false),
             rawOutputType = rawTypeName,
             dngCompressionMode = int(PreferenceKeys.KEY_DNG_COMPRESSION_MODE, 0),

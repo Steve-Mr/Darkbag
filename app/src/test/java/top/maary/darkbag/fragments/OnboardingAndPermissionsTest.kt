@@ -220,15 +220,16 @@ class OnboardingAndPermissionsTest {
         val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
         val inflater = LayoutInflater.from(themedContext)
         val binding = FragmentPermissionsBinding.inflate(inflater)
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        SettingsRepository.resetForTest(context)
+        val repo = SettingsRepository.getInstance(context).apply { awaitHydratedBlocking() }
 
         // Verify keys and defaults
-        assertEquals("motion_photo_enabled", SettingsFragment.KEY_MOTION_PHOTO)
-        assertEquals("motion_photo_audio_enabled", SettingsFragment.KEY_MOTION_PHOTO_AUDIO)
+        assertEquals("motion_photo_enabled", PreferenceKeys.KEY_MOTION_PHOTO)
+        assertEquals("motion_photo_audio_enabled", PreferenceKeys.KEY_MOTION_PHOTO_AUDIO)
 
         // Initial default state
-        assertFalse(prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false))
-        assertTrue(prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true))
+        assertFalse(repo.current().motionPhotoEnabled)
+        assertTrue(repo.current().motionPhotoAudioEnabled)
 
         // Badge parity
         assertEquals("LIVE", binding.switchMotionPhoto.badgeText)
@@ -252,11 +253,12 @@ class OnboardingAndPermissionsTest {
         val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
         val inflater = LayoutInflater.from(themedContext)
         val binding = FragmentPermissionsBinding.inflate(inflater)
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        SettingsRepository.resetForTest(context)
+        val repo = SettingsRepository.getInstance(context).apply { awaitHydratedBlocking() }
 
         // Verify key and default
-        assertEquals("use_internal_viewer", SettingsFragment.KEY_USE_INTERNAL_VIEWER)
-        assertTrue(prefs.getBoolean(SettingsFragment.KEY_USE_INTERNAL_VIEWER, true))
+        assertEquals("use_internal_viewer", PreferenceKeys.KEY_USE_INTERNAL_VIEWER)
+        assertTrue(repo.current().useInternalViewer)
 
         // Badge parity
         assertEquals("BUILT-IN", binding.switchUseInternalViewer.badgeText)
