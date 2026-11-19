@@ -15,6 +15,7 @@ import top.maary.darkbag.databinding.FragmentCameraBinding
 import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.modes.CaptureModeCoordinator
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.LocationHelper
 import top.maary.darkbag.utils.LutManager
@@ -40,6 +41,8 @@ interface CameraEnvironmentHost {
     val displayRotation: Int
     val isHdrPlusEnabled: Boolean
         get() = cameraViewModel.uiState.value.isHdrPlusEnabled
+    val settings: SettingsRepository
+        get() = SettingsRepository.getInstance(hostContext)
     val shouldMirror: Boolean
 
     fun shouldShowAudioPermissionRationale(): Boolean
@@ -64,6 +67,9 @@ interface CameraUiHost {
     fun showShutterBlackout()
     fun showProcessingAnimation()
     fun hideProcessingAnimation()
+    /** Lightweight ZSL-only shutter feedback; no capture/processing work. */
+    fun showZslCaptureFeedback() {}
+
     fun resetBurstUi()
     fun updateCurrentThumbnail(uri: Uri?)
     fun setGalleryThumbnail(filename: String?)

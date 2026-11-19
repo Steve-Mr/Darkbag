@@ -9,6 +9,7 @@ import com.google.android.material.color.MaterialColors
 import com.google.android.material.shape.ShapeAppearanceModel
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentSettingsBinding
+import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.repository.DarkbagPreferences
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.ui.CameraBentoDeckView
@@ -17,7 +18,9 @@ import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.DualLensPairPreference
 import top.maary.darkbag.utils.LutManager
 import top.maary.darkbag.utils.MultiCameraCountPreference
+import top.maary.darkbag.utils.MultiCameraHelper
 import top.maary.darkbag.viewmodel.CameraUiTier
+import kotlin.math.roundToInt
 
 /**
  * Delegate responsible for rendering DarkbagPreferences into Bento Matrix tiles,
@@ -287,6 +290,10 @@ class SettingsBentoDelegate(
         binding.switchHdrPlusOis.isChecked = state.hdrPlusOis
         binding.switchUseInternalViewer.isChecked = state.useInternalViewer
         binding.switchForce60fps.isChecked = state.force60Fps
+        binding.switchExpMulticamColorHarmonization.isChecked = state.expMultiCamColorHarmonization
+        binding.switchZsl.isChecked = state.zslEnabled
+        binding.switchZslAdaptive.isChecked = state.zslAdaptive
+        binding.switchZslLazyRing.isChecked = state.zslLazyRing
 
         // Half Frame
         binding.switchHalfFrameMode.isChecked = state.halfFrameMode
@@ -305,9 +312,17 @@ class SettingsBentoDelegate(
     private fun renderStylingAndVisibility(binding: FragmentSettingsBinding, state: DarkbagPreferences) {
         // Multi-Camera visibility
         val mcEnabled = state.multiCameraModeEnabled
-        binding.btnMenuMultiCameraCount.visibility = if (mcEnabled) View.VISIBLE else View.GONE
-        binding.btnMenuMultiCameraDualPair.visibility = if (mcEnabled && state.multiCameraCountPref == MultiCameraCountPreference.DUAL.key) View.VISIBLE else View.GONE
-        binding.tileMultiCameraSaveRaw.visibility = if (mcEnabled) View.VISIBLE else View.GONE
+        val nativeSupported = MultiCameraHelper.isMultiCameraSupported(context, forceEnable = false)
+        binding.switchMultiCameraForceEnable.visibility = if (nativeSupported) View.GONE else View.VISIBLE
+        if (mcEnabled) {
+            binding.layoutMultiCameraOptions.visibility = View.VISIBLE
+            binding.btnMenuMultiCameraCount.visibility = View.VISIBLE
+            binding.btnMenuMultiCameraDualPair.visibility = if (state.multiCameraCountPref == MultiCameraCountPreference.DUAL.key) View.VISIBLE else View.GONE
+            binding.tileMultiCameraSaveRaw.visibility = View.VISIBLE
+        } else {
+            binding.layoutMultiCameraOptions.visibility = View.GONE
+        }
+        updateMultiCameraCardStyling(binding, mcEnabled, animated = false)
 
         // Storage visibility & paths
         binding.layoutJpgStorage.visibility = if (state.saveJpg) View.VISIBLE else View.GONE
@@ -340,6 +355,152 @@ class SettingsBentoDelegate(
 
         // Debug section
         binding.sectionDebug.visibility = if (state.debugEnabled) View.VISIBLE else View.GONE
+        val zslSubVisibility = if (state.zslEnabled) View.VISIBLE else View.GONE
+        binding.switchZslAdaptive.visibility = zslSubVisibility
+        binding.switchZslLazyRing.visibility = zslSubVisibility
+        binding.cardZslDebug.visibility = zslSubVisibility
+
+        val isArmed = renderZslBadgeAndContainer(binding, state)
+
+        binding.tvZslStatus.text = CameraBentoDeckView.formatProTelemetry(
+            label = context.getString(R.string.zsl_status_label),
+            value = zslStatusValue(state),
+            isTabActive = false,
+            isValueManual = isArmed,
+            context = context,
+            maxChars = 0
+        )
+    }
+
+    private fun renderZslBadgeAndContainer(binding: FragmentSettingsBinding, state: DarkbagPreferences): Boolean {
+        val colorSecondary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondary, Color.GRAY)
+        val colorTertiary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorTertiary, Color.WHITE)
+        val colorError = MaterialColors.getColor(binding.root, androidx.appcompat.R.attr.colorError, Color.RED)
+        val colorOnSurfaceVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY)
+        val colorOnTertiaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnTertiaryContainer, Color.WHITE)
+        val density = context.resources.displayMetrics.density
+        val stroke1_5dp = (1.5f * density).roundToInt()
+
+        if (!state.zslEnabled) {
+            binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_off)
+            binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_secondary)
+            binding.badgeZslStatus.setTextColor(colorSecondary)
+            binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated = false)
+            binding.cardTrayExpZsl.strokeWidth = 0
+            binding.txtTitleExpZsl.setTextColor(colorOnSurfaceVariant)
+            binding.switchZslAdaptive.isEnabled = true
+            binding.switchZslLazyRing.isEnabled = true
+            return false
+        }
+
+        val activeMode = CaptureMode.fromKey(state.activeCaptureMode)
+        val is60FpsConflict = state.force60Fps
+        val isHdrUnsupported = !is60FpsConflict && state.hdrPlusEnabled && state.zslReason == "hdr_unsupported"
+        val isArmed = !is60FpsConflict && !isHdrUnsupported && (state.zslRoute == "raw_ring")
+        val isUnavailable = !is60FpsConflict && !isHdrUnsupported && (state.zslRoute != "raw_ring")
+
+        when {
+            is60FpsConflict -> {
+                binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_conflict)
+                binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_error)
+                binding.badgeZslStatus.setTextColor(colorError)
+                binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated = false)
+                binding.cardTrayExpZsl.strokeColor = colorError
+                binding.cardTrayExpZsl.strokeWidth = stroke1_5dp
+                binding.txtTitleExpZsl.setTextColor(colorError)
+                binding.switchZslAdaptive.isEnabled = false
+                binding.switchZslLazyRing.isEnabled = false
+            }
+
+            isHdrUnsupported -> {
+                binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_hdr_incompat)
+                binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_error)
+                binding.badgeZslStatus.setTextColor(colorError)
+                binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated = false)
+                binding.cardTrayExpZsl.strokeColor = colorError
+                binding.cardTrayExpZsl.strokeWidth = stroke1_5dp
+                binding.txtTitleExpZsl.setTextColor(colorError)
+                binding.switchZslAdaptive.isEnabled = false
+                binding.switchZslLazyRing.isEnabled = false
+            }
+
+            isUnavailable -> {
+                binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_unavailable)
+                binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_secondary)
+                binding.badgeZslStatus.setTextColor(colorSecondary)
+                binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated = false)
+                binding.cardTrayExpZsl.strokeWidth = 0
+                binding.txtTitleExpZsl.setTextColor(colorOnSurfaceVariant)
+                binding.switchZslAdaptive.isEnabled = false
+                binding.switchZslLazyRing.isEnabled = false
+            }
+
+            isArmed -> {
+                binding.badgeZslStatus.text = context.getString(R.string.badge_zsl_armed)
+                binding.badgeZslStatus.setBackgroundResource(R.drawable.bg_bento_badge_tertiary)
+                binding.badgeZslStatus.setTextColor(colorTertiary)
+                binding.cardTrayExpZsl.setContainerRole(BentoContainerRole.TERTIARY_CONTAINER, animated = false)
+                binding.cardTrayExpZsl.strokeWidth = 0
+                binding.txtTitleExpZsl.setTextColor(colorOnTertiaryContainer)
+                binding.switchZslAdaptive.isEnabled = true
+                binding.switchZslLazyRing.isEnabled = true
+            }
+        }
+        return isArmed
+    }
+
+    private fun zslStatusValue(state: DarkbagPreferences): String {
+        if (!state.zslEnabled) return context.getString(R.string.zsl_status_off)
+        if (state.force60Fps) {
+            return context.getString(R.string.zsl_status_inactive_60fps)
+        }
+        val activeMode = CaptureMode.fromKey(state.activeCaptureMode)
+        val isMultiCam = state.multiCameraModeEnabled && (activeMode == CaptureMode.MULTI_CAMERA)
+        return when (state.zslRoute) {
+            "raw_ring" -> when {
+                state.hdrPlusEnabled && state.zslReason == "hdr_unsupported" ->
+                    context.getString(R.string.zsl_status_inactive_hdr)
+
+                isMultiCam -> {
+                    if (state.hdrPlusEnabled) {
+                        context.getString(R.string.zsl_status_multicam_limited)
+                    } else {
+                        context.getString(R.string.zsl_status_multicam_single)
+                    }
+                }
+
+                state.hdrPlusEnabled -> {
+                    val preRoll = minOf(state.hdrBurstCount, 8)
+                    val baseHdr = context.getString(
+                        R.string.zsl_status_hdr_format,
+                        preRoll,
+                        state.hdrBurstCount
+                    )
+                    val evIndicator = formatUnderexposureEv(state.hdrUnderexposureMode)
+                    if (evIndicator.isNotEmpty()) {
+                        "$baseHdr · $evIndicator"
+                    } else {
+                        baseHdr
+                    }
+                }
+
+                else -> context.getString(R.string.zsl_status_single_format, 3)
+            }
+
+            "reprocess_raw" -> context.getString(R.string.zsl_status_reprocess)
+            else -> context.getString(R.string.zsl_status_unavailable)
+        }
+    }
+
+    private fun formatUnderexposureEv(mode: String): String {
+        return when {
+            mode.startsWith("Dynamic") -> "-1.0 EV"
+            mode.startsWith("-1") -> "-1.0 EV"
+            mode.startsWith("-2") -> "-2.0 EV"
+            mode.startsWith("Off") -> "0.0 EV"
+            mode.contains("EV") -> mode.trim()
+            else -> ""
+        }
     }
 
     fun updateSaveFormatCardStyling(binding: FragmentSettingsBinding, isJpg: Boolean, isRaw: Boolean) {
@@ -379,6 +540,23 @@ class SettingsBentoDelegate(
             binding.txtSubHalfFrame.setTextColor(colorOnSurfaceVariant)
         }
         binding.cardTrayHalfFrame.strokeWidth = 0
+    }
+
+    fun updateMultiCameraCardStyling(binding: FragmentSettingsBinding, enabled: Boolean, animated: Boolean = true) {
+        val colorSecondary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondary, Color.GRAY)
+        val colorOnSecondaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSecondaryContainer, Color.BLACK)
+        val colorOnSurfaceVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY)
+
+        if (enabled) {
+            binding.cardTrayAdvMulticam.setContainerRole(BentoContainerRole.SECONDARY_CONTAINER, animated)
+            binding.txtTitleAdvMulticam.setTextColor(colorOnSecondaryContainer)
+            binding.tvMultiCameraStatus.setTextColor(colorOnSecondaryContainer)
+        } else {
+            binding.cardTrayAdvMulticam.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated)
+            binding.txtTitleAdvMulticam.setTextColor(colorOnSurfaceVariant)
+            binding.tvMultiCameraStatus.setTextColor(colorOnSurfaceVariant)
+        }
+        binding.cardTrayAdvMulticam.strokeWidth = 0
     }
 
     fun updateStartupCards(binding: FragmentSettingsBinding, defaultStartup: String, enableCamera: Boolean, enablePlayground: Boolean) {

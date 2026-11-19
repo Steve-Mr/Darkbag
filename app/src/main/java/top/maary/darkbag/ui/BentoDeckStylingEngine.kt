@@ -379,9 +379,14 @@ object BentoDeckStylingEngine {
         value: String,
         isTabActive: Boolean = false,
         isValueManual: Boolean = false,
-        context: Context
+        context: Context,
+        maxChars: Int = 16
     ): CharSequence {
-        val truncatedValue = if (value.length > 16 && !value.endsWith("…")) value.take(15) + "…" else value
+        val truncatedValue = if (maxChars > 0 && value.length > maxChars && !value.endsWith("…")) {
+            value.take(maxChars - 1) + "…"
+        } else {
+            value
+        }
         val text = "$label\n$truncatedValue"
         val builder = SpannableStringBuilder(text)
         val dm = context.resources.displayMetrics

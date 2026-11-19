@@ -17,6 +17,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.SystemClock
 import android.util.Log
+import android.util.Range
 import android.util.Size
 import android.view.Surface
 import android.view.View
@@ -54,6 +55,11 @@ class CameraHardwareStreamController(
 
     private val camera2Lock: Mutex
         get() = env.sessionArbiter.camera2Lock
+
+    @Volatile private var zslRawTargetEnabled = false
+    @Volatile private var zslPreviewProfileEnabled = false
+    @Volatile private var zslAeCompensationSteps = 0
+    @Volatile private var zslFpsRange: Range<Int>? = null
 
     data class CameraCharacteristicsSnapshot(
         val isoRange: android.util.Range<Int>?,
@@ -154,6 +160,36 @@ class CameraHardwareStreamController(
         env.sessionArbiter.applySingleCameraCropToRequest(request)
     }
 
+    /** Adds/removes the RAW ring target without recreating the capture session. */
+    fun setZslRawTargetEnabled(enabled: Boolean) {
+        if (zslRawTargetEnabled == enabled) return
+        zslRawTargetEnabled = enabled
+        updateCamera2RepeatingRequest()
+    }
+
+    /** Applies the HDR+ ZSL preview exposure profile (AE compensation + bounded FPS range). */
+    fun setZslPreviewProfile(
+        enabled: Boolean,
+        aeCompensationSteps: Int = 0,
+        fpsRange: Range<Int>? = null
+    ) {
+        val changed = zslPreviewProfileEnabled != enabled ||
+            zslAeCompensationSteps != aeCompensationSteps ||
+            zslFpsRange != fpsRange
+        zslPreviewProfileEnabled = enabled
+        zslAeCompensationSteps = aeCompensationSteps
+        zslFpsRange = fpsRange
+        if (changed) updateCamera2RepeatingRequest()
+    }
+
+    private fun applyZslPreviewProfile(request: CaptureRequest.Builder) {
+        if (!zslPreviewProfileEnabled || env.runtimeState.isManualExposure) return
+        val rawEv = env.runtimeState.currentEvIndex + zslAeCompensationSteps
+        val ev = env.runtimeState.evRange?.let { rawEv.coerceIn(it.lower, it.upper) } ?: rawEv
+        request.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, ev)
+        zslFpsRange?.let { request.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
+    }
+
     fun updateCamera2RepeatingRequest(isHdrBurst: Boolean = false) {
         val handler = env.sessionArbiter.sessionController.backgroundHandler ?: return
         handler.post {
@@ -163,11 +199,15 @@ class CameraHardwareStreamController(
             try {
                 val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                 request.addTarget(surface)
-                val isMainLens = env.runtimeState.currentLens == null || (env.runtimeState.currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
-                if ((env.runtimeState.isManualExposure || env.isHdrPlusEnabled) && isMainLens) {
+                if (zslRawTargetEnabled) {
+                    env.sessionArbiter.rawImageReader?.surface?.let { request.addTarget(it) }
+                }
+                val shouldArmAnalysis = env.runtimeState.isManualExposure || env.isHdrPlusEnabled || env.settings.current().zslEnabled
+                if (shouldArmAnalysis) {
                     env.sessionArbiter.analysisImageReader?.surface?.let { request.addTarget(it) }
                 }
                 applyManualSettingsToRequest(request, isHdrBurst)
+                applyZslPreviewProfile(request)
 
                 session.setRepeatingRequest(request.build(), object : CameraCaptureSession.CaptureCallback() {
                     override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
@@ -183,7 +223,14 @@ class CameraHardwareStreamController(
     fun handleCaptureResult(result: TotalCaptureResult) {
         val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
         if (timestamp != null) {
-            env.runtimeState.captureResults[timestamp] = result
+            synchronized(env.runtimeState.captureResults) {
+                if (env.runtimeState.captureResults.size >= 32) {
+                    env.runtimeState.captureResults.keys.firstOrNull()?.let {
+                        env.runtimeState.captureResults.remove(it)
+                    }
+                }
+                env.runtimeState.captureResults[timestamp] = result
+            }
         }
         val resIso = result.get(CaptureResult.SENSOR_SENSITIVITY)
         val resTime = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
@@ -191,6 +238,7 @@ class CameraHardwareStreamController(
         if (resIso != null) env.runtimeState.liveIso = resIso
         if (resTime != null) env.runtimeState.liveExposureTime = resTime
         if (resFocus != null) env.runtimeState.liveFocusDistance = resFocus
+        env.sessionArbiter.rawFrameRouter?.onCaptureResult(result)
         env.runtimeState.captureResultFlow.tryEmit(result)
 
         val activeTier = env.cameraViewModel.uiState.value.uiTier
@@ -300,6 +348,7 @@ class CameraHardwareStreamController(
         val handler = env.sessionArbiter.sessionController.backgroundHandler ?: return
 
         Log.d(TAG, "Creating Camera2 Capture Session for device: ${device.id}")
+        env.sessionArbiter.sceneMotionMonitor.reset()
 
         val chars = CameraRepository.getCharacteristics(env.camera2Manager, device.id)
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
@@ -309,7 +358,9 @@ class CameraHardwareStreamController(
         if (isRawSupportedLocally) {
             val rawSizes = map?.getOutputSizes(ImageFormat.RAW_SENSOR) ?: emptyArray()
             targetCaptureSize = rawSizes.maxByOrNull { it.width * it.height } ?: Size(4000, 3000)
-            env.sessionArbiter.rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, ImageFormat.RAW_SENSOR, 8)
+            // 14 slots cover a 5-frame lazy ZSL ring plus forward captures. The lazy ring is
+            // feature-flagged off by default, so slots are only consumed when it is enabled.
+            env.sessionArbiter.rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, ImageFormat.RAW_SENSOR, 14)
         } else {
             val jpegSizes = map?.getOutputSizes(ImageFormat.JPEG) ?: emptyArray()
             targetCaptureSize = jpegSizes.maxByOrNull { it.width * it.height } ?: Size(4000, 3000)
@@ -320,6 +371,12 @@ class CameraHardwareStreamController(
         val analysisSize = yuvSizes?.filter { it.width.toFloat()/it.height.toFloat() in 1.3f..1.4f }
             ?.minByOrNull { it.width * it.height } ?: Size(640, 480)
         env.sessionArbiter.analysisImageReader = ImageReader.newInstance(analysisSize.width, analysisSize.height, ImageFormat.YUV_420_888, 2)
+
+        env.sessionArbiter.rawImageReader?.let { rawReader ->
+            env.sessionArbiter.ensureRawFrameRouter(rawReader) { ts ->
+                synchronized(env.runtimeState.captureResults) { env.runtimeState.captureResults[ts] }
+            }
+        }
 
         env.sessionArbiter.analysisImageReader?.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
@@ -344,6 +401,7 @@ class CameraHardwareStreamController(
                     }
                 }
                 env.runtimeState.lastClippingRatio = if (totalSampled > 0) highlightCount.toDouble() / totalSampled else 0.0
+                env.sessionArbiter.sceneMotionMonitor.processAnalysisImage(image)
             } catch (e: Exception) {
                 Log.e(TAG, "Error analyzing image", e)
             } finally {
@@ -381,13 +439,17 @@ class CameraHardwareStreamController(
                                 try {
                                     val previewRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                                     surface?.let { previewRequest.addTarget(it) }
+                                    if (zslRawTargetEnabled) {
+                                        env.sessionArbiter.rawImageReader?.surface?.let { previewRequest.addTarget(it) }
+                                    }
 
-                                    val isMainLens = env.runtimeState.currentLens == null || (env.runtimeState.currentLens?.multiplier?.let { it in 0.95f..1.05f } ?: false)
-                                    if ((env.runtimeState.isManualExposure || env.isHdrPlusEnabled) && isMainLens) {
+                                    val shouldArmAnalysis = env.runtimeState.isManualExposure || env.isHdrPlusEnabled || env.settings.current().zslEnabled
+                                    if (shouldArmAnalysis) {
                                         env.sessionArbiter.analysisImageReader?.surface?.let { previewRequest.addTarget(it) }
                                     }
 
                                     applyManualSettingsToRequest(previewRequest)
+                                    applyZslPreviewProfile(previewRequest)
 
                                     session.setRepeatingRequest(previewRequest.build(), object : CameraCaptureSession.CaptureCallback() {
                                         override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {

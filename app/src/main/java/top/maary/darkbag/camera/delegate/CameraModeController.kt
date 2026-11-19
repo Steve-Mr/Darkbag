@@ -21,6 +21,7 @@ import top.maary.darkbag.R
 import top.maary.darkbag.camera.MultiCameraCaptureManager
 import top.maary.darkbag.camera.dispatch.CameraCapturePipelineDispatcher
 import top.maary.darkbag.camera.dispatch.CameraMultiCaptureDispatcher
+import top.maary.darkbag.camera.zsl.ZslCaptureController
 import top.maary.darkbag.camera.session.CameraHardwareStreamController
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.modes.CaptureMode
@@ -48,6 +49,7 @@ class CameraModeCollaborators(
     val multiCapture: CameraMultiCaptureDispatcher,
     val stream: CameraHardwareStreamController,
     val lens: CameraLensController,
+    val zsl: ZslCaptureController? = null,
     val focus: CameraFocusMeteringController? = null
 )
 
@@ -101,7 +103,7 @@ class CameraModeController(
         val current = settingsRepo.current()
         val isHalfFramePref = current.halfFrameMode
         val canUseMultiCam = canUseMultiCamera(current)
-        val isMultiCamPref = current.multiCameraModeEnabled || current.multiCameraForceEnable
+        val isMultiCamPref = canUseMultiCam
 
         val hasExplicitMode = settingsRepo.hasExplicitKey(PreferenceKeys.ACTIVE_CAPTURE_MODE)
         val savedModeKey = if (hasExplicitMode) current.activeCaptureMode else null
@@ -135,8 +137,7 @@ class CameraModeController(
 
     private fun canUseMultiCamera(current: DarkbagPreferences): Boolean {
         val forceEnable = current.multiCameraForceEnable
-        val isMultiCamPref = current.multiCameraModeEnabled
-        return (isMultiCamPref || forceEnable) && MultiCameraHelper.isMultiCameraSupported(env.hostContext, forceEnable)
+        return current.multiCameraModeEnabled && MultiCameraHelper.isMultiCameraSupported(env.hostContext, forceEnable)
     }
 
     /** Advances to the next enabled mode (Normal → Half-frame SBS/TB → Multi-camera → Normal). */
@@ -258,6 +259,8 @@ class CameraModeController(
                 saveRaw = saveRaw,
                 initialLensMultiplier = env.runtimeState.currentLens?.multiplier
             )
+            val primary = manager.resolveActivePreviewLens()
+            env.runtimeState.isRawSupported = primary != null && manager.isRawSupportedForLens(primary)
         }
         multiCamBindJob = job
         job.invokeOnCompletion {
@@ -337,14 +340,40 @@ class CameraModeController(
                 isFrame1: Boolean,
                 hfMetadata: HalfFrameManager.Metadata?,
                 timing: StandardTimingTracker
-            ) = onCameraThread { parts.pipeline.triggerHdrPlusBurstCamera2(sink, isFrame1, hfMetadata, timing) }
+            ) = onCameraThread {
+                val outcome = parts.zsl?.tryCaptureHdrPlus(sink, isFrame1, hfMetadata, timing)
+                if (outcome is top.maary.darkbag.camera.zsl.ZslDispatchOutcome.Consumed) {
+                    if (outcome.sensorTimestampNs > 0L) {
+                        parts.motionPhoto.updatePendingStillTimestamp(
+                            outcome.sensorTimestampNs,
+                            outcome.realtimeTimestamp
+                        )
+                    }
+                    return@onCameraThread
+                }
+                parts.zsl?.onForwardCaptureStarting(timing)
+                parts.pipeline.triggerHdrPlusBurstCamera2(sink, isFrame1, hfMetadata, timing)
+            }
 
             override fun triggerSinglePicture(
                 sink: CaptureSink,
                 isFrame1: Boolean,
                 hfMetadata: HalfFrameManager.Metadata?,
                 timing: StandardTimingTracker
-            ) = onCameraThread { parts.pipeline.takeSinglePictureCamera2(sink, timing, isFrame1, hfMetadata) }
+            ) = onCameraThread {
+                val outcome = parts.zsl?.tryCaptureSingle(sink, isFrame1, hfMetadata, timing)
+                if (outcome is top.maary.darkbag.camera.zsl.ZslDispatchOutcome.Consumed) {
+                    if (outcome.sensorTimestampNs > 0L) {
+                        parts.motionPhoto.updatePendingStillTimestamp(
+                            outcome.sensorTimestampNs,
+                            outcome.realtimeTimestamp
+                        )
+                    }
+                    return@onCameraThread
+                }
+                parts.zsl?.onForwardCaptureStarting(timing)
+                parts.pipeline.takeSinglePictureCamera2(sink, timing, isFrame1, hfMetadata)
+            }
 
             override fun triggerMultiCameraPicture(timing: StandardTimingTracker) =
                 onCameraThread { parts.multiCapture.takeMultiCameraPicture(timing) }

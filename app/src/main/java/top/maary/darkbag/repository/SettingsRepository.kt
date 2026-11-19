@@ -154,6 +154,11 @@ class SettingsRepository(context: Context) {
             mirrorFrontCamera = bool(PreferenceKeys.KEY_MIRROR_FRONT_CAMERA, true),
             hdrPlusOis = bool(PreferenceKeys.KEY_HDR_PLUS_OIS, true),
             force60Fps = bool(PreferenceKeys.KEY_FORCE_60FPS, false),
+            zslEnabled = bool(PreferenceKeys.KEY_ZSL_ENABLED, false),
+            zslAdaptive = bool(PreferenceKeys.KEY_ZSL_ADAPTIVE, true),
+            zslLazyRing = bool(PreferenceKeys.KEY_ZSL_LAZY_RING, false),
+            zslRoute = str(PreferenceKeys.KEY_ZSL_ROUTE, "none") ?: "none",
+            zslReason = str(PreferenceKeys.KEY_ZSL_REASON, "none") ?: "none",
             debugEnabled = bool(PreferenceKeys.KEY_DEBUG_ENABLED, false),
             motionPhotoEnabled = bool(PreferenceKeys.KEY_MOTION_PHOTO, false),
             motionPhotoAudioEnabled = bool(PreferenceKeys.KEY_MOTION_PHOTO_AUDIO, true),
@@ -173,6 +178,7 @@ class SettingsRepository(context: Context) {
                 ?: PreferenceKeys.STARTUP_CAMERA,
             onboardingCompleted = bool(PreferenceKeys.KEY_ONBOARDING_COMPLETED, false),
             expFocusPeaking = bool(PreferenceKeys.KEY_EXP_FOCUS_PEAKING, false),
+            expMultiCamColorHarmonization = bool(PreferenceKeys.KEY_EXP_MULTICAM_COLOR_HARMONIZATION, true),
             focusPeakingActive = bool(PreferenceKeys.KEY_FOCUS_PEAKING_ACTIVE, true),
             colorEngineMode = int(PreferenceKeys.KEY_COLOR_ENGINE_MODE, 2),
             shutterLongPressAction = str(
@@ -416,6 +422,25 @@ class SettingsRepository(context: Context) {
         edit { this[PreferenceKeys.FORCE_60FPS] = enabled }
     }
 
+    fun setZslAdaptive(enabled: Boolean) {
+        edit { this[PreferenceKeys.ZSL_ADAPTIVE] = enabled }
+    }
+
+    fun setZslLazyRing(enabled: Boolean) {
+        edit { this[PreferenceKeys.ZSL_LAZY_RING] = enabled }
+    }
+
+    fun setZslEnabled(enabled: Boolean) {
+        edit { this[PreferenceKeys.ZSL_ENABLED] = enabled }
+    }
+
+    fun setZslCapability(route: String, reason: String) {
+        edit {
+            this[PreferenceKeys.ZSL_ROUTE] = route
+            this[PreferenceKeys.ZSL_REASON] = reason
+        }
+    }
+
     fun setDebugEnabled(enabled: Boolean) {
         edit { this[PreferenceKeys.DEBUG_ENABLED] = enabled }
     }
@@ -526,6 +551,10 @@ class SettingsRepository(context: Context) {
 
     fun setRawVideoResolution(resolution: String) {
         edit { this[PreferenceKeys.RAW_VIDEO_RESOLUTION] = resolution }
+    }
+
+    fun setExpMultiCamColorHarmonization(enabled: Boolean) {
+        edit { this[PreferenceKeys.EXP_MULTICAM_COLOR_HARMONIZATION] = enabled }
     }
 
     @VisibleForTesting

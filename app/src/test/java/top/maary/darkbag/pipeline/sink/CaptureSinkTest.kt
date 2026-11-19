@@ -298,6 +298,43 @@ class CaptureSinkTest {
     }
 
     @Test
+    fun testDirectMediaStoreSink_DoesNotEmitDngEventWhenSaveJpgIsTrue() = runBlocking {
+        val testPfdJpg = android.os.ParcelFileDescriptor.createPipe()
+        val testPfdDng = android.os.ParcelFileDescriptor.createPipe()
+        val mockJpgUri = android.net.Uri.parse("content://media/external/images/media/100")
+        val mockDngUri = android.net.Uri.parse("content://media/external/images/media/101")
+        val sink = DirectMediaStoreSink(
+            pfdProvider = { _, _, mime ->
+                if (mime == "image/jpeg") Pair(testPfdJpg[1], mockJpgUri)
+                else Pair(testPfdDng[1], mockDngUri)
+            }
+        )
+        val spec = createDummySpec(saveJpg = true, saveRaw = true)
+        val targets = sink.prepareTargets(context, spec)
+
+        val events = mutableListOf<ColorProcessor.BackgroundSaveEvent>()
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            ColorProcessor.backgroundSaveFlow.collect { events.add(it) }
+        }
+
+        // JPEG export succeeds
+        sink.onImageExported(context, spec, success = true, outputPath = targets.outJpgPath, outputFd = targets.outJpgFd)
+
+        // RAW export succeeds
+        sink.onRawExported(context, spec, success = true, outputPath = targets.outDngPath, outputFd = targets.outDngFd)
+
+        kotlinx.coroutines.yield()
+        job.cancel()
+        testPfdJpg[0].close()
+        testPfdDng[0].close()
+
+        // Only 1 event emitted (the JPEG one), NOT a duplicate or DNG override!
+        assertEquals(1, events.size)
+        assertEquals(mockJpgUri.toString(), events[0].targetUri)
+        assertTrue(events[0].saveJpg)
+    }
+
+    @Test
     fun testHalfFrameCacheSink_OnErrorRollsBackStep0OnFrame1Failure() = runBlocking {
         val sessionStore = HalfFrameSessionStore(context)
         sessionStore.clearProfile(HalfFrameSessionStore.PROFILE_HALF_SIDE)

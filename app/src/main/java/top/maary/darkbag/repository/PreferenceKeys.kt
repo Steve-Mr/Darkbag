@@ -46,6 +46,11 @@ object PreferenceKeys {
     const val KEY_MIRROR_FRONT_CAMERA = "mirror_front_camera"
     const val KEY_HDR_PLUS_OIS = "hdr_plus_ois_enabled"
     const val KEY_FORCE_60FPS = "force_60fps"
+    const val KEY_ZSL_ENABLED = "zsl_enabled"
+    const val KEY_ZSL_ADAPTIVE = "zsl_adaptive"
+    const val KEY_ZSL_LAZY_RING = "zsl_lazy_ring"
+    const val KEY_ZSL_ROUTE = "zsl_route"
+    const val KEY_ZSL_REASON = "zsl_reason"
     const val KEY_DEBUG_ENABLED = "debug_enabled"
     const val KEY_MOTION_PHOTO = "motion_photo_enabled"
     const val KEY_MOTION_PHOTO_AUDIO = "motion_photo_audio_enabled"
@@ -87,6 +92,7 @@ object PreferenceKeys {
     const val KEY_ENABLE_PLAYGROUND = "enable_playground"
     const val KEY_SHOW_FLOATING_TOOLBAR = "show_floating_toolbar"
     const val KEY_EXP_FOCUS_PEAKING = "exp_focus_peaking"
+    const val KEY_EXP_MULTICAM_COLOR_HARMONIZATION = "exp_multicam_color_harmonization"
     const val KEY_FOCUS_PEAKING_ACTIVE = "pref_focus_peaking_active"
     const val KEY_COLOR_ENGINE_MODE = "color_engine_mode"
     const val KEY_GALLERY_COLUMNS_PORTRAIT = "gallery_columns_portrait"
@@ -142,6 +148,11 @@ object PreferenceKeys {
     val MIRROR_FRONT_CAMERA = booleanPreferencesKey(KEY_MIRROR_FRONT_CAMERA)
     val HDR_PLUS_OIS = booleanPreferencesKey(KEY_HDR_PLUS_OIS)
     val FORCE_60FPS = booleanPreferencesKey(KEY_FORCE_60FPS)
+    val ZSL_ENABLED = booleanPreferencesKey(KEY_ZSL_ENABLED)
+    val ZSL_ADAPTIVE = booleanPreferencesKey(KEY_ZSL_ADAPTIVE)
+    val ZSL_LAZY_RING = booleanPreferencesKey(KEY_ZSL_LAZY_RING)
+    val ZSL_ROUTE = stringPreferencesKey(KEY_ZSL_ROUTE)
+    val ZSL_REASON = stringPreferencesKey(KEY_ZSL_REASON)
     val DEBUG_ENABLED = booleanPreferencesKey(KEY_DEBUG_ENABLED)
     val MOTION_PHOTO = booleanPreferencesKey(KEY_MOTION_PHOTO)
     val MOTION_PHOTO_AUDIO = booleanPreferencesKey(KEY_MOTION_PHOTO_AUDIO)
@@ -176,6 +187,7 @@ object PreferenceKeys {
     val ENABLE_PLAYGROUND = booleanPreferencesKey(KEY_ENABLE_PLAYGROUND)
     val SHOW_FLOATING_TOOLBAR = booleanPreferencesKey(KEY_SHOW_FLOATING_TOOLBAR)
     val EXP_FOCUS_PEAKING = booleanPreferencesKey(KEY_EXP_FOCUS_PEAKING)
+    val EXP_MULTICAM_COLOR_HARMONIZATION = booleanPreferencesKey(KEY_EXP_MULTICAM_COLOR_HARMONIZATION)
     val FOCUS_PEAKING_ACTIVE = booleanPreferencesKey(KEY_FOCUS_PEAKING_ACTIVE)
     val COLOR_ENGINE_MODE = intPreferencesKey(KEY_COLOR_ENGINE_MODE)
     val GALLERY_COLUMNS_PORTRAIT = intPreferencesKey(KEY_GALLERY_COLUMNS_PORTRAIT)

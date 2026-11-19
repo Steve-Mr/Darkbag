@@ -19,7 +19,9 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -30,6 +32,9 @@ import java.nio.ByteBuffer
 import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
 import top.maary.darkbag.camera.delegate.CameraUiHost
+import top.maary.darkbag.camera.zsl.ZslFrame
+import top.maary.darkbag.models.StandardTimingTracker
+import top.maary.darkbag.processor.HdrPlusRequestManager
 import top.maary.darkbag.modes.CaptureMode
 import top.maary.darkbag.modes.CaptureModeCoordinator
 import top.maary.darkbag.camera.session.CameraSessionArbiter
@@ -61,6 +66,16 @@ class CameraPipelineExecutorsTest {
         SettingsRepository.resetForTest(context)
         SettingsRepository.getInstance(context).awaitHydratedBlocking()
         viewModel = CameraViewModel()
+        while (HdrPlusRequestManager.pendingTasksCount.value > 0 || HdrPlusRequestManager.pendingForegroundTasksCount.value > 0) {
+            HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = false)
+        }
+    }
+
+    @After
+    fun tearDown() {
+        while (HdrPlusRequestManager.pendingTasksCount.value > 0 || HdrPlusRequestManager.pendingForegroundTasksCount.value > 0) {
+            HdrPlusRequestManager.onTaskFinished(foregroundAlreadyFinished = false)
+        }
     }
 
     @Test
@@ -145,12 +160,106 @@ class CameraPipelineExecutorsTest {
         assertTrue(gateway.resetBurstUiCount >= 1)
     }
 
+    @Test
+    fun dispatcher_dispatchZslSingleFrame_frame1HdrPlus_preservesConfiguredGain() {
+        val gateway = FakeGateway()
+        gateway.hdrPlusEnabledOverride = true
+        val dispatcher = CameraCapturePipelineDispatcher(gateway, gateway, gateway)
+
+        val buffer = ByteBuffer.allocateDirect(128)
+        val frame = ZslFrame(
+            buffer = buffer,
+            width = 4, height = 4, rowStride = 4, timestamp = 12345L,
+            result = null, iso = 100, exposureTimeNs = 10_000_000L, wb = null, cropKey = null,
+            afFocused = true, lensId = "0", zoomRatio = 1f, rotationDegrees = 0, rowLength = 4
+        )
+        val timing = StandardTimingTracker(shutterClick = 9999L)
+
+        val result = dispatcher.dispatchZslSingleFrame(
+            frame = frame,
+            sink = null,
+            isFrame1Trigger = true,
+            hfMetadata = null,
+            timing = timing,
+            digitalGain = 2.0f
+        )
+        assertTrue(result)
+        assertEquals(1, gateway.writtenStep)
+        assertEquals(2.0f, gateway.writtenGain ?: 0f, 0.001f)
+        assertFalse(gateway.updatedStepGainCalled)
+        assertEquals(1, gateway.autoBurstTriggeredCount)
+    }
+
+    @Test
+    fun dispatcher_dispatchZslSingleFrame_frame1NonHdrPlus_computesGain() {
+        val gateway = FakeGateway()
+        gateway.hdrPlusEnabledOverride = false
+        val dispatcher = CameraCapturePipelineDispatcher(gateway, gateway, gateway)
+
+        val buffer = ByteBuffer.allocateDirect(128)
+        val frame = ZslFrame(
+            buffer = buffer,
+            width = 4, height = 4, rowStride = 4, timestamp = 12345L,
+            result = null, iso = 100, exposureTimeNs = 10_000_000L, wb = null, cropKey = null,
+            afFocused = true, lensId = "0", zoomRatio = 1f, rotationDegrees = 0, rowLength = 4
+        )
+        val timing = StandardTimingTracker(shutterClick = 9999L)
+
+        val result = dispatcher.dispatchZslSingleFrame(
+            frame = frame,
+            sink = null,
+            isFrame1Trigger = true,
+            hfMetadata = null,
+            timing = timing,
+            digitalGain = 1.0f
+        )
+        assertTrue(result)
+        assertNull(gateway.writtenStep)
+        assertTrue(gateway.updatedStepGainCalled)
+        assertEquals(1, gateway.autoBurstTriggeredCount)
+    }
+
+    @Test
+    fun dispatcher_dispatchZslSingleFrame_notFrame1_doesNotAdvanceStep() {
+        val gateway = FakeGateway()
+        val dispatcher = CameraCapturePipelineDispatcher(gateway, gateway, gateway)
+
+        val buffer = ByteBuffer.allocateDirect(128)
+        val frame = ZslFrame(
+            buffer = buffer,
+            width = 4, height = 4, rowStride = 4, timestamp = 12345L,
+            result = null, iso = 100, exposureTimeNs = 10_000_000L, wb = null, cropKey = null,
+            afFocused = true, lensId = "0", zoomRatio = 1f, rotationDegrees = 0, rowLength = 4
+        )
+        val timing = StandardTimingTracker(shutterClick = 9999L)
+
+        val result = dispatcher.dispatchZslSingleFrame(
+            frame = frame,
+            sink = null,
+            isFrame1Trigger = false,
+            hfMetadata = null,
+            timing = timing,
+            digitalGain = 1.0f
+        )
+        assertTrue(result)
+        assertNull(gateway.writtenStep)
+        assertFalse(gateway.updatedStepGainCalled)
+        assertEquals(0, gateway.autoBurstTriggeredCount)
+    }
+
     private inner class FakeGateway :
         CameraEnvironmentHost,
         CameraUiHost,
         CameraCoordinatorHost {
 
         var resetBurstUiCount = 0
+        var autoBurstTriggeredCount = 0
+        var writtenStep: Int? = null
+        var writtenGain: Float? = null
+        var updatedStepGainCalled = false
+        var hdrPlusEnabledOverride: Boolean = true
+
+        override val isHdrPlusEnabled: Boolean get() = hdrPlusEnabledOverride
 
         override val hostContext: Context get() = context
         override val hostActivity: FragmentActivity? = null
@@ -206,10 +315,18 @@ class CameraPipelineExecutorsTest {
         override fun handleCaptureResult(result: TotalCaptureResult) {}
         override fun getCombinedOrientation(): Int = 0
         override fun updateMotionPhotoEncoder() {}
-        override fun triggerAutoBurst() {}
+        override fun triggerAutoBurst() {
+            autoBurstTriggeredCount++
+        }
         override fun onCaptureModeCycled(modeChanged: Boolean) {}
         override fun readScopedHalfFrameState(requireFileForStep1: Boolean) {}
-        override fun writeScopedHalfFrameStep(step: Int, captureTimeMillis: Long?, digitalGain: Float, flareType: Int) {}
-        override fun getDigitalGainAndUpdateStep(timestamp: Long, isFrame1Trigger: Boolean, shutterClick: Long?): Float = 1.0f
+        override fun writeScopedHalfFrameStep(step: Int, captureTimeMillis: Long?, digitalGain: Float, flareType: Int) {
+            writtenStep = step
+            writtenGain = digitalGain
+        }
+        override fun getDigitalGainAndUpdateStep(timestamp: Long, isFrame1Trigger: Boolean, shutterClick: Long?): Float {
+            updatedStepGainCalled = true
+            return 1.35f
+        }
     }
 }

@@ -22,6 +22,7 @@ import top.maary.darkbag.R
 import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
 import top.maary.darkbag.camera.delegate.CameraEnvironmentHost
 import top.maary.darkbag.camera.delegate.CameraUiHost
+import top.maary.darkbag.camera.zsl.ZslBurstSeed
 import top.maary.darkbag.fragments.BurstResult
 import top.maary.darkbag.fragments.HdrPlusBurst
 import top.maary.darkbag.models.CaptureMetadata
@@ -116,6 +117,11 @@ class CameraCapturePipelineDispatcher(
     fun stopProcessingWorker() {
         processingChannelJob?.cancel()
         processingChannelJob = null
+        while (true) {
+            val holder = processingChannel.tryReceive().getOrNull() ?: break
+            HdrPlusBurst.releaseBuffer(holder.data)
+            HdrPlusRequestManager.onTaskFinished()
+        }
     }
 
     fun triggerAutoBurst() {
@@ -139,8 +145,67 @@ class CameraCapturePipelineDispatcher(
         sink: CaptureSink? = null,
         isFrame1Trigger: Boolean = false,
         hfMetadata: HalfFrameManager.Metadata? = null,
-        timing: StandardTimingTracker? = null
-    ) = burstExecutor.triggerHdrPlusBurstCamera2(sink, isFrame1Trigger, hfMetadata, timing)
+        timing: StandardTimingTracker? = null,
+        seed: ZslBurstSeed? = null
+    ): Boolean = burstExecutor.triggerHdrPlusBurstCamera2(sink, isFrame1Trigger, hfMetadata, timing, seed)
+
+    fun dispatchZslSingleFrame(
+        frame: top.maary.darkbag.camera.zsl.ZslFrame,
+        sink: CaptureSink?,
+        isFrame1Trigger: Boolean,
+        hfMetadata: HalfFrameManager.Metadata?,
+        timing: StandardTimingTracker,
+        digitalGain: Float
+    ): Boolean {
+        val buffer = frame.buffer ?: return false
+        val effectiveGain = if (isFrame1Trigger) {
+            if (env.isHdrPlusEnabled || digitalGain != 1.0f) {
+                coordinator.writeScopedHalfFrameStep(
+                    1, timing.shutterClick, digitalGain = digitalGain, flareType = hfMetadata?.flareType ?: -1
+                )
+                digitalGain
+            } else {
+                coordinator.getDigitalGainAndUpdateStep(frame.timestamp, true, timing.shutterClick)
+            }
+        } else digitalGain
+        val holder = RawImageHolder(
+            data = buffer,
+            width = frame.width,
+            height = frame.height,
+            timestamp = frame.timestamp,
+            rotationDegrees = frame.rotationDegrees,
+            combinedOrientation = coordinator.getCombinedOrientation(),
+            zoomRatio = frame.zoomRatio,
+            physicalId = frame.lensId,
+            timing = timing,
+            halfFrameMetadata = hfMetadata?.copy(digitalGain = effectiveGain),
+            digitalGain = effectiveGain,
+            sink = sink,
+            capturedLens = env.runtimeState.currentLens,
+            captureResult = frame.result
+        )
+        val sendResult = processingChannel.trySend(holder)
+        if (!sendResult.isSuccess) {
+            Log.w(TAG, "ZSL single frame rejected by processing queue")
+            HdrPlusBurst.releaseBuffer(buffer)
+            return false
+        }
+        if (isFrame1Trigger) {
+            coordinator.triggerAutoBurst()
+        }
+        HdrPlusRequestManager.onTaskStarted()
+        timing.enqueued = System.currentTimeMillis()
+        timing.recordFrameArrival()
+        timing.recordShutterReady()
+        env.runtimeState.isBurstActive = false
+        env.cameraViewModel.setBurstActive(false)
+        env.lifecycleScope.launch(Dispatchers.Main) {
+            ui.resetBurstUi()
+            if (!isFrame1Trigger) ui.showProcessingAnimation()
+            ui.showZslCaptureFeedback()
+        }
+        return true
+    }
 
     fun copyAndroidImageToHolder(
         image: Image,
@@ -182,7 +247,7 @@ class CameraCapturePipelineDispatcher(
             timing?.processingStart = System.currentTimeMillis()
             var enqueued = false
             try {
-                val captureResult = metadataExtractor.findCaptureResult(image.timestamp)
+                val captureResult = image.captureResult ?: metadataExtractor.findCaptureResult(image.timestamp)
                 val targetCharId = activePhysicalId(captureResult)
                     ?: image.physicalId
                     ?: image.capturedLens?.id
@@ -223,6 +288,7 @@ class CameraCapturePipelineDispatcher(
                     )
                     motionMp4Path = path
                     motionStillPtsUs = pts
+                    timing?.motionPhotoStillPtsUs = pts
                 }
 
                 val singleCalib = metadataExtractor.extractSensorCalibration(chars, captureResult, wb)
@@ -328,7 +394,14 @@ class CameraCapturePipelineDispatcher(
     private fun recordCaptureResult(result: TotalCaptureResult) {
         val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
         if (timestamp != null) {
-            env.runtimeState.captureResults[timestamp] = result
+            synchronized(env.runtimeState.captureResults) {
+                if (env.runtimeState.captureResults.size >= 32) {
+                    env.runtimeState.captureResults.keys.firstOrNull()?.let {
+                        env.runtimeState.captureResults.remove(it)
+                    }
+                }
+                env.runtimeState.captureResults[timestamp] = result
+            }
         }
         (env.runtimeState.captureResultFlow as? MutableSharedFlow)?.tryEmit(result)
     }

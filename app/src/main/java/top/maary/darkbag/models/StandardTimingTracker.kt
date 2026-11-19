@@ -13,6 +13,7 @@ enum class CaptureTimingMode(val displayName: String) {
 
 data class StandardTimingTracker(
     val shutterClick: Long,
+    val shutterPressElapsedNs: Long = 0L,
     var captureMode: CaptureTimingMode = CaptureTimingMode.HDR_BURST,
     @Volatile var firstFrameCaptured: Long = 0,
     @Volatile var lastFrameCaptured: Long = 0,
@@ -42,7 +43,13 @@ data class StandardTimingTracker(
     @Volatile var streamingPushMaxMs: Long = 0,
     @Volatile var stage1NormalizeMs: Long = 0,
     @Volatile var stage1FusionMs: Long = 0,
-    @Volatile var isSingleFrame: Boolean = false
+    @Volatile var isSingleFrame: Boolean = false,
+    @Volatile var zslRoute: String = "",
+    @Volatile var zslPreRollFrames: Int = 0,
+    @Volatile var zslPostRollFrames: Int = 0,
+    @Volatile var zslFrameOffsetMs: Long = 0L,
+    @Volatile var zslFallbackReason: String = "",
+    @Volatile var motionPhotoStillPtsUs: Long = 0L
 ) {
     val frameArrivalTimes = mutableListOf<Long>()
 
@@ -241,6 +248,19 @@ data class StandardTimingTracker(
             sensorSection.append("      - 流式累加完成: $accumulationStr$pushDetail\n")
         }
 
+        val zslParts = mutableListOf<String>()
+        if (zslRoute.isNotBlank()) zslParts.add("route=$zslRoute")
+        if (zslPreRollFrames > 0) zslParts.add("pre=$zslPreRollFrames")
+        if (zslPostRollFrames > 0) zslParts.add("post=$zslPostRollFrames")
+        if (zslFrameOffsetMs > 0) zslParts.add("offset=${zslFrameOffsetMs}ms")
+        if (zslFallbackReason.isNotBlank()) zslParts.add("fallback=$zslFallbackReason")
+        if (motionPhotoStillPtsUs > 0L) zslParts.add("motionPts=${motionPhotoStillPtsUs / 1000}ms")
+        val zslSection = if (zslParts.isEmpty()) {
+            ""
+        } else {
+            "\n🎯 ZSL:\n  • ${zslParts.joinToString("\n  • ")}\n"
+        }
+
         return """
 ========================================
 [$modeHeader] $timeStr
@@ -253,7 +273,7 @@ $envLine========================================
 📊 阶段耗时分解:
 $sensorSection  [2] 并发排队等待: $queueWait
   [3] Stage 1 计算 (管线解算/融合): $stage1Cost$stage1Detail
-$exportSection========================================
+$exportSection$zslSection========================================
         """.trimIndent()
     }
 }

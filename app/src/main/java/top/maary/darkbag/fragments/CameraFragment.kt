@@ -128,11 +128,12 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
         override fun onDisplayRemoved(displayId: Int) = Unit
-        override fun onDisplayChanged(displayId: Int) = view?.let {
+        override fun onDisplayChanged(displayId: Int) {
+            val display = view?.display ?: return
             if (displayId == this@CameraFragment.displayId) {
-                Log.d(TAG, "Rotation changed: ${it.display.rotation}")
+                Log.d(TAG, "Rotation changed: ${display.rotation}")
             }
-        } ?: Unit
+        }
     }
 
     override fun shouldShowAudioPermissionRationale(): Boolean =

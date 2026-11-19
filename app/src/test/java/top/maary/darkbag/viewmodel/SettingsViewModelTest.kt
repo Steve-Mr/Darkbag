@@ -86,5 +86,10 @@ class SettingsViewModelTest {
         viewModel.updateRawOutputType("Bayer CFA RAW")
         assertEquals(0, viewModel.preferences.value.rawOutputFormatIndex)
         assertTrue(viewModel.preferences.value.rawOutputType.contains("Bayer"))
+
+        viewModel.updateExpMultiCamColorHarmonization(false)
+        assertFalse(viewModel.preferences.value.expMultiCamColorHarmonization)
+        viewModel.updateExpMultiCamColorHarmonization(true)
+        assertTrue(viewModel.preferences.value.expMultiCamColorHarmonization)
     }
 }

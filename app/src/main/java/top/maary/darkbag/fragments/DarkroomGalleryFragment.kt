@@ -315,9 +315,13 @@ class DarkroomGalleryFragment : Fragment() {
                             hideGalleryDeletingIndicator()
                         }
 
+                        val wasAtTop = !binding.galleryRecyclerView.canScrollVertically(-1)
                         galleryAdapter.submitList(state.items) {
                             if (_binding != null) {
                                 binding.tvGalleryHeaderSubtitle.text = getString(R.string.gallery_groups_count, state.items.size)
+                                if (wasAtTop && state.items.isNotEmpty()) {
+                                    binding.galleryRecyclerView.scrollToPosition(0)
+                                }
                             }
                         }
                     }

@@ -3,6 +3,7 @@ package top.maary.darkbag.camera
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
+import android.os.SystemClock
 import android.net.Uri
 import android.util.Log
 import android.view.View
@@ -36,6 +37,7 @@ import top.maary.darkbag.camera.delegate.CameraUiHost
 import top.maary.darkbag.camera.dispatch.CameraCapturePipelineDispatcher
 import top.maary.darkbag.camera.dispatch.CameraMultiCaptureDispatcher
 import top.maary.darkbag.camera.session.CameraHardwareStreamController
+import top.maary.darkbag.camera.zsl.ZslCaptureController
 import top.maary.darkbag.camera.video.CameraVideoController
 import top.maary.darkbag.databinding.CameraUiContainerBinding
 import top.maary.darkbag.databinding.FragmentCameraBinding
@@ -69,6 +71,9 @@ class CameraControllerHub(
     val focusMeteringController = CameraFocusMeteringController(env, this, this, gestureDelegate)
     val streamController = CameraHardwareStreamController(env, this, this)
     val pipelineDispatcher = CameraCapturePipelineDispatcher(env, this, this)
+    val zslCaptureController = ZslCaptureController(
+        env, this, this, pipelineDispatcher, streamController
+    )
     val multiCaptureDispatcher = CameraMultiCaptureDispatcher(env, this, this)
     val videoController = CameraVideoController(env, this, this)
     val lensController = CameraLensController(env, this, this)
@@ -94,6 +99,7 @@ class CameraControllerHub(
             multiCapture = multiCaptureDispatcher,
             stream = streamController,
             lens = lensController,
+            zsl = zslCaptureController,
             focus = focusMeteringController
         )
     )
@@ -148,6 +154,8 @@ class CameraControllerHub(
 
     override fun hideProcessingAnimation() = overlayController.hideProcessingAnimation()
 
+    override fun showZslCaptureFeedback() = shutterController.showZslCaptureFeedback()
+
     override fun resetBurstUi() = shutterController.resetBurstUi()
 
     override fun updateCurrentThumbnail(uri: Uri?) = thumbnailController.updateCurrentThumbnail(uri)
@@ -157,6 +165,7 @@ class CameraControllerHub(
     override fun onSessionConfigured() {
         env.runtimeState.isSwitchingLens = false
         fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(150L)?.start()
+        zslCaptureController.onSessionConfigured()
     }
 
     override fun triggerTapToFocus(x: Float, y: Float) =
@@ -184,6 +193,7 @@ class CameraControllerHub(
     }
 
     override fun applyCameraControls() {
+        zslCaptureController.onCaptureStateChanged()
         env.sessionArbiter.updateActivePreviewRepeatingRequest {
             streamController.updateCamera2RepeatingRequest()
         }
@@ -217,6 +227,7 @@ class CameraControllerHub(
     override fun triggerAutoBurst() {
         val timing = StandardTimingTracker(
             shutterClick = System.currentTimeMillis(),
+            shutterPressElapsedNs = SystemClock.elapsedRealtimeNanos(),
             captureMode = CaptureTimingMode.HDR_BURST
         )
         ensureActiveCoordinator()?.onShutterTriggered(timing)
@@ -265,6 +276,7 @@ class CameraControllerHub(
         env.locationHelper.stopListening()
         shutterController.disableOrientationTracking()
         motionPhotoController.release()
+        zslCaptureController.onSessionClosed()
         env.lifecycleScope.launch(Dispatchers.Main.immediate + NonCancellable) {
             env.sessionArbiter.closeAllSessions(releaseSessionController = true)
         }
@@ -279,6 +291,7 @@ class CameraControllerHub(
         overlayController.updateHalfFrameUI()
         shutterController.updateShutterOrientation()
         pipelineDispatcher.startProcessingWorker(applicationScope)
+        zslCaptureController.start()
     }
 
     fun setupViewFinderSurface() {
@@ -363,6 +376,7 @@ class CameraControllerHub(
         focusMeteringController.onDestroy()
         shutterController.onDestroy()
         motionPhotoController.release()
+        zslCaptureController.stop()
         val processorToRelease = env.sessionArbiter.lutProcessor
         env.sessionArbiter.lutProcessor = null
         env.lifecycleScope.launch(Dispatchers.Main.immediate + NonCancellable) {
@@ -405,7 +419,10 @@ class CameraControllerHub(
 
     fun triggerVolumeShutter(): Boolean {
         if (cameraUiContainerBinding?.cameraCaptureButton?.isEnabled != true) return false
-        val timing = StandardTimingTracker(shutterClick = System.currentTimeMillis())
+        val timing = StandardTimingTracker(
+            shutterClick = System.currentTimeMillis(),
+            shutterPressElapsedNs = SystemClock.elapsedRealtimeNanos()
+        )
         ensureActiveCoordinator()?.onShutterTriggered(timing)
         return true
     }

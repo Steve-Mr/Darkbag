@@ -257,13 +257,15 @@ class CameraBentoDeckView @JvmOverloads constructor(
             value: String,
             isTabActive: Boolean = false,
             isValueManual: Boolean = false,
-            context: Context
+            context: Context,
+            maxChars: Int = 16
         ): CharSequence = BentoDeckStylingEngine.formatProTelemetry(
             label = label,
             value = value,
             isTabActive = isTabActive,
             isValueManual = isValueManual,
-            context = context
+            context = context,
+            maxChars = maxChars
         )
     }
 }

@@ -25,6 +25,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
+import top.maary.darkbag.camera.zsl.ZslCapabilityDetector
+import top.maary.darkbag.camera.zsl.ZslDebugFormatter
+import top.maary.darkbag.camera.zsl.ZslDebugLabels
+import top.maary.darkbag.camera.zsl.ZslDebugRegistry
+import top.maary.darkbag.camera.zsl.ZslDebugState
+import top.maary.darkbag.camera.zsl.ZslReason
+import top.maary.darkbag.camera.zsl.ZslRoute
 import top.maary.darkbag.databinding.FragmentSettingsBinding
 import top.maary.darkbag.fragments.settings.SettingsBentoDelegate
 import top.maary.darkbag.fragments.settings.SettingsSheetDispatcher
@@ -52,6 +59,7 @@ class SettingsFragment : Fragment() {
 
     private var isAdvancedExpanded = false
     private var aboutClickCount = 0
+    private var zslToggleGuard = false
 
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -130,6 +138,7 @@ class SettingsFragment : Fragment() {
         setupMenus()
         setupStartupSettings()
         setupCheckboxes()
+        setupZslSettings()
         setupStoragePickers()
         setupCacheManagement()
         setupNavigation()
@@ -140,6 +149,15 @@ class SettingsFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 settingsViewModel.preferences.collect { prefsState ->
                     bentoDelegate.renderPreferences(binding, prefsState)
+                    renderZslDebug(ZslDebugRegistry.state.value)
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                ZslDebugRegistry.state.collect { state ->
+                    renderZslDebug(state)
                 }
             }
         }
@@ -396,6 +414,10 @@ class SettingsFragment : Fragment() {
             if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
             settingsViewModel.updateForce60Fps(isChecked)
         }
+        binding.switchExpMulticamColorHarmonization.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateExpMultiCamColorHarmonization(isChecked)
+        }
 
         binding.toggleUiTiers.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (bentoDelegate.isRendering) return@addOnButtonCheckedListener
@@ -432,7 +454,7 @@ class SettingsFragment : Fragment() {
         binding.btnClearDebugLogs.setOnClickListener {
             DebugLogManager.clearLogs()
             updateDebugStats()
-            Toast.makeText(requireContext(), "Debug logs cleared", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), R.string.toast_debug_logs_cleared, Toast.LENGTH_SHORT).show()
         }
 
         binding.btnCopyDebugLogs.setOnClickListener {
@@ -440,11 +462,115 @@ class SettingsFragment : Fragment() {
             if (logs.isNotBlank() && logs != "No logs yet.") {
                 val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Darkbag Timing Logs", logs))
-                Toast.makeText(requireContext(), "Logs copied to clipboard", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), R.string.toast_debug_logs_copied, Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(requireContext(), "No logs to copy", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), R.string.toast_no_logs_to_copy, Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private fun setupZslSettings() {
+        binding.switchZsl.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering || zslToggleGuard) return@setOnCheckedChangeListener
+            if (!isChecked) {
+                settingsViewModel.updateZslEnabled(false)
+                return@setOnCheckedChangeListener
+            }
+            viewLifecycleOwner.lifecycleScope.launch {
+                val report = withContext(Dispatchers.Default) {
+                    ZslCapabilityDetector.inspectDefaultBackCamera(requireContext().applicationContext)
+                }
+                val hdrPlus = settingsViewModel.preferences.value.hdrPlusEnabled
+                when {
+                    report.route == ZslRoute.RAW_RING && hdrPlus && !report.supportsHdrPlusZsl -> {
+                        revertZslToggle()
+                        Toast.makeText(
+                            requireContext(),
+                            R.string.zsl_reason_hdr_unsupported,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+
+                    report.route == ZslRoute.RAW_RING -> {
+                        settingsViewModel.updateZslEnabled(true)
+                        settingsViewModel.updateZslCapability(
+                            report.route.key,
+                            if (report.supportsHdrPlusZsl) report.reason.key else ZslReason.HDR_UNSUPPORTED.key
+                        )
+                    }
+
+                    report.route == ZslRoute.REPROCESS_RAW -> {
+                        revertZslToggle()
+                        Toast.makeText(
+                            requireContext(),
+                            R.string.zsl_toast_reprocess_not_enabled,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+
+                    else -> {
+                        revertZslToggle()
+                        Toast.makeText(
+                            requireContext(),
+                            zslReasonText(report.reason),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }
+        }
+        binding.switchZslAdaptive.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateZslAdaptive(isChecked)
+        }
+        binding.switchZslLazyRing.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateZslLazyRing(isChecked)
+        }
+    }
+
+    private fun revertZslToggle() {
+        settingsViewModel.updateZslEnabled(false)
+        zslToggleGuard = true
+        binding.switchZsl.isChecked = false
+        zslToggleGuard = false
+    }
+
+    private fun zslReasonText(reason: ZslReason): String = when (reason) {
+        ZslReason.NO_RAW -> getString(R.string.zsl_reason_no_raw)
+        ZslReason.RAW_TOO_LARGE -> getString(R.string.zsl_reason_raw_too_large)
+        ZslReason.NO_READ_SENSOR_SETTINGS -> getString(R.string.zsl_reason_no_sensor_settings)
+        ZslReason.LOW_RAM -> getString(R.string.zsl_reason_low_ram)
+        ZslReason.NO_CAMERA -> getString(R.string.zsl_reason_no_camera)
+        ZslReason.UNKNOWN -> getString(R.string.zsl_reason_unknown)
+        else -> getString(R.string.zsl_toast_unavailable)
+    }
+
+    private fun renderZslDebug(state: ZslDebugState) {
+        if (!settingsViewModel.preferences.value.zslEnabled) {
+            binding.cardZslDebug.visibility = View.GONE
+            binding.tvZslDebug.visibility = View.GONE
+            return
+        }
+        binding.cardZslDebug.visibility = View.VISIBLE
+        binding.tvZslDebug.visibility = View.VISIBLE
+        binding.tvZslDebug.text = ZslDebugFormatter.format(
+            state,
+            ZslDebugLabels(
+                armed = getString(R.string.zsl_debug_armed),
+                off = getString(R.string.zsl_debug_off),
+                stateFormat = getString(R.string.zsl_debug_state),
+                reasonFormat = getString(R.string.zsl_debug_reason),
+                routeFormat = getString(R.string.zsl_debug_route),
+                ringFormat = getString(R.string.zsl_debug_ring),
+                ringFpsFormat = getString(R.string.zsl_debug_ring_fps),
+                lastFormat = getString(R.string.zsl_debug_last),
+                waiting = getString(R.string.zsl_debug_waiting),
+                profileHdrPlus = getString(R.string.zsl_debug_profile_hdr_plus),
+                profileSingle = getString(R.string.zsl_debug_profile_single),
+                profileOff = getString(R.string.zsl_debug_profile_off)
+            )
+        )
     }
 
     private fun setupMultiCameraSettings() {
@@ -473,6 +599,8 @@ class SettingsFragment : Fragment() {
         val physLenses = multiCamInfo?.physicalLenses?.joinToString { "${it.name} (${it.type})" } ?: "None"
         binding.tvMultiCameraStatus.text = "$hwDesc\n" + getString(R.string.multi_camera_detected_lenses, physLenses)
         binding.switchMultiCameraMode.isEnabled = true
+        binding.btnMenuMultiCameraCount.isEnabled = true
+        binding.btnMenuMultiCameraDualPair.isEnabled = true
         binding.cbMultiCameraSaveRaw.isEnabled = true
         binding.tileMultiCameraSaveRaw.isEnabled = true
 

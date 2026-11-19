@@ -3,7 +3,9 @@ package top.maary.darkbag.repository
 import android.content.Context
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -193,5 +195,27 @@ class ImageRepositoryCacheTest {
         store.clear()
         assertNull(store.cachedGroups)
         assertNull(store.staleCachedGroups)
+    }
+
+    @Test
+    fun testGetGroupedImagesFlow_skipsStage0WhenInitialUriNotInCache() = runBlocking {
+        val store = GalleryCacheStore.getInstance()
+        store.clear()
+        val oldGroup = ImageGroup(baseName = "DBAG_20261111_000000", jpgUri = Uri.parse("content://media/100"))
+        store.staleCachedGroups = listOf(oldGroup)
+
+        // When initialUri is specified and not in cache, Stage 0 should be skipped
+        val flow = repository.getGroupedImagesFlow(initialUri = "content://media/200_new")
+        val emissions = mutableListOf<List<ImageGroup>>()
+        val job = launch {
+            flow.collect { emissions.add(it) }
+        }
+        delay(50)
+        job.cancel()
+
+        // If Stage 0 was skipped because target wasn't in cache, no emission containing only oldGroup happened
+        assertTrue("Should not emit stale cache that does not contain initialUri", emissions.none { list ->
+            list.size == 1 && list[0].baseName == "DBAG_20261111_000000"
+        })
     }
 }

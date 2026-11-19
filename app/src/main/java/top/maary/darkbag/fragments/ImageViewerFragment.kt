@@ -248,7 +248,11 @@ open class ImageViewerFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             ColorProcessor.backgroundSaveFlow.collect { event ->
-                if (!isAdjusted && ::adapter.isInitialized) mediaPreloadDelegate.handleBackgroundSaveEvent(event)
+                if (!isAdjusted && ::adapter.isInitialized) {
+                    mediaPreloadDelegate.handleBackgroundSaveEvent(event)
+                } else if (!isAdjusted && !::adapter.isInitialized) {
+                    loadImages(targetUri = event.targetUri ?: args.initialUri, forceRefresh = true)
+                }
             }
         }
     }

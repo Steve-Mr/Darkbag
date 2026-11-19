@@ -70,7 +70,9 @@ class CameraMultiCaptureDispatcher(
 
         val orientation = coordinator.getCombinedOrientation()
         val saveRaw = SettingsRepository.getInstance(env.hostContext).current().multiCameraSaveRaw
-        val isHdrPlusActive = env.isHdrPlusEnabled && env.runtimeState.isRawSupported
+        val primaryLens = manager.resolveActivePreviewLens()
+        val isPrimaryRawSupported = if (primaryLens != null) manager.isRawSupportedForLens(primaryLens) else env.runtimeState.isRawSupported
+        val isHdrPlusActive = env.isHdrPlusEnabled && isPrimaryRawSupported
 
         val manualConfig = MultiCameraManualConfig(
             isLinked = env.runtimeState.isMultiCameraManualLinked,

@@ -8,6 +8,8 @@ import android.hardware.camera2.TotalCaptureResult
 import android.media.Image
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import top.maary.darkbag.MainApplication
 import top.maary.darkbag.camera.delegate.CameraCoordinatorHost
@@ -22,6 +24,7 @@ import top.maary.darkbag.processor.HdrPlusRequestManager
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.HalfFrameManager
 import top.maary.darkbag.utils.LensInfo
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal class SingleRawCaptureExecutor(
     private val env: CameraEnvironmentHost,
@@ -53,6 +56,8 @@ internal class SingleRawCaptureExecutor(
 
         HdrPlusRequestManager.onTaskStarted()
         var taskStarted = true
+        val imageClaimed = AtomicBoolean(false)
+        var watchdog: Job? = null
 
         val capturedLens = env.runtimeState.currentLens
         val capturedZoom = specAssembler.resolveEffectiveZoom(capturedLens, null)
@@ -66,17 +71,14 @@ internal class SingleRawCaptureExecutor(
                 coordinator.applyManualSettingsToRequest(this)
             }
 
-            reader.setOnImageAvailableListener({ r ->
+            fun handleImage(image: Image) {
+                if (!imageClaimed.compareAndSet(false, true)) {
+                    image.close()
+                    return
+                }
+                watchdog?.cancel()
                 timing?.recordFrameArrival()
                 timing?.captureCallback = System.currentTimeMillis()
-                val image = r.acquireLatestImage() ?: run {
-                    if (taskStarted) {
-                        taskStarted = false
-                        HdrPlusRequestManager.onTaskFinished()
-                    }
-                    onAbortCapture()
-                    return@setOnImageAvailableListener
-                }
                 try {
                     if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
                         val digitalGain = coordinator.getDigitalGainAndUpdateStep(
@@ -118,7 +120,32 @@ internal class SingleRawCaptureExecutor(
                     onNotifySinkFailure(appContext, sink, hfMetadata, e)
                     onAbortCapture()
                 }
-            }, handler)
+                env.sessionArbiter.rawFrameRouter?.endCapture()
+            }
+
+            val router = env.sessionArbiter.rawFrameRouter
+            if (router != null) {
+                if (!router.beginCapture(::handleImage)) {
+                    if (taskStarted) {
+                        taskStarted = false
+                        HdrPlusRequestManager.onTaskFinished()
+                    }
+                    onAbortCapture()
+                    return
+                }
+            } else {
+                reader.setOnImageAvailableListener({ r ->
+                    val image = r.acquireLatestImage() ?: run {
+                        if (taskStarted) {
+                            taskStarted = false
+                            HdrPlusRequestManager.onTaskFinished()
+                        }
+                        onAbortCapture()
+                        return@setOnImageAvailableListener
+                    }
+                    handleImage(image)
+                }, handler)
+            }
 
             session.capture(request.build(), object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureStarted(
@@ -127,6 +154,7 @@ internal class SingleRawCaptureExecutor(
                     timestamp: Long,
                     frameNumber: Long
                 ) {
+                    env.sessionArbiter.rawFrameRouter?.onCaptureStarted(timestamp)
                     if (isFrame1Trigger) {
                         coordinator.triggerAutoBurst()
                     }
@@ -140,8 +168,22 @@ internal class SingleRawCaptureExecutor(
                     onRecordCaptureResult(result)
                 }
             }, handler)
+
+            watchdog = env.lifecycleScope.launch(Dispatchers.Main) {
+                delay(4000)
+                if (!imageClaimed.compareAndSet(false, true)) return@launch
+                Log.e(TAG, "Single capture timed out waiting for an accepted RAW image")
+                env.sessionArbiter.rawFrameRouter?.endCapture()
+                if (taskStarted) {
+                    taskStarted = false
+                    HdrPlusRequestManager.onTaskFinished()
+                }
+                onAbortCapture()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Camera2 capture failed", e)
+            watchdog?.cancel()
+            env.sessionArbiter.rawFrameRouter?.endCapture()
             if (taskStarted) {
                 HdrPlusRequestManager.onTaskFinished()
             }

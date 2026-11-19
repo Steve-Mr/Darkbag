@@ -27,11 +27,13 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowCameraCharacteristics
 import top.maary.darkbag.camera.MultiCameraCaptureManager
 import top.maary.darkbag.camera.MultiCameraManualConfig
+import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.utils.DarkbagIdentity
 import top.maary.darkbag.utils.LensType
 import top.maary.darkbag.utils.LogicalMultiCameraInfo
 import top.maary.darkbag.utils.MultiCameraHardwareType
 import top.maary.darkbag.utils.PhysicalLensInfo
+import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 
 @RunWith(RobolectricTestRunner::class)
@@ -197,5 +199,114 @@ class MultiCamHelpersTest {
         assertEquals(CaptureRequest.CONTROL_AE_MODE_ON, unlinkedSecondary.aeMode)
         assertNull(unlinkedSecondary.iso)
         assertNull(unlinkedSecondary.focusDistance)
+    }
+
+    @Test
+    fun multiCamPrimaryHdrHelper_calculatesExposureCorrectly() {
+        val chars = ShadowCameraCharacteristics.newCameraCharacteristics()
+        Shadows.shadowOf(chars).set(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE, Range(100, 3200))
+        Shadows.shadowOf(chars).set(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE, Range(100_000L, 1_000_000_000L))
+
+        val primaryLens = PhysicalLensInfo("0", "1x", 4.5f, 24f, 1.0f, LensType.WIDE, chars)
+        val helper = MultiCamPrimaryHdrHelper(
+            context = context,
+            lens = primaryLens,
+            chars = chars,
+            dngWriter = dngWriter,
+            orientationDegrees = 0,
+            captureTimestamp = 1_700_000_000_000L
+        )
+
+        // Without preview result and no manual Ae, exposure calculation returns null (no blind 400/30ms guessing)
+        assertNull(helper.calculateExposure(null))
+
+        // With manual AE, returns manual spec directly with 1.0f burstGain
+        val manualConfig = MultiCameraManualConfig(
+            isManualIso = true,
+            iso = 800,
+            isManualShutter = true,
+            exposureTimeNanos = 20_000_000L
+        )
+        val expSpec = helper.calculateExposure(null, manualConfig)
+        assertNotNull(expSpec)
+        assertEquals(1.0f, expSpec!!.burstGain, 0.01f)
+        assertEquals(800, expSpec.burstIso)
+        assertEquals(20_000_000L, expSpec.burstTimeNs)
+    }
+
+    @Test
+    fun multiCameraCaptureManager_isRawSupportedForLens() {
+        val manager = MultiCameraCaptureManager(context, scope)
+        val chars = ShadowCameraCharacteristics.newCameraCharacteristics()
+        val lens = PhysicalLensInfo("0", "1x", 4.5f, 24f, 1.0f, LensType.WIDE, chars)
+        // No RAW_SENSOR in stream configuration map -> false
+        assertFalse(manager.isRawSupportedForLens(lens))
+    }
+
+    @Test
+    fun dngWriter_assembleFrame_withForcedDigitalGain() {
+        val chars = ShadowCameraCharacteristics.newCameraCharacteristics()
+        val lens = PhysicalLensInfo("0", "1x", 4.5f, 24f, 1.0f, LensType.WIDE, chars)
+        val frame = dngWriter.assembleFrame(
+            lens = lens,
+            jpegPair = null,
+            dngPath = "/tmp/fused.dng",
+            captureResult = null,
+            orientationDegrees = 0,
+            captureTimestamp = 1000L,
+            forcedDigitalGain = 2.0f
+        )
+        assertEquals(2.0f, frame.digitalGain, 0.001f)
+        assertEquals("/tmp/fused.dng", frame.tempDngPath)
+    }
+
+    @Test
+    fun multiCamPrimaryHdrHelper_abort_preservesFallbackWhenSpecified() {
+        val chars = ShadowCameraCharacteristics.newCameraCharacteristics()
+        val primaryLens = PhysicalLensInfo("0", "1x", 4.5f, 24f, 1.0f, LensType.WIDE, chars)
+        val helper = MultiCamPrimaryHdrHelper(
+            context = context,
+            lens = primaryLens,
+            chars = chars,
+            dngWriter = dngWriter,
+            orientationDegrees = 0,
+            captureTimestamp = 1_700_000_000_000L
+        )
+
+        val testBuffer = ByteBuffer.allocateDirect(1024)
+        helper.fallbackBuffer = testBuffer
+
+        // abort(clearFallback = false) keeps fallbackBuffer for writeFallbackSingleFrameDng
+        helper.abort(clearFallback = false)
+        assertSame(testBuffer, helper.fallbackBuffer)
+
+        // abort(clearFallback = true) purges the buffer
+        helper.abort(clearFallback = true)
+        assertNull(helper.fallbackBuffer)
+    }
+
+    @Test
+    fun multiCamPrimaryHdrHelper_writeFallbackSingleFrameDng_handlesNullBufferDefensively() {
+        val chars = ShadowCameraCharacteristics.newCameraCharacteristics()
+        val primaryLens = PhysicalLensInfo("0", "1x", 4.5f, 24f, 1.0f, LensType.WIDE, chars)
+        val helper = MultiCamPrimaryHdrHelper(
+            context = context,
+            lens = primaryLens,
+            chars = chars,
+            dngWriter = dngWriter,
+            orientationDegrees = 0,
+            captureTimestamp = 1_700_000_000_000L
+        )
+
+        helper.fallbackBuffer = null
+        val dummyMeta = CaptureMetadata(
+            exposureTime = 10_000_000L,
+            iso = 100,
+            focalLength = 24f,
+            fNumber = 1.8f,
+            dateTimeOriginal = 1_700_000_000_000L
+        )
+        val res = helper.writeFallbackSingleFrameDng(null, dummyMeta)
+        assertNull(res)
     }
 }

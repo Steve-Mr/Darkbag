@@ -278,6 +278,7 @@ internal class HdrPlusBurstProcessingEnqueuer(
             pendingTaskProvider = { env.runtimeState.pendingMotionPhotoTask },
             clearPendingTask = { env.runtimeState.pendingMotionPhotoTask = null }
         )
+        assemblyRequest.timing?.motionPhotoStillPtsUs = motionStillPtsUs
         val settingsRepo = SettingsRepository.getInstance(appContext)
         settingsRepo.awaitHydrated()
         val prefs = settingsRepo.current()

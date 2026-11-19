@@ -3,6 +3,8 @@ package top.maary.darkbag.camera.delegate
 import android.Manifest
 import android.animation.ValueAnimator
 import android.content.pm.PackageManager
+import android.os.SystemClock
+import android.view.HapticFeedbackConstants
 import android.view.OrientationEventListener
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.core.content.ContextCompat
@@ -68,7 +70,10 @@ class CameraShutterController(
         }
         shutter.onLongPressHoldReleased = { videoController.handleShutterLongPressReleased() }
         shutter.setOnClickListener {
-            val timing = StandardTimingTracker(shutterClick = System.currentTimeMillis())
+            val timing = StandardTimingTracker(
+                shutterClick = System.currentTimeMillis(),
+                shutterPressElapsedNs = SystemClock.elapsedRealtimeNanos()
+            )
             coordinator.ensureActiveCoordinator()?.onShutterTriggered(timing)
         }
     }
@@ -89,6 +94,25 @@ class CameraShutterController(
             },
             onLaunchPermissionRequest = { env.requestAudioPermission() }
         )
+    }
+
+    /** Quick ZSL confirmation: haptic plus a short scale pulse, without a capture blackout. */
+    fun showZslCaptureFeedback() {
+        val button = ui.cameraUiContainerBinding?.cameraCaptureButton ?: return
+        button.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        button.animate().cancel()
+        button.animate()
+            .scaleX(0.94f)
+            .scaleY(0.94f)
+            .setDuration(70L)
+            .withEndAction {
+                button.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(90L)
+                    .start()
+            }
+            .start()
     }
 
     /** Locks the shutter and starts blackout / processing visuals for an accepted capture. */

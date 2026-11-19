@@ -55,6 +55,7 @@ class LutSurfaceProcessor {
     private var currentColorEngineMode = 0
 
     @Volatile private var isFocusPeakingEnabled = false
+    @Volatile private var previewGain = 1.0f
 
     init {
         thread.start()
@@ -66,6 +67,11 @@ class LutSurfaceProcessor {
         handler.post {
             isFocusPeakingEnabled = enabled
         }
+    }
+
+    /** Viewfinder-only gain used to compensate HDR+ ZSL underexposure. */
+    fun setPreviewGain(gain: Float) {
+        previewGain = gain.coerceIn(1.0f, 4.0f)
     }
 
     fun updateColorEngineMode(engineMode: Int) {
@@ -247,6 +253,7 @@ class LutSurfaceProcessor {
         inputSurfaceTexture?.updateTexImage()
         inputSurfaceTexture?.getTransformMatrix(transformMatrix)
 
+        shaderPipeline.setPreviewGain(previewGain)
         shaderPipeline.drawFrame(
             targetWidth = width,
             targetHeight = height,
@@ -265,6 +272,9 @@ class LutSurfaceProcessor {
         // Branch 2: Render to MediaCodec Encoder Surface for Motion Photo (never bake focus peaking lines)
         if (isEncoderActive && encoderEglSurface != EGL14.EGL_NO_SURFACE && encoderWidth > 0 && encoderHeight > 0) {
             EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
+            // Match the viewfinder gain: HDR+ ZSL physically underexposes the sensor, so a
+            // 1.0 encoder gain would record a dark Motion Photo. Focus peaking stays off.
+            shaderPipeline.setPreviewGain(previewGain)
             shaderPipeline.drawFrame(
                 targetWidth = encoderWidth,
                 targetHeight = encoderHeight,
@@ -284,6 +294,7 @@ class LutSurfaceProcessor {
 
             // Rebind Viewfinder display surface
             EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+            shaderPipeline.setPreviewGain(previewGain)
         }
     }
 

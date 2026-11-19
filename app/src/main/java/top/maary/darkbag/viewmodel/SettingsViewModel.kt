@@ -179,6 +179,26 @@ class SettingsViewModel @JvmOverloads constructor(
         settingsRepository.setForce60Fps(enabled)
     }
 
+    fun updateExpMultiCamColorHarmonization(enabled: Boolean) {
+        settingsRepository.setExpMultiCamColorHarmonization(enabled)
+    }
+
+    fun updateZslAdaptive(enabled: Boolean) {
+        settingsRepository.setZslAdaptive(enabled)
+    }
+
+    fun updateZslLazyRing(enabled: Boolean) {
+        settingsRepository.setZslLazyRing(enabled)
+    }
+
+    fun updateZslEnabled(enabled: Boolean) {
+        settingsRepository.setZslEnabled(enabled)
+    }
+
+    fun updateZslCapability(route: String, reason: String) {
+        settingsRepository.setZslCapability(route, reason)
+    }
+
     fun updateDebugEnabled(enabled: Boolean) {
         settingsRepository.setDebugEnabled(enabled)
     }

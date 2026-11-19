@@ -1,6 +1,11 @@
 package top.maary.darkbag.viewmodel
 
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -195,5 +200,38 @@ class DarkroomGalleryViewModelTest {
         val vm2 = DarkroomGalleryViewModel(app)
         assertEquals(2, vm2.uiState.value.columnCount)
         assertFalse(vm2.uiState.value.isWaterfallMode)
+    }
+
+    @Test
+    fun testBackgroundSaveFlowTriggersRefreshAndScrollToTop() = runBlocking {
+        val emittedEvent = top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
+            baseName = "DBAG_NEW_20261118",
+            dngPath = null,
+            jpgPath = null,
+            targetUri = "content://media/external/images/media/999",
+            zoomFactor = 1.0f,
+            orientation = 0,
+            saveJpg = true
+        )
+
+        val effectsList = mutableListOf<DarkroomGalleryEffect>()
+        val job = launch {
+            viewModel.effects.collect { effectsList.add(it) }
+        }
+
+        top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.emit(emittedEvent)
+
+        val deadline = System.currentTimeMillis() + 2000L
+        while (effectsList.isEmpty() && System.currentTimeMillis() < deadline) {
+            org.robolectric.shadows.ShadowLooper.idleMainLooper()
+            delay(20)
+        }
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        job.cancel()
+
+        assertTrue("Should emit ScrollToPosition effect on background save", effectsList.isNotEmpty())
+        val effect = effectsList.first()
+        assertTrue(effect is DarkroomGalleryEffect.ScrollToPosition)
+        assertEquals(0, (effect as DarkroomGalleryEffect.ScrollToPosition).position)
     }
 }

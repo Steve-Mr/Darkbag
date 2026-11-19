@@ -237,7 +237,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                         outputPath = targets.outJpgPath,
                                         outputFd = targets.outJpgFd
                                     )
-                                    if (jpgSuccess) {
+                                    if (jpgSuccess && targets.outJpgFd != -1) {
                                         notifyForegroundComplete()
                                     }
                                     if (jpgSuccess && req.timing?.firstOutputWritten == 0L) {
@@ -266,7 +266,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                         outputPath = targets.outDngPath,
                                         outputFd = targets.outDngFd
                                     )
-                                    if (dngSuccess && !shouldSaveJpg) {
+                                    if (dngSuccess && !shouldSaveJpg && targets.outDngFd != -1) {
                                         notifyForegroundComplete()
                                     }
                                     if (dngSuccess && req.timing?.firstOutputWritten == 0L) {
@@ -328,6 +328,12 @@ class HdrPlusProcessingService : LifecycleService() {
                                     rawSuccess = dngSuccess
                                 )
 
+                                val isFastPath = (shouldSaveJpg && targets.outJpgFd != -1) ||
+                                    (!shouldSaveJpg && shouldSaveRaw && targets.outDngFd != -1)
+                                if (!isFastPath) {
+                                    notifyForegroundComplete()
+                                }
+
                                 if (req.timing?.firstOutputWritten == 0L) {
                                     req.timing?.firstOutputWritten = System.currentTimeMillis()
                                 }
@@ -357,6 +363,7 @@ class HdrPlusProcessingService : LifecycleService() {
                             if (req.timing?.taskCompleted == 0L) {
                                 req.timing?.taskCompleted = System.currentTimeMillis()
                             }
+                            notifyForegroundComplete()
                             exportSemaphore.release()
                             finishTaskAndCheckStopService(req.requestId, foregroundAlreadyFinished = foregroundCompleted.get())
                         }

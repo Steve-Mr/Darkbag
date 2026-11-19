@@ -194,6 +194,7 @@ class MotionPhotoEncoder(
         postDurationMs: Long = 1500L,
         outputFile: File,
         orientationDegrees: Int = 0,
+        stillTimestampProvider: (() -> Long)? = null,
         onComplete: (file: File?, stillPtsUs: Long) -> Unit
     ) {
         if (!isRunning.get()) {
@@ -201,11 +202,13 @@ class MotionPhotoEncoder(
             return
         }
 
-        val captureTimestampUs = captureTimestampNs / 1000L
-
         scope.launch {
             // Wait for post-capture frames to be recorded
             delay(postDurationMs + 100L)
+            // ZSL may resolve its selected sensor frame after the shutter; let it update the
+            // still timestamp before the slice is muxed.
+            val resolvedTimestampNs = stillTimestampProvider?.invoke() ?: captureTimestampNs
+            val captureTimestampUs = resolvedTimestampNs / 1000L
 
             val currentFormat = mediaFormat
             if (currentFormat == null) {
@@ -246,6 +249,13 @@ class MotionPhotoEncoder(
                 audioSlice = audioSlice
             )
 
+            val expectedStillUs = (captureTimestampUs - slice.samples.first().presentationTimeUs)
+                .coerceIn(0L, slice.durationUs)
+            Log.d(
+                TAG,
+                "Motion still PTS: selected=${captureTimestampUs}us expectedRelative=${expectedStillUs}us " +
+                    "actual=${stillPtsUs ?: 0L}us delta=${(stillPtsUs ?: 0L) - expectedStillUs}us"
+            )
             if (stillPtsUs != null && outputFile.exists() && outputFile.length() > 0) {
                 onComplete(outputFile, stillPtsUs)
             } else {

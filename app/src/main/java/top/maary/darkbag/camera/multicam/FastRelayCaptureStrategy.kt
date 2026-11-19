@@ -79,12 +79,14 @@ internal class FastRelayCaptureStrategy(
                 val primaryRawReader = previewCtrl.rawImageReaders[primaryLens.physicalId]
 
                 var primaryCaptureResult: TotalCaptureResult? = null
+                var primaryBurstSpec: MultiCamPrimaryHdrHelper.ExposureSpec? = null
                 if (primaryDev != null && primarySess != null && primaryJpegReader != null) {
-                    val (frame, res) = capturePrimaryLens(
+                    val (frame, res, burstSpec) = capturePrimaryLens(
                         primaryDev, primarySess, primaryJpegReader, primaryRawReader,
                         primaryLens, orientationDegrees, isHdrPlusActive, manualConfig, captureTimestamp
                     )
                     primaryCaptureResult = res
+                    primaryBurstSpec = burstSpec
                     if (frame != null) collectedFrames.add(frame)
                 }
 
@@ -97,7 +99,8 @@ internal class FastRelayCaptureStrategy(
                             lens = relayLens,
                             orientationDegrees = orientationDegrees,
                             primaryCaptureResult = primaryCaptureResult,
-                            manualConfig = manualConfig
+                            manualConfig = manualConfig,
+                            primaryBurstSpec = primaryBurstSpec
                         )
                         if (relayFrame != null) collectedFrames.add(relayFrame)
                     }
@@ -139,12 +142,112 @@ internal class FastRelayCaptureStrategy(
         isHdrPlusActive: Boolean,
         manualConfig: MultiCameraManualConfig?,
         captureTimestamp: Long
-    ): Pair<PhysicalCapturedFrame?, TotalCaptureResult?> {
+    ): Triple<PhysicalCapturedFrame?, TotalCaptureResult?, MultiCamPrimaryHdrHelper.ExposureSpec?> {
         val resultDeferred = CompletableDeferred<TotalCaptureResult?>()
         val jpegDeferred = CompletableDeferred<Pair<ByteArray, Size>?>()
-        val dngDeferred = CompletableDeferred<String?>()
         val handler = previewCtrl.cameraHandler
 
+        val primaryChars = dngWriter.getLensCharacteristics(primaryLens)
+        val shouldRunHdr = isHdrPlusActive && primaryRawReader != null && dngWriter.isRawSupportedForLens(primaryLens)
+        val primaryHdrHelper = if (shouldRunHdr) {
+            MultiCamPrimaryHdrHelper(
+                context = dngWriter.context,
+                lens = primaryLens,
+                chars = primaryChars,
+                dngWriter = dngWriter,
+                orientationDegrees = orientationDegrees,
+                captureTimestamp = captureTimestamp
+            )
+        } else null
+
+        val expSpec = primaryHdrHelper?.calculateExposure(previewCtrl.lastPreviewResult, manualConfig)
+        val rawSize = dngWriter.getOptimalOutputSize(primaryLens, ImageFormat.RAW_SENSOR)
+        val isHdrActive = if (primaryHdrHelper != null && expSpec != null) {
+            primaryHdrHelper.startSession(rawSize, previewCtrl.lastPreviewResult, expSpec)
+        } else false
+
+        if (isHdrActive && primaryHdrHelper != null && expSpec != null) {
+            try {
+                primaryJpegReader.setOnImageAvailableListener({ r ->
+                    val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+                    try {
+                        val buffer = image.planes[0].buffer
+                        val data = ByteArray(buffer.remaining())
+                        buffer.get(data)
+                        jpegDeferred.complete(data to Size(image.width, image.height))
+                    } finally {
+                        image.close()
+                    }
+                }, handler)
+
+                var lastResult: TotalCaptureResult? = null
+                primaryRawReader?.setOnImageAvailableListener({ r ->
+                    val image = r.acquireNextImage() ?: return@setOnImageAvailableListener
+                    primaryHdrHelper.onFrameAvailable(image, lastResult)
+                }, handler)
+
+                val req0 = primaryDev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                    addTarget(primaryJpegReader.surface)
+                    primaryRawReader?.surface?.let { addTarget(it) }
+                    set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
+                    applyManualConfig(this, true, manualConfig, true)
+                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    set(CaptureRequest.SENSOR_EXPOSURE_TIME, expSpec.burstTimeNs)
+                    set(CaptureRequest.SENSOR_SENSITIVITY, expSpec.burstIso)
+                }
+                val req1 = primaryDev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                    primaryRawReader?.surface?.let { addTarget(it) }
+                    set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
+                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    set(CaptureRequest.SENSOR_EXPOSURE_TIME, expSpec.burstTimeNs)
+                    set(CaptureRequest.SENSOR_SENSITIVITY, expSpec.burstIso)
+                }
+                val req2 = primaryDev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                    primaryRawReader?.surface?.let { addTarget(it) }
+                    set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
+                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    set(CaptureRequest.SENSOR_EXPOSURE_TIME, expSpec.burstTimeNs)
+                    set(CaptureRequest.SENSOR_SENSITIVITY, expSpec.burstIso)
+                }
+
+                primarySess.captureBurst(listOf(req0.build(), req1.build(), req2.build()), object : CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, res: TotalCaptureResult) {
+                        lastResult = res
+                        if (!resultDeferred.isCompleted) {
+                            resultDeferred.complete(res)
+                        }
+                    }
+                    override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, failure: CaptureFailure) {
+                        primaryHdrHelper.abort()
+                        if (!resultDeferred.isCompleted) {
+                            resultDeferred.complete(null)
+                        }
+                    }
+                }, handler)
+
+                val captureRes = withTimeoutOrNull(4000L) { resultDeferred.await() }
+                val jpegDataPair = withTimeoutOrNull(4000L) { jpegDeferred.await() }
+                val dngPath = primaryHdrHelper.awaitFusedDng(captureResultDeferred = resultDeferred, timeoutMs = 4500L)
+
+                val frame = if (jpegDataPair != null || dngPath != null) {
+                    dngWriter.assembleFrame(
+                        lens = primaryLens,
+                        jpegPair = jpegDataPair,
+                        dngPath = dngPath,
+                        captureResult = captureRes,
+                        orientationDegrees = orientationDegrees,
+                        captureTimestamp = captureTimestamp,
+                        forcedDigitalGain = expSpec.burstGain
+                    )
+                } else null
+                return Triple(frame, captureRes, expSpec)
+            } catch (e: Exception) {
+                primaryHdrHelper.abort()
+                throw e
+            }
+        }
+
+        val dngDeferred = CompletableDeferred<String?>()
         attachSingleCaptureReaders(
             jpegReader = primaryJpegReader,
             rawReader = primaryRawReader,
@@ -180,7 +283,7 @@ internal class FastRelayCaptureStrategy(
         val frame = if (jpegDataPair != null || dngPath != null) {
             dngWriter.assembleFrame(primaryLens, jpegDataPair, dngPath, captureRes, orientationDegrees, captureTimestamp)
         } else null
-        return frame to captureRes
+        return Triple(frame, captureRes, null)
     }
 
     @SuppressLint("MissingPermission")
@@ -188,7 +291,8 @@ internal class FastRelayCaptureStrategy(
         lens: PhysicalLensInfo,
         orientationDegrees: Int,
         primaryCaptureResult: TotalCaptureResult? = null,
-        manualConfig: MultiCameraManualConfig? = null
+        manualConfig: MultiCameraManualConfig? = null,
+        primaryBurstSpec: MultiCamPrimaryHdrHelper.ExposureSpec? = null
     ): PhysicalCapturedFrame? {
         var dev: CameraDevice? = null
         var sess: CameraCaptureSession? = null
@@ -242,6 +346,19 @@ internal class FastRelayCaptureStrategy(
             val resultDeferred = CompletableDeferred<TotalCaptureResult?>()
             val captureTime = System.currentTimeMillis()
 
+            val chars = dngWriter.getLensCharacteristics(lens)
+            val colorHarmonizationEnabled = top.maary.darkbag.repository.SettingsRepository.getInstance(dngWriter.context).current().expMultiCamColorHarmonization
+            val primaryDevId = previewCtrl.resolveActivePreviewPhysicalId() ?: previewCtrl.currentPrimaryLens?.physicalId ?: "0"
+            val primaryChars = previewCtrl.currentPrimaryLens?.characteristics
+                ?: cameraManager.getCameraCharacteristics(primaryDevId)
+            val harm = if (colorHarmonizationEnabled) {
+                MultiCamColorHarmonizer.harmonize(
+                    primaryChars = primaryChars,
+                    primaryResult = primaryCaptureResult,
+                    secondaryChars = chars
+                )
+            } else null
+
             attachSingleCaptureReaders(
                 jpegReader = jpegReader,
                 rawReader = rawReader,
@@ -251,11 +368,22 @@ internal class FastRelayCaptureStrategy(
                 captureTimestamp = captureTime,
                 resultDeferred = resultDeferred,
                 jpegDeferred = jpegDeferred,
-                dngDeferred = dngDeferred
+                dngDeferred = dngDeferred,
+                overrideNeutralColorPoint = harm?.neutralPoint
             )
 
-            val chars = dngWriter.getLensCharacteristics(lens)
-            val req = buildRelayCaptureRequest(device, jpegReader, rawReader, chars, lens, orientationDegrees, primaryCaptureResult, manualConfig)
+            val req = buildRelayCaptureRequest(
+                device = device,
+                jpegReader = jpegReader,
+                rawReader = rawReader,
+                chars = chars,
+                lens = lens,
+                orientationDegrees = orientationDegrees,
+                primaryCaptureResult = primaryCaptureResult,
+                manualConfig = manualConfig,
+                primaryBurstSpec = primaryBurstSpec,
+                harmonizedProfile = harm
+            )
 
             session.capture(req.build(), object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, result: TotalCaptureResult) {
@@ -295,7 +423,8 @@ internal class FastRelayCaptureStrategy(
         captureTimestamp: Long,
         resultDeferred: CompletableDeferred<TotalCaptureResult?>,
         jpegDeferred: CompletableDeferred<Pair<ByteArray, Size>?>,
-        dngDeferred: CompletableDeferred<String?>
+        dngDeferred: CompletableDeferred<String?>,
+        overrideNeutralColorPoint: FloatArray? = null
     ) {
         val handler = previewCtrl.cameraHandler
         jpegReader.setOnImageAvailableListener({ r ->
@@ -328,7 +457,8 @@ internal class FastRelayCaptureStrategy(
                                 lens = lens,
                                 isHdrPlus = isHdrPlus,
                                 metadata = metadata,
-                                digitalGain = digitalGain
+                                digitalGain = digitalGain,
+                                overrideNeutralColorPoint = overrideNeutralColorPoint
                             )
                             dngDeferred.complete(tempPath)
                         } else {
@@ -353,7 +483,9 @@ internal class FastRelayCaptureStrategy(
         lens: PhysicalLensInfo,
         orientationDegrees: Int,
         primaryCaptureResult: TotalCaptureResult?,
-        manualConfig: MultiCameraManualConfig?
+        manualConfig: MultiCameraManualConfig?,
+        primaryBurstSpec: MultiCamPrimaryHdrHelper.ExposureSpec? = null,
+        harmonizedProfile: MultiCamColorHarmonizer.HarmonizedProfile? = null
     ): CaptureRequest.Builder {
         return device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
             addTarget(jpegReader.surface)
@@ -370,7 +502,12 @@ internal class FastRelayCaptureStrategy(
 
                 if (primExpTime != null && primIso != null && primExpTime > 0 && primIso > 0) {
                     val apertureRatio = relayAperture / primAperture
-                    val targetExposure = (primExpTime.toDouble() * primIso.toDouble()) * (apertureRatio * apertureRatio)
+                    val baseline0EvProduct = if (primaryBurstSpec != null) {
+                        primExpTime.toDouble() * primIso.toDouble() * primaryBurstSpec.burstGain.toDouble()
+                    } else {
+                        primExpTime.toDouble() * primIso.toDouble()
+                    }
+                    val targetExposure = baseline0EvProduct * (apertureRatio * apertureRatio)
                     val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
                     val expTimeRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
                     val targetIso = primIso.coerceIn(isoRange?.lower ?: 100, isoRange?.upper ?: 3200)
@@ -396,12 +533,13 @@ internal class FastRelayCaptureStrategy(
                 }
             }
 
-            val awbGains = primaryCaptureResult?.get(CaptureResult.COLOR_CORRECTION_GAINS)
-            val awbTransform = primaryCaptureResult?.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)
-            if (awbGains != null && awbTransform != null) {
+            if (harmonizedProfile != null) {
                 set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
-                set(CaptureRequest.COLOR_CORRECTION_GAINS, awbGains)
-                set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, awbTransform)
+                set(CaptureRequest.COLOR_CORRECTION_GAINS, harmonizedProfile.gains)
+                harmonizedProfile.colorTransform?.let { transform ->
+                    set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+                    set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+                }
             } else {
                 set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
             }

@@ -38,11 +38,19 @@ class HdrPlusBurst(
 ) {
     companion object {
         private const val MAX_POOL_SIZE = 3
+        @Volatile private var poolLimit = MAX_POOL_SIZE
         private val bufferPool = ConcurrentLinkedQueue<ByteBuffer>()
 
         /**
          * Clears all pooled ByteBuffers to free native memory.
          */
+        fun setPoolLimit(limit: Int) {
+            poolLimit = limit.coerceIn(0, MAX_POOL_SIZE)
+            while (bufferPool.size > poolLimit) {
+                bufferPool.poll()?.let { ColorProcessor.freeDirectBuffer(it) }
+            }
+        }
+
         fun clearPool() {
             var buf = bufferPool.poll()
             while (buf != null) {
@@ -74,7 +82,7 @@ class HdrPlusBurst(
          */
         fun releaseBuffer(buffer: ByteBuffer?) {
             if (buffer != null && buffer.isDirect) {
-                if (bufferPool.size < MAX_POOL_SIZE) {
+                if (bufferPool.size < poolLimit) {
                     bufferPool.offer(buffer)
                 } else {
                     ColorProcessor.freeDirectBuffer(buffer)

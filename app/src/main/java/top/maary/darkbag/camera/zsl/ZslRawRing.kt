@@ -1,0 +1,424 @@
+package top.maary.darkbag.camera.zsl
+
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
+import android.media.Image
+import android.util.Log
+import kotlin.math.abs
+import top.maary.darkbag.processor.ColorProcessor
+import top.maary.darkbag.fragments.HdrPlusBurst
+import java.nio.ByteBuffer
+import java.util.ArrayDeque
+import java.util.concurrent.atomic.AtomicLong
+
+/**
+ * One RAW frame plus the exact CaptureResult it belongs to.
+ *
+ * EAGER_COPY closes the Image after copying. LAZY_IMAGE retains it until take(), where selected
+ * frames are copied and closed; evicted frames are closed by the ring.
+ */
+data class ZslFrame(
+    val buffer: ByteBuffer?,
+    val width: Int,
+    val height: Int,
+    val rowStride: Int,
+    val timestamp: Long,
+    @Volatile var result: TotalCaptureResult?,
+    @Volatile var iso: Int?,
+    @Volatile var exposureTimeNs: Long?,
+    @Volatile var wb: FloatArray?,
+    @Volatile var cropKey: String?,
+    @Volatile var afFocused: Boolean,
+    val lensId: String?,
+    val zoomRatio: Float,
+    val rotationDegrees: Int,
+    val rowLength: Int,
+    val image: Image? = null
+)
+
+/**
+ * Bounded RAW ring for application-side ZSL. Copy happens on the ZSL RAW thread.
+ * Selection is deterministic and pure enough to be tested through the public snapshots.
+ */
+/** Chooses the owned, post-take frame rather than the pre-take ring reference. */
+internal fun List<ZslFrame>.firstOwnedFrame(): ZslFrame? = firstOrNull { it.buffer != null }
+
+/** Resolves a result that may arrive either with the Image or slightly later. */
+internal fun <T> resolveLateResult(
+    provided: T?,
+    timestamp: Long,
+    lookup: ((Long) -> T?)?
+): T? = provided ?: lookup?.invoke(timestamp)
+
+/** Pure AF convergence check for unit testing without Camera2 framework mocks. */
+internal fun isAfStateFocused(afMode: Int?, afState: Int?, lensState: Int?): Boolean {
+    if (afMode == CaptureResult.CONTROL_AF_MODE_OFF) return true
+    return when (afState) {
+        CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED,
+        CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED -> true
+        CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN,
+        CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN,
+        CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED,
+        CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED -> false
+        else -> lensState == CaptureResult.LENS_STATE_STATIONARY
+    }
+}
+
+class ZslRawRing(
+    val config: ZslRingConfig,
+    val cameraId: String,
+    private val lensId: String?,
+    private val physicalId: String?,
+    private val zoomRatio: Float,
+    private val rotationDegrees: Int
+) {
+    fun matches(cameraId: String, lensId: String?, physicalId: String?, zoomRatio: Float): Boolean =
+        this.cameraId == cameraId &&
+            this.lensId == lensId &&
+            this.physicalId == physicalId &&
+            abs(this.zoomRatio - zoomRatio) < 0.01f
+
+    companion object {
+        private const val TAG = "ZslRawRing"
+    }
+
+    private val lock = Any()
+    private val copyLock = Any()
+    private val clearEpoch = AtomicLong(0L)
+    private val frames = ArrayDeque<ZslFrame>()
+
+    internal fun currentClearEpoch(): Long = clearEpoch.get()
+    internal fun isEpochCurrent(capturedEpoch: Long): Boolean = clearEpoch.get() == capturedEpoch
+
+    @Volatile var receivedFrames: Int = 0
+        private set
+    @Volatile var firstFrameTimestampNs: Long = 0L
+        private set
+    @Volatile var lastFrameTimestampNs: Long = 0L
+        private set
+
+    val size: Int
+        get() = synchronized(lock) { frames.size }
+
+    fun offer(
+        image: Image,
+        result: TotalCaptureResult?,
+        resultLookup: ((Long) -> TotalCaptureResult?)? = null
+    ): Boolean {
+        val plane = image.planes.firstOrNull() ?: run {
+            image.close()
+            return false
+        }
+        val width = image.width
+        val height = image.height
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        val rowLength = width * pixelStride
+        val dataLength = rowLength * height
+        if (width <= 0 || height <= 0 || dataLength <= 0) {
+            image.close()
+            return false
+        }
+        if (config.mode == ZslRingMode.LAZY_IMAGE) {
+            return offerLazy(image, result, resultLookup)
+        }
+        var buffer = synchronized(lock) {
+            if (frames.size >= config.depth && frames.isNotEmpty()) {
+                val old = frames.removeFirst()
+                val reused = old.buffer
+                old.image?.close()
+                reused
+            } else {
+                null
+            }
+        }
+        if (buffer == null || buffer.capacity() < dataLength) {
+            HdrPlusBurst.releaseBuffer(buffer)
+            buffer = HdrPlusBurst.acquireBuffer(dataLength)
+        }
+        try {
+            copyPlane(plane.buffer, rowStride, rowLength, width, height, buffer, dataLength)
+            buffer.position(0)
+            buffer.limit(dataLength)
+            synchronized(lock) {
+                // The Image can arrive before its CaptureResult. Re-read the result while
+                // holding the ring lock, after the copy, so attachResult() cannot miss the frame.
+                val resolvedResult = resolveLateResult(result, image.timestamp, resultLookup)
+                val frame = ZslFrame(
+                    buffer = buffer,
+                    width = width,
+                    height = height,
+                    rowStride = rowStride,
+                    timestamp = image.timestamp,
+                    result = resolvedResult,
+                    iso = resolvedResult?.get(CaptureResult.SENSOR_SENSITIVITY),
+                    exposureTimeNs = resolvedResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+                    wb = extractWb(resolvedResult),
+                    cropKey = resolvedResult?.get(CaptureResult.SCALER_CROP_REGION)?.toString(),
+                    afFocused = isAfFocused(resolvedResult),
+                    lensId = lensId,
+                    zoomRatio = zoomRatio,
+                    rotationDegrees = rotationDegrees,
+                    rowLength = rowLength,
+                    image = null
+                )
+                while (frames.size >= config.depth) {
+                    if (frames.isEmpty()) break
+                    releaseFrame(frames.removeFirst())
+                }
+                frames.addLast(frame)
+                receivedFrames++
+                if (firstFrameTimestampNs == 0L) firstFrameTimestampNs = frame.timestamp
+                lastFrameTimestampNs = frame.timestamp
+            }
+            return true
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to copy ZSL RAW frame", e)
+            HdrPlusBurst.releaseBuffer(buffer)
+            return false
+        } finally {
+            image.close()
+        }
+    }
+
+    /** Retains the Image without copying; take() copies the selected frames. */
+    private fun offerLazy(
+        image: Image,
+        result: TotalCaptureResult?,
+        resultLookup: ((Long) -> TotalCaptureResult?)?
+    ): Boolean {
+        val width = image.width
+        val height = image.height
+        val plane = image.planes.firstOrNull() ?: run { image.close(); return false }
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        val rowLength = width * pixelStride
+        if (width <= 0 || height <= 0 || rowLength <= 0) {
+            image.close()
+            return false
+        }
+        try {
+            synchronized(lock) {
+                val resolvedResult = resolveLateResult(result, image.timestamp, resultLookup)
+                val frame = ZslFrame(
+                    buffer = null,
+                    width = width,
+                    height = height,
+                    rowStride = rowStride,
+                    timestamp = image.timestamp,
+                    result = resolvedResult,
+                    iso = resolvedResult?.get(CaptureResult.SENSOR_SENSITIVITY),
+                    exposureTimeNs = resolvedResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+                    wb = extractWb(resolvedResult),
+                    cropKey = resolvedResult?.get(CaptureResult.SCALER_CROP_REGION)?.toString(),
+                    afFocused = isAfFocused(resolvedResult),
+                    lensId = lensId,
+                    zoomRatio = zoomRatio,
+                    rotationDegrees = rotationDegrees,
+                    rowLength = rowLength,
+                    image = image
+                )
+                while (frames.size >= config.depth) {
+                    if (frames.isEmpty()) break
+                    releaseFrame(frames.removeFirst())
+                }
+                frames.addLast(frame)
+                receivedFrames++
+                if (firstFrameTimestampNs == 0L) firstFrameTimestampNs = image.timestamp
+                lastFrameTimestampNs = image.timestamp
+            }
+            return true
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to retain lazy ZSL RAW frame", e)
+            image.close()
+            return false
+        }
+    }
+
+    fun snapshot(): List<ZslFrame> = synchronized(lock) { frames.toList() }
+
+    /** Binds a CaptureResult that arrived after its Image (sync latency > 0). */
+    fun attachResult(timestamp: Long, result: TotalCaptureResult) {
+        synchronized(lock) {
+            val frame = frames.firstOrNull { it.timestamp == timestamp } ?: return
+            frame.result = result
+            frame.iso = result.get(CaptureResult.SENSOR_SENSITIVITY)
+            frame.exposureTimeNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+            frame.wb = extractWb(result)
+            frame.cropKey = result.get(CaptureResult.SCALER_CROP_REGION)?.toString()
+            frame.afFocused = isAfFocused(result)
+        }
+    }
+
+    /** Removes selected frames and copies any retained Images before transferring ownership. */
+    fun take(framesToTake: List<ZslFrame>): List<ZslFrame> {
+        if (framesToTake.isEmpty()) return emptyList()
+        val wanted = framesToTake.map { it.timestamp }.toHashSet()
+        val (taken, capturedEpoch) = synchronized(lock) {
+            val selected = frames.filter { it.timestamp in wanted }
+            frames.removeAll { it.timestamp in wanted }
+            selected to clearEpoch.get()
+        }
+        if (config.mode != ZslRingMode.LAZY_IMAGE) return taken
+        return synchronized(copyLock) {
+            if (clearEpoch.get() != capturedEpoch) {
+                taken.forEach { it.image?.close() }
+                emptyList()
+            } else {
+                taken.mapNotNull { frame -> copyRetainedFrame(frame) }
+            }
+        }
+    }
+
+    private fun copyRetainedFrame(frame: ZslFrame): ZslFrame? {
+        val image = frame.image ?: return frame
+        val plane = image.planes.firstOrNull()
+        if (plane == null) {
+            image.close()
+            return null
+        }
+        val dataLength = frame.rowLength * frame.height
+        val buffer = HdrPlusBurst.acquireBuffer(dataLength)
+        return try {
+            copyPlane(
+                plane.buffer,
+                frame.rowStride,
+                frame.rowLength,
+                frame.width,
+                frame.height,
+                buffer,
+                dataLength
+            )
+            buffer.position(0)
+            buffer.limit(dataLength)
+            frame.copy(buffer = buffer, image = null)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to copy selected lazy ZSL frame", e)
+            HdrPlusBurst.releaseBuffer(buffer)
+            null
+        } finally {
+            image.close()
+        }
+    }
+
+    /** Newest frame with metadata and focused AF state for instant single-frame fallback. */
+    fun latestValid(): ZslFrame? {
+        val all = synchronized(lock) { frames.toList() }
+        val index = ZslFrameSelector.latestValidIndex(all.map { it.toSample() }) ?: return null
+        return all[index]
+    }
+
+    /** Newest frame carrying ISO/exposure metadata (used for pre-flight low-light checks). */
+    fun latestWithMetadata(): ZslFrame? = synchronized(lock) {
+        frames.lastOrNull { it.iso != null && it.exposureTimeNs != null }
+    }
+
+    fun nearest(t0Ns: Long): ZslFrame? {
+        val all = synchronized(lock) { frames.toList() }
+        val index = ZslFrameSelector.nearestIndex(all.map { it.toSample() }, t0Ns, config.maxAgeNs) ?: return null
+        return all[index]
+    }
+
+    /**
+     * Returns a stable pre-roll run for HDR+ ZSL, base-frame first.
+     * Returns an empty list when fewer than [minRunCount] frames share exposure/WB/crop/AF state.
+     */
+    fun stableRun(
+        t0Ns: Long,
+        targetCount: Int,
+        minRunCount: Int = ZslAdaptivePolicy.MIN_HDR_FRAMES
+    ): List<ZslFrame> {
+        val all = synchronized(lock) { frames.toList() }
+        val indices = ZslFrameSelector.stableRunIndices(
+            samples = all.map { it.toSample() },
+            t0Ns = t0Ns,
+            targetCount = targetCount,
+            maxAgeNs = config.maxAgeNs,
+            minRunCount = minRunCount
+        )
+        if (indices.size < minRunCount) return emptyList()
+        return indices.map { all[it] }
+    }
+
+    fun clear() {
+        val old = synchronized(lock) {
+            clearEpoch.incrementAndGet()
+            val copy = frames.toList()
+            frames.clear()
+            copy
+        }
+        // Wait for any in-flight LAZY_IMAGE copy in take() to finish before returning,
+        // so rawImageReader.close() cannot unmap native image buffers mid-copy.
+        synchronized(copyLock) {}
+        old.forEach { releaseFrame(it) }
+    }
+
+    fun releaseFrames(framesToRelease: List<ZslFrame>) {
+        framesToRelease.forEach { releaseFrame(it) }
+    }
+
+    private fun ZslFrame.toSample(): ZslFrameSample = ZslFrameSample(
+        timestamp = timestamp,
+        hasResult = result != null,
+        iso = iso,
+        exposureTimeNs = exposureTimeNs,
+        wb = wb,
+        cropKey = cropKey,
+        afFocused = afFocused
+    )
+
+    private fun extractWb(result: TotalCaptureResult?): FloatArray? {
+        val gains = result?.get(CaptureResult.COLOR_CORRECTION_GAINS) ?: return null
+        return floatArrayOf(gains.red, gains.greenEven, gains.greenOdd, gains.blue)
+    }
+
+    private fun isAfFocused(result: TotalCaptureResult?): Boolean {
+        if (result == null) return false
+        return isAfStateFocused(
+            afMode = result.get(CaptureResult.CONTROL_AF_MODE),
+            afState = result.get(CaptureResult.CONTROL_AF_STATE),
+            lensState = result.get(CaptureResult.LENS_STATE)
+        )
+    }
+
+    private fun copyPlane(
+        source: ByteBuffer,
+        rowStride: Int,
+        rowLength: Int,
+        width: Int,
+        height: Int,
+        target: ByteBuffer,
+        targetCapacity: Int
+    ) {
+        target.clear()
+        if (source.isDirect) {
+            ColorProcessor.copyBayerWithStride(
+                source, source.position(),
+                target, 0,
+                rowLength / 2, height, rowStride, 2
+            )
+        } else {
+            val oldPos = source.position()
+            val oldLimit = source.limit()
+            try {
+                for (y in 0 until height) {
+                    val rowStart = y * rowStride
+                    if (rowStart + rowLength > source.capacity()) break
+                    source.position(rowStart)
+                    source.limit(rowStart + rowLength)
+                    target.put(source)
+                }
+            } finally {
+                source.limit(oldLimit)
+                source.position(oldPos)
+            }
+        }
+        target.position(0)
+        target.limit(targetCapacity)
+    }
+
+    private fun releaseFrame(frame: ZslFrame) {
+        frame.image?.close()
+        frame.buffer?.let { HdrPlusBurst.releaseBuffer(it) }
+    }
+}
