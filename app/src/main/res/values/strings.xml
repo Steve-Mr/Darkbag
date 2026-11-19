@@ -457,6 +457,8 @@
     <string name="zsl_status_inactive_60fps">Inactive · 60 FPS</string>
     <string name="zsl_status_inactive_half_frame">Inactive · Half-Frame</string>
     <string name="zsl_status_inactive_multi_camera">Inactive · Multi-Camera</string>
+    <string name="zsl_status_multicam_limited">Primary Ready · 3-Frame Limited (Secondary Single)</string>
+    <string name="zsl_status_multicam_single">Primary Ready · Single Frame (Secondary Single)</string>
     <string name="pref_exp_zsl_title">ZERO SHUTTER LAG</string>
     <string name="pref_exp_hardware_title">EXPERIMENTAL HARDWARE</string>
     <string name="pref_exp_diagnostics_title">DIAGNOSTIC LOGS</string>
@@ -540,6 +542,7 @@
     <string name="pref_custom_raw_folder">Custom RAW Storage Directory</string>
     <string name="pref_cache_category">Cache &amp; Storage Management</string>
     <string name="pref_force_60fps">Force 60fps Viewfinder Preview</string>
+    <string name="pref_exp_multicam_color_harmonization_title">Multi-Camera Color Harmonization</string>
     <string name="dialog_reset_storage_title">Reset Storage Directory</string>
     <string name="dialog_reset_storage_jpg_message">Reset custom JPEG storage back to default (Pictures/Darkbag)?</string>
     <string name="dialog_reset_storage_raw_message">Reset custom RAW storage back to default (Pictures/Darkbag)?</string>

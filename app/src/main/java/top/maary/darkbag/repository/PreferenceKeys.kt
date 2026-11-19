@@ -92,6 +92,7 @@ object PreferenceKeys {
     const val KEY_ENABLE_PLAYGROUND = "enable_playground"
     const val KEY_SHOW_FLOATING_TOOLBAR = "show_floating_toolbar"
     const val KEY_EXP_FOCUS_PEAKING = "exp_focus_peaking"
+    const val KEY_EXP_MULTICAM_COLOR_HARMONIZATION = "exp_multicam_color_harmonization"
     const val KEY_FOCUS_PEAKING_ACTIVE = "pref_focus_peaking_active"
     const val KEY_COLOR_ENGINE_MODE = "color_engine_mode"
     const val KEY_GALLERY_COLUMNS_PORTRAIT = "gallery_columns_portrait"
@@ -186,6 +187,7 @@ object PreferenceKeys {
     val ENABLE_PLAYGROUND = booleanPreferencesKey(KEY_ENABLE_PLAYGROUND)
     val SHOW_FLOATING_TOOLBAR = booleanPreferencesKey(KEY_SHOW_FLOATING_TOOLBAR)
     val EXP_FOCUS_PEAKING = booleanPreferencesKey(KEY_EXP_FOCUS_PEAKING)
+    val EXP_MULTICAM_COLOR_HARMONIZATION = booleanPreferencesKey(KEY_EXP_MULTICAM_COLOR_HARMONIZATION)
     val FOCUS_PEAKING_ACTIVE = booleanPreferencesKey(KEY_FOCUS_PEAKING_ACTIVE)
     val COLOR_ENGINE_MODE = intPreferencesKey(KEY_COLOR_ENGINE_MODE)
     val GALLERY_COLUMNS_PORTRAIT = intPreferencesKey(KEY_GALLERY_COLUMNS_PORTRAIT)

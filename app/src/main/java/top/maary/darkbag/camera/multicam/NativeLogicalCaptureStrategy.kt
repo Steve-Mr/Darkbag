@@ -103,6 +103,7 @@ internal class NativeLogicalCaptureStrategy(
         val collectedJpegs = ConcurrentHashMap<String, Pair<ByteArray, Size>>()
         val collectedDngPaths = ConcurrentHashMap<String, String>()
         val rawFailedPaths = ConcurrentHashMap<String, Boolean>()
+        val harmonizedNeutralMap = ConcurrentHashMap<String, FloatArray>()
         val expectedRawCount = expectedLenses.count { previewCtrl.rawImageReaders[it.physicalId] != null }
 
         val completionJob = scope.launch(Dispatchers.Default) {
@@ -154,6 +155,7 @@ internal class NativeLogicalCaptureStrategy(
                 orientationDegrees = orientationDegrees,
                 manualConfig = manualConfig,
                 targetExposureProductMap = targetExposureProductMap,
+                harmonizedNeutralMap = harmonizedNeutralMap,
                 primaryBurstSpec = if (isPrimaryHdrActive) primaryExpSpec else null
             )
 
@@ -232,7 +234,8 @@ internal class NativeLogicalCaptureStrategy(
                                         lens = lens,
                                         isHdrPlus = isHdrPlusActive && isPrimary,
                                         metadata = metadata,
-                                        digitalGain = digitalGain
+                                        digitalGain = digitalGain,
+                                        overrideNeutralColorPoint = harmonizedNeutralMap[lens.physicalId]
                                     )
                                     synchronized(frameAssembleLock) {
                                         if (tempPath != null) {
@@ -331,6 +334,7 @@ internal class NativeLogicalCaptureStrategy(
         orientationDegrees: Int,
         manualConfig: MultiCameraManualConfig?,
         targetExposureProductMap: ConcurrentHashMap<String, Double>,
+        harmonizedNeutralMap: ConcurrentHashMap<String, FloatArray>,
         primaryBurstSpec: MultiCamPrimaryHdrHelper.ExposureSpec? = null
     ): CaptureRequest.Builder {
         val lastPreview = previewCtrl.lastPreviewResult
@@ -399,11 +403,40 @@ internal class NativeLogicalCaptureStrategy(
                             setPhysicalCameraKey(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF, lens.physicalId)
                             setPhysicalCameraKey(CaptureRequest.SENSOR_EXPOSURE_TIME, finalExpTime, lens.physicalId)
                             setPhysicalCameraKey(CaptureRequest.SENSOR_SENSITIVITY, targetIso, lens.physicalId)
+
                             Log.i(
                                 TAG,
                                 "Native logical: transferred photometric exposure to ${lens.name} (${lens.physicalId}): " +
                                     "time=${finalExpTime / 1_000_000.0}ms, ISO=$targetIso (ratio=$apertureRatio, base0Ev=$baseline0EvProduct)"
                             )
+                        }
+                    }
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val colorHarmonizationEnabled = top.maary.darkbag.repository.SettingsRepository.getInstance(dngWriter.context).current().expMultiCamColorHarmonization
+                if (colorHarmonizationEnabled) {
+                    val primChars = previewCtrl.currentPrimaryLens?.characteristics
+                        ?: CameraRepository.getCharacteristics(cameraManager, device.id)
+                    for (lens in expectedLenses) {
+                        val isPrimary = lens.physicalId == (previewCtrl.currentPrimaryLens?.physicalId ?: expectedLenses.first().physicalId)
+                        if (!isPrimary) {
+                            val physChars = dngWriter.getLensCharacteristics(lens)
+                            val harm = MultiCamColorHarmonizer.harmonize(
+                                primaryChars = primChars,
+                                primaryResult = lastPreview,
+                                secondaryChars = physChars
+                            )
+                            if (harm != null) {
+                                harmonizedNeutralMap[lens.physicalId] = harm.neutralPoint
+                                setPhysicalCameraKey(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF, lens.physicalId)
+                                setPhysicalCameraKey(CaptureRequest.COLOR_CORRECTION_GAINS, harm.gains, lens.physicalId)
+                                harm.colorTransform?.let { transform ->
+                                    setPhysicalCameraKey(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX, lens.physicalId)
+                                    setPhysicalCameraKey(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform, lens.physicalId)
+                                }
+                            }
                         }
                     }
                 }

@@ -334,7 +334,8 @@ object SensorCalibrationHelper {
     fun extractCalibration(
         characteristics: CameraCharacteristics?,
         result: CaptureResult?,
-        wb: FloatArray? = null
+        wb: FloatArray? = null,
+        overrideNeutralColorPoint: FloatArray? = null
     ): CalibrationData {
         val colorMatrix1 = FloatArray(9) { 0f }
         val cm1 = characteristics?.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
@@ -393,28 +394,30 @@ object SensorCalibrationHelper {
         val calibrationIlluminant1 = (characteristics?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21).toInt()
         val calibrationIlluminant2 = (characteristics?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2) ?: 17).toInt()
 
-        var neutralColorPoint: FloatArray? = null
-        val np = result?.get(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
-        if (np != null && np.size >= 3 && np[0].numerator > 0 && np[1].numerator > 0 && np[2].numerator > 0) {
-            neutralColorPoint = floatArrayOf(
-                np[0].numerator.toFloat() / np[0].denominator.toFloat(),
-                np[1].numerator.toFloat() / np[1].denominator.toFloat(),
-                np[2].numerator.toFloat() / np[2].denominator.toFloat()
-            )
-        } else if (wb != null && wb.size >= 4 && wb[0] > 0.001f && wb[1] > 0.001f && wb[3] > 0.001f) {
-            neutralColorPoint = floatArrayOf(
-                1.0f / wb[0],
-                1.0f / wb[1],
-                1.0f / wb[3]
-            )
-        } else {
-            val wbGains = result?.get(CaptureResult.COLOR_CORRECTION_GAINS)
-            if (wbGains != null && wbGains.red > 0.001f && wbGains.blue > 0.001f) {
+        var neutralColorPoint: FloatArray? = overrideNeutralColorPoint
+        if (neutralColorPoint == null) {
+            val np = result?.get(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
+            if (np != null && np.size >= 3 && np[0].numerator > 0 && np[1].numerator > 0 && np[2].numerator > 0) {
                 neutralColorPoint = floatArrayOf(
-                    1.0f / wbGains.red,
-                    1.0f / wbGains.greenEven,
-                    1.0f / wbGains.blue
+                    np[0].numerator.toFloat() / np[0].denominator.toFloat(),
+                    np[1].numerator.toFloat() / np[1].denominator.toFloat(),
+                    np[2].numerator.toFloat() / np[2].denominator.toFloat()
                 )
+            } else if (wb != null && wb.size >= 4 && wb[0] > 0.001f && wb[1] > 0.001f && wb[3] > 0.001f) {
+                neutralColorPoint = floatArrayOf(
+                    1.0f / wb[0],
+                    1.0f / wb[1],
+                    1.0f / wb[3]
+                )
+            } else {
+                val wbGains = result?.get(CaptureResult.COLOR_CORRECTION_GAINS)
+                if (wbGains != null && wbGains.red > 0.001f && wbGains.blue > 0.001f) {
+                    neutralColorPoint = floatArrayOf(
+                        1.0f / wbGains.red,
+                        1.0f / wbGains.greenEven,
+                        1.0f / wbGains.blue
+                    )
+                }
             }
         }
 

@@ -431,6 +431,8 @@
     <string name="zsl_status_inactive_60fps">未激活 · 60 FPS 互斥</string>
     <string name="zsl_status_inactive_half_frame">未激活 · 半格互斥</string>
     <string name="zsl_status_inactive_multi_camera">未激活 · 多摄互斥</string>
+    <string name="zsl_status_multicam_limited">主镜头就绪 · 有限3帧融合 (副摄单帧)</string>
+    <string name="zsl_status_multicam_single">主镜头就绪 · 单帧标准 (副摄单帧)</string>
     <string name="pref_exp_zsl_title">零快门延迟 (ZSL)</string>
     <string name="pref_exp_hardware_title">实验性硬件与标定</string>
     <string name="pref_exp_diagnostics_title">性能与诊断日志</string>
@@ -514,6 +516,7 @@
     <string name="pref_custom_raw_folder">自定义 RAW 目录</string>
     <string name="pref_cache_category">缓存与存储管理</string>
     <string name="pref_force_60fps">强制 60fps 取景</string>
+    <string name="pref_exp_multicam_color_harmonization_title">多摄色彩一致性</string>
     <string name="pref_hdr_fusion_mode_title">HDR+ 融合算法引擎</string>
     <string name="pref_hdr_fusion_mode_helper">自动模式：1.0x 使用 Spatial+RCD，变焦（≥1.25x）启用 Sabre 超分</string>
     <string name="dialog_reset_storage_title">重置存储目录</string>

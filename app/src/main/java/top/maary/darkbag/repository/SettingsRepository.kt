@@ -178,6 +178,7 @@ class SettingsRepository(context: Context) {
                 ?: PreferenceKeys.STARTUP_CAMERA,
             onboardingCompleted = bool(PreferenceKeys.KEY_ONBOARDING_COMPLETED, false),
             expFocusPeaking = bool(PreferenceKeys.KEY_EXP_FOCUS_PEAKING, false),
+            expMultiCamColorHarmonization = bool(PreferenceKeys.KEY_EXP_MULTICAM_COLOR_HARMONIZATION, true),
             focusPeakingActive = bool(PreferenceKeys.KEY_FOCUS_PEAKING_ACTIVE, true),
             colorEngineMode = int(PreferenceKeys.KEY_COLOR_ENGINE_MODE, 2),
             shutterLongPressAction = str(
@@ -550,6 +551,10 @@ class SettingsRepository(context: Context) {
 
     fun setRawVideoResolution(resolution: String) {
         edit { this[PreferenceKeys.RAW_VIDEO_RESOLUTION] = resolution }
+    }
+
+    fun setExpMultiCamColorHarmonization(enabled: Boolean) {
+        edit { this[PreferenceKeys.EXP_MULTICAM_COLOR_HARMONIZATION] = enabled }
     }
 
     @VisibleForTesting

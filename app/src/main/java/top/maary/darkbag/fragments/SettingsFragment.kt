@@ -414,6 +414,10 @@ class SettingsFragment : Fragment() {
             if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
             settingsViewModel.updateForce60Fps(isChecked)
         }
+        binding.switchExpMulticamColorHarmonization.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateExpMultiCamColorHarmonization(isChecked)
+        }
 
         binding.toggleUiTiers.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (bentoDelegate.isRendering) return@addOnButtonCheckedListener

@@ -290,6 +290,7 @@ class SettingsBentoDelegate(
         binding.switchHdrPlusOis.isChecked = state.hdrPlusOis
         binding.switchUseInternalViewer.isChecked = state.useInternalViewer
         binding.switchForce60fps.isChecked = state.force60Fps
+        binding.switchExpMulticamColorHarmonization.isChecked = state.expMultiCamColorHarmonization
         binding.switchZsl.isChecked = state.zslEnabled
         binding.switchZslAdaptive.isChecked = state.zslAdaptive
         binding.switchZslLazyRing.isChecked = state.zslLazyRing
@@ -394,10 +395,9 @@ class SettingsBentoDelegate(
 
         val activeMode = CaptureMode.fromKey(state.activeCaptureMode)
         val is60FpsConflict = state.force60Fps
-        val isMultiCam = state.multiCameraModeEnabled && (activeMode == CaptureMode.MULTI_CAMERA)
-        val isHdrUnsupported = !is60FpsConflict && !isMultiCam && state.hdrPlusEnabled && state.zslReason == "hdr_unsupported"
-        val isArmed = !is60FpsConflict && !isMultiCam && !isHdrUnsupported && state.zslRoute == "raw_ring"
-        val isUnavailable = isMultiCam || (!is60FpsConflict && !isHdrUnsupported && state.zslRoute != "raw_ring")
+        val isHdrUnsupported = !is60FpsConflict && state.hdrPlusEnabled && state.zslReason == "hdr_unsupported"
+        val isArmed = !is60FpsConflict && !isHdrUnsupported && (state.zslRoute == "raw_ring")
+        val isUnavailable = !is60FpsConflict && !isHdrUnsupported && (state.zslRoute != "raw_ring")
 
         when {
             is60FpsConflict -> {
@@ -456,13 +456,18 @@ class SettingsBentoDelegate(
         }
         val activeMode = CaptureMode.fromKey(state.activeCaptureMode)
         val isMultiCam = state.multiCameraModeEnabled && (activeMode == CaptureMode.MULTI_CAMERA)
-        if (isMultiCam) {
-            return context.getString(R.string.zsl_status_inactive_multi_camera)
-        }
         return when (state.zslRoute) {
             "raw_ring" -> when {
                 state.hdrPlusEnabled && state.zslReason == "hdr_unsupported" ->
                     context.getString(R.string.zsl_status_inactive_hdr)
+
+                isMultiCam -> {
+                    if (state.hdrPlusEnabled) {
+                        context.getString(R.string.zsl_status_multicam_limited)
+                    } else {
+                        context.getString(R.string.zsl_status_multicam_single)
+                    }
+                }
 
                 state.hdrPlusEnabled -> {
                     val preRoll = minOf(state.hdrBurstCount, 8)

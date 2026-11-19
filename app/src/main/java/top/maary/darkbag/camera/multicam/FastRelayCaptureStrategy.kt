@@ -346,6 +346,19 @@ internal class FastRelayCaptureStrategy(
             val resultDeferred = CompletableDeferred<TotalCaptureResult?>()
             val captureTime = System.currentTimeMillis()
 
+            val chars = dngWriter.getLensCharacteristics(lens)
+            val colorHarmonizationEnabled = top.maary.darkbag.repository.SettingsRepository.getInstance(dngWriter.context).current().expMultiCamColorHarmonization
+            val primaryDevId = previewCtrl.resolveActivePreviewPhysicalId() ?: previewCtrl.currentPrimaryLens?.physicalId ?: "0"
+            val primaryChars = previewCtrl.currentPrimaryLens?.characteristics
+                ?: cameraManager.getCameraCharacteristics(primaryDevId)
+            val harm = if (colorHarmonizationEnabled) {
+                MultiCamColorHarmonizer.harmonize(
+                    primaryChars = primaryChars,
+                    primaryResult = primaryCaptureResult,
+                    secondaryChars = chars
+                )
+            } else null
+
             attachSingleCaptureReaders(
                 jpegReader = jpegReader,
                 rawReader = rawReader,
@@ -355,10 +368,10 @@ internal class FastRelayCaptureStrategy(
                 captureTimestamp = captureTime,
                 resultDeferred = resultDeferred,
                 jpegDeferred = jpegDeferred,
-                dngDeferred = dngDeferred
+                dngDeferred = dngDeferred,
+                overrideNeutralColorPoint = harm?.neutralPoint
             )
 
-            val chars = dngWriter.getLensCharacteristics(lens)
             val req = buildRelayCaptureRequest(
                 device = device,
                 jpegReader = jpegReader,
@@ -368,7 +381,8 @@ internal class FastRelayCaptureStrategy(
                 orientationDegrees = orientationDegrees,
                 primaryCaptureResult = primaryCaptureResult,
                 manualConfig = manualConfig,
-                primaryBurstSpec = primaryBurstSpec
+                primaryBurstSpec = primaryBurstSpec,
+                harmonizedProfile = harm
             )
 
             session.capture(req.build(), object : CameraCaptureSession.CaptureCallback() {
@@ -409,7 +423,8 @@ internal class FastRelayCaptureStrategy(
         captureTimestamp: Long,
         resultDeferred: CompletableDeferred<TotalCaptureResult?>,
         jpegDeferred: CompletableDeferred<Pair<ByteArray, Size>?>,
-        dngDeferred: CompletableDeferred<String?>
+        dngDeferred: CompletableDeferred<String?>,
+        overrideNeutralColorPoint: FloatArray? = null
     ) {
         val handler = previewCtrl.cameraHandler
         jpegReader.setOnImageAvailableListener({ r ->
@@ -442,7 +457,8 @@ internal class FastRelayCaptureStrategy(
                                 lens = lens,
                                 isHdrPlus = isHdrPlus,
                                 metadata = metadata,
-                                digitalGain = digitalGain
+                                digitalGain = digitalGain,
+                                overrideNeutralColorPoint = overrideNeutralColorPoint
                             )
                             dngDeferred.complete(tempPath)
                         } else {
@@ -468,7 +484,8 @@ internal class FastRelayCaptureStrategy(
         orientationDegrees: Int,
         primaryCaptureResult: TotalCaptureResult?,
         manualConfig: MultiCameraManualConfig?,
-        primaryBurstSpec: MultiCamPrimaryHdrHelper.ExposureSpec? = null
+        primaryBurstSpec: MultiCamPrimaryHdrHelper.ExposureSpec? = null,
+        harmonizedProfile: MultiCamColorHarmonizer.HarmonizedProfile? = null
     ): CaptureRequest.Builder {
         return device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
             addTarget(jpegReader.surface)
@@ -516,12 +533,13 @@ internal class FastRelayCaptureStrategy(
                 }
             }
 
-            val awbGains = primaryCaptureResult?.get(CaptureResult.COLOR_CORRECTION_GAINS)
-            val awbTransform = primaryCaptureResult?.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)
-            if (awbGains != null && awbTransform != null) {
+            if (harmonizedProfile != null) {
                 set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
-                set(CaptureRequest.COLOR_CORRECTION_GAINS, awbGains)
-                set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, awbTransform)
+                set(CaptureRequest.COLOR_CORRECTION_GAINS, harmonizedProfile.gains)
+                harmonizedProfile.colorTransform?.let { transform ->
+                    set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+                    set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+                }
             } else {
                 set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
             }

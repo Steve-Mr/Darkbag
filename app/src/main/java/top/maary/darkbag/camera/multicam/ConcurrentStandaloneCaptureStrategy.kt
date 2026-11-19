@@ -95,6 +95,7 @@ internal class ConcurrentStandaloneCaptureStrategy(
         val collectedJpegs = ConcurrentHashMap<String, Pair<ByteArray, Size>>()
         val collectedDngPaths = ConcurrentHashMap<String, String>()
         val rawFailedPaths = ConcurrentHashMap<String, Boolean>()
+        val harmonizedNeutralMap = ConcurrentHashMap<String, FloatArray>()
         val expectedRawCount = expectedLenses.count { previewCtrl.rawImageReaders[it.physicalId] != null }
 
         val completionJob = scope.launch(Dispatchers.Default) {
@@ -249,11 +250,23 @@ internal class ConcurrentStandaloneCaptureStrategy(
                         }
                     }, cameraHandler)
                 } else {
+                    val chars = dngWriter.getLensCharacteristics(lens)
+                    val colorHarmonizationEnabled = top.maary.darkbag.repository.SettingsRepository.getInstance(dngWriter.context).current().expMultiCamColorHarmonization
+                    val harm = if (!isPrimary && colorHarmonizationEnabled) {
+                        MultiCamColorHarmonizer.harmonize(
+                            primaryChars = primaryChars,
+                            primaryResult = previewCtrl.lastPreviewResult,
+                            secondaryChars = chars
+                        )
+                    } else null
+                    if (harm != null) {
+                        harmonizedNeutralMap[lens.physicalId] = harm.neutralPoint
+                    }
+
                     rawReader?.setOnImageAvailableListener({ r ->
                         val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
                         scope.launch(Dispatchers.IO) {
                             try {
-                                val chars = dngWriter.getLensCharacteristics(lens)
                                 val captureRes = withTimeoutOrNull(2500L) { resultDeferredMap[lens.physicalId]?.await() }
                                 if (captureRes != null) {
                                     val digitalGain = dngWriter.calculateDigitalGain(captureRes, chars)
@@ -265,7 +278,8 @@ internal class ConcurrentStandaloneCaptureStrategy(
                                         orientationDegrees = orientationDegrees,
                                         lens = lens,
                                         metadata = metadata,
-                                        digitalGain = digitalGain
+                                        digitalGain = digitalGain,
+                                        overrideNeutralColorPoint = harmonizedNeutralMap[lens.physicalId]
                                     )
                                     synchronized(frameAssembleLock) {
                                         if (tempPath != null) {
@@ -298,6 +312,14 @@ internal class ConcurrentStandaloneCaptureStrategy(
                         set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
                         val isMeteringPrimary = (lens.physicalId == (previewCtrl.resolveActivePreviewPhysicalId() ?: previewCtrl.currentPrimaryLens?.physicalId))
                         applyManualConfig(this, isPrimary, manualConfig, isMeteringPrimary)
+                        if (harm != null) {
+                            set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
+                            set(CaptureRequest.COLOR_CORRECTION_GAINS, harm.gains)
+                            harm.colorTransform?.let { transform ->
+                                set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+                                set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+                            }
+                        }
                     }
 
                     sess.capture(req.build(), object : CameraCaptureSession.CaptureCallback() {

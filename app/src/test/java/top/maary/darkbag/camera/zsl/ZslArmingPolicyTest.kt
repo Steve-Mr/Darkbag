@@ -65,9 +65,6 @@ class ZslArmingPolicyTest {
         assertEquals(ZslProfile.OFF, ZslArmingPolicy.evaluate(sampleFacts(force60Fps = true)).profile)
         assertEquals("force_60fps", ZslArmingPolicy.evaluate(sampleFacts(force60Fps = true)).disarmReason)
 
-        assertEquals(ZslProfile.OFF, ZslArmingPolicy.evaluate(sampleFacts(isMultiCamera = true)).profile)
-        assertEquals("multi_camera", ZslArmingPolicy.evaluate(sampleFacts(isMultiCamera = true)).disarmReason)
-
         assertEquals(ZslProfile.OFF, ZslArmingPolicy.evaluate(sampleFacts(isManualExposure = true)).profile)
         assertEquals("manual_exposure", ZslArmingPolicy.evaluate(sampleFacts(isManualExposure = true)).disarmReason)
 
@@ -168,5 +165,21 @@ class ZslArmingPolicyTest {
         )
         assertEquals(ZslProfile.OFF, planNoRaw.profile)
         assertEquals("reader_not_raw", planNoRaw.disarmReason)
+    }
+
+    @Test
+    fun testMultiCameraSupportAndBurstLimiting() {
+        val facts = sampleFacts(isMultiCamera = true, isHdrPlus = true)
+        val eval = ZslArmingPolicy.evaluate(facts)
+        assertEquals(ZslProfile.HDR_PLUS, eval.profile)
+
+        val abundantMem = 2048L * 1024 * 1024
+        val plan = ZslArmingPolicy.planArming(
+            facts = facts, isRawReader = true, hasLut = true, lazyRing = true,
+            lazyFailed = false, burstCount = 8, underexposureMode = "-1 EV", availMemBytes = abundantMem
+        )
+        assertEquals(ZslProfile.HDR_PLUS, plan.profile)
+        assertNotNull(plan.ringConfig)
+        assertEquals(3, plan.ringConfig?.depth)
     }
 }

@@ -225,7 +225,9 @@ class ZslCaptureController(
         val report = ZslCapabilityDetector.inspect(env.hostContext, cameraId)
         val facts = ZslArmingPolicy.ContextFacts(
             zslEnabled = prefs.zslEnabled, sessionActive = sessionActive,
-            isSupportedCaptureMode = coordinator.effectiveCaptureMode == CaptureMode.NORMAL || coordinator.effectiveCaptureMode.isHalfFrame,
+            isSupportedCaptureMode = coordinator.effectiveCaptureMode == CaptureMode.NORMAL ||
+                coordinator.effectiveCaptureMode.isHalfFrame ||
+                coordinator.effectiveCaptureMode == CaptureMode.MULTI_CAMERA,
             force60Fps = prefs.force60Fps, isMultiCamera = env.sessionArbiter.isMultiCameraMode,
             isManualExposure = env.runtimeState.isManualExposure, isFlashActive = env.runtimeState.isFlashEnabled,
             isPowerSaveOrThermalSevere = isThermalSevere(), isHdrPlusEnabled = env.isHdrPlusEnabled, capabilityReport = report

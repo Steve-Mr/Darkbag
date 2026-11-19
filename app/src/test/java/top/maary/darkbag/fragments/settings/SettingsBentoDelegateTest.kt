@@ -68,6 +68,7 @@ class SettingsBentoDelegateTest {
         assertTrue(binding.switchMotionPhotoAudio.isChecked)
         assertTrue(binding.switchHalfFrameMode.isChecked)
         assertTrue(binding.switchMultiCameraMode.isChecked)
+        assertTrue(binding.switchExpMulticamColorHarmonization.isChecked)
     }
 
     @Test
@@ -163,19 +164,37 @@ class SettingsBentoDelegateTest {
     }
 
     @Test
-    fun testZslBentoSubTray_WhenUnavailable_MultiCameraActive() {
+    fun testZslBentoSubTray_WhenMultiCameraActive_ShowsLimitedSupport() {
         val mcPrefs = DarkbagPreferences(
             debugEnabled = true,
             zslEnabled = true,
             multiCameraModeEnabled = true,
             activeCaptureMode = "multi_camera",
-            zslRoute = "raw_ring"
+            zslRoute = "raw_ring",
+            hdrPlusEnabled = true
         )
         delegate.renderPreferences(binding, mcPrefs)
+        assertEquals(themedContext.getString(R.string.badge_zsl_armed), binding.badgeZslStatus.text)
+        assertEquals(BentoContainerRole.TERTIARY_CONTAINER, binding.cardTrayExpZsl.containerRole)
+        assertEquals(0, binding.cardTrayExpZsl.strokeWidth)
+        assertTrue(binding.tvZslStatus.text.contains(themedContext.getString(R.string.zsl_status_multicam_limited)))
+    }
+
+    @Test
+    fun testZslBentoSubTray_WhenMultiCameraActive_HonestRouteGating() {
+        // When zslRoute is "none" in multi-camera mode, it must not fabricate ARMED status
+        val mcNoRingPrefs = DarkbagPreferences(
+            debugEnabled = true,
+            zslEnabled = true,
+            multiCameraModeEnabled = true,
+            activeCaptureMode = "multi_camera",
+            zslRoute = "none",
+            hdrPlusEnabled = true
+        )
+        delegate.renderPreferences(binding, mcNoRingPrefs)
         assertEquals(themedContext.getString(R.string.badge_zsl_unavailable), binding.badgeZslStatus.text)
         assertEquals(BentoContainerRole.SURFACE_CONTAINER_HIGH, binding.cardTrayExpZsl.containerRole)
-        assertEquals(0, binding.cardTrayExpZsl.strokeWidth)
-        assertTrue(binding.tvZslStatus.text.contains(themedContext.getString(R.string.zsl_status_inactive_multi_camera)))
+        assertTrue(binding.tvZslStatus.text.contains(themedContext.getString(R.string.zsl_status_unavailable)))
     }
 
     @Test

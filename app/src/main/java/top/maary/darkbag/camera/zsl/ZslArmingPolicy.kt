@@ -36,7 +36,6 @@ object ZslArmingPolicy {
         if (!facts.sessionActive) return EvaluationResult(ZslProfile.OFF, "session_closed")
         if (!facts.isSupportedCaptureMode) return EvaluationResult(ZslProfile.OFF, "current_mode")
         if (facts.force60Fps) return EvaluationResult(ZslProfile.OFF, "force_60fps")
-        if (facts.isMultiCamera) return EvaluationResult(ZslProfile.OFF, "multi_camera")
         if (facts.isManualExposure) return EvaluationResult(ZslProfile.OFF, "manual_exposure")
         if (facts.isFlashActive) return EvaluationResult(ZslProfile.OFF, "flash")
         if (facts.isPowerSaveOrThermalSevere) return EvaluationResult(ZslProfile.OFF, "thermal")
@@ -139,7 +138,8 @@ object ZslArmingPolicy {
         val report = facts.capabilityReport ?: return ArmingPlan(ZslProfile.OFF, disarmReason = "evaluating")
         if (!isRawReader) return ArmingPlan(ZslProfile.OFF, disarmReason = "reader_not_raw")
         if (eval.profile == ZslProfile.HDR_PLUS && !hasLut) return ArmingPlan(ZslProfile.OFF, disarmReason = "lut_missing")
-        val ringConfig = resolveRingConfig(eval.profile, burstCount, report.frameBytes, lazyRing, lazyFailed, availMemBytes)
+        val effectiveBurst = if (facts.isMultiCamera) minOf(burstCount, 3) else burstCount
+        val ringConfig = resolveRingConfig(eval.profile, effectiveBurst, report.frameBytes, lazyRing, lazyFailed, availMemBytes)
             ?: return ArmingPlan(ZslProfile.OFF, disarmReason = "ring_config")
         val evConfig = if (eval.profile == ZslProfile.HDR_PLUS) {
             resolveHdrTargetEv(underexposureMode, report.minAeCompensationSteps, report.aeCompensationStepEv)

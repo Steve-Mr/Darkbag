@@ -70,7 +70,8 @@ internal class MultiCamDngMetadataWriter(
         lens: PhysicalLensInfo,
         isHdrPlus: Boolean = false,
         metadata: CaptureMetadata? = null,
-        digitalGain: Float = 1.0f
+        digitalGain: Float = 1.0f,
+        overrideNeutralColorPoint: FloatArray? = null
     ): String? {
         val plane = rawImage.planes[0]
         return writeRawBufferToDng(
@@ -85,7 +86,8 @@ internal class MultiCamDngMetadataWriter(
             lens = lens,
             isHdrPlus = isHdrPlus,
             metadata = metadata,
-            digitalGain = digitalGain
+            digitalGain = digitalGain,
+            overrideNeutralColorPoint = overrideNeutralColorPoint
         )
     }
 
@@ -101,7 +103,8 @@ internal class MultiCamDngMetadataWriter(
         lens: PhysicalLensInfo,
         isHdrPlus: Boolean = false,
         metadata: CaptureMetadata? = null,
-        digitalGain: Float = 1.0f
+        digitalGain: Float = 1.0f,
+        overrideNeutralColorPoint: FloatArray? = null
     ): String? {
         return try {
             if (captureResult == null) {
@@ -128,7 +131,11 @@ internal class MultiCamDngMetadataWriter(
                 }
             }
 
-            val calib = SensorCalibrationHelper.extractCalibration(chars, captureResult)
+            val calib = SensorCalibrationHelper.extractCalibration(
+                chars,
+                captureResult,
+                overrideNeutralColorPoint = overrideNeutralColorPoint
+            )
             val lscTriple = SensorCalibrationHelper.extractLensShading(captureResult)
             val activeRect = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
             val activeArea = if (activeRect != null) intArrayOf(activeRect.top, activeRect.left, activeRect.bottom, activeRect.right) else null

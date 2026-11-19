@@ -54,6 +54,7 @@ data class DarkbagPreferences(
     val defaultStartupPage: String = PreferenceKeys.STARTUP_CAMERA,
     val onboardingCompleted: Boolean = false,
     val expFocusPeaking: Boolean = false,
+    val expMultiCamColorHarmonization: Boolean = true,
     val focusPeakingActive: Boolean = true,
     val colorEngineMode: Int = 2,
     val shutterLongPressAction: String = PreferenceKeys.SHUTTER_LONG_PRESS_MP4,
