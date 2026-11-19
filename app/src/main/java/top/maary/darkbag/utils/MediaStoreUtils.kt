@@ -15,7 +15,7 @@
  */
 
 package top.maary.darkbag.utils
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.SettingsRepository
 
 import android.content.ContentUris
 import android.content.Context
@@ -23,6 +23,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.DocumentsContract
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -59,10 +60,11 @@ class MediaStoreUtils(private val context: Context) {
     }
 
     suspend fun getLatestAppImage(): Uri? = withContext(Dispatchers.IO) {
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val settingsRepository = SettingsRepository.getInstance(context)
+        val snapshot = settingsRepository.current()
 
         // 1. Check persisted last captured URI (most accurate and fast)
-        val lastUriStr = prefs.getString(SettingsFragment.KEY_LAST_CAPTURE_URI, null)
+        val lastUriStr = snapshot.lastCaptureUri
         if (lastUriStr != null) {
             val lastUri = Uri.parse(lastUriStr)
             if (verifyUriExists(context, lastUri) && isDarkbagAssetUri(context, lastUri)) {
@@ -72,8 +74,8 @@ class MediaStoreUtils(private val context: Context) {
 
         // 2. Search prioritized SAF folders across JPG and RAW (photos and videos)
         val safFolders = listOfNotNull(
-            prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null),
-            prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+            snapshot.jpgStorageUri,
+            snapshot.rawStorageUri
         ).distinct()
 
         val allSafFiles = mutableListOf<androidx.documentfile.provider.DocumentFile>()
@@ -92,14 +94,14 @@ class MediaStoreUtils(private val context: Context) {
 
         val latestSaf = allSafFiles.maxByOrNull { it.lastModified() }?.uri
         if (latestSaf != null) {
-            prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, latestSaf.toString()).apply()
+            settingsRepository.setLastCaptureUri(latestSaf.toString())
             return@withContext latestSaf
         }
 
         // 3. Fallback to MediaStore filtered by Pictures/Darkbag
         val latestMediaStore = getLatestMediaStoreImageFiltered(context)
         if (latestMediaStore != null) {
-            prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, latestMediaStore.toString()).apply()
+            settingsRepository.setLastCaptureUri(latestMediaStore.toString())
         }
         return@withContext latestMediaStore
     }
@@ -268,6 +270,29 @@ class MediaStoreUtils(private val context: Context) {
                 }
             }
             return uri.path ?: "Unknown"
+        }
+
+        suspend fun deleteUriSafe(context: Context, uri: Uri): Boolean {
+            return withContext(Dispatchers.IO) {
+                try {
+                    if (uri.scheme == "content" && DocumentsContract.isDocumentUri(context, uri)) {
+                        DocumentsContract.deleteDocument(context.contentResolver, uri)
+                    } else if (uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) {
+                        val docUri = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
+                        DocumentsContract.deleteDocument(context.contentResolver, docUri)
+                    } else {
+                        context.contentResolver.delete(uri, null, null) > 0
+                    }
+                } catch (e: Exception) {
+                    try {
+                        val docFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)
+                            ?: androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)
+                        docFile?.delete() ?: false
+                    } catch (e2: Exception) {
+                        throw e
+                    }
+                }
+            }
         }
     }
 }

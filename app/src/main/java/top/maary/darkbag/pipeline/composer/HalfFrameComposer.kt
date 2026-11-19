@@ -15,8 +15,8 @@ object HalfFrameComposer {
         isSwapped: Boolean = false,
         showTimestamp: Boolean = false,
         flareType: Int = -1,
-        time1: Long = System.currentTimeMillis(),
-        time2: Long = System.currentTimeMillis(),
+        time1: Long? = null,
+        time2: Long? = null,
         downsample: Boolean = false
     ): Bitmap? {
         val b1 = if (isSwapped) frame2 else frame1
@@ -26,8 +26,10 @@ object HalfFrameComposer {
             return null
         }
 
-        val t1 = if (isSwapped) time2 else time1
-        val t2 = if (isSwapped) time1 else time2
+        val actualTime1 = time1 ?: System.currentTimeMillis()
+        val actualTime2 = time2 ?: System.currentTimeMillis()
+        val t1 = if (isSwapped) actualTime2 else actualTime1
+        val t2 = if (isSwapped) actualTime1 else actualTime2
 
         val isTB = layout == "TB" || layout == "Top-bottom" || layout == "上下排列" || layout?.contains("top", ignoreCase = true) == true
         val isSBS = !isTB

@@ -1,6 +1,7 @@
 package top.maary.darkbag.repository
 
 import android.content.Context
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -88,15 +89,50 @@ class ImageRepositoryCacheTest {
     }
 
     @Test
-    fun testGetGroupedImagesFlow_prunesStalePrepopulatedItems() = runBlocking {
-        val staleGroup = ImageGroup(baseName = "stale_deleted_item", metadataLoaded = true, isInProgress = false)
+    fun testGetGroupedImagesFlow_staleWhileRevalidateAndPrune() = runBlocking {
+        val staleGroup = ImageGroup(
+            baseName = "stale_deleted_item",
+            dngUri = Uri.parse("content://media/external/images/media/99999"),
+            metadataLoaded = true,
+            isInProgress = false
+        )
         ImageRepository.cachedGroups = listOf(staleGroup)
 
-        // Collecting the flow runs Stage 1, which retains only items on disk or in progress
-        val results = repository.getGroupedImagesFlow().first()
+        val emissions = mutableListOf<List<ImageGroup>>()
+        repository.getGroupedImagesFlow().collect { emissions.add(it) }
 
-        assertFalse("Stale group not found on disk should be pruned from flow emission", results.any { it.baseName == "stale_deleted_item" })
+        // Emission 1 should be the instant cached emission (Stale-While-Revalidate)
+        assertTrue("Flow should emit at least 2 times (cache then disk)", emissions.size >= 2)
+        assertTrue("First emission should contain cached stale item", emissions.first().any { it.baseName == "stale_deleted_item" })
+
+        // Final emission should prune items not on disk
+        val finalResults = emissions.last()
+        assertFalse("Stale group not found on disk should be pruned from final flow emission", finalResults.any { it.baseName == "stale_deleted_item" })
         assertFalse("Stale group should be pruned from cachedGroups", ImageRepository.cachedGroups?.any { it.baseName == "stale_deleted_item" } ?: false)
+    }
+
+    @Test
+    fun testInvalidateCache_preservesStaleCacheByDefault() {
+        val group = ImageGroup(baseName = "photo_1", metadataLoaded = true)
+        ImageRepository.cachedGroups = listOf(group)
+
+        repository.invalidateCache() // default clearStale = false
+
+        assertNull("cachedGroups should be null", ImageRepository.cachedGroups)
+        assertNotNull("staleCachedGroups should preserve previous cache", ImageRepository.staleCachedGroups)
+        assertEquals(1, ImageRepository.staleCachedGroups!!.size)
+        assertEquals("photo_1", ImageRepository.staleCachedGroups!![0].baseName)
+    }
+
+    @Test
+    fun testInvalidateCache_clearStaleTrue_clearsBoth() {
+        val group = ImageGroup(baseName = "photo_1", metadataLoaded = true)
+        ImageRepository.cachedGroups = listOf(group)
+
+        repository.invalidateCache(clearStale = true)
+
+        assertNull("cachedGroups should be null", ImageRepository.cachedGroups)
+        assertNull("staleCachedGroups should be null when clearStale = true", ImageRepository.staleCachedGroups)
     }
 
     @Test
@@ -123,5 +159,39 @@ class ImageRepositoryCacheTest {
         assertNotNull(cacheItem)
         assertEquals("content", cacheItem!!.jpgUri?.scheme)
         assertFalse("cachedGroups must NOT be overwritten by file:// sandbox group", cacheItem.metadataLoaded)
+    }
+
+    @Test
+    fun testIsDarkbagFileName_matchesAllDarkbagPrefixes() {
+        assertTrue(ImageRepository.isDarkbagFileName("DBAG_20261111_120000.jpg"))
+        assertTrue(ImageRepository.isDarkbagFileName("Darkbag_20261111_120000.jpg"))
+        assertTrue(ImageRepository.isDarkbagFileName("RAWVID_20261111_120000.rawvid"))
+        assertTrue(ImageRepository.isDarkbagFileName("CDNG_20261111_120000_000000.dng"))
+        assertTrue(ImageRepository.isDarkbagFileName("dbag_lowercase.jpg"))
+        assertFalse(ImageRepository.isDarkbagFileName("IMG_20261111_120000.jpg"))
+        assertFalse(ImageRepository.isDarkbagFileName("PXL_20261111_120000.jpg"))
+    }
+
+    @Test
+    fun testGalleryCacheStore_directInstanceOperations() {
+        val store = GalleryCacheStore.getInstance()
+        store.clear()
+
+        assertNull(store.cachedGroups)
+        assertNull(store.staleCachedGroups)
+
+        val group = ImageGroup(baseName = "test_store", metadataLoaded = true)
+        store.cachedGroups = listOf(group)
+        assertEquals(1, store.cachedGroups?.size)
+        assertEquals("test_store", store.cachedGroups?.first()?.baseName)
+
+        store.invalidate(clearStale = false)
+        assertNull(store.cachedGroups)
+        assertEquals(1, store.staleCachedGroups?.size)
+
+        store.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+        store.clear()
+        assertNull(store.cachedGroups)
+        assertNull(store.staleCachedGroups)
     }
 }

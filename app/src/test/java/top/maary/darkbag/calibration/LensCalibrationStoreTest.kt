@@ -12,7 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.SettingsRepository
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
@@ -24,8 +24,8 @@ class LensCalibrationStoreTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
+        SettingsRepository.resetForTest(context)
+        SettingsRepository.getInstance(context).awaitHydratedBlocking()
         store = LensCalibrationStore(context)
     }
 

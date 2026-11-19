@@ -1,129 +1,73 @@
 package top.maary.darkbag.fragments
 
-import android.util.Log
-import java.io.File
-import android.os.Build
-import android.provider.MediaStore
-import android.app.Activity
-import android.provider.DocumentsContract
-import androidx.activity.result.IntentSenderRequest
-import androidx.activity.result.contract.ActivityResultContracts
-import android.app.RecoverableSecurityException
-import android.widget.Toast
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.updateLayoutParams
-import androidx.core.content.ContextCompat
-import androidx.core.graphics.ColorUtils
-import android.content.res.ColorStateList
-import android.graphics.Color
-import android.text.Spannable
-import android.text.SpannableStringBuilder
-import android.text.style.ForegroundColorSpan
-import android.view.Gravity
-import android.widget.LinearLayout
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.color.MaterialColors
-import top.maary.darkbag.ui.CameraBentoDeckView
-import top.maary.darkbag.ui.bento.BentoContainerRole
-import top.maary.darkbag.ui.bento.BentoTrayCard
-import androidx.recyclerview.widget.GridLayoutManager
-import androidx.fragment.app.Fragment
-import androidx.lifecycle.lifecycleScope
-import android.content.Context
-import android.graphics.BitmapFactory
-import android.net.Uri
-import android.view.MenuItem
-import android.widget.TextView
-import androidx.appcompat.widget.PopupMenu
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
-import androidx.exifinterface.media.ExifInterface
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
 import androidx.viewpager2.widget.ViewPager2
-import com.google.android.material.bottomsheet.BottomSheetDialog
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.sync.withLock
-import kotlin.coroutines.resume
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import top.maary.darkbag.R
-import top.maary.darkbag.databinding.BottomSheetImageDetailsBinding
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
-import top.maary.darkbag.databinding.ItemDetailRowBinding
+import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.models.ImageGroup
-import top.maary.darkbag.pipeline.composer.HalfFrameComposer
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.repository.ImageRepository
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import kotlin.math.log10
-import kotlin.math.pow
-import kotlin.math.round
-import kotlin.math.roundToInt
+import top.maary.darkbag.repository.SettingsRepository
+import top.maary.darkbag.utils.ImageUtils
+import top.maary.darkbag.utils.LutManager
+import top.maary.darkbag.viewer.ViewerMediaPreloadDelegate
+import top.maary.darkbag.viewer.bento.ViewerBentoDeckCoordinator
+import top.maary.darkbag.viewer.chrome.ViewerChromeAndInsetsDelegate
+import top.maary.darkbag.viewer.deletion.ViewerDeletionController
+import top.maary.darkbag.viewer.editor.DarkroomEditorPanelDelegate
+import top.maary.darkbag.viewer.editor.DarkroomEditorUserIntent
+import top.maary.darkbag.viewer.editor.DarkroomEditorViewModel
+import top.maary.darkbag.viewer.export.ViewerExportCoordinator
+import top.maary.darkbag.viewer.strategy.ViewerMediaStrategy
+import top.maary.darkbag.viewer.strategy.ViewerMediaStrategyFactory
+import top.maary.darkbag.viewer.strategy.ViewerSaveAction
 
+/**
+ * 图像查看器 Fragment (ImageViewerFragment).
+ * 统一承载单张大图、多焦段多摄、运动照片、RAW 视频及 CinemaDNG 序列的渲染播放。
+ * 遵循 Invariant 1 至 Invariant 5，具体导出、元数据查看、删除管理、暗房调节、Bento 底栏、
+ * Edge-to-Edge 外观栏及媒体预加载分别委托给专用控制器与代理。
+ */
 open class ImageViewerFragment : Fragment() {
 
-
-    private suspend fun deleteUriSafe(context: Context, uri: Uri): Boolean {
-        return withContext(Dispatchers.IO) {
-            try {
-                if (uri.scheme == "content" && DocumentsContract.isDocumentUri(context, uri)) {
-                    DocumentsContract.deleteDocument(context.contentResolver, uri)
-                } else if (uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) {
-                    val docUri = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
-                    DocumentsContract.deleteDocument(context.contentResolver, docUri)
-                } else {
-                    context.contentResolver.delete(uri, null, null) > 0
-                }
-            } catch (e: Exception) {
-                try {
-                    val docFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)
-                        ?: androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)
-                    docFile?.delete() ?: false
-                } catch (e2: Exception) {
-                    throw e
-                }
-            }
-        }
-    }
-    private var pendingDeleteNextTargetUri: String? = null
-    private val deleteLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        if (result.resultCode != Activity.RESULT_OK) {
-            context?.let { Toast.makeText(it, "Failed to delete image", Toast.LENGTH_SHORT).show() }
-            hideGalleryDeletingIndicator()
-            if (_binding != null) {
-                binding.galleryRecyclerView.isEnabled = true
-                updateGallerySelectionUI(0)
-            }
-        }
-        lifecycleScope.launch {
-            repository.invalidateCache()
-            loadImages(pendingDeleteNextTargetUri, forceRefresh = true)
-            pendingDeleteNextTargetUri = null
-        }
-    }
-
-    private val importGalleryMediaLauncher = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
-        if (!uris.isNullOrEmpty()) {
-            importMediaFiles(uris)
-        }
-    }
-
     protected var _binding: FragmentImageViewerBinding? = null
-    private var isUiVisible = true
     protected val binding get() = _binding!!
     protected val args: ImageViewerFragmentArgs by navArgs()
+    protected val editorViewModel: DarkroomEditorViewModel by viewModels()
+
+    protected lateinit var mediaStrategy: ViewerMediaStrategy
     protected lateinit var repository: ImageRepository
     protected lateinit var adapter: ImageViewerAdapter
-    protected lateinit var galleryAdapter: DarkbagGalleryGridAdapter
-    protected var isGalleryMode = false
-    protected var startedInGalleryMode = false
-    protected open val isGallerySupported: Boolean = true
+    protected lateinit var lutManager: LutManager
+
+    lateinit var exportCoordinator: ViewerExportCoordinator
+    lateinit var deletionController: ViewerDeletionController
+    lateinit var editorPanelDelegate: DarkroomEditorPanelDelegate
+    lateinit var bentoDeckCoordinator: ViewerBentoDeckCoordinator
+    lateinit var chromeDelegate: ViewerChromeAndInsetsDelegate
+    lateinit var mediaPreloadDelegate: ViewerMediaPreloadDelegate
+
+    protected open val isGallerySupported: Boolean
+        get() = if (::mediaStrategy.isInitialized) mediaStrategy.isGallerySupported else true
+    private var imagesCollectJob: Job? = null
 
     var isMotionPhotoAutoPlay = true
     protected var hasAutoPlayedPosition = -1
@@ -132,4901 +76,495 @@ open class ImageViewerFragment : Fragment() {
     protected var isEditingAdjustments = false
     private var isSaving = false
     protected var currentCinemaDngFrame: Pair<Int, Uri?>? = null
-    private var systemTopInset = 0
-    private var systemBottomInset = 0
-    private var topBarHeight = 0
-    private var bentoDeckHeight = 0
-    private var configBeforeEditing: top.maary.darkbag.models.EditConfig? = null
-    protected var currentEditConfig: top.maary.darkbag.models.EditConfig? = null
-    protected var selectedDngIndex = 0 // 0 or 1 for half-frame
+
+    protected var currentEditConfig: EditConfig? = null
     protected var sourceDngBytes: ByteArray? = null
     protected var sourceDngBytes2: ByteArray? = null
-    private var cachedBitmap1: android.graphics.Bitmap? = null
-    private var cachedBitmap2: android.graphics.Bitmap? = null
-    private var lastPreviewConfig: top.maary.darkbag.models.EditConfig? = null
-    private var lastCompositeBitmap: android.graphics.Bitmap? = null
+    private var lastCompositeBitmap: Bitmap? = null
     private var isLongPressing = false
-    private var savedMatrix = android.graphics.Matrix()
-    private var savedScale = 1f
-    private var pendingSingleDeleteGroup: ImageGroup? = null
 
-    protected lateinit var lutManager: top.maary.darkbag.utils.LutManager
-    protected var previewJob: Job? = null
-    private val adapterUpdateMutex = kotlinx.coroutines.sync.Mutex()
+    private val deleteLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        if (::deletionController.isInitialized) deletionController.handleDeleteResult(result.resultCode)
+    }
+
     protected val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
-            updateGalleryPill(position, if (::adapter.isInitialized) adapter.itemCount else 0)
-            if (::adapter.isInitialized) {
-                adapter.stopAllMotionVideos()
+            super.onPageSelected(position)
+            if (!::adapter.isInitialized || position >= adapter.itemCount) return
+            currentCinemaDngFrame = null
+            lastCompositeBitmap = null
+            sourceDngBytes = null
+            sourceDngBytes2 = null
+            mediaPreloadDelegate.handlePageSelected(position) { pos, total ->
+                chromeDelegate.updateGalleryPill(pos, total)
             }
-            preloadAdjacentMetadata(position)
+        }
 
-            val group = adapter.getGroup(position)
-            val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
-            if (isCinemaDngGroup) {
-                currentCinemaDngFrame = adapter.getActiveCinemaDngFrame(position)
-            } else {
-                currentCinemaDngFrame = null
-            }
-
-            if (!group.metadataLoaded) {
-                lifecycleScope.launch {
-                    val updatedGroup = repository.loadMetadata(group)
-                    adapterUpdateMutex.withLock {
-                        suspendCancellableCoroutine<Unit> { continuation ->
-                            adapter.updateSingleGroup(updatedGroup) {
-                                if (continuation.isActive) continuation.resume(Unit)
-                            }
-                        }
-
-                        if (binding.imagePager.currentItem == position && !isAdjusted) {
-                            prepareEditConfig(updatedGroup)
-                            updateControlsVisibility()
-                        }
-
-                        val format = adapter.getSelectedFormat(position)
-                        if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != position && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == position && format != ImageViewerAdapter.FORMAT_DNG) {
-                            hasAutoPlayedPosition = position
-                            adapter.playMotionVideoForPosition(position)
-                        }
-                    }
-                }
-            } else if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != position && group.isMotionPhoto && adapter.getSelectedFormat(position) != ImageViewerAdapter.FORMAT_DNG) {
-                hasAutoPlayedPosition = position
-                adapter.playMotionVideoForPosition(position)
-            }
-
-            if (isAdjusted) {
-                resetAdjustments()
-            } else {
-                currentEditConfig = null
-                sourceDngBytes = null
-                sourceDngBytes2 = null
-
-                // Clear active view before recycling
-                val currentIndex = binding.imagePager.currentItem
-                val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                    ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-                currentHolder?.binding?.imageView?.let { iv ->
-                    if (iv.drawable is android.graphics.drawable.BitmapDrawable) {
-                        val bmp = (iv.drawable as android.graphics.drawable.BitmapDrawable).bitmap
-                        if (bmp == lastCompositeBitmap || bmp == cachedBitmap1 || bmp == cachedBitmap2) {
-                            iv.setImageDrawable(null)
-                        }
-                    }
-                }
-
-                cachedBitmap1 = null
-                cachedBitmap2 = null
-                lastCompositeBitmap = null
-            }
-            updateControlsVisibility()
+        override fun onPageScrollStateChanged(state: Int) {
+            super.onPageScrollStateChanged(state)
+            if (state == ViewPager2.SCROLL_STATE_DRAGGING && ::adapter.isInitialized) adapter.stopAllMotionVideos()
         }
     }
 
     private val backPressedCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
-            if (isGalleryMode) {
-                if (::galleryAdapter.isInitialized && galleryAdapter.isSelectionMode) {
-                    galleryAdapter.setSelectionMode(false)
-                    updateGallerySelectionUI(0)
-                } else if (startedInGalleryMode) {
-                    findNavController().navigateUp()
-                } else {
-                    exitGalleryMode()
-                }
-            } else if (binding.lutListContainer?.visibility == View.VISIBLE) {
-                binding.lutListContainer?.visibility = View.GONE
-                binding.touchOverlay.visibility = View.GONE
-                updateBackPressedCallbackState()
-            } else if (isEditingAdjustments) {
-                exitEditMode(apply = false)
-            } else if (isAdjusted) {
-                showDiscardChangesDialog()
-            }
+            if (::editorPanelDelegate.isInitialized && editorPanelDelegate.dismissPillPopup()) return
+            if (isEditingAdjustments) exitEditMode(apply = false) else if (isAdjusted) chromeDelegate.showDiscardChangesDialog()
         }
     }
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentImageViewerBinding.inflate(inflater, container, false)
         return binding.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        savedInstanceState?.getString("pendingDeleteNextTargetUri")?.let { pendingDeleteNextTargetUri = it }
-
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        isMotionPhotoAutoPlay = prefs.getBoolean(KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY, true)
+        isMotionPhotoAutoPlay = SettingsRepository.getInstance(requireContext()).current().viewerMotionPhotoAutoPlay
 
         repository = ImageRepository(requireContext())
-        lutManager = top.maary.darkbag.utils.LutManager(requireContext())
-        setupEdgeToEdge()
-        setupToolbar()
-        setupGalleryView()
+        lutManager = LutManager(requireContext())
+        mediaStrategy = ViewerMediaStrategyFactory.create(arguments)
+
+        exportCoordinator = ViewerExportCoordinator(requireContext(), viewLifecycleOwner.lifecycleScope, layoutInflater)
+        deletionController = ViewerDeletionController(
+            context = requireContext(),
+            scope = viewLifecycleOwner.lifecycleScope,
+            repository = repository,
+            mediaStrategy = mediaStrategy,
+            launchDeleteRequest = { deleteLauncher.launch(it) },
+            onNavigateUp = { findNavController().navigateUp() },
+            onReloadImages = { nextUri -> loadImages(nextUri, forceRefresh = true) },
+            onUpdateAdapterGroups = { list ->
+                adapter.updateGroups(list)
+                updateControlsVisibility()
+            },
+            getAdapterItemCount = { if (::adapter.isInitialized) adapter.itemCount else 0 },
+            getAdapterGroupAt = { idx -> if (::adapter.isInitialized && idx in 0 until adapter.itemCount) adapter.getGroup(idx) else null },
+            getCurrentItemIndex = { if (_binding != null) binding.imagePager.currentItem else 0 }
+        )
+
+        bentoDeckCoordinator = ViewerBentoDeckCoordinator(
+            binding = binding,
+            getAdapter = { if (::adapter.isInitialized) adapter else null },
+            getCurrentItemIndex = { if (_binding != null) binding.imagePager.currentItem else 0 },
+            onControlsVisibilityRequested = { updateControlsVisibility() },
+            onMultiCamCollageRequested = { grp -> chromeDelegate.showMultiCamCollageDialog(grp) },
+            onOpenExportHubRequested = { openExportHub() },
+            onFormatToggleRequested = {
+                adapter.cycleOrToggleFormat(binding.imagePager.currentItem)
+                updateControlsVisibility()
+            },
+            onDerivativeCycleRequested = {
+                adapter.cycleDerivativeVersion(binding.imagePager.currentItem)
+                updateControlsVisibility()
+            },
+            onMotionLiveToggleRequested = { mediaPreloadDelegate.handleMotionPhotoIndicatorTapped(binding.imagePager.currentItem) }
+        )
+
+        chromeDelegate = ViewerChromeAndInsetsDelegate(
+            context = requireContext(), binding = binding, fragmentManager = childFragmentManager,
+            getAdapter = { if (::adapter.isInitialized) adapter else null },
+            isGallerySupported = { isGallerySupported }, isAdjusted = { isAdjusted },
+            isEditingAdjustments = { isEditingAdjustments }, isSaving = { isSaving },
+            isLutListVisible = { ::editorPanelDelegate.isInitialized && binding.lutListContainer.visibility == View.VISIBLE },
+            onBackNavigate = { findNavController().navigateUp() },
+            onDismissPillPopup = { ::editorPanelDelegate.isInitialized && editorPanelDelegate.dismissPillPopup() },
+            onExitEditMode = { exitEditMode(it) }, onEnterEditMode = { enterEditMode() },
+            onResetAdjustments = { resetAdjustments() }, onSaveEdit = { saveEdit(it) },
+            onShowSaveMenu = { showSaveMenu(it) }, onOpenExportHub = { openExportHub() },
+            onPerformShare = { performShare() }, onPerformShareAsTiff = { performShareAsTiff() },
+            onShowLutMenu = { editorPanelDelegate.showLutMenu(it) },
+            onShowDeleteDialog = { showDeleteDialog(it) },
+            onUpdateBackPressedEnabled = { backPressedCallback.isEnabled = it }
+        )
+
+        mediaPreloadDelegate = ViewerMediaPreloadDelegate(
+            context = requireContext(),
+            binding = binding,
+            lifecycleScope = viewLifecycleOwner.lifecycleScope,
+            repository = repository,
+            editorViewModel = editorViewModel,
+            bentoDeckCoordinator = bentoDeckCoordinator,
+            chromeDelegate = chromeDelegate,
+            getAdapter = { if (::adapter.isInitialized) adapter else null },
+            isBindingAlive = { _binding != null && ::adapter.isInitialized },
+            isMotionPhotoAutoPlay = { isMotionPhotoAutoPlay },
+            setMotionPhotoAutoPlay = { isMotionPhotoAutoPlay = it },
+            getHasAutoPlayedPosition = { hasAutoPlayedPosition },
+            setHasAutoPlayedPosition = { hasAutoPlayedPosition = it },
+            isAdjusted = { isAdjusted },
+            getLastCompositeBitmap = { lastCompositeBitmap },
+            setLongPressing = { isLongPressing = it },
+            getSourceDngBytes = { Pair(sourceDngBytes, sourceDngBytes2) },
+            setSourceDngBytes = { b1, b2 -> sourceDngBytes = b1; sourceDngBytes2 = b2 },
+            setCurrentCinemaDngFrame = { currentCinemaDngFrame = it },
+            onPrepareEditConfig = { prepareEditConfig(it) },
+            onUpdateControlsVisibility = { updateControlsVisibility() },
+            onUpdateFormatBentoRow = { updateFormatBentoRow() },
+            onOpenDarkroomGallery = { openDarkroomGallery() }
+        )
+
+        editorPanelDelegate = DarkroomEditorPanelDelegate(
+            binding = binding,
+            viewModel = editorViewModel,
+            layoutInflater = layoutInflater,
+            lifecycleScope = viewLifecycleOwner.lifecycleScope,
+            ensureDngBytesLoaded = { mediaPreloadDelegate.ensureDngBytesLoaded() },
+            onMarkAdjusted = { markAdjusted() },
+            onViewportPaddingRequested = { chromeDelegate.updateViewportPadding() },
+            onEditStateChanged = { isEditing, isAdjustedState ->
+                this.isEditingAdjustments = isEditing
+                this.isAdjusted = isAdjustedState
+                if (::adapter.isInitialized) {
+                    binding.imagePager.isUserInputEnabled = !isEditing && !isAdjustedState
+                    adapter.setFormatSwitcherPersistentHidden(isEditing || isAdjustedState)
+                }
+                chromeDelegate.updateSplitButtons()
+                chromeDelegate.updateToolbarIcon()
+                chromeDelegate.updateBackPressedCallbackState()
+            },
+            onBackPressedCallbackStateChanged = { chromeDelegate.updateBackPressedCallbackState() }
+        )
+
+        bentoDeckCoordinator.setupListeners()
+        editorPanelDelegate.setup()
+        chromeDelegate.setupEdgeToEdge()
+        chromeDelegate.setupToolbar()
+
+        binding.btnGalleryPill.setOnClickListener { openDarkroomGallery() }
 
         if (savedInstanceState == null && args.startInGalleryMode) {
-            startedInGalleryMode = true
-            enterGalleryMode(targetPosition = -1, animated = false)
-        } else if (savedInstanceState != null) {
-            startedInGalleryMode = savedInstanceState.getBoolean("startedInGalleryMode", false)
+            openDarkroomGallery()
+            return
         }
 
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, backPressedCallback)
+        setupResultListeners()
+        observeEditorUiState()
 
-        childFragmentManager.setFragmentResultListener(HalfFrameShareSheet.REQUEST_KEY, viewLifecycleOwner) { _, bundle ->
-            val uris = bundle.getParcelableArrayList<android.net.Uri>(HalfFrameShareSheet.BUNDLE_KEY_URIS)
-            if (uris != null) {
-                shareImages(uris)
+        binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
+        loadImages(forceRefresh = false)
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            ColorProcessor.backgroundSaveFlow.collect { event ->
+                if (!isAdjusted && ::adapter.isInitialized) mediaPreloadDelegate.handleBackgroundSaveEvent(event)
             }
+        }
+    }
+
+    private fun observeEditorUiState() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                editorViewModel.uiState.collect { state ->
+                    editorPanelDelegate.render(state)
+                    if (state.activeConfig != null) currentEditConfig = state.activeConfig
+                    if (state.previewBitmap != null && state.previewBitmap != lastCompositeBitmap) {
+                        lastCompositeBitmap = state.previewBitmap
+                        if (!isLongPressing && ::adapter.isInitialized) {
+                            val cur = binding.imagePager.currentItem
+                            if (cur in 0 until adapter.itemCount) adapter.setManualBitmap(cur, state.previewBitmap)
+                        }
+                    }
+                    if (state.activeConfig != null && ::adapter.isInitialized && adapter.itemCount > 0) {
+                        val cur = binding.imagePager.currentItem
+                        if (cur in 0 until adapter.itemCount) {
+                            val g = adapter.getGroup(cur)
+                            if (g.isRawVideo || g.rawVideoUri != null) adapter.updateRawVideoAdjustments(cur, state.activeConfig)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun setupResultListeners() {
+        childFragmentManager.setFragmentResultListener(HalfFrameShareSheet.REQUEST_KEY, viewLifecycleOwner) { _, bundle ->
+            bundle.getParcelableArrayList<Uri>(HalfFrameShareSheet.BUNDLE_KEY_URIS)?.let { exportCoordinator.shareImages(it) }
         }
 
         childFragmentManager.setFragmentResultListener(DarkbagBatchDeleteSheet.REQUEST_KEY, viewLifecycleOwner) { _, bundle ->
             val mode = bundle.getInt(DarkbagBatchDeleteSheet.BUNDLE_KEY_DELETE_MODE, 0)
-            val selectedItems = if (::galleryAdapter.isInitialized) galleryAdapter.getSelectedItems() else emptyList()
-            if (selectedItems.isNotEmpty()) {
-                deleteBatchImages(selectedItems, mode)
-            } else {
-                pendingSingleDeleteGroup?.let { group ->
-                    executeSingleGroupDelete(group, mode)
-                    pendingSingleDeleteGroup = null
-                }
+            deletionController.pendingSingleDeleteGroup?.let { group ->
+                val derivatives = adapter.getDerivativeUris(group)
+                val activeIdx = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
+                deletionController.executeSingleGroupDelete(group, mode, derivatives, activeIdx)
+                deletionController.pendingSingleDeleteGroup = null
             }
         }
 
         childFragmentManager.setFragmentResultListener(RawVideoExportSheet.REQUEST_KEY, viewLifecycleOwner) { _, bundle ->
-            val log = bundle.getString(RawVideoExportSheet.RESULT_LOG) ?: "None"
-            val lut = bundle.getString(RawVideoExportSheet.RESULT_LUT) ?: "None"
-            val resolution = bundle.getInt(RawVideoExportSheet.RESULT_RESOLUTION, 1080)
-            val action = bundle.getString(RawVideoExportSheet.RESULT_ACTION)
-            val frameIndex = bundle.getInt(RawVideoExportSheet.RESULT_FRAME_INDEX, 0)
-            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-            val config = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(log = log, lut = lut)
-
-            when (action) {
-                RawVideoExportSheet.ACTION_EXPORT_MP4 -> {
-                    performExportMp4(currentGroup, config, resolution)
-                }
-                RawVideoExportSheet.ACTION_EXPORT_CINEMADNG -> {
-                    performExportCinemaDng(currentGroup)
-                }
-                RawVideoExportSheet.ACTION_FRAME_JPG -> {
-                    exportCinemaDngFrame(
-                        group = currentGroup,
-                        exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.GRADED_JPG_ONLY,
-                        editConfig = config,
-                        targetFrameIndex = frameIndex
-                    )
-                }
-                RawVideoExportSheet.ACTION_FRAME_DNG -> {
-                    exportCinemaDngFrame(
-                        group = currentGroup,
-                        exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_DNG_ONLY,
-                        editConfig = null,
-                        targetFrameIndex = frameIndex
-                    )
-                }
-                RawVideoExportSheet.ACTION_FRAME_PAIR -> {
-                    exportCinemaDngFrame(
-                        group = currentGroup,
-                        exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_AND_GRADED_PAIR,
-                        editConfig = config,
-                        targetFrameIndex = frameIndex
-                    )
-                }
-                else -> {
-                    val exportMode = bundle.getInt(RawVideoExportSheet.RESULT_EXPORT_MODE, RawVideoExportSheet.MODE_VIDEO)
-                    when (exportMode) {
-                        RawVideoExportSheet.MODE_VIDEO -> {
-                            performExportMp4(currentGroup, config, resolution)
-                        }
-                        RawVideoExportSheet.MODE_SINGLE_FRAME_JPG -> {
-                            exportCinemaDngFrame(
-                                group = currentGroup,
-                                exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.GRADED_JPG_ONLY,
-                                editConfig = config,
-                                targetFrameIndex = frameIndex
-                            )
-                        }
-                        RawVideoExportSheet.MODE_SINGLE_FRAME_PAIR -> {
-                            exportCinemaDngFrame(
-                                group = currentGroup,
-                                exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_AND_GRADED_PAIR,
-                                editConfig = config,
-                                targetFrameIndex = frameIndex
-                            )
-                        }
-                    }
-                }
-            }
+            val curGroup = adapter.getGroup(binding.imagePager.currentItem)
+            val curFrame = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(binding.imagePager.currentItem)
+            exportCoordinator.handleExportSheetResult(
+                bundle = bundle,
+                currentGroup = curGroup,
+                currentEditConfig = currentEditConfig,
+                frameInfo = curFrame,
+                repository = repository,
+                onStartExport = { setBusyLoading(true) },
+                onEndExport = { setBusyLoading(false) },
+                onRefreshGroup = { mediaPreloadDelegate.refreshCurrentGroupAndAdapter(it) }
+            )
         }
+    }
 
-        binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
-        loadImages(forceRefresh = true)
+    private fun attachInitialAdapter(groups: List<ImageGroup>, disableInputWhenAdjusted: Boolean = false) {
+        adapter = mediaPreloadDelegate.createViewerAdapter(groups)
+        binding.imagePager.adapter = adapter
+        if (disableInputWhenAdjusted) binding.imagePager.isUserInputEnabled = !isAdjusted
+        chromeDelegate.setupActionButtons()
+    }
 
-        viewLifecycleOwner.lifecycleScope.launch {
-            ColorProcessor.backgroundSaveFlow.collect { event ->
-                if (isAdjusted || !::adapter.isInitialized) return@collect
-                handleBackgroundSaveEvent(event)
-            }
-        }
+    private fun showLoadedPager() {
+        binding.initialLoadingIndicator.visibility = View.GONE
+        binding.imagePager.visibility = View.VISIBLE
     }
 
     protected open fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {
-        if (!isGalleryMode) {
-            binding.initialLoadingIndicator.visibility = View.VISIBLE
-            binding.imagePager.visibility = View.INVISIBLE
-        }
+        binding.initialLoadingIndicator.visibility = View.VISIBLE
+        binding.imagePager.visibility = View.INVISIBLE
 
-        var hasNavigatedToTargetUri = false
-
-        lifecycleScope.launch {
-            repository.getGroupedImagesFlow(targetUri).collect { groups ->
-                if (groups.isEmpty()) {
-                    hideGalleryDeletingIndicator()
-                    if (isGalleryMode) {
-                        exitGalleryMode()
+        if (::mediaStrategy.isInitialized && mediaStrategy.isSandbox) {
+            viewLifecycleOwner.lifecycleScope.launch {
+                val groups = mediaStrategy.loadInitialGroups(requireContext(), arguments, repository)
+                if (!groups.isNullOrEmpty()) {
+                    if (binding.imagePager.adapter == null) {
+                        attachInitialAdapter(groups, disableInputWhenAdjusted = true)
+                        updateControlsVisibility()
+                    } else {
+                        adapter.updateGroups(groups)
                     }
-                    findNavController().navigateUp()
-                    return@collect
-                }
-
-                if (::galleryAdapter.isInitialized) {
-                    galleryAdapter.submitList(groups) {
-                        if (_binding != null) {
-                            val animator = binding.galleryRecyclerView.itemAnimator
-                            if (animator != null && animator.isRunning) {
-                                animator.isRunning {
-                                    hideGalleryDeletingIndicator()
-                                    if (_binding != null) {
-                                        binding.galleryRecyclerView.isEnabled = true
-                                    }
-                                }
-                            } else {
-                                hideGalleryDeletingIndicator()
-                                if (_binding != null) {
-                                    binding.galleryRecyclerView.isEnabled = true
-                                }
-                            }
-                        }
-                    }
-                    if (isGalleryMode && !galleryAdapter.isSelectionMode) {
-                        binding.tvGalleryHeaderTitle.text = "${getString(R.string.gallery_album_darkroom)} (${groups.size})"
-                    }
-                }
-
-                val isFirstLoad = !::adapter.isInitialized
-
-                val targetBaseName = targetUri?.let { top.maary.darkbag.utils.ImageUtils.getBaseName(it) }
-                val targetPos = if (targetUri != null) {
-                    val pos = groups.indexOfFirst {
-                        (targetBaseName != null && it.baseName == targetBaseName) ||
-                                it.rawVideoUri?.toString() == targetUri ||
-                                it.mp4VideoUri?.toString() == targetUri ||
-                                it.jpgUri?.toString() == targetUri ||
-                                it.dngUri?.toString() == targetUri ||
-                                it.dngUri1?.toString() == targetUri ||
-                                it.dngUri2?.toString() == targetUri ||
-                                it.derivativeJpgUris.any { u -> u.toString() == targetUri } ||
-                                it.derivativeMp4Uris.any { u -> u.toString() == targetUri } ||
-                                it.multiJpgUris.any { u -> u.toString() == targetUri } ||
-                                it.multiDngUris.any { u -> u.toString() == targetUri }
-                    }
-                    if (pos != -1) pos else {
-                        groups.indexOfFirst { it.baseName.isNotEmpty() && targetUri.contains(it.baseName) }
-                    }
-                } else -1
-
-                if (isGalleryMode && isFirstLoad) {
-                    val scrollPos = if (targetPos != -1) targetPos else 0
-                    if (scrollPos in groups.indices) {
-                        binding.galleryRecyclerView.scrollToPosition(scrollPos)
-                    }
-                }
-
-                if (isFirstLoad) {
-                    adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
-                        isMotionPhotoAutoPlay = this@ImageViewerFragment.isMotionPhotoAutoPlay
-                        onImageTapped = { toggleUi() }
-                        onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
-                        onLongPressStarted = { handleLongPressStarted(it) }
-                        onLongPressEnded = { handleLongPressEnded(it) }
-                        onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
-                        onPinchToOverview = { enterGalleryMode() }
-                        onMultiCameraLensChanged = { _, _ ->
-                            updateSplitButtons()
-                            updateToolbarIcon()
-                            updateControlsVisibility()
-                        }
-                        onFormatChanged = { _, _ ->
-                            updateControlsVisibility()
-                        }
-                        onDerivativeVersionChanged = { _, _ ->
-                            updateControlsVisibility()
-                        }
-                        onCinemaDngFrameSelected = { group, index, uri ->
-                            val currentPosition = binding.imagePager.currentItem
-                            if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
-                                currentCinemaDngFrame = Pair(index, uri)
-                                binding.filmstripBentoSeekbar?.setProgress(index, group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: 1)
-                            }
-                        }
-                        onVideoPlaybackStateChanged = { position, isPlaying, currentMs, totalMs ->
-                            if (_binding != null && ::adapter.isInitialized && position == binding.imagePager.currentItem) {
-                                updateVideoPlaybackButton(isPlaying, currentMs, totalMs)
-                            }
-                        }
-                        setFormatSwitcherPersistentHidden(isAdjusted)
-                        onCurrentListChanged = { previousList, currentList ->
-                            val currentIndex = binding.imagePager.currentItem
-                            updateGalleryPill(currentIndex, currentList.size)
-                            if (currentIndex in currentList.indices) {
-                                val currentGroup = currentList[currentIndex]
-                                val prevGroup = previousList.getOrNull(currentIndex)
-
-                                if ((prevGroup == null || !prevGroup.metadataLoaded) && currentGroup.metadataLoaded) {
-                                    if (currentGroup.editConfig != null) {
-                                        prepareEditConfig(currentGroup)
-                                    }
-                                }
-
-                                updateControlsVisibility()
-                            }
-                        }
-                    }
-                    binding.imagePager.adapter = adapter
-
-                    val initialIndex = if (targetPos != -1) targetPos else 0
-                    if (targetPos != -1) {
-                        hasNavigatedToTargetUri = true
-                    }
-                    binding.imagePager.setCurrentItem(initialIndex, false)
-
-                    // Load metadata for the initial image immediately
-                    val initialGroup = groups.getOrNull(initialIndex)
-                    if (initialGroup != null) {
-                        if (!initialGroup.metadataLoaded) {
-                            val updatedGroup = repository.loadMetadata(initialGroup)
-                            prepareEditConfig(updatedGroup)
-                            adapterUpdateMutex.withLock {
-                                suspendCancellableCoroutine<Unit> { continuation ->
-                                    adapter.updateSingleGroup(updatedGroup) {
-                                        if (continuation.isActive) continuation.resume(Unit)
-                                    }
-                                }
-                                if (binding.imagePager.currentItem == initialIndex && !isAdjusted) {
-                                    updateControlsVisibility()
-                                }
-                                if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex && binding.imagePager.currentItem == initialIndex) {
-                                    hasAutoPlayedPosition = initialIndex
-                                    adapter.playMotionVideoForPosition(initialIndex)
-                                }
-                            }
-                        } else {
-                            prepareEditConfig(initialGroup)
-                            if (!isAdjusted && isMotionPhotoAutoPlay && initialGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex) {
-                                hasAutoPlayedPosition = initialIndex
-                                adapter.playMotionVideoForPosition(initialIndex)
-                            }
-                        }
-                    }
-
-                    binding.imagePager.isUserInputEnabled = !isAdjusted
-                    setupActionButtons()
-                    updateControlsVisibility()
-                    updateGalleryPill(binding.imagePager.currentItem, groups.size)
-                    preloadAdjacentMetadata(binding.imagePager.currentItem)
-
-                    if (!isGalleryMode) {
-                        binding.imagePager.visibility = View.VISIBLE
-                        binding.initialLoadingIndicator.visibility = View.GONE
-                    }
-                } else {
-                    adapter.updateGroups(groups)
-                    if (targetUri != null && !hasNavigatedToTargetUri && targetPos != -1) {
-                        hasNavigatedToTargetUri = true
-                        binding.imagePager.setCurrentItem(targetPos, false)
-                    }
-                    updateGalleryPill(binding.imagePager.currentItem, groups.size)
-                    preloadAdjacentMetadata(binding.imagePager.currentItem)
-                    if (!isGalleryMode && (targetUri == null || hasNavigatedToTargetUri)) {
-                        binding.imagePager.visibility = View.VISIBLE
-                        binding.initialLoadingIndicator.visibility = View.GONE
-                    }
-
-                    val currentIndex = binding.imagePager.currentItem
-                    if (currentIndex in groups.indices) {
-                        val currentGroup = groups[currentIndex]
-                        if (!currentGroup.metadataLoaded) {
-                            lifecycleScope.launch {
-                                val updatedGroup = repository.loadMetadata(currentGroup)
-                                adapterUpdateMutex.withLock {
-                                    suspendCancellableCoroutine<Unit> { continuation ->
-                                        adapter.updateSingleGroup(updatedGroup) {
-                                            if (continuation.isActive) continuation.resume(Unit)
-                                        }
-                                    }
-                                    val index = adapter.getGroups().indexOfFirst { it.baseName == updatedGroup.baseName }
-                                    if (index == binding.imagePager.currentItem && !isAdjusted) {
-                                        updateControlsVisibility()
-                                    }
-                                    if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != index && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == index) {
-                                        hasAutoPlayedPosition = index
-                                        adapter.playMotionVideoForPosition(index)
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    showLoadedPager()
                 }
             }
+            return
         }
-    }
 
-    private fun handleBackgroundSaveEvent(event: ColorProcessor.BackgroundSaveEvent) {
-        // Trigger a full repository refresh to include the new item
-        lifecycleScope.launch {
-            repository.invalidateCache()
-            val newGroups = repository.getGroupedImages(forceRefresh = true)
-            adapter.updateGroups(newGroups)
-            // Force update the current edit config from the newly loaded metadata
-            val currentIndex = binding.imagePager.currentItem
-            if (currentIndex in newGroups.indices) {
-                prepareEditConfig(newGroups[currentIndex])
+        if (forceRefresh) repository.invalidateCache(clearStale = true)
+        var hasNavigated = false
+        imagesCollectJob?.cancel()
+        imagesCollectJob = lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                repository.getGroupedImagesFlow(targetUri).collect { groups ->
+                    if (groups.isEmpty()) {
+                        findNavController().navigateUp()
+                        return@collect
+                    }
+                    val isFirst = !::adapter.isInitialized
+                    val targetBase = targetUri?.let { ImageUtils.getBaseName(it) }
+                    val targetPosArg = arguments?.getInt("target_position", -1) ?: -1
+                    val targetPos = if (targetPosArg >= 0 && isFirst) targetPosArg else groups.indexOfFirst { mediaPreloadDelegate.matchesTarget(it, targetUri, targetBase) }
+
+                    if (isFirst) {
+                        attachInitialAdapter(groups)
+                        if (targetPos in groups.indices) {
+                            binding.imagePager.setCurrentItem(targetPos, false)
+                            hasNavigated = true
+                        }
+                        val initPos = binding.imagePager.currentItem
+                        if (initPos in groups.indices) {
+                            prepareEditConfig(groups[initPos])
+                            chromeDelegate.updateGalleryPill(initPos, groups.size)
+                        }
+                        showLoadedPager()
+                        updateControlsVisibility()
+                    } else {
+                        val curBase = if (binding.imagePager.currentItem in adapter.getGroups().indices) adapter.getGroup(binding.imagePager.currentItem).baseName else null
+                        adapter.updateGroups(groups) {
+                            if (_binding == null) return@updateGroups
+                            chromeDelegate.updateGalleryPill(binding.imagePager.currentItem, groups.size)
+                            if (targetUri != null && !hasNavigated && targetPos in groups.indices) {
+                                binding.imagePager.setCurrentItem(targetPos, false)
+                                hasNavigated = true
+                            } else if (curBase != null) {
+                                val np = groups.indexOfFirst { it.baseName == curBase }
+                                if (np != -1 && np != binding.imagePager.currentItem) binding.imagePager.setCurrentItem(np, false)
+                            }
+                            if (binding.imagePager.currentItem in groups.indices) prepareEditConfig(groups[binding.imagePager.currentItem])
+                            updateControlsVisibility()
+                        }
+                        showLoadedPager()
+                    }
+                }
             }
         }
     }
 
     protected fun updateControlsVisibility() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
-        val canEdit = ((currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial) || isRawVideo
-
-        val showDeck = isUiVisible && !isEditingAdjustments && !isGalleryMode
-        binding.viewerBentoDeck.visibility = if (showDeck) View.VISIBLE else View.GONE
-        binding.btnLogCurve.isEnabled = canEdit
-        binding.btnLogCurve.isClickable = canEdit
-        binding.btnLogCurve.alpha = if (canEdit) 1.0f else 0.65f
-        binding.btn3dLut.isEnabled = canEdit
-        binding.btn3dLut.isClickable = canEdit
-        binding.btn3dLut.alpha = if (canEdit) 1.0f else 0.65f
-        binding.btnAdjustTofu.isEnabled = canEdit
-        binding.btnAdjustTofu.isClickable = canEdit
-        binding.btnAdjustTofu.alpha = if (canEdit) 1.0f else 0.65f
-
-        if (canEdit && currentEditConfig == null) {
-            prepareEditConfig(currentGroup)
-        }
-
-        if (canEdit && currentGroup.isHalfFrame() && !currentGroup.isPartial) {
-            binding.hfExtraControls.visibility = View.VISIBLE
-            updateEffectsButtons()
-        } else {
-            binding.hfExtraControls.visibility = View.GONE
-        }
+        val cur = binding.imagePager.currentItem
+        if (cur !in 0 until adapter.itemCount) return
+        val currentGroup = adapter.getGroup(cur)
 
         updateFormatBentoRow()
-        updateSplitButtons()
-        updateToolbarIcon()
-        updateEditUi()
-        updateEffectsButtons()
-        updateSelectionFeedback()
-        updateBackPressedCallbackState()
+        val isHalfFrame = currentGroup.isHalfFrame()
+        binding.btnSeparateDng.visibility = if (isHalfFrame && adapter.getSelectedFormat(cur) == "DNG") View.VISIBLE else View.GONE
+        binding.btnAdjustTofu.visibility = if (isAdjusted || !isHalfFrame) View.GONE else View.VISIBLE
+        chromeDelegate.updateSplitButtons()
+        chromeDelegate.updateToolbarIcon()
     }
 
     protected fun updateFormatBentoRow() {
-        val currentBinding = _binding ?: return
-        if (!::adapter.isInitialized || adapter.itemCount == 0) return
-        val currentIndex = currentBinding.imagePager.currentItem
-        if (currentIndex !in 0 until adapter.itemCount) return
-        val currentGroup = adapter.getGroup(currentIndex)
-        val ctx = context ?: return
-        val density = ctx.resources.displayMetrics.density
-
-        (currentBinding.viewerBentoDeck as? BentoTrayCard)?.let { deckCard ->
-            val role = when {
-                currentGroup.isHalfFrame() -> BentoContainerRole.TERTIARY_CONTAINER
-                currentGroup.isMultiCamera -> BentoContainerRole.SECONDARY_CONTAINER
-                else -> BentoContainerRole.SURFACE_CONTAINER_LOW
-            }
-            deckCard.setContainerRole(role, animated = true)
-        }
-
-        val currentFormat = adapter.getSelectedFormat(currentIndex)
-        val isRawSelected = currentFormat == ImageViewerAdapter.FORMAT_DNG
-
-        val lenses = if (currentGroup.isMultiCamera) adapter.getMultiCameraLenses(currentGroup) else emptyList()
-        val activeLensIndex = if (currentGroup.isMultiCamera && lenses.isNotEmpty()) {
-            adapter.getSelectedLensIndex(currentIndex).coerceIn(0, lenses.size - 1)
-        } else 0
-        val activeLens = if (currentGroup.isMultiCamera && lenses.isNotEmpty()) {
-            lenses[activeLensIndex]
-        } else null
-        val activeLensTag = activeLens?.lensTag?.ifEmpty {
-            String.format(java.util.Locale.US, "%.1fx", activeLens.multiplier)
-        } ?: "1.0x"
-
-        val hasDng = if (currentGroup.isMultiCamera) {
-            activeLens?.dngUri != null
-        } else {
-            currentGroup.hasMasterRaw
-        }
-
-        val derivatives = adapter.getDerivativeUris(currentGroup)
-        val hasDerivatives = if (currentGroup.isMultiCamera) {
-            activeLens?.jpgUri != null
-        } else {
-            derivatives.isNotEmpty()
-        }
-
-        val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
-        val isCinemaDng = currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()
-        val activeDerivIdx = adapter.getSelectedDerivativeIndex(currentGroup.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
-        val activeDerivativeUri = derivatives.getOrNull(activeDerivIdx) ?: currentGroup.jpgUri ?: currentGroup.mp4VideoUri
-        val isMp4Active = !isRawSelected && activeDerivativeUri != null && (activeDerivativeUri.toString().endsWith(".mp4", ignoreCase = true) || currentGroup.isMp4Video)
-
-        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(ctx, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
-        val colorPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
-        val colorOnPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnPrimaryContainer, android.graphics.Color.WHITE)
-        val colorSecondaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorSecondaryContainer, android.graphics.Color.DKGRAY)
-        val colorOnSecondaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnSecondaryContainer, android.graphics.Color.WHITE)
-        val colorSurfaceContainerHigh = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.GRAY)
-        val colorOnSurfaceVariant = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnSurfaceVariant, android.graphics.Color.LTGRAY)
-        val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
-
-        val showDerivCycle = !currentGroup.isMultiCamera && !isRawSelected && derivatives.size >= 2
-        val showMotionLive = !currentGroup.isMultiCamera && currentGroup.isMotionPhoto && !isRawSelected && !isAdjusted
-        val hasContextualAddons = showMotionLive
-
-        if (hasContextualAddons) {
-            currentBinding.viewerFormatRow?.visibility = View.VISIBLE
-            currentBinding.btnFormatSwitch?.visibility = View.VISIBLE
-            currentBinding.btnFormatSwitchCompact?.visibility = View.GONE
-            currentBinding.btnDerivativeCycleCompact?.visibility = View.GONE
-        } else {
-            currentBinding.viewerFormatRow?.visibility = View.GONE
-            currentBinding.btnFormatSwitchCompact?.visibility = View.VISIBLE
-            currentBinding.btnDerivativeCycleCompact?.visibility = if (showDerivCycle) View.VISIBLE else View.GONE
-        }
-
-        currentBinding.btnFormatSwitch?.let { btn ->
-            when {
-                hasDng && hasDerivatives -> {
-                    btn.isEnabled = !isAdjusted
-                    btn.isClickable = !isAdjusted
-                    if (currentGroup.isMultiCamera) {
-                        val line1 = "$activeLensTag · ${if (isRawSelected) "DNG" else "JPG"}"
-                        val line2 = "JPG ⇄ DNG"
-                        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                            label = line1,
-                            value = line2,
-                            isTabActive = isRawSelected,
-                            isValueManual = false,
-                            context = ctx
-                        )
-                    } else if (isRawSelected) {
-                        val line1 = when {
-                            isRawVideo -> "MASTER · RAWVID"
-                            isCinemaDng -> "MASTER · CDNG"
-                            else -> "MASTER · DNG"
-                        }
-                        val line2 = if (isRawVideo || currentGroup.mp4VideoUri != null) "⇄ SWITCH MP4" else "⇄ SWITCH JPG"
-                        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                            label = line1,
-                            value = line2,
-                            isTabActive = true,
-                            isValueManual = false,
-                            context = ctx
-                        )
-                    } else {
-                        val line1 = if (isMp4Active) "VIEW · MP4" else "VIEW · JPG"
-                        val line2 = when {
-                            isRawVideo -> "⇄ SWITCH RAWVID"
-                            isCinemaDng -> "⇄ SWITCH CDNG"
-                            else -> "⇄ SWITCH DNG"
-                        }
-                        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                            label = line1,
-                            value = line2,
-                            isTabActive = false,
-                            isValueManual = false,
-                            context = ctx
-                        )
-                    }
-
-                    if (isRawSelected) {
-                        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
-                        btn.setTextColor(colorOnPrimaryContainer)
-                        btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
-                        btn.strokeWidth = (1.5f * density).toInt()
-                        btn.cornerRadius = (10f * density).toInt()
-                    } else {
-                        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSecondaryContainer)
-                        btn.setTextColor(colorOnSecondaryContainer)
-                        btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
-                        btn.strokeWidth = (1f * density).toInt()
-                        btn.cornerRadius = (14f * density).toInt()
-                    }
-                }
-                hasDng && !hasDerivatives -> {
-                    btn.isEnabled = false
-                    btn.isClickable = false
-                    val line1 = if (currentGroup.isMultiCamera) "$activeLensTag · DNG" else "FORMAT"
-                    val line2 = when {
-                        isRawVideo -> "RAWVID ONLY"
-                        isCinemaDng -> "CDNG ONLY"
-                        else -> "DNG ONLY"
-                    }
-                    btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                        label = line1,
-                        value = line2,
-                        isTabActive = false,
-                        isValueManual = false,
-                        context = ctx
-                    )
-                    btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
-                    btn.strokeWidth = (1f * density).toInt()
-                    btn.cornerRadius = (14f * density).toInt()
-                }
-                else -> {
-                    btn.isEnabled = false
-                    btn.isClickable = false
-                    val line1 = if (currentGroup.isMultiCamera) "$activeLensTag · JPG" else "FORMAT"
-                    val line2 = if (isMp4Active) "MP4 ONLY" else "JPG ONLY"
-                    btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                        label = line1,
-                        value = line2,
-                        isTabActive = false,
-                        isValueManual = false,
-                        context = ctx
-                    )
-                    btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
-                    btn.strokeWidth = (1f * density).toInt()
-                    btn.cornerRadius = (14f * density).toInt()
-                }
-            }
-        }
-
-        currentBinding.btnFormatSwitchCompact?.let { btn ->
-            val isRawAvailable = hasDng
-            val rawLabel = when {
-                isRawVideo -> "RAWVID"
-                isCinemaDng -> "CDNG"
-                else -> "RAW"
-            }
-            val nonRawLabel = if (isMp4Active) "MP4" else "JPG"
-
-            if (isRawSelected) {
-                btn.isEnabled = !isAdjusted
-                btn.isClickable = !isAdjusted
-                btn.text = rawLabel
-                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
-                btn.setTextColor(colorOnPrimaryContainer)
-                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
-                btn.strokeWidth = (1.5f * density).toInt()
-                btn.cornerRadius = (14f * density).toInt()
-            } else if (isRawAvailable) {
-                btn.isEnabled = !isAdjusted
-                btn.isClickable = !isAdjusted
-                btn.text = rawLabel
-                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-                btn.setTextColor(colorOnSurfaceVariant)
-                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
-                btn.strokeWidth = (1f * density).toInt()
-                btn.cornerRadius = (14f * density).toInt()
-            } else {
-                btn.isEnabled = false
-                btn.isClickable = false
-                btn.text = nonRawLabel
-                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-                btn.setTextColor(androidx.core.graphics.ColorUtils.setAlphaComponent(colorOnSurfaceVariant, 120))
-                btn.strokeWidth = 0
-                btn.cornerRadius = (14f * density).toInt()
-            }
-        }
-
-        currentBinding.btnDerivativeCycleCompact?.let { btn ->
-            val showCompactLook = !hasContextualAddons && showDerivCycle
-            btn.visibility = if (showCompactLook) View.VISIBLE else View.GONE
-            if (showCompactLook) {
-                val dotColor = LOOK_DOT_COLORS[activeDerivIdx % LOOK_DOT_COLORS.size]
-                val dotColorAlpha = androidx.core.graphics.ColorUtils.setAlphaComponent(dotColor, 200)
-
-                val text = "V${activeDerivIdx + 1} ●"
-                val spannable = android.text.SpannableStringBuilder(text)
-                val dotIdx = text.indexOf("●")
-                if (dotIdx >= 0) {
-                    spannable.setSpan(
-                        android.text.style.ForegroundColorSpan(dotColor),
-                        dotIdx,
-                        dotIdx + 1,
-                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-                    )
-                }
-                btn.text = spannable
-                btn.icon = null
-
-                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-                btn.setTextColor(colorOnSurfaceVariant)
-                btn.strokeColor = android.content.res.ColorStateList.valueOf(dotColorAlpha)
-                btn.strokeWidth = (1.5f * density).toInt()
-                btn.cornerRadius = (14f * density).toInt()
-            }
-        }
-
-        currentBinding.btnDerivativeCycle?.let { btn ->
-            val showExpandedLook = hasContextualAddons && showDerivCycle
-            btn.visibility = if (showExpandedLook) View.VISIBLE else View.GONE
-            if (showExpandedLook) {
-                val dotColor = LOOK_DOT_COLORS[activeDerivIdx % LOOK_DOT_COLORS.size]
-                val dotColorAlpha = androidx.core.graphics.ColorUtils.setAlphaComponent(dotColor, 200)
-
-                val line1 = "LOOK"
-                val line2 = "V${activeDerivIdx + 1} / V${derivatives.size} ●"
-                val formatted = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                    label = line1,
-                    value = line2,
-                    isTabActive = false,
-                    isValueManual = true,
-                    context = ctx
-                )
-                val spannable = formatted as? android.text.SpannableStringBuilder ?: android.text.SpannableStringBuilder(formatted)
-                val dotIdx = spannable.indexOf("●")
-                if (dotIdx >= 0) {
-                    spannable.setSpan(
-                        android.text.style.ForegroundColorSpan(dotColor),
-                        dotIdx,
-                        dotIdx + 1,
-                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-                    )
-                }
-                btn.text = spannable
-                btn.icon = null
-
-                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-                btn.strokeColor = android.content.res.ColorStateList.valueOf(dotColorAlpha)
-                btn.strokeWidth = (1.5f * density).toInt()
-                btn.cornerRadius = (14f * density).toInt()
-            }
-        }
-
-        currentBinding.btnMotionLive?.let { btn ->
-            btn.visibility = if (showMotionLive) View.VISIBLE else View.GONE
-            if (showMotionLive) {
-                val line1 = "LIVE PHOTO"
-                val line2 = if (isMotionPhotoAutoPlay) "AUTO ON" else "PAUSED"
-                val liveText = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                    label = line1,
-                    value = line2,
-                    isTabActive = isMotionPhotoAutoPlay,
-                    isValueManual = isMotionPhotoAutoPlay,
-                    context = ctx
-                )
-                btn.text = liveText
-                if (isMotionPhotoAutoPlay) {
-                    btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
-                    btn.setTextColor(colorOnPrimaryContainer)
-                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
-                    btn.strokeWidth = (1.5f * density).toInt()
-                    btn.cornerRadius = (12f * density).toInt()
-                } else {
-                    btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-                    btn.setTextColor(colorOnSurfaceVariant)
-                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
-                    btn.strokeWidth = (1f * density).toInt()
-                    btn.cornerRadius = (12f * density).toInt()
-                }
-            }
-        }
-
-        if (currentGroup.isMultiCamera && lenses.isNotEmpty()) {
-            currentBinding.viewerMulticamRow?.visibility = View.VISIBLE
-            currentBinding.multicamLensContainer?.let { container ->
-                container.removeAllViews()
-                for ((idx, lens) in lenses.withIndex()) {
-                    val isSelected = (idx == activeLensIndex)
-                    val baseTag = if (lens.lensTag.isNotBlank()) lens.lensTag else String.format(java.util.Locale.US, "%.1fx", lens.multiplier)
-                    val lensLabel = when {
-                        baseTag.contains("(") -> baseTag
-                        lens.multiplier < 0.9f -> "$baseTag (UW)"
-                        lens.multiplier in 0.9f..1.5f -> "$baseTag (W)"
-                        lens.multiplier > 1.5f -> "$baseTag (T)"
-                        else -> baseTag
-                    }
-
-                    val lensBtn = com.google.android.material.button.MaterialButton(
-                        ctx,
-                        null,
-                        com.google.android.material.R.attr.materialButtonTonalStyle
-                    ).apply {
-                        layoutParams = android.widget.LinearLayout.LayoutParams(
-                            0,
-                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                            1.0f
-                        ).apply {
-                            if (idx > 0) marginStart = (2f * density).roundToInt()
-                            if (idx < lenses.size - 1) marginEnd = (2f * density).roundToInt()
-                        }
-                        text = lensLabel
-                        textSize = 10.5f
-                        isSingleLine = true
-                        ellipsize = android.text.TextUtils.TruncateAt.END
-                        gravity = android.view.Gravity.CENTER
-                        insetTop = 0
-                        insetBottom = 0
-                        setPadding(0, 0, 0, 0)
-                        minWidth = 0
-                        minimumWidth = 0
-
-                        if (isSelected) {
-                            cornerRadius = (10f * density).roundToInt()
-                            backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
-                            setTextColor(colorOnPrimaryContainer)
-                            strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
-                            strokeWidth = (1.5f * density).roundToInt()
-                        } else {
-                            cornerRadius = (14f * density).roundToInt()
-                            backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-                            setTextColor(colorOnSurfaceVariant)
-                            strokeColor = android.content.res.ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
-                            strokeWidth = 0
-                        }
-
-                        setOnClickListener {
-                            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                            val curPos = currentBinding.imagePager.currentItem
-                            if (adapter.getSelectedLensIndex(curPos) != idx) {
-                                adapter.setSelectedLensIndex(curPos, idx)
-                                updateControlsVisibility()
-                            }
-                        }
-                    }
-                    container.addView(lensBtn)
-                }
-            }
-
-            currentBinding.btnMulticamCollage?.apply {
-                text = CameraBentoDeckView.formatProTelemetry(
-                    label = "⊞ COLLAGE",
-                    value = "多摄拼图",
-                    isTabActive = true,
-                    isValueManual = false,
-                    context = ctx
-                )
-                setOnClickListener {
-                    it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                    val curPos = currentBinding.imagePager.currentItem
-                    val grp = adapter.getGroup(curPos)
-                    if (grp.isMultiCamera) {
-                        showMultiCamCollageDialog(grp)
-                    }
-                }
-            }
-        } else {
-            currentBinding.viewerMulticamRow?.visibility = View.GONE
-            currentBinding.multicamLensContainer?.removeAllViews()
-        }
-
-        val isVideoActive = isRawVideo || isCinemaDng || currentGroup.isMp4Video || currentGroup.mp4VideoUri != null || isMp4Active
-
-        if (isVideoActive) {
-            currentBinding.viewerVideoDeck?.visibility = View.VISIBLE
-            if (isCinemaDng) {
-                currentBinding.filmstripBentoContainer?.visibility = View.VISIBLE
-                val frameUris = if (currentGroup.cinemaDngFrameUris.isNotEmpty()) {
-                    currentGroup.cinemaDngFrameUris
-                } else if (currentGroup.cinemaDngFirstFrameUri != null) {
-                    listOf(currentGroup.cinemaDngFirstFrameUri)
-                } else {
-                    emptyList()
-                }
-                val activeIndex = currentCinemaDngFrame?.first ?: adapter.getActiveCinemaDngFrame(currentIndex)?.first ?: 0
-                currentBinding.filmstripBentoSeekbar?.setFrames(frameUris, activeIndex)
-            } else {
-                currentBinding.filmstripBentoContainer?.visibility = View.GONE
-            }
-
-            val exportSub = if (isCinemaDng) "CDNG / MP4 / FRAME" else "MP4 / FRAME / DNG"
-            currentBinding.btnVideoExportHub?.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-                label = "↗ EXPORT HUB",
-                value = exportSub,
-                isTabActive = false,
-                isValueManual = false,
-                context = ctx
-            )
-
-            val isPlaying = adapter.isVideoPlaying(currentIndex)
-            val curMs = adapter.getVideoCurrentPosition(currentIndex)
-            val totalMs = adapter.getVideoDuration(currentIndex)
-            updateVideoPlaybackButton(isPlaying, curMs, totalMs)
-        } else {
-            currentBinding.viewerVideoDeck?.visibility = View.GONE
-        }
-    }
-
-    protected fun updateVideoPlaybackButton(isPlaying: Boolean, currentMs: Long, totalMs: Long) {
-        val currentBinding = _binding ?: return
-        val btn = currentBinding.btnVideoPlayback ?: return
-        val ctx = context ?: return
-        val density = ctx.resources.displayMetrics.density
-
-        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(ctx, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
-        val colorPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
-        val colorOnPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnPrimaryContainer, android.graphics.Color.WHITE)
-        val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.GRAY)
-
-        val line1 = if (isPlaying) "❚❚ PAUSE" else "▶ PLAY"
-        val line2 = if (totalMs > 0) {
-            "${formatVideoTime(currentMs)} / ${formatVideoTime(totalMs)}"
-        } else {
-            val currentIndex = currentBinding.imagePager.currentItem
-            if (::adapter.isInitialized && currentIndex in adapter.getGroups().indices) {
-                val group = adapter.getGroup(currentIndex)
-                if (group.isCinemaDng || group.cinemaDngFrameUris.isNotEmpty()) {
-                    val count = group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: group.cinemaDngFrameCount
-                    val sec = (count / 24.0f).roundToInt()
-                    "24 FPS · ${sec}s"
-                } else if (group.isRawVideo) {
-                    val fps = group.rawVideoFps.takeIf { it > 0 } ?: 24.0f
-                    val sec = (group.rawVideoFrameCount / fps).roundToInt()
-                    "${fps.toInt()} FPS · ${sec}s"
-                } else {
-                    "00:00 / 00:00"
-                }
-            } else {
-                "00:00 / 00:00"
-            }
-        }
-
-        btn.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = line1,
-            value = line2,
-            isTabActive = isPlaying,
-            isValueManual = false,
-            context = ctx
-        )
-
-        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
-        btn.setTextColor(colorOnPrimaryContainer)
-        if (isPlaying) {
-            btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
-            btn.strokeWidth = (1.5f * density).toInt()
-            btn.cornerRadius = (14f * density).toInt()
-        } else {
-            btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
-            btn.strokeWidth = (1f * density).toInt()
-            btn.cornerRadius = (18f * density).toInt()
-        }
-    }
-
-    private fun formatVideoTime(millis: Long): String {
-        val totalSec = (millis / 1000).coerceAtLeast(0)
-        val minutes = totalSec / 60
-        val seconds = totalSec % 60
-        return String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
+        if (::bentoDeckCoordinator.isInitialized) bentoDeckCoordinator.updateFormatBentoRow(isAdjusted, isMotionPhotoAutoPlay, currentCinemaDngFrame)
     }
 
     protected fun prepareEditConfig(group: ImageGroup) {
-        // Reset cached data to prevent cross-contamination between different image groups
-        sourceDngBytes = null
-        sourceDngBytes2 = null
-        cachedBitmap1 = null
-        cachedBitmap2 = null
-        lastPreviewConfig = null
-        selectedDngIndex = 0
-        previewJob?.cancel()
-
-        currentEditConfig = group.editConfig?.let {
-            if (it.exposure == 0f && it.adjustments == null) {
-                val baseEv = if (it.digitalGain > 0f) kotlin.math.log2(it.digitalGain) else 0f
-                it.copy(exposure = baseEv)
-            } else if (it.adjustments != null) {
-                val newAdjs = it.adjustments.map { adj ->
-                    if (adj.exposure == 0f) {
-                        val baseEv = if (adj.digitalGain > 0f) kotlin.math.log2(adj.digitalGain) else 0f
-                        adj.copy(exposure = baseEv)
-                    } else adj
-                }
-                it.copy(adjustments = newAdjs)
-            } else it
-        }?.copy() ?: top.maary.darkbag.models.EditConfig(
-            adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
-        )
-
-        // Solidify "Random" flare type to prevent jumping during edits
-        currentEditConfig = currentEditConfig?.let { config ->
-            if (config.flareType == 0) {
-                val resolved = java.util.Random().nextInt(2) + 1
-                config.copy(flareType = resolved)
-            } else config
-        }
-
-        updateEditUi()
-        updateEffectsButtons()
-        // DNG bytes and deep EXIF will be loaded on-demand when entering edit flow
-    }
-
-    protected open suspend fun ensureDngBytesLoaded() {
-        if (sourceDngBytes != null) return
-        val group = adapter.getGroup(binding.imagePager.currentItem)
-        val dngUri1 = if (group.isMultiCamera) {
-            val idx = adapter.getSelectedLensIndex(binding.imagePager.currentItem)
-            group.multiDngUris.getOrNull(idx) ?: group.multiDngUris.firstOrNull()
-        } else {
-            group.dngUri ?: group.dngUri1
-        }
-        val dngUri2 = group.dngUri2
-        val context = context ?: return
-
-        withContext(Dispatchers.IO) {
-            try {
-                dngUri1?.let { uri ->
-                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                        sourceDngBytes = java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
-                    }
-                }
-                dngUri2?.let { uri ->
-                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                        sourceDngBytes2 = java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
-                    }
-                }
-
-                // Fallback: Load digital gain from DNG EXIF only if missing from JPG
-                val currentConfig = currentEditConfig
-                if (currentConfig != null) {
-                    if (currentConfig.digitalGain == 1.0f && currentConfig.adjustments == null && currentConfig.exposure == 0f) {
-                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext
-                        repository.readDngBaselineExposure(primaryUri, false)?.let { configFromExif ->
-                            withContext(Dispatchers.Main) {
-                                if (currentEditConfig?.exposure == 0f) {
-                                    currentEditConfig = currentEditConfig?.copy(
-                                        digitalGain = configFromExif.digitalGain,
-                                        exposure = if (configFromExif.digitalGain > 0f) kotlin.math.log2(configFromExif.digitalGain) else 0f
-                                    )
-                                    updateEditUi()
-                                    if (isEditingAdjustments) updateSlidersInPanel()
-                                }
-                            }
-                        }
-                    } else if (currentConfig.adjustments != null) {
-                        val adjs = currentConfig.adjustments.toMutableList()
-                        var updated = false
-                        if (dngUri1 != null && adjs.getOrNull(0)?.digitalGain == 1.0f && adjs.getOrNull(0)?.exposure == 0f) {
-                            repository.readDngBaselineExposure(dngUri1, true, 0)?.adjustments?.get(0)?.let { adj ->
-                                adjs[0] = adj
-                                updated = true
-                            }
-                        }
-                        if (dngUri2 != null && adjs.getOrNull(1)?.digitalGain == 1.0f && adjs.getOrNull(1)?.exposure == 0f) {
-                            repository.readDngBaselineExposure(dngUri2, true, 1)?.adjustments?.get(1)?.let { adj ->
-                                adjs[1] = adj
-                                updated = true
-                            }
-                        }
-                        if (updated) {
-                            withContext(Dispatchers.Main) {
-                                currentEditConfig = currentEditConfig?.copy(adjustments = adjs)
-                                updateEditUi()
-                                if (isEditingAdjustments) updateSlidersInPanel()
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("ImageViewerFragment", "Failed to load source DNG bytes", e)
-            }
-        }
-    }
-
-    private fun updateSplitButtons() {
-        if (isEditingAdjustments || isAdjusted) {
-            binding.btnActionMain?.setIconResource(R.drawable.ic_save)
-            binding.btnActionMain?.text = getString(R.string.save).uppercase()
-            binding.btnActionMain?.contentDescription = getString(R.string.save)
-        } else {
-            if (::adapter.isInitialized && adapter.itemCount > 0) {
-                val currentIndex = binding.imagePager.currentItem
-                val currentGroup = adapter.getGroup(currentIndex)
-                val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
-
-                if (isUnrenderedRawVideoOrCinemaDng) {
-                    binding.btnActionMain?.setIconResource(R.drawable.ic_save)
-                    binding.btnActionMain?.text = "EXPORT"
-                    binding.btnActionMain?.contentDescription = getString(R.string.action_export_main)
-                } else {
-                    binding.btnActionMain?.setIconResource(R.drawable.ic_share)
-                    binding.btnActionMain?.text = "SHARE"
-                    binding.btnActionMain?.contentDescription = getString(R.string.share_button_alt)
-                }
-            } else {
-                binding.btnActionMain?.setIconResource(R.drawable.ic_share)
-                binding.btnActionMain?.text = "SHARE"
-                binding.btnActionMain?.contentDescription = getString(R.string.share_button_alt)
-            }
-        }
-    }
-
-    private fun updateToolbarIcon() {
-        if (isAdjusted || isEditingAdjustments) {
-            binding.btnBack.setIconResource(R.drawable.ic_close)
-        } else {
-            binding.btnBack.setIconResource(R.drawable.ic_back)
-        }
-    }
-
-    protected open fun setupActionButtons() {
-        binding.btnActionMain?.setOnClickListener {
-            if (isSaving) return@setOnClickListener
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-
-            if (isEditingAdjustments || isAdjusted) {
-                saveEdit(isReplacement = true)
-            } else {
-                if (::adapter.isInitialized && adapter.itemCount > 0) {
-                    val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                    val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
-                    if (isUnrenderedRawVideoOrCinemaDng) {
-                        openExportHub()
-                    } else {
-                        performShare()
-                    }
-                } else {
-                    performShare()
-                }
-            }
-        }
-
-        binding.btnActionMain?.setOnLongClickListener {
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-            if (isEditingAdjustments || isAdjusted) {
-                showSaveMenu(it)
-            } else {
-                showViewMenu(it)
-            }
-            true
-        }
-
-        binding.btnActionMenu?.setOnClickListener {
-            binding.btnActionMenu?.isCheckable = true
-            binding.btnActionMenu?.isChecked = true
-            if (isEditingAdjustments || isAdjusted) {
-                showSaveMenu(it)
-            } else {
-                showViewMenu(it)
-            }
-        }
-
-        binding.btnLogCurve.setOnClickListener {
-            showLutMenu()
-        }
-
-        binding.btn3dLut.setOnClickListener {
-            showLutMenu()
-        }
-
-        binding.btnEditRecipe?.setOnClickListener {
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            showLutMenu()
-        }
-
-        binding.btnFormatSwitch?.setOnClickListener {
-            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            adapter.cycleOrToggleFormat(binding.imagePager.currentItem)
-        }
-
-        binding.btnFormatSwitchCompact?.setOnClickListener {
-            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            adapter.cycleOrToggleFormat(binding.imagePager.currentItem)
-        }
-
-        binding.btnDerivativeCycle?.setOnClickListener {
-            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            val curPos = binding.imagePager.currentItem
-            adapter.cycleDerivativeVersion(curPos)
-            updateFormatBentoRow()
-        }
-
-        binding.btnDerivativeCycleCompact?.setOnClickListener {
-            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            val curPos = binding.imagePager.currentItem
-            adapter.cycleDerivativeVersion(curPos)
-            updateFormatBentoRow()
-        }
-
-        binding.btnMulticamCollage?.setOnClickListener {
-            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-            if (currentGroup.isMultiCamera) {
-                showMultiCamCollageDialog(currentGroup)
-            }
-        }
-
-        binding.btnMotionLive?.setOnClickListener {
-            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
-            handleMotionPhotoIndicatorTapped(binding.imagePager.currentItem)
-        }
-
-        binding.btnVideoPlayback?.setOnClickListener {
-            if (!::adapter.isInitialized || adapter.itemCount == 0) return@setOnClickListener
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            val currentIndex = binding.imagePager.currentItem
-            if (currentIndex !in adapter.getGroups().indices) return@setOnClickListener
-            val currentGroup = adapter.getGroup(currentIndex)
-            val currentFormat = adapter.getSelectedFormat(currentIndex)
-            val isRawSelected = currentFormat == ImageViewerAdapter.FORMAT_DNG
-            val derivatives = adapter.getDerivativeUris(currentGroup)
-            val activeDerivIdx = adapter.getSelectedDerivativeIndex(currentGroup.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
-            val activeDerivativeUri = derivatives.getOrNull(activeDerivIdx) ?: currentGroup.jpgUri ?: currentGroup.mp4VideoUri
-            val isMp4Active = !isRawSelected && activeDerivativeUri != null && (activeDerivativeUri.toString().endsWith(".mp4", ignoreCase = true) || currentGroup.isMp4Video)
-            val isCinemaDng = currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()
-
-            when {
-                currentGroup.isRawVideo || currentGroup.rawVideoUri != null -> {
-                    adapter.toggleRawVideoForPosition(currentIndex)
-                }
-                isMp4Active || currentGroup.isMp4Video || currentGroup.mp4VideoUri != null -> {
-                    adapter.toggleMp4VideoForPosition(currentIndex)
-                }
-                isCinemaDng -> {
-                    if (currentGroup.mp4VideoUri != null && !isRawSelected) {
-                        adapter.toggleMp4VideoForPosition(currentIndex)
-                    } else {
-                        adapter.toggleCinemaDngForPosition(currentIndex)
-                    }
-                }
-            }
-        }
-
-        binding.btnVideoExportHub?.setOnClickListener {
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            openExportHub()
-        }
-
-        binding.filmstripBentoSeekbar?.onFrameSelected = { frameIndex, uri ->
-            if (::adapter.isInitialized && adapter.itemCount > 0) {
-                val currentIndex = binding.imagePager.currentItem
-                if (currentIndex in adapter.getGroups().indices) {
-                    val group = adapter.getGroup(currentIndex)
-                    val frameUris = if (group.cinemaDngFrameUris.isNotEmpty()) {
-                        group.cinemaDngFrameUris
-                    } else if (group.cinemaDngFirstFrameUri != null) {
-                        listOf(group.cinemaDngFirstFrameUri)
-                    } else {
-                        emptyList()
-                    }
-                    val targetUri = uri ?: frameUris.getOrNull(frameIndex)
-                    currentCinemaDngFrame = Pair(frameIndex, targetUri)
-                    adapter.selectCinemaDngFrame(currentIndex, frameIndex, targetUri)
-                }
-            }
-        }
-
-        binding.btnTabLight?.setOnClickListener {
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            selectAdjustmentTab(0)
-        }
-        binding.btnTabRange?.setOnClickListener {
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            selectAdjustmentTab(1)
-        }
-        binding.btnTabTone?.setOnClickListener {
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            selectAdjustmentTab(2)
-        }
-        binding.btnTabColor?.setOnClickListener {
-            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-            selectAdjustmentTab(3)
-        }
-
-        binding.btnDelete.setOnClickListener {
-            if (::adapter.isInitialized && adapter.itemCount > 0) {
-                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                showDeleteDialog(currentGroup)
-            }
-        }
-
-        binding.btnSeparateDng.setOnClickListener {
-            if (::adapter.isInitialized && adapter.itemCount > 0) {
-                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                showHalfFrameShareSheet(currentGroup)
-            }
-        }
-
-        binding.touchOverlay.setOnClickListener {
-            binding.lutListContainer?.visibility = View.GONE
-            binding.touchOverlay.visibility = View.GONE
-            updateBackPressedCallbackState()
-        }
-
-        binding.btnTimestamp.setOnClickListener {
-            lifecycleScope.launch {
-                ensureDngBytesLoaded()
-                val current = currentEditConfig ?: return@launch
-                currentEditConfig = current.copy(showTimestamp = !current.showTimestamp)
-                markAdjusted()
-                updateEffectsButtons()
-                applyEditPreview()
-            }
-        }
-
-        binding.btnFlare.setOnClickListener {
-            lifecycleScope.launch {
-                ensureDngBytesLoaded()
-                val current = currentEditConfig ?: return@launch
-                val nextFlare = when (current.flareType) {
-                    -1 -> 1
-                    1 -> 2
-                    2 -> -1
-                    else -> 1
-                }
-                currentEditConfig = current.copy(flareType = nextFlare)
-                markAdjusted()
-                updateEffectsButtons()
-                applyEditPreview()
-            }
-        }
-
-        binding.btnSwap.setOnClickListener {
-            lifecycleScope.launch {
-                ensureDngBytesLoaded()
-                val current = currentEditConfig ?: return@launch
-                currentEditConfig = current.copy(isSwapped = !current.isSwapped)
-                markAdjusted()
-                updateEffectsButtons()
-                applyEditPreview()
-            }
-        }
-
-        binding.btnAdjustTofu.setOnClickListener {
-            showAdjustmentsBottomSheet()
-            lifecycleScope.launch {
-                ensureDngBytesLoaded()
-            }
-        }
-
-        binding.hfSelection1.setOnClickListener {
-            if (selectedDngIndex != 0) {
-                selectedDngIndex = 0
-                updateSelectionFeedback()
-                updateSlidersInPanel()
-                applyEditPreview()
-            }
-        }
-
-        binding.hfSelection2.setOnClickListener {
-            if (selectedDngIndex != 1) {
-                selectedDngIndex = 1
-                updateSelectionFeedback()
-                updateSlidersInPanel()
-                applyEditPreview()
-            }
-        }
-
-        binding.btnEditDone.setOnClickListener {
-            exitEditMode(apply = true)
-        }
-
-        binding.btnEditCancel.setOnClickListener {
-            exitEditMode(apply = false)
-        }
-
-        binding.editTabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
-            override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab?) {
-                updateAdjustmentTabButtons(tab?.position ?: 0)
-                updateSlidersInPanel()
-            }
-            override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
-            override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
-        })
-
-        val sliderChangeListener = com.google.android.material.slider.Slider.OnChangeListener { slider, value, fromUser ->
-            if (fromUser) {
-                val config = currentEditConfig ?: return@OnChangeListener
-                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                val tabPos = binding.editTabs.selectedTabPosition
-
-                markAdjusted()
-
-                val updateConfig: (top.maary.darkbag.models.BasicAdjustments) -> top.maary.darkbag.models.BasicAdjustments = { old ->
-                    when (tabPos) {
-                        0 -> when (slider.id) { // Light
-                            R.id.slider_1 -> old.copy(exposure = value)
-                            R.id.slider_2 -> old.copy(contrast = value)
-                            else -> old
-                        }
-                        1 -> when (slider.id) { // Range
-                            R.id.slider_1 -> old.copy(highlights = value)
-                            R.id.slider_2 -> old.copy(shadows = value)
-                            else -> old
-                        }
-                        2 -> when (slider.id) { // Tone
-                            R.id.slider_1 -> old.copy(whites = value)
-                            R.id.slider_2 -> old.copy(blacks = value)
-                            else -> old
-                        }
-                        3 -> when (slider.id) { // Color
-                            R.id.slider_1 -> old.copy(saturation = value)
-                            else -> old
-                        }
-                        else -> old
-                    }
-                }
-
-                if (currentGroup.isHalfFrame()) {
-                    val adjs = config.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
-                    val adjIndex = if (config.isSwapped) 1 - selectedDngIndex else selectedDngIndex
-                    adjs[adjIndex] = updateConfig(adjs[adjIndex])
-                    currentEditConfig = config.copy(adjustments = adjs)
-                } else {
-                    val basic = updateConfig(config.toBasic())
-                    currentEditConfig = config.copy(
-                        exposure = basic.exposure,
-                        contrast = basic.contrast,
-                        highlights = basic.highlights,
-                        shadows = basic.shadows,
-                        whites = basic.whites,
-                        blacks = basic.blacks,
-                        saturation = basic.saturation
-                    )
-                }
-
-                if (slider.id == R.id.slider_1) {
-                    binding.tvValue1.text = if (tabPos == 0) String.format("%.2f EV", value) else String.format("%.2f", value)
-                } else {
-                    binding.tvValue2.text = String.format("%.2f", value)
-                }
-                applyEditPreview()
-            }
-        }
-        binding.slider1.addOnChangeListener(sliderChangeListener)
-        binding.slider2.addOnChangeListener(sliderChangeListener)
-
-        binding.groupFrameSelectionIntegrated.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (isChecked) {
-                selectedDngIndex = if (checkedId == R.id.btn_select_frame1_integrated) 0 else 1
-                updateSelectionFeedback()
-                updateSlidersInPanel()
-                applyEditPreview()
-            }
-        }
+        currentEditConfig = group.editConfig ?: EditConfig(log = "None", lut = null, hfLayout = group.hfLayout)
+        editorViewModel.processIntent(DarkroomEditorUserIntent.SetActiveGroup(group))
     }
 
     protected open fun showSaveMenu(anchor: View) {
-        val popup = PopupMenu(requireContext(), anchor)
-        popup.menu.add(0, MENU_SAVE_AS, 0, "Save as new file").apply {
-            setIcon(R.drawable.ic_save_as)
-        }
-        popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
-            setIcon(R.drawable.ic_photo)
-        }
-
-        forceShowIcons(popup)
-
-        popup.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                MENU_SAVE_AS -> saveEdit(isReplacement = false)
-                MENU_SHARE_TIFF -> performShareAsTiff()
+        chromeDelegate.showSaveMenu(anchor, mediaStrategy) { action ->
+            when (action) {
+                ViewerSaveAction.SAVE_REPLACE -> saveEdit(isReplacement = true)
+                ViewerSaveAction.SAVE_AS_NEW -> saveEdit(isReplacement = false)
+                ViewerSaveAction.SHARE_TIFF -> performShareAsTiff()
+                ViewerSaveAction.EXPORT_JPG_TO_PICTURES -> exportToJpg()
             }
-            true
         }
-        popup.setOnDismissListener { binding.btnActionMenu?.isChecked = false }
-        popup.show()
     }
 
-    protected open fun showViewMenu(anchor: View) {
-        if (!::adapter.isInitialized || adapter.itemCount == 0) {
-            binding.btnActionMenu?.isChecked = false
-            return
+    private fun setBusyLoading(busy: Boolean, blockInteraction: Boolean = true) {
+        binding.initialLoadingIndicator.visibility = if (busy) View.VISIBLE else View.GONE
+        if (blockInteraction) {
+            binding.interactionBlocker?.visibility = if (busy) View.VISIBLE else View.GONE
         }
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val popup = PopupMenu(requireContext(), anchor)
-        val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
+    }
 
-        if (isUnrenderedRawVideoOrCinemaDng) {
-            popup.menu.add(0, MENU_SHARE, 0, getString(R.string.share_button_alt)).apply {
-                setIcon(R.drawable.ic_share)
-            }
-        } else {
-            popup.menu.add(0, MENU_EXPORT_HUB, 0, getString(R.string.action_export)).apply {
-                setIcon(R.drawable.ic_save)
-            }
-            if (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null) {
-                popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
-                    setIcon(R.drawable.ic_photo)
-                }
-            }
-        }
-        if (currentGroup.isMultiCamera) {
-            popup.menu.add(0, MENU_COLLAGE, 0, getString(R.string.create_multi_cam_collage)).apply {
-                setIcon(R.drawable.ic_photo)
-            }
-        }
-        popup.menu.add(0, MENU_DETAILS, 0, "Details").apply {
-            setIcon(R.drawable.ic_info)
-        }
-        popup.menu.add(0, MENU_DELETE, 0, "Delete").apply {
-            setIcon(R.drawable.ic_delete)
-        }
-
-        forceShowIcons(popup)
-
-        popup.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                MENU_SHARE -> performShare()
-                MENU_EXPORT_HUB -> openExportHub()
-                MENU_SHARE_TIFF -> performShareAsTiff()
-                MENU_EXPORT_CINEMADNG_FRAME -> openExportHub()
-                MENU_EXPORT_CINEMA_DNG -> performExportCinemaDng(adapter.getGroup(binding.imagePager.currentItem))
-                MENU_EXPORT_MP4 -> openExportHub()
-                MENU_COLLAGE -> showMultiCamCollageDialog(adapter.getGroup(binding.imagePager.currentItem))
-                MENU_DETAILS -> showImageDetails()
-                MENU_DELETE -> {
-                    val groupToDelete = adapter.getGroup(binding.imagePager.currentItem)
-                    showDeleteDialog(groupToDelete)
-                }
-            }
-            true
-        }
-        popup.setOnDismissListener { binding.btnActionMenu?.isChecked = false }
-        popup.show()
+    private fun exportToJpg() {
+        val config = currentEditConfig ?: return
+        exportCoordinator.exportToJpg(
+            group = adapter.getGroup(binding.imagePager.currentItem), config = config,
+            isEditingAdjustments = isEditingAdjustments, cachedBytes1 = sourceDngBytes, cachedBytes2 = sourceDngBytes2,
+            repository = repository, onStartExport = { setBusyLoading(true) },
+            onEndExport = { setBusyLoading(false) }, onSaveReplacement = { saveEdit(isReplacement = true) }
+        )
     }
 
     protected fun markAdjusted() {
         if (!isAdjusted) {
             isAdjusted = true
             adapter.setFormatSwitcherPersistentHidden(true)
-            updateSplitButtons()
-            updateToolbarIcon()
-            updateBackPressedCallbackState()
+            chromeDelegate.updateSplitButtons()
+            chromeDelegate.updateToolbarIcon()
+            chromeDelegate.updateBackPressedCallbackState()
         }
     }
 
     protected fun resetAdjustments() {
         isAdjusted = false
-        exitEditMode(apply = false)
+        editorPanelDelegate.exitEditMode(apply = false)
         binding.imagePager.isUserInputEnabled = true
         adapter.setFormatSwitcherPersistentHidden(false)
         sourceDngBytes = null
         sourceDngBytes2 = null
-        cachedBitmap1 = null
-        cachedBitmap2 = null
-        lastPreviewConfig = null
         lastCompositeBitmap = null
-        previewJob?.cancel()
         currentEditConfig = null
+        editorViewModel.processIntent(DarkroomEditorUserIntent.ResetAdjustments)
 
-        binding.lutListContainer?.visibility = View.GONE
-
-        val currentIndex = binding.imagePager.currentItem
-        adapter.notifyItemChanged(currentIndex)
-
-        val currentGroup = adapter.getGroup(currentIndex)
-        prepareEditConfig(currentGroup)
+        val cur = binding.imagePager.currentItem
+        adapter.notifyItemChanged(cur)
+        prepareEditConfig(adapter.getGroup(cur))
         updateControlsVisibility()
     }
 
     private fun openExportHub() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
-        val currentIndex = binding.imagePager.currentItem
-        val currentGroup = adapter.getGroup(currentIndex)
-        lifecycleScope.launch {
-            val fullyLoadedGroup = if (!currentGroup.metadataLoaded) {
-                repository.loadMetadata(currentGroup)
-            } else {
-                currentGroup
-            }
-            val config = currentEditConfig ?: fullyLoadedGroup.editConfig
-            val frameInfo = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(currentIndex)
-            val frameIndex = frameInfo?.first ?: 0
-            val sheet = RawVideoExportSheet.newInstance(
-                group = fullyLoadedGroup,
-                currentLog = config?.log,
-                currentLut = config?.lut,
-                frameIndex = frameIndex
-            )
-            sheet.show(childFragmentManager, RawVideoExportSheet.TAG)
-        }
+        val cur = binding.imagePager.currentItem
+        val frameInfo = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(cur)
+        exportCoordinator.openExportHub(adapter.getGroup(cur), currentEditConfig, frameInfo?.first ?: 0, repository, childFragmentManager)
     }
 
     private fun performShare() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
-        val currentIndex = binding.imagePager.currentItem
-        val currentGroup = adapter.getGroup(currentIndex)
-        val selectedFormat = adapter.getSelectedFormat(currentIndex)
-
-        if (selectedFormat == "DNG" && currentGroup.isHalfFrame()) {
-            showHalfFrameShareSheet(currentGroup)
-            return
+        val cur = binding.imagePager.currentItem
+        exportCoordinator.shareGroupMedia(adapter.getGroup(cur), adapter.getSelectedFormat(cur)) {
+            chromeDelegate.showHalfFrameShareSheet(it)
         }
-
-        val currentUri = when (selectedFormat) {
-            "JPG" -> currentGroup.jpgUri
-            "MP4" -> currentGroup.mp4VideoUri
-            "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: currentGroup.cinemaDngFirstFrameUri
-            else -> currentGroup.jpgUri ?: currentGroup.mp4VideoUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: currentGroup.rawVideoUri ?: currentGroup.cinemaDngFirstFrameUri ?: currentGroup.cinemaDngAudioUri
-        }
-        currentUri?.let {
-            shareImages(listOf(it))
-        } ?: run {
-            val fallbackUri = currentGroup.firstAvailableUri
-            if (fallbackUri != null) {
-                shareImages(listOf(fallbackUri))
-            } else {
-                Toast.makeText(requireContext(), R.string.error_no_external_viewer, Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-
-    private var preloadJob: kotlinx.coroutines.Job? = null
-
-    private fun preloadAdjacentMetadata(position: Int) {
-        if (!::adapter.isInitialized) return
-        val currentGroups = adapter.getGroups()
-        if (currentGroups.isEmpty()) return
-
-        val indicesToPreload = listOf(
-            position,
-            position + 1,
-            position - 1,
-            position + 2,
-            position - 2
-        ).filter { it in currentGroups.indices }
-
-        preloadJob?.cancel()
-        preloadJob = lifecycleScope.launch(Dispatchers.IO) {
-            for (index in indicesToPreload) {
-                if (!currentCoroutineContext().isActive) break
-                val groups = adapter.getGroups()
-                if (index !in groups.indices) continue
-                val g = groups[index]
-                if (!g.metadataLoaded) {
-                    val updated = repository.loadMetadata(g)
-                    adapterUpdateMutex.withLock {
-                        suspendCancellableCoroutine<Unit> { cont ->
-                            adapter.updateSingleGroup(updated) {
-                                if (cont.isActive) cont.resume(Unit)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun updateEditUi() {
-        if (!::adapter.isInitialized || adapter.itemCount == 0) return
-        val currentIndex = binding.imagePager.currentItem
-        if (currentIndex !in 0 until adapter.itemCount) return
-        val currentGroup = adapter.getGroup(currentIndex)
-
-        if (!currentGroup.metadataLoaded) return
-
-        val ctx = context ?: return
-        val config = currentEditConfig ?: currentGroup.editConfig
-        val logName = if (config != null && config.log != null && config.log != "None") config.log else "None"
-        val lutName = if (config != null && config.lut != null && config.lut != "None") config.lut.substringBeforeLast(".") else "None"
-
-        binding.btn3dLut.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "LUT",
-            value = lutName,
-            isTabActive = false,
-            isValueManual = lutName != "None",
-            context = ctx
-        )
-        binding.btnAdjustTofu.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "ADJUST",
-            value = if (isAdjusted) "ACTIVE" else "LIGHT & COLOR",
-            isTabActive = false,
-            isValueManual = isAdjusted,
-            context = ctx
-        )
-        binding.btnEditRecipe?.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "RECIPE",
-            value = if (lutName != "None") lutName else logName,
-            isTabActive = false,
-            isValueManual = (logName != "None" || lutName != "None"),
-            context = ctx
-        )
-        binding.btnSeparateDng.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "SPLIT",
-            value = "HALF FRAME",
-            isTabActive = false,
-            isValueManual = false,
-            context = ctx
-        )
-    }
-
-    private fun updateEffectsButtons() {
-        val config = currentEditConfig ?: return
-        val ctx = context ?: return
-        val iconRes = when (config.flareType) {
-            1 -> R.drawable.ic_flare_side
-            2 -> R.drawable.ic_flare_corner
-            else -> R.drawable.ic_flare_none
-        }
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-        val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
-
-        binding.btnTimestamp.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "DATE",
-            value = if (config.showTimestamp) "ON" else "OFF",
-            isTabActive = false,
-            isValueManual = config.showTimestamp,
-            context = ctx
-        )
-        binding.btnTimestamp.setIconTintResource(if (config.showTimestamp) R.color.vibrant_orange else android.R.color.white)
-        binding.btnTimestamp.alpha = if (config.showTimestamp) 1.0f else 0.6f
-
-        val flareSub = when (config.flareType) {
-            1 -> "LEAK #1"
-            2 -> "LEAK #2"
-            else -> "OFF"
-        }
-        binding.btnFlare.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "FLARE",
-            value = flareSub,
-            isTabActive = false,
-            isValueManual = config.flareType != -1,
-            context = ctx
-        )
-        binding.btnFlare.setIconTintResource(if (config.flareType != -1) R.color.vibrant_pink else android.R.color.white)
-        binding.btnFlare.setIconResource(iconRes)
-        binding.btnFlare.alpha = if (config.flareType != -1) 1.0f else 0.6f
-
-        binding.btnSwap.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "⇄ SWAP",
-            value = if (isTB) "T / B" else "F1 / F2",
-            isTabActive = false,
-            isValueManual = config.isSwapped,
-            context = ctx
-        )
-        binding.btnSwap.setIconResource(if (isTB) R.drawable.ic_swap_vert else R.drawable.ic_swap_horiz)
-        binding.btnSwap.setIconTintResource(if (config.isSwapped) R.color.vibrant_cyan else android.R.color.white)
-        binding.btnSwap.alpha = if (config.isSwapped) 1.0f else 0.6f
-    }
-
-    private fun selectAdjustmentTab(index: Int) {
-        binding.editTabs.getTabAt(index)?.select()
-        updateAdjustmentTabButtons(index)
-        updateSlidersInPanel()
-    }
-
-    private fun updateAdjustmentTabButtons(selectedTab: Int) {
-        val ctx = context ?: return
-        val density = ctx.resources.displayMetrics.density
-        val colorPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(
-            ctx, com.google.android.material.R.attr.colorPrimaryContainer, 0xFF334433.toInt()
-        )
-        val colorOnPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(
-            ctx, com.google.android.material.R.attr.colorOnPrimaryContainer, 0xFFFFFFFF.toInt()
-        )
-        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(
-            ctx, androidx.appcompat.R.attr.colorPrimary, 0xFF88CC88.toInt()
-        )
-        val colorSurfaceContainerHigh = com.google.android.material.color.MaterialColors.getColor(
-            ctx, com.google.android.material.R.attr.colorSurfaceContainerHigh, 0xFF2B2B2B.toInt()
-        )
-        val colorOnSurfaceVariant = com.google.android.material.color.MaterialColors.getColor(
-            ctx, com.google.android.material.R.attr.colorOnSurfaceVariant, 0xFFCCCCCC.toInt()
-        )
-        val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(
-            ctx, com.google.android.material.R.attr.colorOutlineVariant, 0xFF444444.toInt()
-        )
-
-        val tabs = listOf(
-            binding.btnTabLight,
-            binding.btnTabRange,
-            binding.btnTabTone,
-            binding.btnTabColor
-        )
-        tabs.forEachIndexed { idx, btn ->
-            btn ?: return@forEachIndexed
-            val isSelected = idx == selectedTab
-            if (isSelected) {
-                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
-                btn.setTextColor(colorOnPrimaryContainer)
-                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
-                btn.strokeWidth = (1.5f * density).toInt()
-                btn.cornerRadius = (10f * density).toInt()
-            } else {
-                btn.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-                btn.setTextColor(colorOnSurfaceVariant)
-                btn.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
-                btn.strokeWidth = (1f * density).toInt()
-                btn.cornerRadius = (14f * density).toInt()
-            }
-        }
-    }
-
-    private fun updateSelectionFeedback() {
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val activeLayout = currentEditConfig?.hfLayout ?: currentGroup.hfLayout
-        val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
-
-        if (isEditingAdjustments && currentGroup.isHalfFrame()) {
-            binding.hfSelection1.visibility = if (selectedDngIndex == 1) View.VISIBLE else View.GONE
-            binding.hfSelection2.visibility = if (selectedDngIndex == 0) View.VISIBLE else View.GONE
-
-            val lp1 = binding.hfSelection1.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-            val lp2 = binding.hfSelection2.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-
-            if (isTB) {
-                lp1.bottomToBottom = -1
-                lp1.bottomToTop = R.id.hf_selection_divider
-                lp1.endToEnd = R.id.image_pager
-                lp1.endToStart = -1
-
-                lp2.topToTop = -1
-                lp2.topToBottom = R.id.hf_selection_divider
-                lp2.startToStart = R.id.image_pager
-                lp2.startToEnd = -1
-            } else {
-                lp1.bottomToBottom = R.id.image_pager
-                lp1.bottomToTop = -1
-                lp1.endToEnd = -1
-                lp1.endToStart = R.id.hf_selection_divider
-
-                lp2.topToTop = R.id.image_pager
-                lp2.topToBottom = -1
-                lp2.startToStart = -1
-                lp2.startToEnd = R.id.hf_selection_divider
-            }
-            binding.hfSelection1.layoutParams = lp1
-            binding.hfSelection2.layoutParams = lp2
-        } else {
-            binding.hfSelection1.visibility = View.GONE
-            binding.hfSelection2.visibility = View.GONE
-        }
-    }
-
-    private fun showLutMenu() {
-        val lutManager = top.maary.darkbag.utils.LutManager(requireContext())
-        top.maary.darkbag.ui.ColorRecipeBottomSheet.show(requireContext(), lutManager) { selectedLog, selectedLut ->
-            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-            val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
-            if (isRawVideo) {
-                currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(
-                    log = selectedLog,
-                    lut = selectedLut ?: "None"
-                )
-                markAdjusted()
-                updateEditUi()
-                applyEditPreview()
-            } else {
-                lifecycleScope.launch {
-                    ensureDngBytesLoaded()
-                    currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(
-                        log = selectedLog,
-                        lut = selectedLut ?: "None"
-                    )
-                    markAdjusted()
-                    updateEditUi()
-                    applyEditPreview()
-                }
-            }
-        }
-    }
-
-    private fun showLogSelectionMenu() {
-        showLutMenu()
-    }
-
-    private fun showLutSelectionMenu() {
-        showLutMenu()
-    }
-
-    private fun showPillPopup(items: List<Pair<String, Boolean>>, autoDismiss: Boolean = true, onSelected: (String, Int) -> Unit) {
-        val container = binding.lutListContainer
-        val rv = binding.lutList
-
-        binding.touchOverlay.visibility = View.VISIBLE
-        container.visibility = View.VISIBLE
-        rv.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(requireContext())
-        rv.adapter = object : androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder>() {
-            inner class PillViewHolder(val btn: com.google.android.material.button.MaterialButton) :
-                androidx.recyclerview.widget.RecyclerView.ViewHolder(btn)
-
-            override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): androidx.recyclerview.widget.RecyclerView.ViewHolder {
-                val btn = LayoutInflater.from(parent.context).inflate(R.layout.item_popup_pill, parent, false) as com.google.android.material.button.MaterialButton
-                return PillViewHolder(btn)
-            }
-
-            override fun onBindViewHolder(holder: androidx.recyclerview.widget.RecyclerView.ViewHolder, position: Int) {
-                val pillHolder = holder as PillViewHolder
-                val (title, isEnabled) = items[position]
-                pillHolder.btn.text = title
-                pillHolder.btn.isEnabled = isEnabled
-                pillHolder.btn.alpha = if (isEnabled) 1.0f else 0.5f
-                pillHolder.btn.setOnClickListener {
-                    onSelected(title, position)
-                    if (autoDismiss) {
-                        container.visibility = View.GONE
-                        binding.touchOverlay.visibility = View.GONE
-                        updateBackPressedCallbackState()
-                    }
-                }
-            }
-            override fun getItemCount() = items.size
-        }
-    }
-
-    private fun showAdjustmentsBottomSheet() {
-        enterEditMode()
     }
 
     protected fun enterEditMode() {
-        if (!isUiVisible) showUi()
-        if (isEditingAdjustments) return
-        isEditingAdjustments = true
-        configBeforeEditing = currentEditConfig?.copy()
-
-        binding.imagePager.isUserInputEnabled = false
-        adapter.setFormatSwitcherPersistentHidden(true)
-
-        updateSplitButtons()
-        updateToolbarIcon()
-        updateViewportPadding()
-
-        // Hide standard controls
-        binding.viewerBentoDeck.visibility = View.GONE
-
-        // Show edit panel with animation
-        binding.editAdjustmentPanel.visibility = View.VISIBLE
-        binding.editAdjustmentPanel.alpha = 0f
-
-        binding.editAdjustmentPanel.translationX = 0f
-        binding.editAdjustmentPanel.translationY = 100f
-
-        binding.editAdjustmentPanel.animate()
-            .alpha(1f)
-            .translationX(0f)
-            .translationY(0f)
-            .setDuration(300)
-            .start()
-
-        // Wait for layout to ensure height is calculated for viewport padding
-        binding.editAdjustmentPanel.post {
-            updateViewportPadding()
-        }
-
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        if (currentGroup.isHalfFrame()) {
-            binding.groupFrameSelectionIntegrated.visibility = View.VISIBLE
-            binding.groupFrameSelectionIntegrated.check(if (selectedDngIndex == 0) R.id.btn_select_frame1_integrated else R.id.btn_select_frame2_integrated)
-        } else {
-            binding.groupFrameSelectionIntegrated.visibility = View.GONE
-        }
-
-        updateAdjustmentTabButtons(binding.editTabs.selectedTabPosition.coerceAtLeast(0))
-        updateEditUi()
-        updateSlidersInPanel()
-        updateSelectionFeedback()
-        updateBackPressedCallbackState()
-    }
-
-    private fun exitEditMode(apply: Boolean) {
-        if (!isEditingAdjustments) return
-        isEditingAdjustments = false
-
-        if (!apply) {
-            isAdjusted = false
-            currentEditConfig = configBeforeEditing?.copy()
-            applyEditPreview()
-            updateSplitButtons()
-            updateToolbarIcon()
-        }
-
-        binding.imagePager.isUserInputEnabled = !isAdjusted
-
-        updateViewportPadding()
-
-        val anim = binding.editAdjustmentPanel.animate()
-            .alpha(0f)
-            .translationY(100f)
-            .setDuration(200)
-            .withEndAction {
-                binding.editAdjustmentPanel.visibility = View.GONE
-                updateControlsVisibility()
-            }
-        anim.start()
-
-        updateSelectionFeedback()
-        updateBackPressedCallbackState()
-    }
-
-    private fun updateSlidersInPanel() {
-        val config = currentEditConfig ?: return
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val tabPos = binding.editTabs.selectedTabPosition
-
-        val target = if (currentGroup.isHalfFrame()) {
-            val adjIndex = if (config.isSwapped) 1 - selectedDngIndex else selectedDngIndex
-            config.adjustments?.getOrNull(adjIndex) ?: top.maary.darkbag.models.BasicAdjustments()
-        } else {
-            config.toBasic()
-        }
-
-        when (tabPos) {
-            0 -> { // Light
-                binding.tvLabel1.text = "Exposure"
-                binding.slider1.valueFrom = EXPOSURE_MIN
-                binding.slider1.valueTo = EXPOSURE_MAX
-                binding.slider1.value = target.exposure.coerceIn(EXPOSURE_MIN, EXPOSURE_MAX)
-                binding.tvValue1.text = String.format("%.2f EV", target.exposure)
-
-                binding.layoutSlider2.visibility = View.VISIBLE
-                binding.tvLabel2.text = "Contrast"
-                binding.slider2.valueFrom = ADJUSTMENT_MIN
-                binding.slider2.valueTo = ADJUSTMENT_MAX
-                binding.slider2.value = target.contrast.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue2.text = String.format("%.2f", target.contrast)
-            }
-            1 -> { // Range
-                binding.tvLabel1.text = "Highlights"
-                binding.slider1.valueFrom = ADJUSTMENT_MIN
-                binding.slider1.valueTo = ADJUSTMENT_MAX
-                binding.slider1.value = target.highlights.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue1.text = String.format("%.2f", target.highlights)
-
-                binding.layoutSlider2.visibility = View.VISIBLE
-                binding.tvLabel2.text = "Shadows"
-                binding.slider2.valueFrom = ADJUSTMENT_MIN
-                binding.slider2.valueTo = ADJUSTMENT_MAX
-                binding.slider2.value = target.shadows.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue2.text = String.format("%.2f", target.shadows)
-            }
-            2 -> { // Tone
-                binding.tvLabel1.text = "Whites"
-                binding.slider1.valueFrom = ADJUSTMENT_MIN
-                binding.slider1.valueTo = ADJUSTMENT_MAX
-                binding.slider1.value = target.whites.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue1.text = String.format("%.2f", target.whites)
-
-                binding.layoutSlider2.visibility = View.VISIBLE
-                binding.tvLabel2.text = "Blacks"
-                binding.slider2.valueFrom = ADJUSTMENT_MIN
-                binding.slider2.valueTo = ADJUSTMENT_MAX
-                binding.slider2.value = target.blacks.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue2.text = String.format("%.2f", target.blacks)
-            }
-            3 -> { // Color
-                binding.tvLabel1.text = "Saturation"
-                binding.slider1.valueFrom = ADJUSTMENT_MIN
-                binding.slider1.valueTo = ADJUSTMENT_MAX
-                binding.slider1.value = target.saturation.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue1.text = String.format("%.2f", target.saturation)
-
-                binding.layoutSlider2.visibility = View.GONE
-            }
+        if (!chromeDelegate.isUiVisible) chromeDelegate.showUi()
+        if (!isEditingAdjustments) {
+            val currentGroup = if (::adapter.isInitialized && binding.imagePager.currentItem in adapter.getGroups().indices) adapter.getGroup(binding.imagePager.currentItem) else null
+            editorPanelDelegate.enterEditMode(currentGroup)
         }
     }
 
-    private fun applyEditPreview() {
-        val config = currentEditConfig ?: return
-        lifecycleScope.launch {
-            ensureDngBytesLoaded()
-            applyEditPreviewInternal(config)
-        }
-    }
-
-    protected fun handleLongPressStarted(imageView: top.maary.darkbag.ui.ZoomableImageView) {
-        if (isAdjusted) {
-            view?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-            val currentIndex = binding.imagePager.currentItem
-            val currentGroup = adapter.getGroup(currentIndex)
-            val jpgUri = currentGroup.jpgUri ?: return
-
-            isLongPressing = true
-
-            // Save current zoom state
-            savedMatrix.set(imageView.imageMatrix)
-            savedScale = imageView.saveScale
-
-            imageView.resetZoom()
-            adapter.cancelLoadJob(currentIndex, clearView = false)
-            com.bumptech.glide.Glide.with(imageView)
-                .asBitmap()
-                .load(jpgUri)
-                .placeholder(imageView.drawable)
-                .dontAnimate()
-                .diskCacheStrategy(com.bumptech.glide.load.engine.DiskCacheStrategy.NONE)
-                .skipMemoryCache(true)
-                .into(imageView)
-            return
-        }
-
-        // Browse mode: Temporary motion photo video playback (only in JPG mode)
-        val currentIndex = binding.imagePager.currentItem
-        if (::adapter.isInitialized && currentIndex in adapter.getGroups().indices) {
-            val selectedFormat = adapter.getSelectedFormat(currentIndex)
-            if (selectedFormat != ImageViewerAdapter.FORMAT_DNG) {
-                val currentGroup = adapter.getGroup(currentIndex)
-                if (currentGroup.isMotionPhoto && currentGroup.jpgUri != null) {
-                    view?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                    adapter.playMotionVideoForPosition(currentIndex)
-                }
-            }
-        }
-    }
-
-    protected fun handleLongPressEnded(imageView: top.maary.darkbag.ui.ZoomableImageView) {
-        if (isAdjusted) {
-            isLongPressing = false
-            val currentIndex = binding.imagePager.currentItem
-
-            com.bumptech.glide.Glide.with(imageView).clear(imageView)
-            if (lastCompositeBitmap != null) {
-                imageView.setImageBitmap(lastCompositeBitmap)
-            } else {
-                val format = adapter.getSelectedFormat(currentIndex)
-                adapter.setFormat(currentIndex, format)
-            }
-
-            // Restore zoom state
-            imageView.restoreZoomState(savedMatrix, savedScale)
-            return
-        }
-
-        // Browse mode: Stop temporary motion photo playback
-        val currentIndex = binding.imagePager.currentItem
-        if (::adapter.isInitialized) {
-            adapter.stopMotionVideoForPosition(currentIndex)
-        }
-    }
-
-    protected fun handleMotionPhotoIndicatorTapped(position: Int) {
-        isMotionPhotoAutoPlay = !isMotionPhotoAutoPlay
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY, isMotionPhotoAutoPlay).apply()
-        updateFormatBentoRow()
-        view?.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-        adapter.setMotionPhotoAutoPlayEnabled(isMotionPhotoAutoPlay)
-
-        if (isMotionPhotoAutoPlay) {
-            val currentPos = binding.imagePager.currentItem
-            hasAutoPlayedPosition = currentPos
-            adapter.playMotionVideoForPosition(currentPos)
-        } else {
-            adapter.stopAllMotionVideos()
-        }
-    }
-
-    private fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) {
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val dngUri1 = if (currentGroup.isMultiCamera) {
-            val lenses = if (currentGroup.multiCameraLenses.isNotEmpty()) currentGroup.multiCameraLenses else adapter.getMultiCameraLenses(currentGroup)
-            val idx = adapter.getSelectedLensIndex(binding.imagePager.currentItem).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
-            lenses.getOrNull(idx)?.dngUri ?: currentGroup.multiDngUris.getOrNull(idx) ?: currentGroup.multiDngUris.firstOrNull()
-        } else {
-            currentGroup.dngUri ?: currentGroup.dngUri1
-        }
-        val dngUri2 = currentGroup.dngUri2
-
-        val currentIndex = binding.imagePager.currentItem
-        val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-            ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-
-        if (currentGroup.isRawVideo || currentGroup.rawVideoUri != null) {
-            adapter.updateRawVideoAdjustments(currentIndex, config)
-            binding.initialLoadingIndicator.visibility = View.GONE
-            currentHolder?.binding?.loadingIndicator?.visibility = View.GONE
-            return
-        }
-
-        if (isEditingAdjustments) {
-            binding.initialLoadingIndicator.visibility = View.VISIBLE
-        } else {
-            currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
-        }
-        currentHolder?.binding?.imageView?.invalidateOutline()
-
-        previewJob?.cancel()
-        previewJob = lifecycleScope.launch {
-            delay(150)
-            val isIndividual = isEditingAdjustments && currentGroup.isHalfFrame()
-
-            var compositeBitmap: android.graphics.Bitmap? = null
-            var selectedFrameBitmap: android.graphics.Bitmap? = null
-
-            withContext(Dispatchers.IO) {
-                try {
-                    val context = requireContext()
-                    val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
-                    val lutPath = if (config.lut != null && config.lut != "None") {
-                        java.io.File(lutManager.lutDir, config.lut).absolutePath
-                    } else null
-
-                    fun processSingle(bytes: ByteArray?, uri: Uri, index: Int): android.graphics.Bitmap? {
-                        val finalBytes = bytes ?: run {
-                             context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                                java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
-                            }
-                        } ?: return null
-
-                        var rawWidth = 0
-                        var rawHeight = 0
-                        val orientation = try {
-                            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                                rawWidth = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
-                                rawHeight = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
-                                exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                            } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                        } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-
-                        val rotDegrees = when(orientation) {
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                            else -> 0
-                        }
-
-                        val isRotated90or270 = (rotDegrees == 90 || rotDegrees == 270)
-                        val ds: Int
-                        val fullW: Int
-                        val fullH: Int
-
-                        if (rawWidth > 0 && rawHeight > 0) {
-                            ds = top.maary.darkbag.utils.ImageUtils.calculateInSampleSize(rawWidth, rawHeight, 1024, 1024)
-                            fullW = if (isRotated90or270) rawHeight / ds else rawWidth / ds
-                            fullH = if (isRotated90or270) rawWidth / ds else rawHeight / ds
-                        } else {
-                            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
-                            ds = top.maary.darkbag.utils.ImageUtils.calculateInSampleSize(options, 1024, 1024)
-                            if (isRotated90or270 && options.outWidth > options.outHeight) {
-                                fullW = options.outHeight / ds
-                                fullH = options.outWidth / ds
-                            } else {
-                                fullW = options.outWidth / ds
-                                fullH = options.outHeight / ds
-                            }
-                        }
-
-                        val bmpW = (fullW / config.zoomFactor).toInt().coerceAtLeast(1)
-                        val bmpH = (fullH / config.zoomFactor).toInt().coerceAtLeast(1)
-                        val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
-
-                        val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
-
-                        val meta = repository.getCaptureMetadata(uri) ?: top.maary.darkbag.models.CaptureMetadata()
-                        // Use a private JNI call or update current one to support metadata for TIFF?
-                        // For now we use the existing one but we should ideally pass metadata.
-                        top.maary.darkbag.processor.ColorProcessor.processRaw(
-                            dngData = finalBytes,
-                            targetLog = logIndex,
-                            lutPath = lutPath,
-                            exposure = adj.exposure,
-                            contrast = adj.contrast,
-                            saturation = adj.saturation,
-                            highlights = adj.highlights,
-                            shadows = adj.shadows,
-                            whites = adj.whites,
-                            blacks = adj.blacks,
-                            digitalGain = 1.0f, // Gain is already in adj.exposure
-                            outputJpgPath = null,
-                            useGpu = false,
-                            orientation = rotDegrees,
-                            mirror = false,
-                            outputBitmap = previewBitmap,
-                            downsampleFactor = ds,
-                            zoomFactor = config.zoomFactor
-                        )
-                        return previewBitmap
-                    }
-
-                    if (!currentGroup.isHalfFrame()) {
-                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
-                        val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
-                        compositeBitmap = processSingle(primaryBytes, primaryUri!!, 0)
-                    } else {
-                        val forceUpdate1 = lastPreviewConfig == null ||
-                                          lastPreviewConfig?.log != config.log ||
-                                          lastPreviewConfig?.lut != config.lut ||
-                                          lastPreviewConfig?.adjustments?.getOrNull(0) != config.adjustments?.getOrNull(0)
-
-                        val forceUpdate2 = lastPreviewConfig == null ||
-                                          lastPreviewConfig?.log != config.log ||
-                                          lastPreviewConfig?.lut != config.lut ||
-                                          lastPreviewConfig?.adjustments?.getOrNull(1) != config.adjustments?.getOrNull(1)
-
-                        if (forceUpdate1 || cachedBitmap1 == null) {
-                            cachedBitmap1 = dngUri1?.let { processSingle(sourceDngBytes, it, 0) }
-                        }
-                        if (forceUpdate2 || cachedBitmap2 == null) {
-                            cachedBitmap2 = dngUri2?.let { processSingle(sourceDngBytes2, it, 1) }
-                        }
-
-                        val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-                        val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-                        val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-
-                        compositeBitmap = HalfFrameComposer.compose(
-                            frame1 = cachedBitmap1,
-                            frame2 = cachedBitmap2,
-                            layout = activeLayout,
-                            isSwapped = config.isSwapped,
-                            showTimestamp = config.showTimestamp,
-                            flareType = config.flareType,
-                            time1 = time1,
-                            time2 = time2,
-                            downsample = false
-                        )
-                        if (compositeBitmap != null) {
-                            lastPreviewConfig = config.copy()
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("ImageViewerFragment", "Failed to generate edit preview", e)
-                }
-            }
-
-            if (compositeBitmap != null) {
-                if (lastCompositeBitmap != compositeBitmap) {
-                    val old = lastCompositeBitmap
-                    lastCompositeBitmap = compositeBitmap
-
-                    }
-                if (isLongPressing) return@launch
-
-                val currentIndex = binding.imagePager.currentItem
-                adapter.cancelLoadJob(currentIndex, clearView = true)
-                val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                    ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-                compositeBitmap?.let { adapter.setManualBitmap(currentIndex, it) }
-                holder?.binding?.loadingIndicator?.visibility = View.GONE
-            }
-
-            val finalHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-            finalHolder?.binding?.loadingIndicator?.visibility = View.GONE
-            binding.initialLoadingIndicator.visibility = View.GONE
-        }
-    }
-
-    private fun top.maary.darkbag.models.EditConfig.toBasic() = top.maary.darkbag.models.BasicAdjustments(
-        exposure, contrast, saturation, highlights, shadows, whites, blacks
-    )
+    private fun exitEditMode(apply: Boolean) = editorPanelDelegate.exitEditMode(apply)
 
     protected open fun saveEdit(isReplacement: Boolean) {
         if (isSaving) return
         val config = currentEditConfig ?: return
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val finalConfig = config.copy(hfLayout = config.hfLayout ?: currentGroup.hfLayout)
+        val (c1, c2) = editorViewModel.getCachedDngBytes()
         isSaving = true
 
-        if (currentGroup.isRawVideo || currentGroup.rawVideoUri != null) {
-            val rawVideoUri = currentGroup.rawVideoUri ?: run {
-                isSaving = false
-                return
-            }
-            val ctx = context ?: run {
-                isSaving = false
-                return
-            }
-            val appContext = ctx.applicationContext
-            previewJob?.cancel()
-            binding.initialLoadingIndicator.visibility = View.VISIBLE
-            binding.interactionBlocker?.visibility = View.VISIBLE
-
-            lifecycleScope.launch {
-                try {
-                    withContext(Dispatchers.IO) {
-                        // 1. In-place update .rawvid FileHeader with latest Log, LUT, and adjustments
-                        try {
-                            appContext.contentResolver.openFileDescriptor(rawVideoUri, "rw")?.use { rwFd ->
-                                top.maary.darkbag.rawvideo.RawVideoNative.nativeUpdateHeaderMetadata(
-                                    fd = rwFd.fd,
-                                    activeLog = finalConfig.log,
-                                    activeLut = finalConfig.lut,
-                                    exposure = finalConfig.exposure,
-                                    contrast = finalConfig.contrast,
-                                    saturation = finalConfig.saturation
-                                )
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("ImageViewerFragment", "Failed to in-place update rawvid header", e)
-                        }
-
-                        // 2. If companion JPG exists, re-render it with orientation and save
-                        if (currentGroup.jpgUri != null) {
-                            val pfd = appContext.contentResolver.openFileDescriptor(rawVideoUri, "r")
-                            pfd?.use { parcelFd ->
-                                val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReaderFd(parcelFd.fd)
-                                if (handle != 0L) {
-                                    try {
-                                        val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
-                                        if (header != null) {
-                                            val bayerBuf = java.nio.ByteBuffer.allocateDirect(header.width * header.height * 2)
-                                            val meta = LongArray(3)
-                                            val readBytes = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, bayerBuf)
-                                            if (readBytes > 0) {
-                                                val bmp = android.graphics.Bitmap.createBitmap(header.width, header.height, android.graphics.Bitmap.Config.ARGB_8888)
-                                                val targetLogIndex = if (finalConfig.log != null && finalConfig.log != "None") {
-                                                    SettingsFragment.LOG_CURVES.indexOf(finalConfig.log).takeIf { it >= 0 } ?: -1
-                                                } else -1
-                                                val lutPath = if (finalConfig.lut != null && finalConfig.lut != "None" && finalConfig.lut.isNotBlank()) {
-                                                    val f = java.io.File(lutManager.lutDir, finalConfig.lut)
-                                                    if (f.exists()) f.absolutePath else {
-                                                        val f2 = java.io.File(java.io.File(appContext.filesDir, "luts"), finalConfig.lut)
-                                                        if (f2.exists()) f2.absolutePath else null
-                                                    }
-                                                } else null
-
-                                                top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
-                                                    bayerBuffer = bayerBuf,
-                                                    width = header.width,
-                                                    height = header.height,
-                                                    orientation = header.orientation,
-                                                    cfaPattern = header.cfaPattern,
-                                                    whiteLevel = header.whiteLevel,
-                                                    blackLevel = header.blackLevel.firstOrNull() ?: 64f,
-                                                    neutralPoint = header.neutralPoint,
-                                                    targetLog = targetLogIndex,
-                                                    lutPath = lutPath,
-                                                    exposure = finalConfig.exposure,
-                                                    contrast = finalConfig.contrast,
-                                                    saturation = finalConfig.saturation,
-                                                    outBitmap = bmp
-                                                )
-
-                                                val orientation = try {
-                                                    appContext.contentResolver.openFileDescriptor(currentGroup.jpgUri, "r")?.use { jPfd ->
-                                                        androidx.exifinterface.media.ExifInterface(jPfd.fileDescriptor).getAttributeInt(
-                                                            androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
-                                                            androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                                                        )
-                                                    } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                                                } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-
-                                                val rotDegrees = when (orientation) {
-                                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                                                    else -> 0
-                                                }
-
-                                                val finalJpgBmp = if (rotDegrees != 0) {
-                                                    val m = android.graphics.Matrix().apply { postRotate(rotDegrees.toFloat()) }
-                                                    val r = android.graphics.Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
-                                                    if (r != bmp) bmp.recycle()
-                                                    r
-                                                } else bmp
-
-                                                val rootBaseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName)
-                                                val baseName = if (isReplacement) {
-                                                    rootBaseName
-                                                } else {
-                                                    val editTimestamp = java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", java.util.Locale.US).format(java.util.Date())
-                                                    "${rootBaseName}_edited_$editTimestamp"
-                                                }
-                                                val targetUri = if (isReplacement) currentGroup.jpgUri else null
-                                                val jpgFolderUri = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                                                    .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-
-                                                val captureMetadata = currentGroup.jpgUri?.let { repository.getCaptureMetadata(it) }
-
-                                                top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
-                                                    context = appContext,
-                                                    inputBitmap = finalJpgBmp,
-                                                    bmpPath = null,
-                                                    rotationDegrees = 0,
-                                                    zoomFactor = 1.0f,
-                                                    baseName = baseName,
-                                                    linearDngPath = null,
-                                                    saveJpg = true,
-                                                    saveRaw = false,
-                                                    targetUri = targetUri,
-                                                    jpgFolderUri = if (isReplacement) null else jpgFolderUri,
-                                                    editConfig = finalConfig,
-                                                    isAlreadyStitched = true,
-                                                    captureMetadata = captureMetadata
-                                                )
-                                                finalJpgBmp.recycle()
-                                            }
-                                        }
-                                    } finally {
-                                        top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    resetAdjustments()
-                    repository.invalidateCache()
-                    val updatedGroups = repository.getGroupedImages(forceRefresh = true)
-                    if (updatedGroups.isNotEmpty()) {
-                        val targetBaseName = currentGroup.baseName
-                        val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
-                        val rawTargetGroup = updatedGroups[newPos]
-                        val targetGroup = repository.loadMetadata(rawTargetGroup)
-                        val mutableList = updatedGroups.toMutableList()
-                        mutableList[newPos] = targetGroup
-                        adapter.updateGroups(mutableList)
-                        binding.imagePager.setCurrentItem(newPos, false)
-                        prepareEditConfig(targetGroup)
-                        updateControlsVisibility()
-                    }
-                    binding.root.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
-                    Toast.makeText(appContext, "Saved adjustments for RAW video", Toast.LENGTH_SHORT).show()
-                } catch (e: Exception) {
-                    android.util.Log.e("ImageViewerFragment", "Failed to save RAW video adjustments", e)
-                } finally {
-                    binding.initialLoadingIndicator.visibility = View.GONE
-                    binding.interactionBlocker?.visibility = View.GONE
-                    isSaving = false
-                }
-            }
-            return
-        }
-
-        val dngUri1 = if (currentGroup.isMultiCamera) {
-            val lenses = if (currentGroup.multiCameraLenses.isNotEmpty()) currentGroup.multiCameraLenses else adapter.getMultiCameraLenses(currentGroup)
-            val idx = adapter.getSelectedLensIndex(binding.imagePager.currentItem).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
-            lenses.getOrNull(idx)?.dngUri ?: currentGroup.multiDngUris.getOrNull(idx) ?: currentGroup.multiDngUris.firstOrNull()
-        } else {
-            currentGroup.dngUri ?: currentGroup.dngUri1
-        }
-        val dngUri2 = currentGroup.dngUri2
-
-        previewJob?.cancel()
-        binding.initialLoadingIndicator.visibility = View.VISIBLE
-        binding.interactionBlocker?.visibility = View.VISIBLE
-
-        val ctx = context ?: return
-        val appContext = ctx.applicationContext
-        lifecycleScope.launch {
-            try {
-                ensureDngBytesLoaded()
-                withContext(Dispatchers.IO) {
-                    try {
-                        val context = appContext
-                    val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
-                    val lutPath = if (config.lut != null && config.lut != "None") {
-                        java.io.File(lutManager.lutDir, config.lut).absolutePath
-                    } else null
-
-                    fun processFull(bytes: ByteArray?, uri: Uri, index: Int): android.graphics.Bitmap? {
-                        val finalBytes = bytes ?: run {
-                            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                                java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
-                            }
-                        } ?: return null
-
-                        var rawWidth = 0
-                        var rawHeight = 0
-                        val orientation = try {
-                            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                                rawWidth = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
-                                rawHeight = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
-                                exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                            } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                        } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-
-                        val rotDegrees = when(orientation) {
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                            else -> 0
-                        }
-
-                        val isRotated90or270 = (rotDegrees == 90 || rotDegrees == 270)
-                        val fullW: Int
-                        val fullH: Int
-
-                        if (rawWidth > 0 && rawHeight > 0) {
-                            fullW = if (isRotated90or270) rawHeight else rawWidth
-                            fullH = if (isRotated90or270) rawWidth else rawHeight
-                        } else {
-                            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
-                            if (isRotated90or270 && options.outWidth > options.outHeight) {
-                                fullW = options.outHeight
-                                fullH = options.outWidth
-                            } else {
-                                fullW = options.outWidth
-                                fullH = options.outHeight
-                            }
-                        }
-
-                        val bmpW = (fullW / config.zoomFactor).toInt().coerceAtLeast(1)
-                        val bmpH = (fullH / config.zoomFactor).toInt().coerceAtLeast(1)
-                        val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
-                        val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
-
-                        val meta = repository.getCaptureMetadata(uri)
-                        top.maary.darkbag.processor.ColorProcessor.processRaw(
-                            dngData = finalBytes,
-                            targetLog = logIndex,
-                            lutPath = lutPath,
-                            exposure = adj.exposure,
-                            contrast = adj.contrast,
-                            saturation = adj.saturation,
-                            highlights = adj.highlights,
-                            shadows = adj.shadows,
-                            whites = adj.whites,
-                            blacks = adj.blacks,
-                            digitalGain = 1.0f, // Gain is already in adj.exposure
-                            outputJpgPath = null,
-                            useGpu = false,
-                            orientation = rotDegrees,
-                            mirror = false,
-                            outputBitmap = previewBitmap,
-                            downsampleFactor = 1,
-                            zoomFactor = config.zoomFactor,
-                            metadata = meta
-                        )
-                        return previewBitmap
-                    }
-
-                    val finalBitmap: android.graphics.Bitmap? = if (currentGroup.isMultiCamera) {
-                        val lenses = if (currentGroup.multiCameraLenses.isNotEmpty()) currentGroup.multiCameraLenses else adapter.getMultiCameraLenses(currentGroup)
-                        for (i in lenses.indices) {
-                            val lens = lenses[i]
-                            val dngUri = lens.dngUri ?: continue
-                            val bmp = processFull(null, dngUri, i)
-                            if (bmp != null) {
-                                val jpgUri = lens.jpgUri
-                                val rootBaseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName)
-                                val fileName = if (jpgUri != null) {
-                                    top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(getFileName(context, jpgUri).substringBeforeLast("."))
-                                } else {
-                                    "${rootBaseName}_MULTI_${lens.lensTag}"
-                                }
-                                val baseName = if (isReplacement) {
-                                    fileName
-                                } else {
-                                    val editTimestamp = java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", java.util.Locale.US).format(java.util.Date())
-                                    "${fileName}_edited_$editTimestamp"
-                                }
-                                val targetUri = if (isReplacement) jpgUri else null
-                                val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                                    .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-                                val captureMetadata = repository.getCaptureMetadata(dngUri)
-
-                                top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
-                                    context = context,
-                                    inputBitmap = bmp,
-                                    bmpPath = null,
-                                    rotationDegrees = 0,
-                                    zoomFactor = 1.0f,
-                                    baseName = baseName,
-                                    linearDngPath = null,
-                                    saveJpg = true,
-                                    saveRaw = false,
-                                    jpgFolderUri = jpgFolderUri,
-                                    targetUri = targetUri,
-                                    editConfig = config,
-                                    captureMetadata = captureMetadata
-                                )
-                                bmp.recycle()
-                            }
-                        }
-                        null
-                    } else if (!currentGroup.isHalfFrame()) {
-                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
-                        val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
-                        processFull(primaryBytes, primaryUri, 0)
-                    } else {
-                        val f1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
-                        val f2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
-
-                        val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-                        val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-                        val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-
-                        val finalComposite = HalfFrameComposer.compose(
-                            frame1 = f1,
-                            frame2 = f2,
-                            layout = activeLayout,
-                            isSwapped = finalConfig.isSwapped,
-                            showTimestamp = finalConfig.showTimestamp,
-                            flareType = finalConfig.flareType,
-                            time1 = time1,
-                            time2 = time2,
-                            downsample = top.maary.darkbag.utils.HalfFrameManager(context).downsample
-                        )
-                        f1?.recycle()
-                        f2?.recycle()
-                        finalComposite
-                    }
-
-                    finalBitmap?.let { bitmap ->
-                        val rootBaseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName)
-                        val baseName = if (isReplacement) {
-                            rootBaseName
-                        } else {
-                            val editTimestamp = java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", java.util.Locale.US).format(java.util.Date())
-                            "${rootBaseName}_edited_$editTimestamp"
-                        }
-                        val targetUri = if (isReplacement) currentGroup.jpgUri else null
-                        val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-
-                        val captureMetadata = (currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1)?.let { repository.getCaptureMetadata(it) }
-
-                        top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
-                            context = context,
-                            inputBitmap = bitmap,
-                            bmpPath = null,
-                            rotationDegrees = 0,
-                            zoomFactor = 1.0f,
-                            baseName = baseName,
-                            linearDngPath = null,
-                            saveJpg = true,
-                            saveRaw = false,
-                            targetUri = targetUri,
-                            jpgFolderUri = if (isReplacement) null else jpgFolderUri,
-                            editConfig = finalConfig,
-                            isAlreadyStitched = true, // Force true to avoid HalfFrameManager intercepting user's explicit save actions
-                            captureMetadata = captureMetadata
-                        )
-                        bitmap.recycle()
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("ImageViewerFragment", "Failed to save edit", e)
-                }
-            }
-
+        exportCoordinator.saveEdit(
+            group = adapter.getGroup(binding.imagePager.currentItem), config = config,
+            isReplacement = isReplacement, cachedBytes1 = c1 ?: sourceDngBytes, cachedBytes2 = c2 ?: sourceDngBytes2,
+            repository = repository, mediaStrategy = mediaStrategy,
+            onStartSave = { setBusyLoading(true) },
+            onEndSave = { setBusyLoading(false); isSaving = false },
+            onSuccess = {
                 resetAdjustments()
-                repository.invalidateCache()
-                val updatedGroups = repository.getGroupedImages(forceRefresh = true)
-                if (updatedGroups.isNotEmpty()) {
-                    val targetBaseName = currentGroup.baseName
-                    val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
-                    val rawTargetGroup = updatedGroups[newPos]
-                    val targetGroup = repository.loadMetadata(rawTargetGroup)
-                    val mutableList = updatedGroups.toMutableList()
-                    mutableList[newPos] = targetGroup
-                    adapter = ImageViewerAdapter(mutableList, lifecycleScope, requireContext()).apply {
-                        isMotionPhotoAutoPlay = this@ImageViewerFragment.isMotionPhotoAutoPlay
-                        onImageTapped = { toggleUi() }
-                        onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
-                        onLongPressStarted = { handleLongPressStarted(it) }
-                        onLongPressEnded = { handleLongPressEnded(it) }
-                        onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
-                        onFormatChanged = { _, _ -> updateControlsVisibility() }
-                        onDerivativeVersionChanged = { _, _ -> updateControlsVisibility() }
-                        onMultiCameraLensChanged = { _, _ ->
-                            updateSplitButtons()
-                            updateToolbarIcon()
-                            updateControlsVisibility()
-                        }
-                        onCinemaDngFrameSelected = { group, index, uri ->
-                            val currentPosition = binding.imagePager.currentItem
-                            if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
-                                currentCinemaDngFrame = Pair(index, uri)
-                                binding.filmstripBentoSeekbar?.setProgress(index, group.cinemaDngFrameUris.size.takeIf { it > 0 } ?: 1)
-                            }
-                        }
-                        onVideoPlaybackStateChanged = { position, isPlaying, currentMs, totalMs ->
-                            if (_binding != null && ::adapter.isInitialized && position == binding.imagePager.currentItem) {
-                                updateVideoPlaybackButton(isPlaying, currentMs, totalMs)
-                            }
-                        }
-                        setFormatSwitcherPersistentHidden(isAdjusted)
-                        onCurrentListChanged = { previousList, currentList ->
-                            val currentIndex = binding.imagePager.currentItem
-                            if (currentIndex in currentList.indices) {
-                                val currentGroup = currentList[currentIndex]
-                                val prevGroup = previousList.getOrNull(currentIndex)
-
-                                if ((prevGroup == null || !prevGroup.metadataLoaded) && currentGroup.metadataLoaded) {
-                                    if (currentGroup.editConfig != null) {
-                                        prepareEditConfig(currentGroup)
-                                    }
-                                }
-
-                                updateControlsVisibility()
-                            }
-                        }
-                    }
-                    binding.imagePager.adapter = adapter
-                    binding.imagePager.setCurrentItem(newPos, false)
-                    prepareEditConfig(targetGroup)
-                    updateControlsVisibility()
-                    binding.root.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
+                binding.root.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
+                if (mediaStrategy.isSandbox) {
+                    mediaStrategy.loadInitialGroups(requireContext().applicationContext, arguments, repository)?.let { adapter.updateGroups(it) }
+                } else {
+                    val targetUriStr = if (isReplacement) adapter.getGroup(binding.imagePager.currentItem).jpgUri?.toString() else null
+                    repository.invalidateCache(clearStale = true)
+                    loadImages(targetUriStr, forceRefresh = true)
                 }
-            } finally {
-                binding.initialLoadingIndicator.visibility = View.GONE
-                binding.interactionBlocker?.visibility = View.GONE
-                isSaving = false
             }
-        }
+        )
     }
 
     protected open fun performShareAsTiff() {
-        if (isEditingAdjustments) {
-            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.share_as_tiff_dialog_title)
-                .setMessage(R.string.share_as_tiff_dialog_message)
-                .setPositiveButton(R.string.save_and_share) { _, _ ->
-                    saveEdit(isReplacement = true)
-                    processAndShareTiff()
-                }
-                .setNegativeButton(R.string.share_without_saving) { _, _ ->
-                    processAndShareTiff()
-                }
-                .setNeutralButton(R.string.cancel, null)
-                .show()
-        } else {
-            processAndShareTiff()
-        }
-    }
-
-    protected open fun processAndShareTiff() {
         val config = currentEditConfig ?: return
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
-        val dngUri2 = currentGroup.dngUri2
-
-        binding.initialLoadingIndicator.visibility = View.VISIBLE
-
-        val ctx = context ?: return
-        val appContext = ctx.applicationContext
-        lifecycleScope.launch {
-            ensureDngBytesLoaded()
-            val tiffUri = withContext(Dispatchers.IO) {
-                try {
-                    val context = appContext
-                    val exportDir = java.io.File(context.filesDir, "shared_exports")
-                    if (!exportDir.exists()) exportDir.mkdirs()
-
-                    // Single file policy: reuse same filename to avoid storage bloat
-                    val tempTiff = java.io.File(exportDir, "latest_share_export.tif")
-
-                    val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
-                    val lutPath = if (config.lut != null && config.lut != "None") {
-                        java.io.File(lutManager.lutDir, config.lut).absolutePath
-                    } else null
-
-                    fun processFullToTiff(bytes: ByteArray?, uri: Uri, index: Int, targetTiffPath: String?): android.graphics.Bitmap? {
-                        val finalBytes = bytes ?: run {
-                            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                                java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
-                            }
-                        } ?: return null
-                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
-                        val orientation = try {
-                            context.contentResolver.openInputStream(uri)?.use { input ->
-                                androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                            } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                        } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-
-                        val rotDegrees = when(orientation) {
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                            else -> 0
-                        }
-                        val fullW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight else options.outWidth
-                        val fullH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth else options.outHeight
-                        val bmpW = (fullW / config.zoomFactor).toInt()
-                        val bmpH = (fullH / config.zoomFactor).toInt()
-                        val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
-                        val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
-
-                        val meta = repository.getCaptureMetadata(uri)
-                        top.maary.darkbag.processor.ColorProcessor.processRaw(
-                            dngData = finalBytes,
-                            targetLog = logIndex,
-                            lutPath = lutPath,
-                            exposure = adj.exposure,
-                            contrast = adj.contrast,
-                            saturation = adj.saturation,
-                            highlights = adj.highlights,
-                            shadows = adj.shadows,
-                            whites = adj.whites,
-                            blacks = adj.blacks,
-                            digitalGain = 1.0f,
-                            outputJpgPath = null,
-                            outputTiffPath = targetTiffPath,
-                            useGpu = false,
-                            orientation = rotDegrees,
-                            mirror = false,
-                            outputBitmap = if (targetTiffPath != null) null else previewBitmap,
-                            downsampleFactor = 1,
-                            zoomFactor = config.zoomFactor,
-                            metadata = meta
-                        )
-                        return previewBitmap
-                    }
-
-                    if (!currentGroup.isHalfFrame()) {
-                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
-                        val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
-                        processFullToTiff(primaryBytes, primaryUri, 0, tempTiff.absolutePath)?.recycle()
-                    } else {
-                        val f1 = dngUri1?.let { processFullToTiff(sourceDngBytes, it, 0, null) }
-                        val f2 = dngUri2?.let { processFullToTiff(sourceDngBytes2, it, 1, null) }
-
-                        val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-                        val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-                        val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-
-                        val finalComposite = HalfFrameComposer.compose(
-                            frame1 = f1,
-                            frame2 = f2,
-                            layout = activeLayout,
-                            isSwapped = config.isSwapped,
-                            showTimestamp = config.showTimestamp,
-                            flareType = config.flareType,
-                            time1 = time1,
-                            time2 = time2,
-                            downsample = top.maary.darkbag.utils.HalfFrameManager(context).downsample
-                        )
-
-                        if (finalComposite != null) {
-                            val primaryUri = currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: Uri.EMPTY
-                            var meta = repository.getCaptureMetadata(primaryUri) ?: top.maary.darkbag.models.CaptureMetadata()
-                            if (meta.dateTimeOriginal == null) {
-                                val captureTime = System.currentTimeMillis()
-                                val offset = java.text.SimpleDateFormat("XXX", java.util.Locale.US).format(java.util.Date(captureTime))
-                                meta = meta.copy(
-                                    dateTimeOriginal = captureTime,
-                                    dateTimeDigitized = captureTime,
-                                    offsetTime = offset,
-                                    offsetTimeOriginal = offset,
-                                    offsetTimeDigitized = offset
-                                )
-                            }
-                            top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(finalComposite, tempTiff.absolutePath, meta)
-                            finalComposite.recycle()
-                        }
-                        f1?.recycle()
-                        f2?.recycle()
-                    }
-
-                    android.provider.DocumentsContract.buildDocumentUri(
-                        top.maary.darkbag.provider.DarkbagDocumentsProvider.AUTHORITY,
-                        "${top.maary.darkbag.provider.DarkbagDocumentsProvider.ROOT_ID_EXPORTS}:${tempTiff.name}"
-                    )
-                } catch (e: Exception) {
-                    android.util.Log.e("ImageViewerFragment", "Failed to process TIFF for sharing", e)
-                    null
-                }
-            }
-
-            binding.initialLoadingIndicator.visibility = View.GONE
-            tiffUri?.let { uri ->
-                // Notify the system that the "Exports" root has changed
-                val childrenUri = android.provider.DocumentsContract.buildChildDocumentsUri(
-                    top.maary.darkbag.provider.DarkbagDocumentsProvider.AUTHORITY,
-                    top.maary.darkbag.provider.DarkbagDocumentsProvider.ROOT_ID_EXPORTS
-                )
-                appContext.contentResolver.notifyChange(childrenUri, null)
-
-                shareTiff(uri)
-            }
-        }
-    }
-
-    private fun shareTiff(uri: Uri) {
-        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-            type = "image/tiff"
-            putExtra(android.content.Intent.EXTRA_STREAM, uri)
-            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        try {
-            startActivity(android.content.Intent.createChooser(intent, "Share TIFF"))
-        } catch (e: android.content.ActivityNotFoundException) {
-            context?.let { android.widget.Toast.makeText(it, "No app found to share TIFF.", android.widget.Toast.LENGTH_SHORT).show() }
-        }
-    }
-
-    private fun shareImages(uris: List<android.net.Uri>) {
-        if (uris.isEmpty()) return
-        val mimeType = if (uris.size == 1) {
-            val u = uris[0]
-            val type = context?.contentResolver?.getType(u)
-            type ?: when {
-                u.toString().endsWith(".dng", true) -> "image/x-adobe-dng"
-                u.toString().endsWith(".mp4", true) -> "video/mp4"
-                u.toString().endsWith(".wav", true) -> "audio/wav"
-                else -> "image/jpeg"
-            }
-        } else {
-            val types = uris.mapNotNull { context?.contentResolver?.getType(it) ?: (if (it.toString().endsWith(".dng", true)) "image/x-adobe-dng" else "image/jpeg") }
-            if (types.all { it.startsWith("image/") }) "image/*" else "*/*"
-        }
-        val intent = if (uris.size == 1) {
-            android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                type = mimeType
-                putExtra(android.content.Intent.EXTRA_STREAM, uris[0])
-            }
-        } else {
-            android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
-                type = mimeType
-                putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(uris))
-            }
-        }
-        intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        try {
-            startActivity(android.content.Intent.createChooser(intent, "Share"))
-        } catch (e: android.content.ActivityNotFoundException) {
-            android.widget.Toast.makeText(requireContext(), "No app found to share.", android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun showCinemaDngShareExportDialog(group: top.maary.darkbag.models.ImageGroup) {
-        openExportHub()
-    }
-
-    private fun exportCinemaDngFrame(
-        group: top.maary.darkbag.models.ImageGroup,
-        exportType: top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType,
-        editConfig: top.maary.darkbag.models.EditConfig? = null,
-        targetFrameIndex: Int? = null
-    ) {
-        val currentIndex = binding.imagePager.currentItem
-        val frameInfo = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(currentIndex)
-        val frameIndex = targetFrameIndex ?: frameInfo?.first ?: 0
-        val frameUri = if (targetFrameIndex != null && group.cinemaDngFrameUris.indices.contains(targetFrameIndex)) {
-            group.cinemaDngFrameUris[targetFrameIndex]
-        } else {
-            frameInfo?.second
-                ?: group.cinemaDngFrameUris.getOrNull(frameIndex)
-                ?: group.cinemaDngFirstFrameUri
-                ?: group.dngUri
-        }
-
-        if (frameUri == null) {
-            Toast.makeText(requireContext(), R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        binding.initialLoadingIndicator.visibility = View.VISIBLE
-        binding.interactionBlocker?.visibility = View.VISIBLE
-        Toast.makeText(requireContext(), R.string.cinemadng_exporting_frame, Toast.LENGTH_SHORT).show()
-
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val fullyLoadedGroup = if (!group.metadataLoaded) {
-                    repository.loadMetadata(group)
-                } else {
-                    group
-                }
-                val config = editConfig ?: currentEditConfig ?: fullyLoadedGroup.editConfig
-                top.maary.darkbag.rawvideo.RawVideoExporter.exportSingleFrameFromCinemaDng(
-                    context = requireContext().applicationContext,
-                    frameDngUri = frameUri,
-                    baseName = group.baseName,
-                    frameIndex = frameIndex,
-                    editConfig = config,
-                    exportType = exportType
-                )
-            }
-
-            binding.initialLoadingIndicator.visibility = View.GONE
-            binding.interactionBlocker?.visibility = View.GONE
-
-            val (rawUri, jpgUri) = result
-            if (rawUri != null || jpgUri != null) {
-                Toast.makeText(requireContext(), R.string.cinemadng_export_success, Toast.LENGTH_SHORT).show()
-                refreshCurrentGroupAndAdapter(group.baseName)
-            } else {
-                Toast.makeText(requireContext(), R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun handleCinemaDngFullVideoExport(group: top.maary.darkbag.models.ImageGroup) {
-        if (group.isRawVideo || group.rawVideoUri != null) {
-            openExportHub()
-        } else if (group.mp4VideoUri != null) {
-            shareImages(listOf(group.mp4VideoUri))
-        } else if (group.cinemaDngAudioUri != null) {
-            shareImages(listOf(group.cinemaDngAudioUri))
-        } else {
-            performExportCinemaDng(group)
-        }
-    }
-
-    private fun showHalfFrameShareSheet(group: ImageGroup) {
-        HalfFrameShareSheet.newInstance(group.dngUri1, group.dngUri2)
-            .show(childFragmentManager, HalfFrameShareSheet.TAG)
-    }
-
-    private fun showImageDetails() {
-        val viewerBinding = _binding ?: return
-        val currentIndex = binding.imagePager.currentItem
-        val currentGroup = adapter.getGroup(currentIndex)
-        val selectedFormat = adapter.getSelectedFormat(currentIndex)
-
-        val uri = adapter.getCurrentUri(currentIndex) ?: return
-
-        val dialog = BottomSheetDialog(requireContext())
-        val detailsBinding = BottomSheetImageDetailsBinding.inflate(layoutInflater)
-        dialog.setContentView(detailsBinding.root)
-
-        // Ensure edge-to-edge support for the BottomSheet
-        dialog.window?.let { window ->
-            window.navigationBarColor = android.graphics.Color.TRANSPARENT
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                window.setDecorFitsSystemWindows(false)
-            }
-        }
-
-        ViewCompat.setOnApplyWindowInsetsListener(detailsBinding.root) { v, insets ->
-            val navigationBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, navigationBars.bottom + resources.getDimensionPixelSize(R.dimen.margin_medium))
-            insets
-        }
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            val context = requireContext()
-            val details = mutableListOf<Pair<String, String>>()
-            val techDetails = mutableListOf<Pair<String, String>>()
-            val configDetails = mutableListOf<Pair<String, String>>()
-
-            try {
-                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                    val exif = ExifInterface(pfd.fileDescriptor)
-
-                    // Basic Info
-                    val fileName = getFileName(context, uri)
-                    details.add("File Name" to fileName)
-
-                    val fileSize = getFileSize(context, uri)
-                    details.add("File Size" to fileSize)
-
-                    val width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
-                    val height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
-                    if (width > 0 && height > 0) {
-                        details.add("Resolution" to "${width}x${height} (${String.format("%.1f MP", width * height / 1000000f)})")
-                    }
-
-                    val dateStr = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
-                    dateStr?.let { details.add("Date & Time" to it) }
-
-                    details.add("Path" to (uri.path ?: "Unknown"))
-
-                    // Technical Info
-                    val make = exif.getAttribute(ExifInterface.TAG_MAKE)
-                    val model = exif.getAttribute(ExifInterface.TAG_MODEL)
-                    if (make != null || model != null) {
-                        techDetails.add("Device" to "${make ?: ""} ${model ?: ""}".trim())
-                    }
-
-                    val iso = exif.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS)
-                    iso?.let { techDetails.add("ISO" to it) }
-
-                    val exposureTime = exif.getAttributeDouble(ExifInterface.TAG_EXPOSURE_TIME, 0.0)
-                    if (exposureTime > 0) {
-                        val expStr = if (exposureTime < 1.0) {
-                            "1/${round(1.0 / exposureTime).toInt()}s"
-                        } else {
-                            "${String.format("%.1f", exposureTime)}s"
-                        }
-                        techDetails.add("Shutter Speed" to expStr)
-                    }
-
-                    val fNumber = exif.getAttributeDouble(ExifInterface.TAG_F_NUMBER, 0.0)
-                    if (fNumber > 0) techDetails.add("Aperture" to "f/${fNumber}")
-
-                    val focalLength = exif.getAttributeDouble(ExifInterface.TAG_FOCAL_LENGTH, 0.0)
-                    if (focalLength > 0) techDetails.add("Focal Length" to "${focalLength}mm")
-
-                    // Config Info (UserComment)
-                    val comment = exif.getAttribute(ExifInterface.TAG_USER_COMMENT)
-                    if (comment?.startsWith("{") == true) {
-                        try {
-                            val json = org.json.JSONObject(comment)
-                            val keys = json.keys()
-                            while (keys.hasNext()) {
-                                val key = keys.next()
-                                if (key == "adjustments") continue
-                                val value = json.get(key)
-                                val label = key.replace("_", " ").replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
-                                configDetails.add(label to value.toString())
-                            }
-                        } catch (e: Exception) {
-                            configDetails.add("Custom Info" to comment)
-                        }
-                    } else if (comment != null) {
-                        configDetails.add("Custom Info" to comment)
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("ImageViewerFragment", "Error reading details", e)
-            }
-
-            withContext(Dispatchers.Main) {
-                details.forEach { addDetailRow(detailsBinding.layoutBasicInfo, it.first, it.second) }
-                techDetails.forEach { addDetailRow(detailsBinding.layoutTechInfo, it.first, it.second) }
-                if (configDetails.isEmpty()) {
-                    detailsBinding.cardConfigInfo.visibility = android.view.View.GONE
-                    detailsBinding.tvConfigHeader.visibility = android.view.View.GONE
-                } else {
-                    configDetails.forEach { addDetailRow(detailsBinding.layoutConfigInfo, it.first, it.second) }
-                }
-            }
-        }
-        dialog.show()
-    }
-
-    private fun addDetailRow(container: ViewGroup, label: String, value: String) {
-        val rowBinding = ItemDetailRowBinding.inflate(layoutInflater, container, true)
-        rowBinding.tvLabel.text = label
-        rowBinding.tvValue.text = value
-    }
-
-    private fun queryContentResolver(context: Context, uri: Uri, columnName: String): String? {
-        return try {
-            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val index = cursor.getColumnIndex(columnName)
-                    if (index != -1) cursor.getString(index) else null
-                } else null
-            }
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    private fun getFileName(context: Context, uri: Uri): String {
-        return queryContentResolver(context, uri, android.provider.OpenableColumns.DISPLAY_NAME)
-            ?: uri.lastPathSegment ?: "Unknown"
-    }
-
-    private fun getFileSize(context: Context, uri: Uri): String {
-        val sizeStr = queryContentResolver(context, uri, android.provider.OpenableColumns.SIZE)
-        return sizeStr?.toLongOrNull()?.let { formatFileSize(it) } ?: "Unknown"
-    }
-
-    private fun formatFileSize(size: Long): String {
-        if (size <= 0) return "0 B"
-        val units = arrayOf("B", "KB", "MB", "GB", "TB")
-        val digitGroups = (log10(size.toDouble()) / log10(1024.0)).toInt()
-        return String.format("%.1f %s", size / 1024.0.pow(digitGroups.toDouble()), units[digitGroups])
+        exportCoordinator.performShareAsTiff(
+            group = adapter.getGroup(binding.imagePager.currentItem), config = config,
+            isEditingAdjustments = isEditingAdjustments, cachedBytes1 = sourceDngBytes, cachedBytes2 = sourceDngBytes2,
+            repository = repository, onStartRender = { setBusyLoading(true, blockInteraction = false) },
+            onEndRender = { setBusyLoading(false, blockInteraction = false) }, onSaveReplacement = { saveEdit(isReplacement = true) }
+        )
     }
 
     private fun showDeleteDialog(group: ImageGroup) {
-        val hasCdng = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
-        val hasRawVid = group.isRawVideo || group.rawVideoUri != null
-        val hasDerivatives = group.allDerivativeUris.isNotEmpty()
-        val hasPhotoDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null || group.multiDngUris.isNotEmpty()
-        val hasRaw = hasPhotoDng || hasRawVid
-
-        val componentCount = (if (hasRaw) 1 else 0) + (if (hasDerivatives) 1 else 0) + (if (hasCdng) 1 else 0)
-        val hasMultipleComponents = componentCount > 1
-
-        if (hasMultipleComponents) {
-            pendingSingleDeleteGroup = group
-            DarkbagBatchDeleteSheet.newInstance(
-                selectedCount = 1,
-                hasRaw = hasRaw,
-                hasDerivatives = hasDerivatives,
-                hasCinemaDng = hasCdng
-            ).show(childFragmentManager, DarkbagBatchDeleteSheet.TAG)
-        } else {
-            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.delete_image_title)
-                .setMessage(R.string.delete_image_message)
-                .setPositiveButton(R.string.delete_button_alt) { _, _ ->
-                    deleteImage(group, group.allUris, true)
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
-        }
+        val derivatives = adapter.getDerivativeUris(group)
+        val activeIdx = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
+        deletionController.showDeleteDialog(group, derivatives, activeIdx, childFragmentManager)
     }
 
-    private fun executeSingleGroupDelete(group: ImageGroup, deleteMode: Int) {
-        val urisToDelete = mutableListOf<Uri>()
-        var isEntireGroup = false
-        when (deleteMode) {
-            DarkbagBatchDeleteSheet.MODE_ENTIRE_GROUP -> {
-                group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
-                urisToDelete.addAll(group.allUris)
-                isEntireGroup = true
-            }
-            DarkbagBatchDeleteSheet.MODE_RAW_ONLY -> {
-                if (group.isCinemaDng || group.cinemaDngFolderUri != null) {
-                    group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
-                }
-                urisToDelete.addAll(group.allMasterRawUris)
-                val remainingUris = group.allUris.filter { !urisToDelete.contains(it) }
-                isEntireGroup = remainingUris.isEmpty()
-            }
-            DarkbagBatchDeleteSheet.MODE_DERIVATIVES_ONLY -> {
-                urisToDelete.addAll(group.allDerivativeUris)
-                val remainingUris = group.allUris.filter { !urisToDelete.contains(it) }
-                isEntireGroup = remainingUris.isEmpty()
-            }
-            DarkbagBatchDeleteSheet.MODE_CINEMADNG_ONLY -> {
-                group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
-                urisToDelete.addAll(group.allCinemaDngUris)
-                val remainingUris = group.allUris.filter { !urisToDelete.contains(it) }
-                isEntireGroup = remainingUris.isEmpty()
-            }
-        }
-        deleteImage(group, urisToDelete, isEntireGroup)
-    }
-
-    protected open fun deleteImage(group: ImageGroup, deleteGroup: Boolean) {
-        deleteImage(group, if (deleteGroup) group.allUris else null, deleteGroup)
-    }
-
-    protected open fun deleteImage(group: ImageGroup, targetUris: List<Uri>?, deleteGroup: Boolean) {
-        val context = context ?: return
-        lifecycleScope.launch {
-            var nextTargetUri: String? = null
-            val currentIndex = binding.imagePager.currentItem
-            val urisToDelete = mutableListOf<Uri>()
-
-            if (targetUris != null) {
-                urisToDelete.addAll(targetUris)
-            } else if (deleteGroup) {
-                urisToDelete.addAll(group.allUris)
-            } else {
-                val selectedFormat = adapter.getSelectedFormat(currentIndex)
-                val isCdng = selectedFormat == "CDNG" || ((selectedFormat == ImageViewerAdapter.FORMAT_DNG || selectedFormat == "RAW") && (group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()))
-                val isRawVid = selectedFormat == "RAWVID" || ((selectedFormat == ImageViewerAdapter.FORMAT_DNG || selectedFormat == "RAW") && (group.isRawVideo || group.rawVideoUri != null))
-                val isPhotoDng = selectedFormat == ImageViewerAdapter.FORMAT_DNG || selectedFormat == "DNG" || selectedFormat == "RAW"
-
-                when {
-                    isCdng -> {
-                        urisToDelete.addAll(group.allCinemaDngUris)
-                    }
-                    isRawVid -> {
-                        urisToDelete.addAll(group.rawVideoMasterUris)
-                    }
-                    isPhotoDng -> {
-                        urisToDelete.addAll(group.photoMasterUris)
-                    }
-                    else -> {
-                        val derivatives = adapter.getDerivativeUris(group)
-                        val activeIndex = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
-                        val activeUri = derivatives.getOrNull(activeIndex) ?: group.jpgUri ?: group.mp4VideoUri
-                        activeUri?.let { urisToDelete.add(it) }
-                    }
-                }
-            }
-
-            // Ensure CinemaDNG folder is included if sequence frames are deleted
-            if (urisToDelete.any { group.allCinemaDngUris.contains(it) } && group.cinemaDngFolderUri != null) {
-                if (!urisToDelete.contains(group.cinemaDngFolderUri)) {
-                    group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
-                }
-            }
-
-            if (deleteGroup) {
-                if (adapter.itemCount > 1) {
-                    val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
-                    val nextGroup = adapter.getGroup(nextIndex)
-                    nextTargetUri = nextGroup.firstAvailableUri?.toString()
-                }
-            }
-
-            val securityExceptionUris = mutableListOf<Uri>()
-            for (uri in urisToDelete.distinct()) {
-                try {
-                    deleteUriSafe(context, uri)
-                } catch (e: SecurityException) {
-                    if (uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
-                        securityExceptionUris.add(uri)
-                    }
-                } catch (e: Exception) {
-                    Log.e("ImageViewerFragment", "Failed to delete $uri", e)
-                }
-            }
-
-            // Calculate nextTargetUri for single file deletion after successful deletion attempts
-            if (!deleteGroup) {
-                repository.invalidateCache()
-                val remainingGroup = repository.getGroupedImages(forceRefresh = true).find { it.baseName == group.baseName }
-                nextTargetUri = if (remainingGroup != null && remainingGroup.hasAny()) {
-                    remainingGroup.firstAvailableUri?.toString()
-                } else {
-                    if (adapter.itemCount > 1) {
-                        val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
-                        val nextGroup = adapter.getGroup(nextIndex)
-                        nextGroup.firstAvailableUri?.toString()
-                    } else null
-                }
-            }
-
-            if (securityExceptionUris.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                pendingDeleteNextTargetUri = nextTargetUri
-                try {
-                    val deleteRequest = MediaStore.createDeleteRequest(context.contentResolver, securityExceptionUris)
-                    deleteLauncher.launch(IntentSenderRequest.Builder(deleteRequest.intentSender).build())
-                } catch (e: Exception) {
-                    context.let { Toast.makeText(it, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show() }
-                    repository.invalidateCache()
-                    loadImages(nextTargetUri, forceRefresh = true)
-                }
-            } else {
-                repository.invalidateCache()
-                loadImages(nextTargetUri, forceRefresh = true)
-            }
-        }
-    }
-
-
-
-    private fun setupToolbar() {
-        updateSplitButtons()
-        updateToolbarIcon()
-        binding.btnBack.setOnClickListener {
-            if (isGalleryMode) {
-                if (::galleryAdapter.isInitialized && galleryAdapter.isSelectionMode) {
-                    galleryAdapter.setSelectionMode(false)
-                    updateGallerySelectionUI(0)
-                } else {
-                    exitGalleryMode()
-                }
-            } else if (binding.lutListContainer?.visibility == View.VISIBLE) {
-                binding.lutListContainer?.visibility = View.GONE
-                binding.touchOverlay.visibility = View.GONE
-                updateBackPressedCallbackState()
-            } else if (isEditingAdjustments) {
-                exitEditMode(apply = false)
-            } else if (isAdjusted) {
-                showDiscardChangesDialog()
-            } else {
-                findNavController().navigateUp()
-            }
-        }
-    }
-
-    protected fun setupGalleryView() {
+    private fun openDarkroomGallery() {
         if (!isGallerySupported) return
-        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        val initialCols = if (isLandscape) 4 else 3
-
-        galleryAdapter = DarkbagGalleryGridAdapter(requireContext(), repository).apply {
-            columnCount = initialCols
-            onItemClick = { group, pos, lensTag ->
-                startedInGalleryMode = false
-                exitGalleryMode(pos, lensTag)
-            }
-            onItemLongClick = { _, _, _ ->
-                updateGallerySelectionUI(getSelectedCount())
-            }
-            onSelectionChanged = { count ->
-                updateGallerySelectionUI(count)
-            }
-        }
-
-        val layoutManager = GridLayoutManager(requireContext(), initialCols)
-        layoutManager.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
-            override fun getSpanSize(position: Int): Int {
-                if (position in 0 until galleryAdapter.itemCount) {
-                    val item = galleryAdapter.getItem(position)
-                    if (item.isMultiCamera && item.multiCameraLenses.isNotEmpty()) {
-                        return layoutManager.spanCount
-                    }
-                }
-                return 1
-            }
-        }
-
-        binding.galleryRecyclerView.layoutManager = layoutManager
-        binding.galleryRecyclerView.adapter = galleryAdapter
-        (binding.galleryRecyclerView.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)?.apply {
-            removeDuration = 250
-            moveDuration = 250
-        }
-
-        binding.btnGalleryPill.setOnClickListener {
-            enterGalleryMode()
-        }
-
-        // Header Action: Back (Normal) / Close Selection (Selection)
-        binding.btnGalleryHeaderAction.setOnClickListener {
-            if (galleryAdapter.isSelectionMode) {
-                galleryAdapter.setSelectionMode(false)
-                updateGallerySelectionUI(0)
-            } else if (startedInGalleryMode) {
-                findNavController().navigateUp()
-            } else {
-                exitGalleryMode()
-            }
-        }
-
-        // Header Info
-        binding.btnGalleryHeaderInfo.setOnClickListener {
-            showAlbumInfoSheet()
-        }
-
-        // Header Select All / Deselect All Toggle (Selection Mode)
-        binding.btnGalleryHeaderSelectAll.setOnClickListener {
-            val totalSelectable = galleryAdapter.currentList.sumOf { if (it.isMultiCamera && it.multiCameraLenses.isNotEmpty()) it.multiCameraLenses.size else 1 }
-            if (galleryAdapter.getSelectedCount() >= totalSelectable && totalSelectable > 0) {
-                galleryAdapter.deselectAll()
-            } else {
-                galleryAdapter.selectAll()
-            }
-        }
-
-        // Normal Dock Actions
-        binding.btnGalleryDockSelectAll.setOnClickListener {
-            galleryAdapter.setSelectionMode(true)
-            galleryAdapter.selectAll()
-        }
-
-        binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_cols, initialCols)
-        binding.btnGalleryDockLayout.setOnClickListener {
-            cycleGalleryLayout()
-        }
-
-        binding.btnGalleryDockImport.setOnClickListener {
-            importGalleryMediaLauncher.launch("*/*")
-        }
-
-        // Selection Dock Actions
-        binding.btnGalleryDockMerge.setOnClickListener {
-            val selected = galleryAdapter.getSelectedItems()
-            if (selected.size == 2) {
-                performMergeCollage(selected)
-            } else {
-                Toast.makeText(requireContext(), R.string.gallery_merge_need_two, Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        binding.btnGalleryDockBatchGrade.setOnClickListener {
-            val selected = galleryAdapter.getSelectedItems()
-            if (selected.isEmpty()) return@setOnClickListener
-            if (checkHomogeneity(selected)) {
-                performBatchGrade(selected)
-            } else {
-                Toast.makeText(requireContext(), R.string.gallery_batch_grade_mismatch, Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        binding.btnGalleryDockShare.setOnClickListener {
-            val selected = galleryAdapter.getSelectedItems()
-            val uris = selected.mapNotNull { item ->
-                if (item.specificLens != null) {
-                    item.specificLens.jpgUri ?: item.specificLens.dngUri
-                } else {
-                    val g = item.group
-                    g.firstAvailableUri ?: g.jpgUri ?: g.mp4VideoUri ?: g.cinemaDngFirstFrameUri ?: g.dngUri
-                }
-            }
-            if (uris.isNotEmpty()) {
-                shareImages(uris)
-            }
-        }
-
-        binding.btnGalleryDockDelete.setOnClickListener {
-            val selected = galleryAdapter.getSelectedItems()
-            if (selected.isNotEmpty()) {
-                showBatchDeleteDialog(selected)
-            }
-        }
-    }
-
-    private fun cycleGalleryLayout() {
-        if (!::galleryAdapter.isInitialized) return
-        val nextCols = when (galleryAdapter.columnCount) {
-            1 -> 2
-            2 -> 3
-            3 -> 4
-            else -> 1
-        }
-        (binding.galleryRecyclerView.layoutManager as? GridLayoutManager)?.spanCount = nextCols
-        galleryAdapter.columnCount = nextCols
-        binding.btnGalleryDockLayout.text = if (nextCols == 1) {
-            getString(R.string.gallery_layout_1_col)
-        } else {
-            getString(R.string.gallery_layout_cols, nextCols)
-        }
-    }
-
-    protected fun updateGalleryPill(position: Int, totalCount: Int) {
-        if (!isGallerySupported || totalCount <= 0) {
-            binding.btnGalleryPill.visibility = View.GONE
-        } else {
-            val currentPos = (position + 1).coerceIn(1, totalCount)
-            val posStr = if (totalCount >= 10) String.format("%02d", currentPos) else "$currentPos"
-            val countStr = if (totalCount >= 10) String.format("%02d", totalCount) else "$totalCount"
-            binding.btnGalleryPill.text = "▦ $posStr / $countStr"
-            binding.btnGalleryPill.visibility = if (isUiVisible && !isEditingAdjustments && !isGalleryMode) View.VISIBLE else View.GONE
-        }
-    }
-
-    fun enterGalleryMode(targetPosition: Int = binding.imagePager.currentItem, animated: Boolean = true) {
-        if (!isGallerySupported) return
-        if (isEditingAdjustments || isAdjusted) return
-        if (isGalleryMode) return
-        isGalleryMode = true
-        isUiVisible = false
-
-        if (::adapter.isInitialized) {
-            adapter.stopAllMotionVideos()
-        }
-
-        binding.galleryContainer.visibility = View.VISIBLE
-        if (animated) {
-            binding.galleryContainer.alpha = 0f
-            binding.galleryContainer.animate().alpha(1f).setDuration(200).start()
-        } else {
-            binding.galleryContainer.alpha = 1f
-        }
-
-        binding.topBarContainer.visibility = View.GONE
-        binding.viewerBentoDeck.visibility = View.GONE
-        binding.imagePager.visibility = View.INVISIBLE
-
-        val currentCount = if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0
-        binding.tvGalleryHeaderTitle.text = "${getString(R.string.gallery_album_darkroom)} ($currentCount)"
-        updateGallerySelectionUI(0)
-
-        if (targetPosition in 0 until (if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0)) {
-            binding.galleryRecyclerView.scrollToPosition(targetPosition)
-        }
-
-        updateBackPressedCallbackState()
-    }
-
-    fun exitGalleryMode(targetPosition: Int = -1, targetLensTag: String? = null) {
-        if (!isGalleryMode) return
-        isGalleryMode = false
-        startedInGalleryMode = false
-        hideGalleryDeletingIndicator()
-        binding.galleryRecyclerView.isEnabled = true
-
-        if (::galleryAdapter.isInitialized) {
-            galleryAdapter.setSelectionMode(false)
-        }
-
-        binding.galleryContainer.animate().alpha(0f).setDuration(150).withEndAction {
-            binding.galleryContainer.visibility = View.GONE
-        }.start()
-
-        binding.imagePager.visibility = View.VISIBLE
-        isUiVisible = false
-        showUi()
-
-        if (targetPosition in 0 until (if (::adapter.isInitialized) adapter.itemCount else 0)) {
-            binding.imagePager.setCurrentItem(targetPosition, false)
-            if (targetLensTag != null) {
-                val group = adapter.getGroup(targetPosition)
-                val lenses = adapter.getMultiCameraLenses(group)
-                val lensIndex = lenses.indexOfFirst { it.lensTag == targetLensTag }
-                if (lensIndex != -1) {
-                    adapter.setSelectedLensIndex(targetPosition, lensIndex)
-                }
-            }
-        }
-
-        updateBackPressedCallbackState()
-    }
-
-    private fun updateGallerySelectionUI(selectedCount: Int) {
-        if (!::galleryAdapter.isInitialized) return
-        if (galleryAdapter.isSelectionMode) {
-            binding.galleryHeaderCard.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.PRIMARY_CONTAINER, animated = true)
-            binding.btnGalleryHeaderAction.setIconResource(R.drawable.ic_close)
-            binding.tvGalleryHeaderTitle.text = getString(R.string.gallery_selected_count, selectedCount)
-            binding.btnGalleryHeaderInfo.visibility = View.GONE
-            binding.btnGalleryHeaderSelectAll.visibility = View.VISIBLE
-
-            val totalSelectable = galleryAdapter.currentList.sumOf { if (it.isMultiCamera && it.multiCameraLenses.isNotEmpty()) it.multiCameraLenses.size else 1 }
-            val allSelected = selectedCount > 0 && selectedCount >= totalSelectable
-            binding.btnGalleryHeaderSelectAll.setText(if (allSelected) R.string.gallery_deselect_all else R.string.gallery_select_all)
-
-            binding.galleryBottomBar.visibility = View.VISIBLE
-            binding.galleryBottomBar.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.PRIMARY_CONTAINER, animated = true)
-            binding.layoutGalleryNormalActions.visibility = View.GONE
-            binding.layoutGallerySelectionActions.visibility = View.VISIBLE
-
-            val canMerge = selectedCount == 2
-            binding.btnGalleryDockMerge.isEnabled = canMerge
-            binding.btnGalleryDockMerge.alpha = if (canMerge) 1.0f else 0.4f
-
-            val selected = galleryAdapter.getSelectedItems()
-            val canGrade = selected.isNotEmpty() && checkHomogeneity(selected)
-            binding.btnGalleryDockBatchGrade.isEnabled = canGrade
-            binding.btnGalleryDockBatchGrade.alpha = if (canGrade) 1.0f else 0.4f
-
-            val hasSelection = selectedCount > 0
-            binding.btnGalleryDockShare.isEnabled = hasSelection
-            binding.btnGalleryDockShare.alpha = if (hasSelection) 1.0f else 0.4f
-
-            binding.btnGalleryDockDelete.isEnabled = hasSelection
-            binding.btnGalleryDockDelete.alpha = if (hasSelection) 1.0f else 0.4f
-        } else {
-            binding.galleryHeaderCard.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.SURFACE_CONTAINER, animated = true)
-            binding.btnGalleryHeaderAction.setIconResource(R.drawable.ic_back)
-            val count = galleryAdapter.itemCount
-            binding.tvGalleryHeaderTitle.text = "${getString(R.string.gallery_album_darkroom)} ($count)"
-            binding.btnGalleryHeaderInfo.visibility = View.VISIBLE
-            binding.btnGalleryHeaderSelectAll.visibility = View.GONE
-
-            binding.galleryBottomBar.visibility = View.VISIBLE
-            binding.galleryBottomBar.setContainerRole(top.maary.darkbag.ui.bento.BentoContainerRole.SURFACE_CONTAINER, animated = true)
-            binding.layoutGalleryNormalActions.visibility = View.VISIBLE
-            binding.layoutGallerySelectionActions.visibility = View.GONE
-        }
-    }
-
-    private fun showAlbumInfoSheet() {
-        val items = if (::galleryAdapter.isInitialized) galleryAdapter.currentList else emptyList()
-        val totalCount = items.size
-        val lastCaptureTime = items.maxOfOrNull { it.captureTime.takeIf { t -> t > 0 } ?: it.lastModified } ?: 0L
-
-        lifecycleScope.launch {
-            val totalSize = withContext(Dispatchers.IO) {
-                var sum = 0L
-                val ctx = context ?: return@withContext 0L
-                for (group in items) {
-                    val uris = mutableListOf<Uri>()
-                    group.jpgUri?.let { uris.add(it) }
-                    group.dngUri?.let { uris.add(it) }
-                    group.dngUri1?.let { uris.add(it) }
-                    group.dngUri2?.let { uris.add(it) }
-                    group.rawVideoUri?.let { uris.add(it) }
-                    group.mp4VideoUri?.let { uris.add(it) }
-                    group.derivativeJpgUris.forEach { uris.add(it) }
-                    group.derivativeMp4Uris.forEach { uris.add(it) }
-                    group.multiJpgUris.forEach { uris.add(it) }
-                    group.multiDngUris.forEach { uris.add(it) }
-                    group.cinemaDngFrameUris.forEach { uris.add(it) }
-                    for (u in uris.distinct()) {
-                        try {
-                            ctx.contentResolver.openFileDescriptor(u, "r")?.use { pfd ->
-                                val s = pfd.statSize
-                                if (s > 0) sum += s
-                            }
-                        } catch (e: Exception) {
-                            // ignore
-                        }
-                    }
-                }
-                sum
-            }
-            if (isAdded) {
-                GalleryAlbumInfoSheet.newInstance(totalCount, totalSize, lastCaptureTime)
-                    .show(childFragmentManager, GalleryAlbumInfoSheet.TAG)
-            }
-        }
-    }
-
-    internal fun checkHomogeneity(selected: List<GallerySelectedItem>): Boolean {
-        if (selected.isEmpty()) return false
-        val isStaticPhoto: (GallerySelectedItem) -> Boolean = { item ->
-            val g = item.group
-            !g.isMotionPhoto && !g.isRawVideo && g.rawVideoUri == null && g.mp4VideoUri == null && !g.isCinemaDng && g.cinemaDngFolderUri == null && g.cinemaDngFrameUris.isEmpty()
-        }
-        val isMotionPhoto: (GallerySelectedItem) -> Boolean = { item ->
-            item.group.isMotionPhoto
-        }
-        val isVideo: (GallerySelectedItem) -> Boolean = { item ->
-            val g = item.group
-            g.isRawVideo || g.rawVideoUri != null || g.mp4VideoUri != null || g.isCinemaDng || g.cinemaDngFolderUri != null || g.cinemaDngFrameUris.isNotEmpty()
-        }
-
-        return selected.all(isStaticPhoto) || selected.all(isMotionPhoto) || selected.all(isVideo)
-    }
-
-    private fun performMergeCollage(selected: List<GallerySelectedItem>) {
-        if (selected.size != 2) return
-        val options = listOf(
-            getString(R.string.collage_layout_sbs),
-            getString(R.string.collage_layout_tb)
-        )
-        top.maary.darkbag.ui.BentoSelectionBottomSheet.show(
-            fragmentManager = childFragmentManager,
-            title = getString(R.string.gallery_action_merge),
-            options = options,
-            selectedIndex = 0,
-            badge = "COLLAGE"
-        ) { which ->
-            val isSideBySide = (which == 0)
-            val ctx = context ?: return@show
-            val appContext = ctx.applicationContext
-
-            val item1 = selected[0]
-            val item2 = selected[1]
-            val uri1 = item1.specificLens?.jpgUri ?: item1.group.firstAvailableUri ?: item1.group.jpgUri
-            val uri2 = item2.specificLens?.jpgUri ?: item2.group.firstAvailableUri ?: item2.group.jpgUri
-
-            if (uri1 == null || uri2 == null) {
-                Toast.makeText(ctx, R.string.gallery_collage_resolve_failed, Toast.LENGTH_SHORT).show()
-                return@show
-            }
-
-            showGalleryDeletingIndicator(2)
-            binding.galleryRecyclerView.isEnabled = false
-
-            lifecycleScope.launch {
-                val success = withContext(Dispatchers.IO) {
-                    try {
-                        val bmp1Raw = appContext.contentResolver.openInputStream(uri1)?.use { android.graphics.BitmapFactory.decodeStream(it) }
-                        val bmp2Raw = appContext.contentResolver.openInputStream(uri2)?.use { android.graphics.BitmapFactory.decodeStream(it) }
-                        if (bmp1Raw == null || bmp2Raw == null) {
-                            bmp1Raw?.recycle()
-                            bmp2Raw?.recycle()
-                            return@withContext false
-                        }
-                        val bmp1 = top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(bmp1Raw, isSideBySide)
-                        val bmp2 = top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(bmp2Raw, isSideBySide)
-                        val stitched = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(bmp1, bmp2, isSideBySide)
-
-                        val timeStamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
-                        val fileName = "${top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX}${timeStamp}_COLLAGE.jpg"
-                        val values = android.content.ContentValues().apply {
-                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                            put(android.provider.MediaStore.MediaColumns.DATE_ADDED, System.currentTimeMillis() / 1000)
-                            put(android.provider.MediaStore.MediaColumns.DATE_MODIFIED, System.currentTimeMillis() / 1000)
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                                put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
-                            }
-                        }
-                        val insertedUri = appContext.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                        if (insertedUri != null) {
-                            appContext.contentResolver.openOutputStream(insertedUri, "wt")?.use { out ->
-                                stitched.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, out)
-                                out.flush()
-                            }
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                values.clear()
-                                values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
-                                appContext.contentResolver.update(insertedUri, values, null, null)
-                            }
-                        }
-
-                        stitched.recycle()
-                        if (bmp1 != bmp1Raw) bmp1.recycle()
-                        if (bmp2 != bmp2Raw) bmp2.recycle()
-                        bmp1Raw.recycle()
-                        bmp2Raw.recycle()
-                        insertedUri != null
-                    } catch (e: Exception) {
-                        android.util.Log.e("ImageViewerFragment", "Collage stitching failed", e)
-                        false
-                    }
-                }
-
-                hideGalleryDeletingIndicator()
-                if (_binding != null) {
-                    binding.galleryRecyclerView.isEnabled = true
-                }
-                if (success) {
-                    repository.invalidateCache()
-                    loadImages(forceRefresh = true)
-                    galleryAdapter.setSelectionMode(false)
-                    updateGallerySelectionUI(0)
-                    Toast.makeText(requireContext(), R.string.gallery_merge_success, Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(requireContext(), R.string.gallery_collage_create_failed, Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-    }
-
-    private fun performBatchGrade(selected: List<GallerySelectedItem>) {
-        val lutManager = top.maary.darkbag.utils.LutManager(requireContext())
-        top.maary.darkbag.ui.ColorRecipeBottomSheet.show(requireContext(), lutManager) { selectedLog, selectedLut ->
-            val ctx = context ?: return@show
-            val appContext = ctx.applicationContext
-            showGalleryDeletingIndicator(selected.size)
-            binding.galleryRecyclerView.isEnabled = false
-
-            lifecycleScope.launch {
-                val gradedCount = withContext(Dispatchers.IO) {
-                    var count = 0
-                    for (item in selected) {
-                        val group = item.group
-                        val targetConfig = (group.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(
-                            log = selectedLog,
-                            lut = selectedLut ?: "None"
-                        )
-                        if (group.isRawVideo || group.rawVideoUri != null) {
-                            group.rawVideoUri?.let { rawVideoUri ->
-                                try {
-                                    appContext.contentResolver.openFileDescriptor(rawVideoUri, "rw")?.use { rwFd ->
-                                        top.maary.darkbag.rawvideo.RawVideoNative.nativeUpdateHeaderMetadata(
-                                            fd = rwFd.fd,
-                                            activeLog = targetConfig.log,
-                                            activeLut = targetConfig.lut,
-                                            exposure = targetConfig.exposure,
-                                            contrast = targetConfig.contrast,
-                                            saturation = targetConfig.saturation
-                                        )
-                                        count++
-                                    }
-                                } catch (e: Exception) {
-                                    android.util.Log.w("ImageViewerFragment", "Failed to update rawvid header for $rawVideoUri", e)
-                                }
-                            }
-                        } else {
-                            val targetUris = mutableListOf<android.net.Uri>()
-                            if (item.specificLens != null) {
-                                item.specificLens.jpgUri?.let { targetUris.add(it) }
-                            } else {
-                                group.jpgUri?.let { targetUris.add(it) }
-                                group.derivativeJpgUris.forEach { targetUris.add(it) }
-                            }
-                            for (u in targetUris.distinct()) {
-                                try {
-                                    top.maary.darkbag.utils.ImageSaver.writeMetadataToExif(appContext, u, targetConfig, null)
-                                    count++
-                                } catch (e: Exception) {
-                                    android.util.Log.w("ImageViewerFragment", "Failed to write EXIF for $u", e)
-                                }
-                            }
-                        }
-                    }
-                    count
-                }
-
-                hideGalleryDeletingIndicator()
-                if (_binding != null) {
-                    binding.galleryRecyclerView.isEnabled = true
-                }
-                repository.invalidateCache()
-                loadImages(forceRefresh = true)
-                galleryAdapter.setSelectionMode(false)
-                updateGallerySelectionUI(0)
-                Toast.makeText(requireContext(), getString(R.string.gallery_batch_grade_success, selected.size), Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun importMediaFiles(uris: List<Uri>) {
-        val ctx = context ?: return
-        val appContext = ctx.applicationContext
-        showGalleryDeletingIndicator(uris.size)
-        binding.galleryRecyclerView.isEnabled = false
-
-        lifecycleScope.launch {
-            val importedCount = withContext(Dispatchers.IO) {
-                var count = 0
-                for (uri in uris) {
-                    try {
-                        val mime = appContext.contentResolver.getType(uri) ?: ""
-                        var originalName: String? = null
-                        appContext.contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                            if (cursor.moveToFirst()) {
-                                originalName = cursor.getString(0)
-                            }
-                        }
-                        val isVideo = mime.startsWith("video/") || originalName?.endsWith(".mp4", ignoreCase = true) == true
-                        val isDng = mime == "image/x-adobe-dng" || originalName?.endsWith(".dng", ignoreCase = true) == true
-
-                        if (originalName.isNullOrBlank()) {
-                            originalName = when {
-                                isVideo -> "imported_${System.currentTimeMillis()}.mp4"
-                                isDng -> "imported_${System.currentTimeMillis()}.dng"
-                                else -> "imported_${System.currentTimeMillis()}.jpg"
-                            }
-                        }
-                        val cleanName = java.io.File(originalName!!).name
-                        val targetFileName = if (cleanName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) {
-                            cleanName
-                        } else {
-                            "${top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX}${cleanName}"
-                        }
-
-                        val collection = if (isVideo) {
-                            android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                        } else {
-                            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                        }
-                        val relativePath = if (isVideo) "Movies/Darkbag" else "Pictures/Darkbag"
-                        val targetMime = when {
-                            isVideo -> if (mime.startsWith("video/")) mime else "video/mp4"
-                            isDng -> "image/x-adobe-dng"
-                            mime.startsWith("image/") -> mime
-                            else -> "image/jpeg"
-                        }
-
-                        val values = android.content.ContentValues().apply {
-                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, targetFileName)
-                            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, targetMime)
-                            put(android.provider.MediaStore.MediaColumns.DATE_ADDED, System.currentTimeMillis() / 1000)
-                            put(android.provider.MediaStore.MediaColumns.DATE_MODIFIED, System.currentTimeMillis() / 1000)
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-                                put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
-                            }
-                        }
-
-                        val destUri = appContext.contentResolver.insert(collection, values)
-                        if (destUri != null) {
-                            appContext.contentResolver.openInputStream(uri)?.use { inStream ->
-                                appContext.contentResolver.openOutputStream(destUri, "wt")?.use { outStream ->
-                                    inStream.copyTo(outStream)
-                                    outStream.flush()
-                                }
-                            }
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                values.clear()
-                                values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
-                                appContext.contentResolver.update(destUri, values, null, null)
-                            }
-                            count++
-                        }
-                    } catch (e: Exception) {
-                        android.util.Log.e("ImageViewerFragment", "Failed to import file $uri", e)
-                    }
-                }
-                count
-            }
-
-            hideGalleryDeletingIndicator()
-            if (_binding != null) {
-                binding.galleryRecyclerView.isEnabled = true
-            }
-            if (importedCount > 0) {
-                repository.invalidateCache()
-                loadImages(forceRefresh = true)
-                Toast.makeText(requireContext(), getString(R.string.gallery_import_success, importedCount), Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun showBatchDeleteDialog(selectedItems: List<GallerySelectedItem>) {
-        if (selectedItems.isEmpty()) return
-        val hasAnyRaw = selectedItems.any { item ->
-            if (item.specificLens != null) {
-                item.specificLens.dngUri != null
-            } else {
-                item.group.hasMasterRaw
-            }
-        }
-        val hasAnyDerivatives = selectedItems.any { item ->
-            if (item.specificLens != null) {
-                item.specificLens.jpgUri != null
-            } else {
-                item.group.hasDerivatives
-            }
-        }
-
-        val hasAnyCinemaDng = selectedItems.any { item ->
-            val g = item.group
-            g.isCinemaDng || g.cinemaDngFolderUri != null || g.cinemaDngFirstFrameUri != null || g.cinemaDngFrameUris.isNotEmpty()
-        }
-
-        DarkbagBatchDeleteSheet.newInstance(selectedItems.size, hasAnyRaw, hasAnyDerivatives, hasAnyCinemaDng)
-            .show(childFragmentManager, DarkbagBatchDeleteSheet.TAG)
-    }
-
-    protected fun showGalleryDeletingIndicator(count: Int) {
-        if (_binding == null) return
-        binding.tvGalleryDeletingStatus?.text = if (count > 0) {
-            getString(R.string.gallery_deleting_count, count)
-        } else {
-            getString(R.string.gallery_deleting)
-        }
-        binding.galleryDeletingIndicator?.apply {
-            animate().cancel()
-            visibility = View.VISIBLE
-            alpha = 0f
-            translationY = -40f
-            animate()
-                .alpha(1f)
-                .translationY(0f)
-                .setDuration(200)
-                .start()
-        }
-    }
-
-    protected fun hideGalleryDeletingIndicator() {
-        if (_binding == null) return
-        binding.galleryDeletingIndicator?.apply {
-            animate().cancel()
-            animate()
-                .alpha(0f)
-                .translationY(-40f)
-                .setDuration(200)
-                .withEndAction {
-                    visibility = View.GONE
-                }
-                .start()
-        }
-    }
-
-    private fun deleteBatchImages(selectedItems: List<GallerySelectedItem>, deleteMode: Int) {
-        val context = context ?: return
-        showGalleryDeletingIndicator(selectedItems.size)
-        binding.galleryRecyclerView.isEnabled = false
-        binding.galleryBottomBar.visibility = View.GONE
-
-        lifecycleScope.launch {
-            val urisToDelete = mutableListOf<Uri>()
-
-            for (item in selectedItems) {
-                val group = item.group
-                val lens = item.specificLens
-                if (lens != null) {
-                    when (deleteMode) {
-                        DarkbagBatchDeleteSheet.MODE_ENTIRE_GROUP -> { // Entire group / lens
-                            lens.jpgUri?.let { urisToDelete.add(it) }
-                            lens.dngUri?.let { urisToDelete.add(it) }
-                        }
-                        DarkbagBatchDeleteSheet.MODE_RAW_ONLY -> { // RAW only
-                            lens.dngUri?.let { urisToDelete.add(it) }
-                        }
-                        DarkbagBatchDeleteSheet.MODE_DERIVATIVES_ONLY -> { // Derivatives only
-                            lens.jpgUri?.let { urisToDelete.add(it) }
-                        }
-                        DarkbagBatchDeleteSheet.MODE_CINEMADNG_ONLY -> {
-                            // Lens is photo, no CDNG sequence
-                        }
-                    }
-                } else {
-                    when (deleteMode) {
-                        DarkbagBatchDeleteSheet.MODE_ENTIRE_GROUP -> {
-                            group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
-                            urisToDelete.addAll(group.allUris)
-                        }
-                        DarkbagBatchDeleteSheet.MODE_RAW_ONLY -> {
-                            group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
-                            urisToDelete.addAll(group.allMasterRawUris)
-                        }
-                        DarkbagBatchDeleteSheet.MODE_DERIVATIVES_ONLY -> {
-                            urisToDelete.addAll(group.allDerivativeUris)
-                        }
-                        DarkbagBatchDeleteSheet.MODE_CINEMADNG_ONLY -> {
-                            group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
-                            urisToDelete.addAll(group.allCinemaDngUris)
-                        }
-                    }
-                }
-            }
-
-            val securityExceptionUris = mutableListOf<Uri>()
-            withContext(Dispatchers.IO) {
-                for (uri in urisToDelete.distinct()) {
-                    try {
-                        deleteUriSafe(context, uri)
-                    } catch (e: SecurityException) {
-                        if (uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
-                            securityExceptionUris.add(uri)
-                        }
-                    } catch (e: Exception) {
-                        Log.e("ImageViewerFragment", "Failed to delete $uri", e)
-                    }
-                }
-            }
-
-            galleryAdapter.setSelectionMode(false)
-            updateGallerySelectionUI(0)
-
-            if (securityExceptionUris.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                try {
-                    val deleteRequest = MediaStore.createDeleteRequest(context.contentResolver, securityExceptionUris)
-                    deleteLauncher.launch(IntentSenderRequest.Builder(deleteRequest.intentSender).build())
-                } catch (e: Exception) {
-                    context.let { Toast.makeText(it, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show() }
-                    repository.invalidateCache()
-                    loadImages(forceRefresh = true)
-                    hideGalleryDeletingIndicator()
-                    if (_binding != null) {
-                        binding.galleryRecyclerView.isEnabled = true
-                        updateGallerySelectionUI(0)
-                    }
-                }
-            } else {
-                repository.invalidateCache()
-                loadImages(forceRefresh = true)
-            }
-        }
-    }
-
-    protected fun toggleUi() {
-        if (isEditingAdjustments || isGalleryMode) return
-        if (isUiVisible) hideUi() else showUi()
-    }
-
-    protected fun showUi() {
-        if (isGalleryMode) return
-        if (isUiVisible) return
-        isUiVisible = true
-
-        binding.topBarContainer.visibility = View.VISIBLE
-        updateSplitButtons()
-        updateControlsVisibility()
-        updateGalleryPill(binding.imagePager.currentItem, if (::adapter.isInitialized) adapter.itemCount else 0)
-
-        adapter.setUiVisibility(true)
-
-        binding.topBarContainer.animate().cancel()
-        binding.viewerBentoDeck.animate().cancel()
-
-        binding.topBarContainer.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
-        binding.viewerBentoDeck.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
-        updateViewportPadding()
-    }
-
-    protected fun hideUi() {
-        if (isGalleryMode) return
-        if (!isUiVisible) return
-        isUiVisible = false
-
-        adapter.setUiVisibility(false)
-
-        binding.topBarContainer.animate().cancel()
-        binding.viewerBentoDeck.animate().cancel()
-
-        val topShift = -(binding.topBarContainer.height + (binding.topBarContainer.layoutParams as ViewGroup.MarginLayoutParams).topMargin).toFloat()
-        val bottomShift = (binding.viewerBentoDeck.height + (binding.viewerBentoDeck.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin).toFloat()
-
-        binding.topBarContainer.animate().translationY(topShift).alpha(0f).setDuration(200)
-            .withEndAction { binding.topBarContainer.visibility = View.GONE }.start()
-        binding.viewerBentoDeck.animate().translationY(bottomShift).alpha(0f).setDuration(200)
-            .withEndAction { binding.viewerBentoDeck.visibility = View.GONE }.start()
-        updateViewportPadding()
-    }
-
-    private fun showMultiCamCollageDialog(group: ImageGroup) {
-        val sheet = MultiCameraCollageSheet.newInstance(group)
-        sheet.show(childFragmentManager, MultiCameraCollageSheet.TAG)
-    }
-
-    private fun setupEdgeToEdge() {
-        val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
-
-        binding.topBarContainer.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
-            val newHeight = bottom - top
-            if (newHeight > 0 && newHeight != topBarHeight) {
-                topBarHeight = newHeight
-                updateViewportPadding()
-            }
-        }
-
-        binding.viewerBentoDeck.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
-            val newHeight = bottom - top
-            if (newHeight > 0 && newHeight != bentoDeckHeight) {
-                bentoDeckHeight = newHeight
-                updateViewportPadding()
-            }
-        }
-
-        ViewCompat.setOnApplyWindowInsetsListener(binding.viewerRoot) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            systemTopInset = systemBars.top
-            systemBottomInset = systemBars.bottom
-            updateViewportPadding()
-
-            val density = resources.displayMetrics.density
-            val bentoMarginH = (12 * density).toInt()
-            val bentoMarginTop = (8 * density).toInt()
-
-            binding.topBarContainer.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                topMargin = systemBars.top + bentoMarginTop
-                leftMargin = systemBars.left + bentoMarginH
-                rightMargin = systemBars.right + bentoMarginH
-            }
-            binding.viewerBentoDeck.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + bentoMarginH
-                leftMargin = systemBars.left + bentoMarginH
-                rightMargin = systemBars.right + bentoMarginH
-            }
-
-            binding.galleryHeaderCard.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                topMargin = systemBars.top + bentoMarginTop
-                leftMargin = systemBars.left + bentoMarginH
-                rightMargin = systemBars.right + bentoMarginH
-            }
-            binding.galleryBottomBar.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + bentoMarginH
-                leftMargin = systemBars.left + bentoMarginH
-                rightMargin = systemBars.right + bentoMarginH
-            }
-            val headerOffset = (70 * density).toInt()
-            val bottomOffset = (84 * density).toInt()
-            binding.galleryRecyclerView.setPadding(
-                systemBars.left + (8 * density).toInt(),
-                systemBars.top + headerOffset,
-                systemBars.right + (8 * density).toInt(),
-                systemBars.bottom + bottomOffset
-            )
-
-            val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-            binding.editAdjustmentPanel.setPadding(
-                if (isLandscape) systemBars.left else 0,
-                0,
-                if (isLandscape) systemBars.right else 0,
-                systemBars.bottom
-            )
-
-            insets
-        }
-    }
-
-    private fun updateViewportPadding() {
-        val topPadding: Int
-        val bottomPadding: Int
-
-        if (isEditingAdjustments) {
-            topPadding = systemTopInset + topBarHeight
-            bottomPadding = binding.editAdjustmentPanel.height
-        } else if (isUiVisible) {
-            topPadding = systemTopInset + topBarHeight
-            val density = resources.displayMetrics.density
-            val bentoMargin = (8 * density).toInt()
-            val deckH = if (binding.viewerBentoDeck.visibility == View.VISIBLE) {
-                if (bentoDeckHeight > 0) bentoDeckHeight else binding.viewerBentoDeck.height
-            } else 0
-            bottomPadding = if (deckH > 0) deckH + systemBottomInset + bentoMargin else topPadding
-        } else {
-            topPadding = 0
-            bottomPadding = 0
-        }
-
-        val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0 && binding.imagePager.currentItem in 0 until adapter.itemCount) adapter.getGroup(binding.imagePager.currentItem) else null
-        val isVideo = currentGroup?.isRawVideo == true || currentGroup?.mp4VideoUri != null || (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)?.findViewHolderForAdapterPosition(binding.imagePager.currentItem)?.let { (it as? ImageViewerAdapter.ViewHolder)?.isPlayingVideo } == true
-
-        if (!isVideo) {
-            android.transition.TransitionManager.beginDelayedTransition(binding.viewerRoot, android.transition.AutoTransition().apply {
-                duration = 200
-                addTarget(binding.imagePager)
-            })
-        }
-        binding.imagePager.setPadding(0, topPadding, 0, bottomPadding)
-
-        // Ensure half-frame masks match the visible viewport
-        val activeLayout = currentEditConfig?.hfLayout ?: currentGroup?.hfLayout
-        val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
-
-        val lp1 = binding.hfSelection1.layoutParams as ViewGroup.MarginLayoutParams
-        val lp2 = binding.hfSelection2.layoutParams as ViewGroup.MarginLayoutParams
-        val lpDiv = binding.hfSelectionDivider.layoutParams as ViewGroup.MarginLayoutParams
-        val lpProgress = binding.initialLoadingIndicator.layoutParams as ViewGroup.MarginLayoutParams
-
-        lp1.topMargin = topPadding
-        lp1.bottomMargin = if (isTB) 0 else bottomPadding
-        lp1.leftMargin = 0
-        lp1.rightMargin = 0
-
-        lp2.topMargin = if (isTB) 0 else topPadding
-        lp2.bottomMargin = bottomPadding
-        lp2.leftMargin = 0
-        lp2.rightMargin = 0
-
-        lpDiv.topMargin = topPadding
-        lpDiv.bottomMargin = bottomPadding
-
-        lpProgress.topMargin = topPadding
-        lpProgress.bottomMargin = bottomPadding
-
-        binding.hfSelection1.layoutParams = lp1
-        binding.hfSelection2.layoutParams = lp2
-        binding.hfSelectionDivider.layoutParams = lpDiv
-        binding.initialLoadingIndicator.layoutParams = lpProgress
-    }
-
-    private fun updateBackPressedCallbackState() {
-        backPressedCallback.isEnabled = isGalleryMode || isAdjusted || isEditingAdjustments || (binding.lutListContainer?.visibility == View.VISIBLE)
-    }
-
-    protected open fun showDiscardChangesDialog() {
-        if (isEditingAdjustments) {
-            exitEditMode(apply = false)
-            return
-        }
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.discard_changes_title)
-            .setMessage(R.string.discard_changes_message)
-            .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(R.string.discard) { _, _ ->
-                resetAdjustments()
-            }
-            .show()
-    }
-
-    protected fun forceShowIcons(popup: PopupMenu) {
-        val colorOnSurface = com.google.android.material.color.MaterialColors.getColor(requireContext(), com.google.android.material.R.attr.colorOnSurface, android.graphics.Color.WHITE)
-        for (i in 0 until popup.menu.size()) {
-            popup.menu.getItem(i).icon?.setTint(colorOnSurface)
-        }
-        try {
-            val field = popup.javaClass.getDeclaredField("mPopup")
-            field.isAccessible = true
-            val menuHelper = field.get(popup)
-            val setForceShowIcon = menuHelper.javaClass.getDeclaredMethod("setForceShowIcon", Boolean::class.java)
-            setForceShowIcon.invoke(menuHelper, true)
-        } catch (e: NoSuchFieldException) {
-            android.util.Log.e("ImageViewerFragment", "mPopup field not found in PopupMenu", e)
-        } catch (e: NoSuchMethodException) {
-            android.util.Log.e("ImageViewerFragment", "setForceShowIcon method not found", e)
-        } catch (e: Exception) {
-            android.util.Log.e("ImageViewerFragment", "Unexpected error forcing icons", e)
-        }
+        val pos = if (::adapter.isInitialized && adapter.itemCount > 0) binding.imagePager.currentItem else 0
+        val currentGroup = if (::adapter.isInitialized && pos in adapter.getGroups().indices) adapter.getGroup(pos) else null
+        val uri = currentGroup?.firstAvailableUri ?: currentGroup?.jpgUri ?: currentGroup?.dngUri
+        val action = ImageViewerFragmentDirections.actionImageViewerToDarkroomGallery(initialUri = uri?.toString())
+        findNavController().navigate(action)
     }
 
     override fun onPause() {
         super.onPause()
-        if (::adapter.isInitialized) {
-            adapter.stopAllMotionVideos()
-        }
+        if (::adapter.isInitialized) adapter.stopAllMotionVideos()
     }
 
-    private var activeExportDialog: androidx.appcompat.app.AlertDialog? = null
-
     override fun onDestroyView() {
-        activeExportDialog?.let {
-            if (it.isShowing) {
-                try { it.dismiss() } catch (_: Exception) {}
-            }
-        }
-        activeExportDialog = null
-        if (::adapter.isInitialized) {
-            adapter.stopAllMotionVideos()
-        }
+        exportCoordinator.dismissActiveDialog()
+        editorPanelDelegate.onDestroy()
+        if (::adapter.isInitialized) adapter.stopAllMotionVideos()
         binding.imagePager.unregisterOnPageChangeCallback(pageChangeCallback)
         super.onDestroyView()
         _binding = null
     }
 
-    private suspend fun refreshCurrentGroupAndAdapter(targetBaseName: String, autoSelectFormat: String? = null) {
-        repository.invalidateCache()
-        val newGroups = repository.getGroupedImages(forceRefresh = true)
-        if (_binding == null || !::adapter.isInitialized) return
-        adapter.updateGroups(newGroups) {
-            if (_binding == null || !::adapter.isInitialized) return@updateGroups
-            if (autoSelectFormat != null) {
-                adapter.setFormatForGroup(targetBaseName, autoSelectFormat)
-            }
-            val currentIndex = binding.imagePager.currentItem
-            if (currentIndex in newGroups.indices) {
-                val currentGroup = newGroups[currentIndex]
-                if (currentGroup.baseName == targetBaseName) {
-                    adapter.notifyItemChanged(currentIndex)
-                    prepareEditConfig(currentGroup)
-                    updateSplitButtons()
-                    updateControlsVisibility()
-                    updateToolbarIcon()
-                }
-            }
-        }
-        if (::galleryAdapter.isInitialized) {
-            galleryAdapter.submitList(newGroups)
-        }
-    }
-
-    private fun showExportProgressDialog(
-        title: String,
-        onCancel: (() -> Unit)? = null
-    ): Pair<androidx.appcompat.app.AlertDialog, (Int, Int) -> Unit> {
-        val dialogView = layoutInflater.inflate(R.layout.layout_export_progress_dialog, null)
-        val titleView = dialogView.findViewById<TextView>(R.id.export_dialog_title)
-        val progressBar = dialogView.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.export_progress_bar)
-        val progressText = dialogView.findViewById<TextView>(R.id.export_progress_text)
-
-        titleView.text = title
-        progressBar.isIndeterminate = false
-        progressBar.progress = 0
-        progressText.text = getString(R.string.export_progress_preparing)
-
-        val builder = com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setView(dialogView)
-            .setCancelable(false)
-
-        if (onCancel != null) {
-            builder.setNegativeButton(R.string.cancel) { _, _ ->
-                onCancel()
-            }
-        }
-
-        val dialog = builder.create()
-        dialog.show()
-        activeExportDialog = dialog
-
-        val updateProgress: (Int, Int) -> Unit = { current, total ->
-            if (total > 0) {
-                val percent = (current * 100) / total
-                lifecycleScope.launch(Dispatchers.Main) {
-                    if (dialog.isShowing) {
-                        progressBar.progress = percent
-                        progressText.text = getString(R.string.export_progress_format, percent, current, total)
-                    }
-                }
-            }
-        }
-        return Pair(dialog, updateProgress)
-    }
-
-    private fun performExportCinemaDng(group: top.maary.darkbag.models.ImageGroup) {
-        val uri = group.rawVideoUri ?: return
-        val context = requireContext()
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val rawFolderUriStr = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
-        val clipName = "CDNG_${group.baseName}"
-
-        val isUserCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
-        var exportJob: kotlinx.coroutines.Job? = null
-
-        val (progressDialog, updateProgress) = showExportProgressDialog(
-            title = getString(R.string.export_progress_exporting_cdng),
-            onCancel = {
-                isUserCancelled.set(true)
-                exportJob?.cancel()
-            }
-        )
-
-        exportJob = lifecycleScope.launch {
-            var tempExportDir: File? = null
-            var destDir: File? = null
-            try {
-                if (rawFolderUriStr != null) {
-                    // 路径 B（配置了 SAF Tree URI）：向 cacheDir 临时输出并流式复制到 SAF DocumentFile
-                    val tempDir = File(context.cacheDir, "cdng_${System.currentTimeMillis()}").apply { mkdirs() }
-                    tempExportDir = tempDir
-
-                    val resultDir = top.maary.darkbag.rawvideo.RawVideoExporter.exportToCinemaDng(
-                        context = context,
-                        rawVideoUri = uri,
-                        outputDir = tempDir,
-                        clipName = clipName,
-                        isCancelled = { isUserCancelled.get() || !isActive },
-                        onProgress = updateProgress
-                    )
-
-                    if (isUserCancelled.get() || !isActive) {
-                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                            tempDir.deleteRecursively()
-                        }
-                        Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                        return@launch
-                    }
-
-                    if (resultDir != null && resultDir.exists()) {
-                        val exportedClipName = resultDir.name
-                        withContext(Dispatchers.IO) {
-                            try {
-                                val treeUri = Uri.parse(rawFolderUriStr)
-                                val treeDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
-                                val clipDirDoc = treeDoc?.createDirectory(exportedClipName)
-                                if (clipDirDoc != null) {
-                                    resultDir.listFiles()?.forEach { file ->
-                                        if (isUserCancelled.get() || !isActive) return@forEach
-                                        val mime = if (file.name.endsWith(".wav")) "audio/wav" else "image/x-adobe-dng"
-                                        val targetDoc = clipDirDoc.createFile(mime, file.name)
-                                        if (targetDoc != null) {
-                                            context.contentResolver.openOutputStream(targetDoc.uri)?.use { out ->
-                                                file.inputStream().use { it.copyTo(out) }
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to SAF folder", e)
-                            } finally {
-                                tempDir.deleteRecursively()
-                            }
-                        }
-
-                        if (isUserCancelled.get() || !isActive) {
-                            Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                            return@launch
-                        }
-
-                        refreshCurrentGroupAndAdapter(group.baseName)
-                        Toast.makeText(context, "CinemaDNG exported: $exportedClipName", Toast.LENGTH_LONG).show()
-                    } else {
-                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                            tempDir.deleteRecursively()
-                        }
-                        Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-                    // 路径 A（未配置 SAF，保存到公共 Pictures 目录）：直接写出，避免双重写入
-                    val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
-                    val targetDir = File(picturesDir, "Darkbag/CinemaDNG/$clipName").apply { mkdirs() }
-                    destDir = targetDir
-
-                    val resultDir = top.maary.darkbag.rawvideo.RawVideoExporter.exportToCinemaDng(
-                        context = context,
-                        rawVideoUri = uri,
-                        outputDir = targetDir,
-                        clipName = clipName,
-                        isCancelled = { isUserCancelled.get() || !isActive },
-                        onProgress = updateProgress
-                    )
-
-                    if (isUserCancelled.get() || !isActive) {
-                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                            targetDir.deleteRecursively()
-                        }
-                        Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                        return@launch
-                    }
-
-                    if (resultDir != null && resultDir.exists()) {
-                        withContext(Dispatchers.IO) {
-                            val filePaths = resultDir.listFiles()?.map { it.absolutePath }?.toTypedArray()
-                            if (!filePaths.isNullOrEmpty()) {
-                                android.media.MediaScannerConnection.scanFile(context, filePaths, null, null)
-                            }
-                        }
-                        refreshCurrentGroupAndAdapter(group.baseName)
-                        Toast.makeText(context, "CinemaDNG exported: $clipName", Toast.LENGTH_LONG).show()
-                    } else {
-                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                            targetDir.deleteRecursively()
-                        }
-                        Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            } catch (e: java.util.concurrent.CancellationException) {
-                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                    tempExportDir?.deleteRecursively()
-                    destDir?.deleteRecursively()
-                }
-                Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                    tempExportDir?.deleteRecursively()
-                    destDir?.deleteRecursively()
-                }
-                if (isUserCancelled.get()) {
-                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                } else {
-                    android.util.Log.e("ImageViewerFragment", "CinemaDNG export error", e)
-                    Toast.makeText(context, "CinemaDNG export error: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-            } finally {
-                if (progressDialog.isShowing) {
-                    try { progressDialog.dismiss() } catch (_: Exception) {}
-                }
-                if (activeExportDialog === progressDialog) {
-                    activeExportDialog = null
-                }
-            }
-        }
-    }
-
-    private fun performExportMp4(
-        group: top.maary.darkbag.models.ImageGroup,
-        config: top.maary.darkbag.models.EditConfig = currentEditConfig ?: group.editConfig ?: top.maary.darkbag.models.EditConfig(),
-        targetResolution: Int = 1080
-    ) {
-        val uri = group.rawVideoUri ?: return
-        val context = requireContext()
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val mediaFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-
-        val tempMp4File = File(context.cacheDir, "${group.baseName}_graded.mp4")
-
-        val isUserCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
-        var exportJob: kotlinx.coroutines.Job? = null
-
-        val (progressDialog, updateProgress) = showExportProgressDialog(
-            title = getString(R.string.export_progress_exporting_mp4),
-            onCancel = {
-                isUserCancelled.set(true)
-                exportJob?.cancel()
-            }
-        )
-
-        exportJob = lifecycleScope.launch {
-            try {
-                val success = top.maary.darkbag.rawvideo.RawVideoExporter.exportToMp4(
-                    context = context,
-                    rawVideoUri = uri,
-                    outputFile = tempMp4File,
-                    editConfig = config,
-                    targetResolution = targetResolution,
-                    isCancelled = { isUserCancelled.get() || !isActive },
-                    onProgress = updateProgress
-                )
-
-                if (isUserCancelled.get() || !isActive) {
-                    withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                        tempMp4File.delete()
-                    }
-                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
-
-                if (success && tempMp4File.exists() && tempMp4File.length() > 0) {
-                    val (savedUri, _) = top.maary.darkbag.utils.ImageSaver.saveMp4Video(
-                        context = context,
-                        mp4File = tempMp4File,
-                        baseName = "${group.baseName}_graded",
-                        mediaFolderUri = mediaFolderUri
-                    )
-                    if (savedUri != null) {
-                        refreshCurrentGroupAndAdapter(group.baseName, autoSelectFormat = ImageViewerAdapter.FORMAT_JPG)
-                        Toast.makeText(context, "Graded MP4 saved: ${group.baseName}_graded.mp4", Toast.LENGTH_LONG).show()
-                    } else {
-                        Toast.makeText(context, "Failed to save MP4 to storage", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-                    withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                        tempMp4File.delete()
-                    }
-                    Toast.makeText(context, "MP4 export failed", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: java.util.concurrent.CancellationException) {
-                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                    tempMp4File.delete()
-                }
-                Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                    tempMp4File.delete()
-                }
-                if (isUserCancelled.get()) {
-                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                } else {
-                    android.util.Log.e("ImageViewerFragment", "MP4 export error", e)
-                    Toast.makeText(context, "MP4 export error: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-            } finally {
-                if (progressDialog.isShowing) {
-                    try { progressDialog.dismiss() } catch (_: Exception) {}
-                }
-                if (activeExportDialog === progressDialog) {
-                    activeExportDialog = null
-                }
-            }
-        }
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        deletionController.pendingDeleteNextTargetUri?.let { outState.putString("pendingDeleteNextTargetUri", it) }
     }
 
     companion object {
-        const val KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY = "viewer_motion_photo_auto_play"
-
-        val LOOK_DOT_COLORS = intArrayOf(
-            Color.parseColor("#FFD0BC"), // Soft Coral / Primary
-            Color.parseColor("#80D8FF"), // Soft Cyan
-            Color.parseColor("#FFE57F"), // Soft Amber / Classic Chrome
-            Color.parseColor("#B9F6CA"), // Soft Mint / Emerald
-            Color.parseColor("#EA80FC"), // Soft Lavender
-            Color.parseColor("#FF8A80")  // Soft Red
-        )
-
-        private const val MENU_DETAILS = 1
-        private const val MENU_DELETE = 2
-        private const val MENU_SAVE_AS = 3
-        private const val MENU_SHARE_TIFF = 4
-        private const val MENU_COLLAGE = 5
-        private const val MENU_EXPORT_CINEMA_DNG = 6
-        private const val MENU_EXPORT_MP4 = 7
-        private const val MENU_EXPORT_CINEMADNG_FRAME = 8
-        private const val MENU_SHARE = 9
-        private const val MENU_EXPORT_HUB = 10
-
-        private const val EXPOSURE_MIN = -4f
-        private const val EXPOSURE_MAX = 4f
-        private const val ADJUSTMENT_MIN = -1f
-        private const val ADJUSTMENT_MAX = 1f
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        pendingDeleteNextTargetUri?.let { outState.putString("pendingDeleteNextTargetUri", it) }
-        outState.putBoolean("startedInGalleryMode", startedInGalleryMode)
-    }
-
-    protected suspend fun generateProcessedBitmap(config: top.maary.darkbag.models.EditConfig, currentGroup: ImageGroup): android.graphics.Bitmap? {
-        val ctx = context ?: return null
-        val appContext = ctx.applicationContext
-        return withContext(Dispatchers.IO) {
-            val context = appContext
-            val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
-            val dngUri2 = currentGroup.dngUri2
-            val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
-            val lutPath = if (config.lut != null && config.lut != "None") {
-                java.io.File(lutManager.lutDir, config.lut).absolutePath
-            } else null
-
-            fun processFull(bytes: ByteArray?, uri: Uri, index: Int): android.graphics.Bitmap? {
-                val finalBytes = bytes ?: run {
-                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                        java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
-                    }
-                } ?: return null
-                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
-                val orientation = try {
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                    } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-
-                val rotDegrees = when(orientation) {
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                    else -> 0
-                }
-                val fullW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight else options.outWidth
-                val fullH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth else options.outHeight
-                val bmpW = (fullW / config.zoomFactor).toInt()
-                val bmpH = (fullH / config.zoomFactor).toInt()
-                val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
-                val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks)
-
-                val meta = repository.getCaptureMetadata(uri)
-                top.maary.darkbag.processor.ColorProcessor.processRaw(
-                    dngData = finalBytes,
-                    targetLog = logIndex,
-                    lutPath = lutPath,
-                    exposure = adj.exposure,
-                    contrast = adj.contrast,
-                    saturation = adj.saturation,
-                    highlights = adj.highlights,
-                    shadows = adj.shadows,
-                    whites = adj.whites,
-                    blacks = adj.blacks,
-                    digitalGain = 1.0f,
-                    outputJpgPath = null,
-                    outputTiffPath = null,
-                    useGpu = false,
-                    orientation = rotDegrees,
-                    mirror = false,
-                    outputBitmap = previewBitmap,
-                    downsampleFactor = 1,
-                    zoomFactor = config.zoomFactor,
-                    metadata = meta
-                )
-                return previewBitmap
-            }
-
-            if (!currentGroup.isHalfFrame()) {
-                val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
-                val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
-                processFull(primaryBytes, primaryUri, 0)
-            } else {
-                val f1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
-                val f2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
-
-                        val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-                        val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-                        val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
-
-                        val finalComposite = HalfFrameComposer.compose(
-                            frame1 = f1,
-                            frame2 = f2,
-                            layout = activeLayout,
-                            isSwapped = config.isSwapped,
-                            showTimestamp = config.showTimestamp,
-                            flareType = config.flareType,
-                            time1 = time1,
-                            time2 = time2,
-                            downsample = top.maary.darkbag.utils.HalfFrameManager(context).downsample
-                        )
-                        f1?.recycle()
-                        f2?.recycle()
-                        finalComposite
-                    }
-        }
+        val LOOK_DOT_COLORS = ViewerBentoDeckCoordinator.LOOK_DOT_COLORS
     }
 }

@@ -14,6 +14,10 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import top.maary.darkbag.R
+import top.maary.darkbag.repository.CameraHardwareCapabilities
+import top.maary.darkbag.repository.DarkbagPreferences
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
@@ -23,9 +27,9 @@ class SettingsFragmentTest {
     fun testRawVideoResolutionOptionsAndDefault() {
         assertEquals(
             listOf("Max Native (4:3)", "2K Open Gate (4:3)", "4K UHD (16:9)", "1080p (16:9)"),
-            SettingsFragment.RAW_VIDEO_RESOLUTION_OPTIONS
+            PreferenceKeys.RAW_VIDEO_RESOLUTION_OPTIONS
         )
-        assertEquals("Max Native (4:3)", SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION)
+        assertEquals("Max Native (4:3)", PreferenceKeys.DEFAULT_RAW_VIDEO_RESOLUTION)
     }
 
     @Test
@@ -36,13 +40,13 @@ class SettingsFragmentTest {
             Size(4000, 3000),
             Size(1280, 720)
         )
-        val selected = SettingsFragment.selectRawVideoSize("Max Native (4:3)", sizes)
+        val selected = CameraHardwareCapabilities.selectRawVideoSize("Max Native (4:3)", sizes)
         assertEquals(Size(4000, 3000), selected)
 
-        val legacySelected = SettingsFragment.selectRawVideoSize("Max Native", sizes)
+        val legacySelected = CameraHardwareCapabilities.selectRawVideoSize("Max Native", sizes)
         assertEquals(Size(4000, 3000), legacySelected)
 
-        val emptySelected = SettingsFragment.selectRawVideoSize("Max Native (4:3)", emptyArray())
+        val emptySelected = CameraHardwareCapabilities.selectRawVideoSize("Max Native (4:3)", emptyArray())
         assertEquals(Size(4000, 3000), emptySelected)
     }
 
@@ -54,10 +58,10 @@ class SettingsFragmentTest {
             Size(4000, 3000),
             Size(1280, 720)
         )
-        val selected = SettingsFragment.selectRawVideoSize("2K Open Gate (4:3)", sizes)
+        val selected = CameraHardwareCapabilities.selectRawVideoSize("2K Open Gate (4:3)", sizes)
         assertEquals(Size(4000, 3000), selected)
 
-        val emptySelected = SettingsFragment.selectRawVideoSize("2K Open Gate (4:3)", emptyArray())
+        val emptySelected = CameraHardwareCapabilities.selectRawVideoSize("2K Open Gate (4:3)", emptyArray())
         assertEquals(Size(4000, 3000), emptySelected)
     }
 
@@ -68,10 +72,10 @@ class SettingsFragmentTest {
             Size(3840, 2160),
             Size(4000, 3000)
         )
-        val selected = SettingsFragment.selectRawVideoSize("4K UHD (16:9)", sizes)
+        val selected = CameraHardwareCapabilities.selectRawVideoSize("4K UHD (16:9)", sizes)
         assertEquals(Size(3840, 2160), selected)
 
-        val legacySelected = SettingsFragment.selectRawVideoSize("4K UHD", sizes)
+        val legacySelected = CameraHardwareCapabilities.selectRawVideoSize("4K UHD", sizes)
         assertEquals(Size(3840, 2160), legacySelected)
     }
 
@@ -82,7 +86,7 @@ class SettingsFragmentTest {
             Size(4096, 2304), // 16:9 near 4K
             Size(4000, 3000)
         )
-        val selected = SettingsFragment.selectRawVideoSize("4K UHD (16:9)", sizes)
+        val selected = CameraHardwareCapabilities.selectRawVideoSize("4K UHD (16:9)", sizes)
         assertEquals(Size(4096, 2304), selected)
     }
 
@@ -94,7 +98,7 @@ class SettingsFragmentTest {
             Size(3200, 2400), // 7,680,000 px (closest to 3840*2160 = 8,294,400)
             Size(4000, 3000)  // 12,000,000 px
         )
-        val selected = SettingsFragment.selectRawVideoSize("4K UHD (16:9)", sizes)
+        val selected = CameraHardwareCapabilities.selectRawVideoSize("4K UHD (16:9)", sizes)
         assertEquals(Size(3200, 2400), selected)
     }
 
@@ -105,10 +109,10 @@ class SettingsFragmentTest {
             Size(3840, 2160),
             Size(4000, 3000)
         )
-        val selected = SettingsFragment.selectRawVideoSize("1080p (16:9)", sizes)
+        val selected = CameraHardwareCapabilities.selectRawVideoSize("1080p (16:9)", sizes)
         assertEquals(Size(1920, 1080), selected)
 
-        val legacySelected = SettingsFragment.selectRawVideoSize("1080p", sizes)
+        val legacySelected = CameraHardwareCapabilities.selectRawVideoSize("1080p", sizes)
         assertEquals(Size(1920, 1080), legacySelected)
     }
 
@@ -119,7 +123,7 @@ class SettingsFragmentTest {
             Size(3840, 2160),
             Size(4000, 3000)
         )
-        val selected = SettingsFragment.selectRawVideoSize("1080p", sizes)
+        val selected = CameraHardwareCapabilities.selectRawVideoSize("1080p", sizes)
         assertEquals(Size(1280, 720), selected)
     }
 
@@ -131,7 +135,7 @@ class SettingsFragmentTest {
             Size(3200, 2400),
             Size(4000, 3000)
         )
-        val selected = SettingsFragment.selectRawVideoSize("1080p", sizes)
+        val selected = CameraHardwareCapabilities.selectRawVideoSize("1080p", sizes)
         assertEquals(Size(1600, 1200), selected)
     }
 
@@ -141,16 +145,16 @@ class SettingsFragmentTest {
             Size(1920, 1080),
             Size(4000, 3000)
         )
-        val selected = SettingsFragment.selectRawVideoSize("Unknown", sizes)
+        val selected = CameraHardwareCapabilities.selectRawVideoSize("Unknown", sizes)
         assertEquals(Size(4000, 3000), selected)
     }
 
     @Test
     fun testHardwareCapabilities_FpsAnd4kCropDetection() {
         // 1. 测试未获取到 characteristics 时的安全 fallback
-        assertEquals(30, SettingsFragment.HardwareCapabilities.getMaxSupportedFps(null))
-        assertFalse(SettingsFragment.HardwareCapabilities.is4kCropSupported(null))
-        assertNull(SettingsFragment.HardwareCapabilities.getMaxRawSize(null))
+        assertEquals(30, CameraHardwareCapabilities.getMaxSupportedFps(null))
+        assertFalse(CameraHardwareCapabilities.is4kCropSupported(null))
+        assertNull(CameraHardwareCapabilities.getMaxRawSize(null))
 
         // 2. 验证选项展示格式化逻辑
         val maxHardwareFps = 30
@@ -168,56 +172,56 @@ class SettingsFragmentTest {
     @Test
     fun testBurstProcessingStrategies() {
         assertEquals(
-            listOf(SettingsFragment.BURST_STRATEGY_BALANCED, SettingsFragment.BURST_STRATEGY_AGGRESSIVE),
-            SettingsFragment.BURST_PROCESSING_STRATEGIES
+            listOf(PreferenceKeys.BURST_STRATEGY_BALANCED, PreferenceKeys.BURST_STRATEGY_AGGRESSIVE),
+            PreferenceKeys.BURST_PROCESSING_STRATEGIES
         )
-        assertEquals("Balanced (Smooth UI)", SettingsFragment.BURST_STRATEGY_BALANCED)
-        assertEquals("Rapid Burst (Maximum Shots)", SettingsFragment.BURST_STRATEGY_AGGRESSIVE)
+        assertEquals("Balanced (Smooth UI)", PreferenceKeys.BURST_STRATEGY_BALANCED)
+        assertEquals("Rapid Burst (Maximum Shots)", PreferenceKeys.BURST_STRATEGY_AGGRESSIVE)
     }
 
     @Test
     fun testHdrFusionModes() {
-        assertEquals("hdr_fusion_mode", SettingsFragment.KEY_HDR_FUSION_MODE)
+        assertEquals("hdr_fusion_mode", PreferenceKeys.KEY_HDR_FUSION_MODE)
         assertEquals(
             listOf(
-                SettingsFragment.HDR_FUSION_AUTO,
-                SettingsFragment.HDR_FUSION_SPATIAL_RCD,
-                SettingsFragment.HDR_FUSION_SABRE,
-                SettingsFragment.HDR_FUSION_CLASSIC
+                PreferenceKeys.HDR_FUSION_AUTO,
+                PreferenceKeys.HDR_FUSION_SPATIAL_RCD,
+                PreferenceKeys.HDR_FUSION_SABRE,
+                PreferenceKeys.HDR_FUSION_CLASSIC
             ),
-            SettingsFragment.HDR_FUSION_MODES
+            PreferenceKeys.HDR_FUSION_MODES
         )
-        assertEquals("Auto (Spatial / Sabre Zoom)", SettingsFragment.HDR_FUSION_AUTO)
-        assertEquals("Spatial Merge + RCD", SettingsFragment.HDR_FUSION_SPATIAL_RCD)
-        assertEquals("Sabre (Super-Resolution)", SettingsFragment.HDR_FUSION_SABRE)
-        assertEquals("Classic HDR+ (Wiener)", SettingsFragment.HDR_FUSION_CLASSIC)
+        assertEquals("Auto (Spatial / Sabre Zoom)", PreferenceKeys.HDR_FUSION_AUTO)
+        assertEquals("Spatial Merge + RCD", PreferenceKeys.HDR_FUSION_SPATIAL_RCD)
+        assertEquals("Sabre (Super-Resolution)", PreferenceKeys.HDR_FUSION_SABRE)
+        assertEquals("Classic HDR+ (Wiener)", PreferenceKeys.HDR_FUSION_CLASSIC)
     }
 
     @Test
     fun testHdrFusionModeConstantsAndMapping() {
         // Verify key and list constants
-        assertEquals("hdr_fusion_mode", SettingsFragment.KEY_HDR_FUSION_MODE)
-        assertEquals(4, SettingsFragment.HDR_FUSION_MODES.size)
+        assertEquals("hdr_fusion_mode", PreferenceKeys.KEY_HDR_FUSION_MODE)
+        assertEquals(4, PreferenceKeys.HDR_FUSION_MODES.size)
 
         // Verify index contract matches pipeline fusionMode integers:
         // 0 -> Auto, 1 -> Spatial + RCD, 2 -> Sabre, 3 -> Classic
-        assertEquals(0, SettingsFragment.HDR_FUSION_MODES.indexOf(SettingsFragment.HDR_FUSION_AUTO))
-        assertEquals(1, SettingsFragment.HDR_FUSION_MODES.indexOf(SettingsFragment.HDR_FUSION_SPATIAL_RCD))
-        assertEquals(2, SettingsFragment.HDR_FUSION_MODES.indexOf(SettingsFragment.HDR_FUSION_SABRE))
-        assertEquals(3, SettingsFragment.HDR_FUSION_MODES.indexOf(SettingsFragment.HDR_FUSION_CLASSIC))
+        assertEquals(0, PreferenceKeys.HDR_FUSION_MODES.indexOf(PreferenceKeys.HDR_FUSION_AUTO))
+        assertEquals(1, PreferenceKeys.HDR_FUSION_MODES.indexOf(PreferenceKeys.HDR_FUSION_SPATIAL_RCD))
+        assertEquals(2, PreferenceKeys.HDR_FUSION_MODES.indexOf(PreferenceKeys.HDR_FUSION_SABRE))
+        assertEquals(3, PreferenceKeys.HDR_FUSION_MODES.indexOf(PreferenceKeys.HDR_FUSION_CLASSIC))
 
         // Contract verification of CameraFragment preference resolution
         fun mapPreferenceToFusionMode(pref: String?): Int = when (pref) {
-            SettingsFragment.HDR_FUSION_SPATIAL_RCD -> 1
-            SettingsFragment.HDR_FUSION_SABRE -> 2
-            SettingsFragment.HDR_FUSION_CLASSIC -> 3
+            PreferenceKeys.HDR_FUSION_SPATIAL_RCD -> 1
+            PreferenceKeys.HDR_FUSION_SABRE -> 2
+            PreferenceKeys.HDR_FUSION_CLASSIC -> 3
             else -> 0
         }
 
-        assertEquals(0, mapPreferenceToFusionMode(SettingsFragment.HDR_FUSION_AUTO))
-        assertEquals(1, mapPreferenceToFusionMode(SettingsFragment.HDR_FUSION_SPATIAL_RCD))
-        assertEquals(2, mapPreferenceToFusionMode(SettingsFragment.HDR_FUSION_SABRE))
-        assertEquals(3, mapPreferenceToFusionMode(SettingsFragment.HDR_FUSION_CLASSIC))
+        assertEquals(0, mapPreferenceToFusionMode(PreferenceKeys.HDR_FUSION_AUTO))
+        assertEquals(1, mapPreferenceToFusionMode(PreferenceKeys.HDR_FUSION_SPATIAL_RCD))
+        assertEquals(2, mapPreferenceToFusionMode(PreferenceKeys.HDR_FUSION_SABRE))
+        assertEquals(3, mapPreferenceToFusionMode(PreferenceKeys.HDR_FUSION_CLASSIC))
         assertEquals(0, mapPreferenceToFusionMode("Unknown"))
         assertEquals(0, mapPreferenceToFusionMode(null))
     }
@@ -394,7 +398,7 @@ class SettingsFragmentTest {
         assertNotNull(deckBinding.settingsButton)
 
         // Verify bindAuthenticPreview populates lens buttons and binds state cleanly
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = DarkbagPreferences()
         val spec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(prefs, top.maary.darkbag.viewmodel.CameraUiTier.PRO)
         top.maary.darkbag.ui.CameraBentoDeckView.bindAuthenticPreview(deckBinding, themedContext, prefs, spec)
         assertEquals(5, deckBinding.lensControlsContainer?.childCount)
@@ -423,7 +427,7 @@ class SettingsFragmentTest {
     fun testDeckVisibilitySpecTierParity() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = DarkbagPreferences()
 
         // 1. POINT_AND_SHOOT preset
         val psSpec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(prefs, top.maary.darkbag.viewmodel.CameraUiTier.POINT_AND_SHOOT)
@@ -450,28 +454,28 @@ class SettingsFragmentTest {
         assertTrue(proSpec.enableFocusPeaking)
 
         // 4. CUSTOM respects granular prefs and collapses Row B when all 3 Row B switches are off
-        prefs.edit()
-            .putBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
-            .putBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, false)
-            .putBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, false)
-            .putBoolean(SettingsFragment.KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, false)
-            .putBoolean(SettingsFragment.KEY_SHOW_SETTINGS_BUTTON, false)
-            .apply()
+        val collapsedPrefs = DarkbagPreferences(
+            enableManualControls = false,
+            showLutSwitcher = false,
+            showHdrPlusSwitch = false,
+            showHdrUnderexposureButton = false,
+            showSettingsButton = false
+        )
 
-        val customCollapsedSpec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(prefs, top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM)
+        val customCollapsedSpec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(collapsedPrefs, top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM)
         assertFalse(customCollapsedSpec.showFilmRow)
 
         // 5. CUSTOM keeps Row B visible when HDR+ is on, and dynamically expands fixed pills when Log/LUT is off
-        prefs.edit()
-            .putBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, true)
-            .putBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, false)
-            .putBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, true)
-            .putBoolean(SettingsFragment.KEY_SHOW_LENS_CONTROLS, false)
-            .putBoolean(SettingsFragment.KEY_SHOW_MODE_SWITCH_BUTTON, true)
-            .putBoolean(SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, true)
-            .apply()
+        val customPrefs = DarkbagPreferences(
+            enableManualControls = true,
+            showLutSwitcher = false,
+            showHdrPlusSwitch = true,
+            showLensControls = false,
+            showModeSwitchButton = true,
+            showCameraSwitchButton = true
+        )
 
-        val customSpec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(prefs, top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM)
+        val customSpec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(customPrefs, top.maary.darkbag.viewmodel.CameraUiTier.CUSTOM)
         assertTrue(customSpec.showProModule)
         assertFalse(customSpec.showLogAndLut)
         assertTrue(customSpec.showHdrPlusPill)
@@ -480,7 +484,7 @@ class SettingsFragmentTest {
         val inflater = LayoutInflater.from(themedContext)
         val host = androidx.constraintlayout.widget.ConstraintLayout(themedContext)
         val deckBinding = top.maary.darkbag.databinding.CameraUiContainerBinding.inflate(inflater, host)
-        top.maary.darkbag.ui.CameraBentoDeckView.bindAuthenticPreview(deckBinding, themedContext, prefs, customSpec)
+        top.maary.darkbag.ui.CameraBentoDeckView.bindAuthenticPreview(deckBinding, themedContext, customPrefs, customSpec)
 
         val hdrLp = deckBinding.hdrPlusPill?.layoutParams as android.widget.LinearLayout.LayoutParams
         assertEquals(0, hdrLp.width)
@@ -615,9 +619,10 @@ class SettingsFragmentTest {
 
     @Test
     fun testMotionPhotoAudioSwitchAndPreference() {
-        assertEquals("motion_photo_audio_enabled", SettingsFragment.KEY_MOTION_PHOTO_AUDIO)
+        assertEquals("motion_photo_audio_enabled", PreferenceKeys.KEY_MOTION_PHOTO_AUDIO)
 
         val context = ApplicationProvider.getApplicationContext<Context>()
+        SettingsRepository.resetForTest(context)
         val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
         val inflater = LayoutInflater.from(themedContext)
         val binding = top.maary.darkbag.databinding.FragmentSettingsBinding.inflate(inflater)
@@ -626,11 +631,31 @@ class SettingsFragmentTest {
         assertNotNull(binding.switchMotionPhotoAudio)
         assertEquals("AUDIO", binding.switchMotionPhotoAudio.badgeText)
 
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true).apply()
-        assertTrue(prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, false))
+        val repo = SettingsRepository.getInstance(context).apply { awaitHydratedBlocking() }
+        repo.setMotionPhotoAudioEnabled(true)
+        assertTrue(repo.current().motionPhotoAudioEnabled)
 
-        prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, false).apply()
-        assertFalse(prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO_AUDIO, true))
+        repo.setMotionPhotoAudioEnabled(false)
+        assertFalse(repo.current().motionPhotoAudioEnabled)
+    }
+
+    @Test
+    fun testSettingsFragmentLifecycleAttachmentAndViewModelResolution() {
+        val appContext = ApplicationProvider.getApplicationContext<Context>()
+        SettingsRepository.resetForTest(appContext)
+        val repo = SettingsRepository.getInstance(appContext).apply { awaitHydratedBlocking() }
+        repo.setFlashEnabled(true)
+        repo.setRawOutputFormatIndex(1)
+        repo.setHdrBurstCount(6)
+        repo.setDefaultFocal1x("28mm")
+
+        val activity = org.robolectric.Robolectric.buildActivity(androidx.fragment.app.FragmentActivity::class.java).setup().get()
+        activity.setTheme(top.maary.darkbag.R.style.AppTheme)
+        val fragment = SettingsFragment()
+        activity.supportFragmentManager.beginTransaction()
+            .add(fragment, "settings_test")
+            .commitNow()
+
+        assertNotNull(fragment.view)
     }
 }

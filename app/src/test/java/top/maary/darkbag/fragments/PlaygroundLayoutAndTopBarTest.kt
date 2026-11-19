@@ -15,9 +15,11 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import top.maary.darkbag.R
+import top.maary.darkbag.databinding.FragmentDarkroomGalleryBinding
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
 import top.maary.darkbag.databinding.FragmentPlaygroundGalleryBinding
 import top.maary.darkbag.databinding.ItemPlaygroundImageBinding
+import top.maary.darkbag.models.PlaygroundItem
 import top.maary.darkbag.ui.bento.BentoContainerRole
 import top.maary.darkbag.ui.bento.BentoTrayCard
 import java.io.File
@@ -152,7 +154,7 @@ class PlaygroundLayoutAndTopBarTest {
             binding.playgroundBentoDock is BentoTrayCard
         )
         val dockTray = binding.playgroundBentoDock as BentoTrayCard
-        assertEquals(BentoContainerRole.SURFACE_CONTAINER_LOW, dockTray.containerRole)
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER, dockTray.containerRole)
 
         // Test dynamic mode reactivity
         dockTray.setContainerRole(BentoContainerRole.SECONDARY_CONTAINER, animated = false)
@@ -163,9 +165,11 @@ class PlaygroundLayoutAndTopBarTest {
         assertNotNull(binding.tvPlaygroundTitle)
         assertNotNull(binding.tvPlaygroundSubtitle)
         assertNotNull(binding.btnPlaygroundSelectAll)
+        assertNotNull(binding.btnPlaygroundCamera)
         assertNotNull(binding.btnPlaygroundSettings)
         assertNotNull(binding.recyclerView)
         assertNotNull(binding.emptyStateText)
+        assertNotNull(binding.playgroundLoadingIndicator)
         assertNotNull(binding.fabAdd)
         assertNotNull(binding.btnMerge)
         assertNotNull(binding.btnDisband)
@@ -203,11 +207,28 @@ class PlaygroundLayoutAndTopBarTest {
             binding.adjustmentIsland is BentoTrayCard
         )
 
-        // Gallery bottom bar
-        assertNotNull(binding.galleryBottomBar)
+        // Gallery bottom bar (in decoupled DarkroomGallery layout)
+        val galleryBinding = FragmentDarkroomGalleryBinding.inflate(LayoutInflater.from(context))
+        assertNotNull(galleryBinding.galleryBottomBar)
         assertTrue(
             "galleryBottomBar must be BentoTrayCard",
-            binding.galleryBottomBar is BentoTrayCard
+            galleryBinding.galleryBottomBar is BentoTrayCard
         )
+    }
+
+    @Test
+    fun testPlaygroundTopBarCameraEntry() {
+        val binding = FragmentPlaygroundGalleryBinding.inflate(LayoutInflater.from(context))
+        assertEquals(View.GONE, binding.btnPlaygroundSelectAll.visibility)
+        assertEquals(View.VISIBLE, binding.btnPlaygroundCamera.visibility)
+        assertNotNull(binding.btnPlaygroundCamera.icon)
+    }
+
+    @Test
+    fun testDarkroomGalleryInsetsSetup() {
+        val galleryBinding = FragmentDarkroomGalleryBinding.inflate(LayoutInflater.from(context))
+        assertNotNull(galleryBinding.galleryHeaderCard)
+        assertNotNull(galleryBinding.galleryRecyclerView)
+        assertNotNull(galleryBinding.galleryBottomBar)
     }
 }

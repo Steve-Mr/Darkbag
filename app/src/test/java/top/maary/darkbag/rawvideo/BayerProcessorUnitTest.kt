@@ -3,7 +3,7 @@ package top.maary.darkbag.rawvideo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.PreferenceKeys
 
 class BayerProcessorUnitTest {
 
@@ -35,7 +35,7 @@ class BayerProcessorUnitTest {
         assertEquals(RawVideoNative.DOWNSAMPLE_CROP_4K, mapPreferenceToMode("4K UHD"))
         assertEquals(RawVideoNative.DOWNSAMPLE_NONE, mapPreferenceToMode("Max Native (4:3)"))
         assertEquals(RawVideoNative.DOWNSAMPLE_NONE, mapPreferenceToMode("Max Native"))
-        assertEquals(RawVideoNative.DOWNSAMPLE_NONE, mapPreferenceToMode(SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION))
+        assertEquals(RawVideoNative.DOWNSAMPLE_NONE, mapPreferenceToMode(PreferenceKeys.DEFAULT_RAW_VIDEO_RESOLUTION))
         assertEquals(RawVideoNative.DOWNSAMPLE_NONE, mapPreferenceToMode(null))
         assertEquals(RawVideoNative.DOWNSAMPLE_NONE, mapPreferenceToMode("invalid"))
     }

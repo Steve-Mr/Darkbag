@@ -75,7 +75,7 @@
                         android:id="@+id/tv_header_step"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="STEP 01 / 04"
+                        tools:text="STEP 01 / 04"
                         android:textSize="10.5sp"
                         android:textColor="?attr/colorOnSurfaceVariant" />
                 </LinearLayout>
@@ -210,7 +210,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="欢迎使用 Darkbag"
+                                android:text="@string/onboarding_welcome_title"
                                 android:textSize="13.5sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorOnSurface" />
@@ -245,13 +245,13 @@
                             android:orientation="horizontal"
                             android:gravity="center_vertical"
                             android:paddingHorizontal="4dp"
-                            android:layout_marginBottom="4dp">
+                            android:layout_marginBottom="8dp">
 
                             <TextView
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="STARTUP MODULE"
+                                android:text="@string/settings_section_startup"
                                 android:textSize="11sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorPrimary" />
@@ -262,20 +262,11 @@
                                 android:background="@drawable/bg_bento_badge_primary"
                                 android:paddingHorizontal="8dp"
                                 android:paddingVertical="2dp"
-                                android:text="STARTUP"
+                                android:text="@string/settings_badge_startup"
                                 android:textSize="10sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorPrimary" />
                         </LinearLayout>
-
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:paddingHorizontal="4dp"
-                            android:paddingBottom="4dp"
-                            android:text="默认启动模块"
-                            android:textSize="10sp"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
 
                         <!-- 2-Column Starter Cards -->
                         <top.maary.darkbag.ui.bento.BentoRowLayout
@@ -305,7 +296,7 @@
                                         android:id="@+id/txt_startup_camera_title"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="📷 CAMERA"
+                                        android:text="@string/settings_startup_camera_title"
                                         android:textSize="11.5sp"
                                         android:textStyle="bold"
                                         android:textColor="?attr/colorOnPrimaryContainer" />
@@ -314,7 +305,7 @@
                                         android:id="@+id/txt_startup_camera_desc"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="默认启动相机"
+                                        android:text="@string/settings_startup_camera_desc"
                                         android:textSize="9.5sp"
                                         android:textColor="?attr/colorOnPrimaryContainer"
                                         android:layout_marginTop="2dp" />
@@ -344,7 +335,7 @@
                                         android:id="@+id/txt_startup_playground_title"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="🎨 PLAYGROUND"
+                                        android:text="@string/settings_startup_playground_title"
                                         android:textSize="11.5sp"
                                         android:textStyle="bold"
                                         android:textColor="?attr/colorOnSurface" />
@@ -353,7 +344,7 @@
                                         android:id="@+id/txt_startup_playground_desc"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="外部暗房工作台"
+                                        android:text="@string/settings_startup_playground_desc"
                                         android:textSize="9.5sp"
                                         android:textColor="?attr/colorOnSurfaceVariant"
                                         android:layout_marginTop="2dp" />
@@ -388,7 +379,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="CORE PERMISSIONS"
+                                android:text="@string/onboarding_section_permissions"
                                 android:textSize="11sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorOnPrimaryContainer" />
@@ -399,7 +390,7 @@
                                 android:background="@drawable/bg_bento_badge_secondary"
                                 android:paddingHorizontal="8dp"
                                 android:paddingVertical="2dp"
-                                android:text="STEP 1"
+                                android:text="@string/onboarding_badge_step_1"
                                 android:textSize="10sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorSecondary" />
@@ -674,7 +665,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="CAPTURE &amp; OUTPUT"
+                                android:text="@string/settings_section_capture_output"
                                 android:textSize="11sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorOnSecondaryContainer" />
@@ -685,7 +676,7 @@
                                 android:background="@drawable/bg_bento_badge_secondary"
                                 android:paddingHorizontal="8dp"
                                 android:paddingVertical="2dp"
-                                android:text="FORMAT"
+                                android:text="@string/onboarding_badge_format"
                                 android:textSize="10sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorOnSecondaryContainer" />
@@ -832,7 +823,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="1.0X FOCAL BASE &amp; METADATA"
+                                android:text="@string/onboarding_section_optics"
                                 android:textSize="11sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorPrimary" />
@@ -843,7 +834,7 @@
                                 android:background="@drawable/bg_bento_badge_primary"
                                 android:paddingHorizontal="8dp"
                                 android:paddingVertical="2dp"
-                                android:text="OPTICS"
+                                android:text="@string/onboarding_badge_optics"
                                 android:textSize="10sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorPrimary" />
@@ -884,7 +875,7 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="原生广角"
+                                        android:text="@string/onboarding_focal_24_desc"
                                         android:textSize="9.5sp"
                                         android:textColor="?attr/colorOnPrimaryContainer" />
                                 </LinearLayout>
@@ -919,7 +910,7 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="经典街拍"
+                                        android:text="@string/onboarding_focal_28_desc"
                                         android:textSize="9.5sp"
                                         android:textColor="?attr/colorOnSurfaceVariant" />
                                 </LinearLayout>
@@ -954,7 +945,7 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="人文叙事"
+                                        android:text="@string/onboarding_focal_35_desc"
                                         android:textSize="9.5sp"
                                         android:textColor="?attr/colorOnSurfaceVariant" />
                                 </LinearLayout>
@@ -1048,7 +1039,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="FILM RECIPE &amp; LOG PAIRING"
+                                android:text="@string/onboarding_section_recipe_pairing"
                                 android:textSize="11sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorOnTertiaryContainer" />
@@ -1059,7 +1050,7 @@
                                 android:background="@drawable/bg_bento_badge_tertiary"
                                 android:paddingHorizontal="8dp"
                                 android:paddingVertical="2dp"
-                                android:text="RECIPE"
+                                android:text="@string/onboarding_badge_recipe"
                                 android:textSize="10sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorTertiary" />
@@ -1090,7 +1081,7 @@
                             android:layout_height="wrap_content"
                             android:paddingHorizontal="4dp"
                             android:layout_marginBottom="4dp"
-                            android:text="1. 选择配方适用的 Log 曲线"
+                            android:text="@string/onboarding_recipe_step1_select_log"
                             android:textSize="10.5sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorOnTertiaryContainer" />
@@ -1172,7 +1163,7 @@
                             style="@style/Widget.Material3.Button.TonalButton"
                             android:layout_width="match_parent"
                             android:layout_height="48dp"
-                            android:text="导入匹配 F-Log2 的 .cube 文件"
+                            tools:text="Import .cube matching F-Log2"
                             android:textSize="11sp"
                             android:textStyle="bold"
                             app:icon="@drawable/ic_lut"
@@ -1206,7 +1197,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
                                 android:layout_marginStart="8dp"
-                                android:text="Classic_Neg.cube ➔ F-Log2"
+                                tools:text="Classic_Neg.cube ➔ F-Log2"
                                 android:textSize="10.5sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorPrimary" />
@@ -1275,7 +1266,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="VIEWFINDER DECK TIER"
+                                android:text="@string/onboarding_section_ui_tier"
                                 android:textSize="11sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorOnPrimaryContainer" />
@@ -1286,7 +1277,7 @@
                                 android:background="@drawable/bg_bento_badge_primary"
                                 android:paddingHorizontal="8dp"
                                 android:paddingVertical="2dp"
-                                android:text="UI TIER"
+                                android:text="@string/onboarding_badge_ui_tier"
                                 android:textSize="10sp"
                                 android:textStyle="bold"
                                 android:textColor="?attr/colorPrimary" />
@@ -1319,7 +1310,7 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="P&amp;S"
+                                        android:text="@string/settings_tier_ps_tag"
                                         android:textSize="12sp"
                                         android:textStyle="bold"
                                         android:textColor="?attr/colorOnSurface" />
@@ -1327,7 +1318,7 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="极简快拍"
+                                        android:text="@string/onboarding_tier_ps_short"
                                         android:textSize="9.5sp"
                                         android:textColor="?attr/colorOnSurfaceVariant" />
                                 </LinearLayout>
@@ -1354,7 +1345,7 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="FILM"
+                                        android:text="@string/settings_tier_film_tag"
                                         android:textSize="12sp"
                                         android:textStyle="bold"
                                         android:textColor="?attr/colorOnPrimaryContainer" />
@@ -1362,7 +1353,7 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="胶片创作"
+                                        android:text="@string/onboarding_tier_film_short"
                                         android:textSize="9.5sp"
                                         android:textColor="?attr/colorOnPrimaryContainer" />
                                 </LinearLayout>
@@ -1389,7 +1380,7 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="PRO"
+                                        android:text="@string/settings_tier_pro_tag"
                                         android:textSize="12sp"
                                         android:textStyle="bold"
                                         android:textColor="?attr/colorOnSurface" />
@@ -1397,7 +1388,7 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="专业手动"
+                                        android:text="@string/onboarding_tier_pro_short"
                                         android:textSize="9.5sp"
                                         android:textColor="?attr/colorOnSurfaceVariant" />
                                 </LinearLayout>
@@ -1447,7 +1438,7 @@
                                     android:layout_width="0dp"
                                     android:layout_height="wrap_content"
                                     android:layout_weight="1"
-                                    android:text="长按快门动作"
+                                    android:text="@string/onboarding_shutter_hold_title"
                                     android:textSize="11sp"
                                     android:textStyle="bold"
                                     android:textColor="?attr/colorOnSurface" />
@@ -1459,7 +1450,7 @@
                                     android:background="@drawable/bg_bento_badge_secondary"
                                     android:paddingHorizontal="8dp"
                                     android:paddingVertical="2dp"
-                                    android:text="Standard MP4"
+                                    tools:text="Standard MP4"
                                     android:textSize="10sp"
                                     android:textStyle="bold"
                                     android:textColor="?attr/colorSecondary" />

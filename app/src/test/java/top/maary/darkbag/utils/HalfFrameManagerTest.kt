@@ -9,7 +9,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
@@ -23,8 +24,8 @@ class HalfFrameManagerTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
+        SettingsRepository.resetForTest(context)
+        SettingsRepository.getInstance(context).awaitHydratedBlocking()
 
         sessionStore = HalfFrameSessionStore(context)
         halfFrameManager = HalfFrameManager(context)
@@ -33,11 +34,10 @@ class HalfFrameManagerTest {
     @Test
     fun testNormalCapture_WithNullMetadata_NeverHijackedEvenIfGlobalModeIsHalfFrame() {
         // Given: User switched global mode to HALF_FRAME_SBS
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, SettingsFragment.MODE_HALF_FRAME_SBS)
-            .putBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, true)
-            .apply()
+        SettingsRepository.getInstance(context).edit {
+            this[PreferenceKeys.ACTIVE_CAPTURE_MODE] = PreferenceKeys.MODE_HALF_FRAME_SBS
+            this[PreferenceKeys.HALF_FRAME_MODE] = true
+        }
 
         // Verify global isEnabled is true
         assertEquals(true, halfFrameManager.isEnabled)
@@ -66,10 +66,7 @@ class HalfFrameManagerTest {
     @Test
     fun testNormalCapture_WithExplicitNormalProfile_NeverHijacked() {
         // Given: Global mode is HALF_FRAME_TB
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, SettingsFragment.MODE_HALF_FRAME_TB)
-            .apply()
+        SettingsRepository.getInstance(context).setActiveCaptureMode(PreferenceKeys.MODE_HALF_FRAME_TB)
 
         val dummyFile = File(context.cacheDir, "test_normal_explicit.jpg")
         dummyFile.writeBytes(byteArrayOf(1, 2, 3))

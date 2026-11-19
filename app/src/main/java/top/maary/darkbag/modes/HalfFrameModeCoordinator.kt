@@ -1,9 +1,9 @@
 package top.maary.darkbag.modes
 
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.CaptureTimingMode
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.pipeline.sink.HalfFrameCacheSink
+import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.utils.HalfFrameManager
 import top.maary.darkbag.utils.HalfFrameSessionStore
 import top.maary.darkbag.utils.ImageUtils
@@ -37,15 +37,15 @@ class HalfFrameModeCoordinator(
 
     override fun onActivated() {
         val layout = if (mode == CaptureMode.HALF_FRAME_TB) {
-            SettingsFragment.HALF_FRAME_LAYOUT_TB
+            PreferenceKeys.HALF_FRAME_LAYOUT_TB
         } else {
-            SettingsFragment.HALF_FRAME_LAYOUT_SBS
+            PreferenceKeys.HALF_FRAME_LAYOUT_SBS
         }
-        host.preferences.edit()
-            .putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, layout)
-            .putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, mode.key)
-            .putBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, true)
-            .apply()
+        host.settingsRepository.edit {
+            this[PreferenceKeys.HALF_FRAME_LAYOUT] = layout
+            this[PreferenceKeys.ACTIVE_CAPTURE_MODE] = mode.key
+            this[PreferenceKeys.HALF_FRAME_MODE] = true
+        }
         host.updateHalfFrameUi(animate = false)
     }
 
@@ -60,7 +60,7 @@ class HalfFrameModeCoordinator(
         // 立即截取取景器快照用于转场动效
         host.captureViewFinderSnapshot()
 
-        val prefs = host.preferences
+        val currentPrefs = host.settingsRepository.current()
         val currentSession = sessionStore.readSession(profile = profile)
         val step = currentSession.step
 
@@ -82,7 +82,7 @@ class HalfFrameModeCoordinator(
         }
 
         var resolvedFlare = -1
-        val flarePref = if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
+        val flarePref = if (currentPrefs.halfFrameLightLeak) 0 else -1
         resolvedFlare = if (flarePref == 0) Random().nextInt(2) + 1 else flarePref
 
         if (isFrame1) {
@@ -96,7 +96,7 @@ class HalfFrameModeCoordinator(
         val sessionForMetadata = sessionStore.readSession(profile = profile)
         val hfMetadata = HalfFrameManager.Metadata(
             profile = sessionForMetadata.profile,
-            dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false),
+            dateStamp = currentPrefs.halfFrameDateStamp,
             captureTimeMillis = timing.shutterClick,
             frame1BaseName = if (isFrame2) sessionForMetadata.baseName else null,
             frame1TempPath = if (isFrame2) sessionForMetadata.tempPath else null,
@@ -153,22 +153,39 @@ class HalfFrameModeCoordinator(
     }
 
     override fun getEffectiveOrientation(deviceOrientationDegrees: Int): Int {
-        val layout = host.preferences.getString(
-            SettingsFragment.KEY_HALF_FRAME_LAYOUT,
-            SettingsFragment.HALF_FRAME_LAYOUT_SBS
-        )
-        return if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) 270 else 0
+        val layout = host.settingsRepository.current().halfFrameLayout
+        return if (layout == PreferenceKeys.HALF_FRAME_LAYOUT_TB) 270 else 0
     }
 
     override fun getShutterDotRotation(deviceOrientationDegrees: Int): Float {
-        val layout = host.preferences.getString(
-            SettingsFragment.KEY_HALF_FRAME_LAYOUT,
-            SettingsFragment.HALF_FRAME_LAYOUT_SBS
-        )
-        return if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) {
+        val layout = host.settingsRepository.current().halfFrameLayout
+        return if (layout == PreferenceKeys.HALF_FRAME_LAYOUT_TB) {
             90f
         } else {
             0f
         }
+    }
+
+    override fun filterAvailableLenses(
+        lenses: List<top.maary.darkbag.utils.LensInfo>,
+        repoFacing: Int
+    ): List<top.maary.darkbag.utils.LensInfo> {
+        return lenses.filter { it.facing == repoFacing }.filter {
+            !it.isZoomPreset || it.sensorId.contains("virtual-2x")
+        }.filter {
+            !it.sensorId.contains(top.maary.darkbag.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
+        }
+    }
+
+    override fun shouldHideGalleryThumbnail(): Boolean {
+        return sessionStore.readSession(profile = profile).step == 1
+    }
+
+    override fun shouldClearThumbnailOnCapture(): Boolean {
+        return sessionStore.readSession(profile = profile).step == 1
+    }
+
+    override fun keepsProcessingAnimationActive(): Boolean {
+        return sessionStore.readSession(profile = profile).step == 1
     }
 }

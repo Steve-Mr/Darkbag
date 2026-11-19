@@ -1,7 +1,6 @@
 package top.maary.darkbag.modes
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.graphics.Bitmap
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.CompletableDeferred
@@ -15,25 +14,29 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.CaptureTimingMode
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.pipeline.sink.CaptureSink
 import top.maary.darkbag.pipeline.sink.DirectMediaStoreSink
 import top.maary.darkbag.pipeline.sink.HalfFrameCacheSink
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.HalfFrameManager
 import top.maary.darkbag.utils.HalfFrameSessionStore
+import top.maary.darkbag.utils.LensInfo
+import top.maary.darkbag.utils.LensType
+import top.maary.darkbag.utils.CameraRepository
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
 class CaptureModeCoordinatorTest {
 
     private lateinit var context: Context
-    private lateinit var prefs: SharedPreferences
+    private lateinit var settingsRepository: SettingsRepository
 
     class MockModeExecutionContext(
         override val context: Context,
-        override val preferences: SharedPreferences,
+        override val settingsRepository: SettingsRepository,
         override var isHdrPlusEnabled: Boolean = true,
         override var isRawSupported: Boolean = true,
         override var deviceOrientationDegrees: Int = 0
@@ -108,22 +111,39 @@ class CaptureModeCoordinatorTest {
             lastTiming = timing
         }
 
+        var frontPipToggled = false
+        var lastSwitchedMultiplier: Float? = null
+        var multiCamSessionBound = false
+
         override fun triggerMultiCameraPicture(timing: StandardTimingTracker) {
             multiCamTriggered = true
             lastTiming = timing
+        }
+
+        override fun toggleFrontPipInMultiCameraMode() {
+            frontPipToggled = true
+        }
+
+        override fun switchMultiCameraPrimaryLens(multiplier: Float) {
+            lastSwitchedMultiplier = multiplier
+        }
+
+        override fun bindMultiCameraSession(): Boolean {
+            multiCamSessionBound = true
+            return true
         }
     }
 
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
+        SettingsRepository.resetForTest(context)
+        settingsRepository = SettingsRepository.getInstance(context).apply { awaitHydratedBlocking() }
     }
 
     @Test
     fun testModeCoordinatorFactory_CreatesCorrectInstances() {
-        val host = MockModeExecutionContext(context, prefs)
+        val host = MockModeExecutionContext(context, settingsRepository)
 
         val normalCoord = ModeCoordinatorFactory.create(CaptureMode.NORMAL, host)
         assertTrue(normalCoord is NormalModeCoordinator)
@@ -144,7 +164,7 @@ class CaptureModeCoordinatorTest {
 
     @Test
     fun testNormalModeCoordinator_TriggersHdrPlusBurstWithDirectMediaStoreSink() {
-        val host = MockModeExecutionContext(context, prefs, isHdrPlusEnabled = true, isRawSupported = true)
+        val host = MockModeExecutionContext(context, settingsRepository, isHdrPlusEnabled = true, isRawSupported = true)
         val coordinator = NormalModeCoordinator(host)
         val timing = StandardTimingTracker(shutterClick = 1000L)
 
@@ -161,7 +181,7 @@ class CaptureModeCoordinatorTest {
 
     @Test
     fun testNormalModeCoordinator_TriggersSinglePictureWhenHdrPlusDisabled() {
-        val host = MockModeExecutionContext(context, prefs, isHdrPlusEnabled = false, isRawSupported = true)
+        val host = MockModeExecutionContext(context, settingsRepository, isHdrPlusEnabled = false, isRawSupported = true)
         val coordinator = NormalModeCoordinator(host)
         val timing = StandardTimingTracker(shutterClick = 2000L)
 
@@ -176,8 +196,8 @@ class CaptureModeCoordinatorTest {
 
     @Test
     fun testNormalModeCoordinator_MotionPhotoTriggeredWhenEnabled() {
-        prefs.edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO, true).apply()
-        val host = MockModeExecutionContext(context, prefs)
+        settingsRepository.setMotionPhotoEnabled(true)
+        val host = MockModeExecutionContext(context, settingsRepository)
         val coordinator = NormalModeCoordinator(host)
         val timing = StandardTimingTracker(shutterClick = 3000L)
 
@@ -192,7 +212,7 @@ class CaptureModeCoordinatorTest {
         sessionStore.clearCurrentSession(deleteTempFile = true)
         sessionStore.markStep(0)
 
-        val host = MockModeExecutionContext(context, prefs, isHdrPlusEnabled = true, isRawSupported = true)
+        val host = MockModeExecutionContext(context, settingsRepository, isHdrPlusEnabled = true, isRawSupported = true)
         val coordinator = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
         coordinator.onActivated()
 
@@ -241,22 +261,22 @@ class CaptureModeCoordinatorTest {
 
     @Test
     fun testHalfFrameModeCoordinator_DotRotationRespectsLayout() {
-        val host = MockModeExecutionContext(context, prefs)
+        val host = MockModeExecutionContext(context, settingsRepository)
 
         // SBS layout (Portrait) -> 0f
-        prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS).apply()
+        settingsRepository.setHalfFrameLayout(PreferenceKeys.HALF_FRAME_LAYOUT_SBS)
         val sbsCoordinator = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
         assertEquals(0f, sbsCoordinator.getShutterDotRotation(90))
 
         // TB layout (Landscape) -> 90f
-        prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_TB).apply()
+        settingsRepository.setHalfFrameLayout(PreferenceKeys.HALF_FRAME_LAYOUT_TB)
         val tbCoordinator = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_TB, host)
         assertEquals(90f, tbCoordinator.getShutterDotRotation(90))
     }
 
     @Test
     fun testMultiCameraModeCoordinator_TriggersMultiCameraCapture() {
-        val host = MockModeExecutionContext(context, prefs)
+        val host = MockModeExecutionContext(context, settingsRepository)
         val coordinator = MultiCameraModeCoordinator(host)
         val timing = StandardTimingTracker(shutterClick = 5000L)
 
@@ -268,7 +288,7 @@ class CaptureModeCoordinatorTest {
 
     @Test
     fun testCoordinators_RespectCanTriggerCaptureGuard() {
-        val host = MockModeExecutionContext(context, prefs).apply { canTrigger = false }
+        val host = MockModeExecutionContext(context, settingsRepository).apply { canTrigger = false }
         val normal = NormalModeCoordinator(host)
         normal.onShutterTriggered(StandardTimingTracker(shutterClick = 100L))
         assertFalse(host.burstTriggered)
@@ -297,7 +317,7 @@ class CaptureModeCoordinatorTest {
         sessionStore.clearProfile(HalfFrameSessionStore.PROFILE_HALF_SIDE)
         sessionStore.markStep(1, System.currentTimeMillis(), profile = HalfFrameSessionStore.PROFILE_HALF_SIDE)
 
-        val host = MockModeExecutionContext(context, prefs)
+        val host = MockModeExecutionContext(context, settingsRepository)
         val coordinator = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
 
         val consumed = coordinator.onShutterLongPressed()
@@ -313,22 +333,22 @@ class CaptureModeCoordinatorTest {
 
     @Test
     fun testHalfFrameModeCoordinator_EffectiveOrientationRespectsLayout() {
-        val host = MockModeExecutionContext(context, prefs)
+        val host = MockModeExecutionContext(context, settingsRepository)
 
         // SBS layout -> 0
-        prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS).apply()
+        settingsRepository.setHalfFrameLayout(PreferenceKeys.HALF_FRAME_LAYOUT_SBS)
         val sbsCoordinator = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
         assertEquals(0, sbsCoordinator.getEffectiveOrientation(90))
 
         // TB layout -> 270
-        prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_TB).apply()
+        settingsRepository.setHalfFrameLayout(PreferenceKeys.HALF_FRAME_LAYOUT_TB)
         val tbCoordinator = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_TB, host)
         assertEquals(270, tbCoordinator.getEffectiveOrientation(90))
     }
 
     @Test
     fun testNormalAndMultiCamera_DefaultLongPressAndOrientation() {
-        val host = MockModeExecutionContext(context, prefs)
+        val host = MockModeExecutionContext(context, settingsRepository)
         val normal = NormalModeCoordinator(host)
         val multi = MultiCameraModeCoordinator(host)
 
@@ -337,6 +357,100 @@ class CaptureModeCoordinatorTest {
 
         assertFalse(multi.onShutterLongPressed())
         assertEquals(180, multi.getEffectiveOrientation(180))
+    }
+
+    @Test
+    fun testModeSpecificSwitchCameraAndSessionBinding() {
+        val host = MockModeExecutionContext(context, settingsRepository)
+        val normal = NormalModeCoordinator(host)
+        val half = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+        val multi = MultiCameraModeCoordinator(host)
+
+        assertFalse(normal.onSwitchCameraClicked())
+        assertFalse(half.onSwitchCameraClicked())
+        assertTrue(multi.onSwitchCameraClicked())
+        assertTrue(host.frontPipToggled)
+
+        assertFalse(normal.bindCameraSession())
+        assertFalse(half.bindCameraSession())
+        assertTrue(multi.bindCameraSession())
+        assertTrue(host.multiCamSessionBound)
+
+        assertFalse(normal.supportsProLink())
+        assertFalse(half.supportsProLink())
+        assertTrue(multi.supportsProLink())
+    }
+
+    @Test
+    fun testHalfFrameModeCoordinator_ThumbnailAndProgressHoldInStep1() {
+        val sessionStore = HalfFrameSessionStore(context)
+        sessionStore.clearProfile(HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        val host = MockModeExecutionContext(context, settingsRepository)
+        val half = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+
+        // In step 0
+        assertFalse(half.shouldHideGalleryThumbnail())
+        assertFalse(half.shouldClearThumbnailOnCapture())
+        assertFalse(half.keepsProcessingAnimationActive())
+
+        // In step 1
+        sessionStore.markStep(1, System.currentTimeMillis(), profile = HalfFrameSessionStore.PROFILE_HALF_SIDE)
+        assertTrue(half.shouldHideGalleryThumbnail())
+        assertTrue(half.shouldClearThumbnailOnCapture())
+        assertTrue(half.keepsProcessingAnimationActive())
+    }
+
+    @Test
+    fun testFilterAvailableLenses_Normal_HalfFrame_MultiCamera() {
+        val host = MockModeExecutionContext(context, settingsRepository)
+        val normal = NormalModeCoordinator(host)
+        val half = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+        val multi = MultiCameraModeCoordinator(host)
+
+        val wideBack = LensInfo(
+            id = "0", physicalId = null, sensorId = "wide-0", name = "1x Wide",
+            focalLength = 4.38f, equivalentFocalLength = 26f, multiplier = 1.0f,
+            type = LensType.WIDE, facing = 0, isLogicalAuto = false, isZoomPreset = false
+        )
+        val teleVirtual = LensInfo(
+            id = "0", physicalId = null, sensorId = "wide-0${CameraRepository.VIRTUAL_TELE_2X_SUFFIX}", name = "2x Crop",
+            focalLength = 4.38f, equivalentFocalLength = 52f, multiplier = 2.0f,
+            type = LensType.TELE, facing = 0, isLogicalAuto = false, isZoomPreset = true
+        )
+        val frontLens = LensInfo(
+            id = "1", physicalId = null, sensorId = "front-1", name = "Front",
+            focalLength = 3.5f, equivalentFocalLength = 24f, multiplier = 1.0f,
+            type = LensType.WIDE, facing = 1, isLogicalAuto = false, isZoomPreset = false
+        )
+
+        val allLenses = listOf(wideBack, teleVirtual, frontLens)
+
+        val normalFiltered = normal.filterAvailableLenses(allLenses, repoFacing = 0)
+        assertEquals(1, normalFiltered.size)
+        assertEquals("wide-0", normalFiltered[0].sensorId)
+
+        val halfFiltered = half.filterAvailableLenses(allLenses, repoFacing = 0)
+        assertEquals(1, halfFiltered.size)
+        assertEquals("wide-0", halfFiltered[0].sensorId)
+
+        val multiFiltered = multi.filterAvailableLenses(allLenses, repoFacing = 0)
+        assertEquals(1, multiFiltered.size)
+        assertEquals("wide-0", multiFiltered[0].sensorId)
+
+        assertTrue(multi.onLensSelected(wideBack))
+        assertEquals(1.0f, host.lastSwitchedMultiplier)
+    }
+
+    @Test
+    fun testSupportsLongPressVideo_policyByCoordinator() {
+        val host = MockModeExecutionContext(context, settingsRepository)
+        val normal = NormalModeCoordinator(host)
+        val half = HalfFrameModeCoordinator(CaptureMode.HALF_FRAME_SBS, host)
+        val multi = MultiCameraModeCoordinator(host)
+
+        assertTrue(normal.supportsLongPressVideo())
+        assertFalse(half.supportsLongPressVideo())
+        assertFalse(multi.supportsLongPressVideo())
     }
 }
 

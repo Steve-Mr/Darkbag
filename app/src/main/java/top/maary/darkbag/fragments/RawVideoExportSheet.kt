@@ -74,7 +74,7 @@ class RawVideoExportSheet : BottomSheetDialogFragment() {
         }
 
         // 2. Setup Log Dropdown Menu
-        val logOptions = listOf("None") + SettingsFragment.LOG_CURVES
+        val logOptions = listOf("None") + top.maary.darkbag.repository.PreferenceKeys.LOG_CURVES
         selectedLog = if (logOptions.contains(initialLog)) initialLog else "None"
 
         val logAdapter = android.widget.ArrayAdapter(context, android.R.layout.simple_dropdown_item_1line, logOptions)

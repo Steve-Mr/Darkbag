@@ -4,6 +4,7 @@ import android.app.Application
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
+import top.maary.darkbag.repository.SettingsRepository
 
 class MainApplication : Application() {
     // Global scope for background processing that should survive UI destruction
@@ -15,11 +16,7 @@ class MainApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         // Clear session-based camera settings on app startup
-        val prefs = getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-        prefs.edit()
-            .remove(top.maary.darkbag.fragments.CameraFragment.KEY_SELECTED_LENS_ID)
-            .remove(top.maary.darkbag.fragments.CameraFragment.KEY_LENS_FACING)
-            .apply()
+        SettingsRepository.getInstance(this).clearSessionLensState()
 
         top.maary.darkbag.processor.ColorProcessor.detectAndApplyMemoryTier(this)
     }
@@ -29,6 +26,7 @@ class MainApplication : Application() {
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
             level == android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
             top.maary.darkbag.processor.ColorProcessor.clearSabreTexturePoolAsync()
+            top.maary.darkbag.repository.GalleryCacheStore.getInstance().onTrimMemory(level)
         }
     }
 }

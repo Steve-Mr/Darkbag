@@ -2,30 +2,36 @@ package top.maary.darkbag.camera
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.ImageFormat
-import android.hardware.camera2.*
-import android.hardware.camera2.params.OutputConfiguration
-import android.hardware.camera2.params.SessionConfiguration
-import android.media.ExifInterface
-import android.media.Image
-import android.media.ImageReader
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.TotalCaptureResult
+import android.hardware.camera2.params.MeteringRectangle
 import android.os.Build
 import android.os.Handler
-import android.os.HandlerThread
 import android.util.Log
-import android.util.Size
 import android.view.Surface
 import androidx.annotation.RequiresApi
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import top.maary.darkbag.camera.multicam.ConcurrentStandaloneCaptureStrategy
+import top.maary.darkbag.camera.multicam.FastRelayCaptureStrategy
+import top.maary.darkbag.camera.multicam.MultiCamDngMetadataWriter
+import top.maary.darkbag.camera.multicam.MultiCamSessionConnector
+import top.maary.darkbag.camera.multicam.MultiCameraPreviewController
+import top.maary.darkbag.camera.multicam.NativeLogicalCaptureStrategy
 import top.maary.darkbag.models.CaptureMetadata
-import top.maary.darkbag.utils.*
-import java.io.File
-import java.io.FileOutputStream
-import java.text.SimpleDateFormat
-import java.util.*
-import java.util.concurrent.ConcurrentHashMap
+import top.maary.darkbag.utils.DualLensPairPreference
+import top.maary.darkbag.utils.LensType
+import top.maary.darkbag.utils.LogicalMultiCameraInfo
+import top.maary.darkbag.utils.MultiCameraCountPreference
+import top.maary.darkbag.utils.MultiCameraHardwareType
+import top.maary.darkbag.utils.MultiCameraHelper
+import top.maary.darkbag.utils.PhysicalLensInfo
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
@@ -58,55 +64,89 @@ data class MultiCameraManualConfig(
     val iso: Int = 100,
     val isManualShutter: Boolean = false,
     val exposureTimeNanos: Long = 10_000_000L,
-    val evIndex: Int = 0
+    val evIndex: Int = 0,
+    val focusMeteringRegion: MeteringRectangle? = null,
+    val exposureMeteringRegion: MeteringRectangle? = null
 )
 
 @RequiresApi(Build.VERSION_CODES.P)
 class MultiCameraCaptureManager(
-    private val context: Context,
+    context: Context,
     private val scope: CoroutineScope
 ) {
     companion object {
         private const val TAG = "MultiCameraCaptureMgr"
-        private const val CAPTURE_TIMEOUT_MS = 8000L
     }
 
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val executor: Executor = Executors.newSingleThreadExecutor()
-
-    private var cameraThread: HandlerThread? = null
-    private var cameraHandler: Handler? = null
-
-    // Native Logical Multi-Camera Session State
-    private var cameraDevice: CameraDevice? = null
-    private var captureSession: CameraCaptureSession? = null
-
-    // Standalone Concurrent Session State
-    private val openDevices = ConcurrentHashMap<String, CameraDevice>()
-    private val openSessions = ConcurrentHashMap<String, CameraCaptureSession>()
-
-    private var currentLogicalInfo: LogicalMultiCameraInfo? = null
-    private var currentCountPref: MultiCameraCountPreference = MultiCameraCountPreference.AUTO_MAX
-    private var currentPairPref: DualLensPairPreference = DualLensPairPreference.WIDE_ULTRAWIDE
-    private var currentSaveRaw: Boolean = false
-
-    private var activeLenses: List<PhysicalLensInfo> = emptyList()
-    private val jpegImageReaders = ConcurrentHashMap<String, ImageReader>()
-    private val rawImageReaders = ConcurrentHashMap<String, ImageReader>()
-    private var previewSurface: Surface? = null
-
     private val lock = Mutex()
-    private var isCapturing = false
 
-    var onSessionConfiguredListener: (() -> Unit)? = null
-    var onSessionFailedListener: ((String) -> Unit)? = null
+    private val dngWriter = MultiCamDngMetadataWriter(context, cameraManager)
+    private lateinit var sessionConnector: MultiCamSessionConnector
 
-    private fun ensureThread() {
-        if (cameraThread == null) {
-            cameraThread = HandlerThread("MultiCameraThread").apply { start() }
-            cameraHandler = Handler(cameraThread!!.looper)
+    private val previewCtrl: MultiCameraPreviewController = MultiCameraPreviewController(
+        cameraManager = cameraManager,
+        scope = scope,
+        executor = executor,
+        dngWriter = dngWriter,
+        onFallbackToRelay = { fallbackInfo, targetPreviewSurface ->
+            sessionConnector.openRelayPrimarySession(fallbackInfo, targetPreviewSurface, isInitialConfig = true)
         }
+    ).also { ctrl ->
+        sessionConnector = MultiCamSessionConnector(
+            cameraManager = cameraManager,
+            scope = scope,
+            executor = executor,
+            previewCtrl = ctrl,
+            dngWriter = dngWriter,
+            onCloseRequested = { close() }
+        )
     }
+
+    private val nativeLogicalStrategy = NativeLogicalCaptureStrategy(
+        cameraManager = cameraManager,
+        scope = scope,
+        previewCtrl = previewCtrl,
+        dngWriter = dngWriter,
+        applyManualConfig = ::applyManualConfig
+    )
+    private val concurrentStandaloneStrategy = ConcurrentStandaloneCaptureStrategy(
+        scope = scope,
+        previewCtrl = previewCtrl,
+        dngWriter = dngWriter,
+        applyManualConfig = ::applyManualConfig
+    )
+    private val fastRelayStrategy = FastRelayCaptureStrategy(
+        cameraManager = cameraManager,
+        scope = scope,
+        executor = executor,
+        previewCtrl = previewCtrl,
+        dngWriter = dngWriter,
+        applyManualConfig = ::applyManualConfig,
+        reopenRelayPrimarySession = { info, surface, lens ->
+            sessionConnector.openRelayPrimarySession(info, surface, targetLens = lens)
+        }
+    )
+
+    var onSessionConfiguredListener: (() -> Unit)?
+        get() = previewCtrl.onSessionConfiguredListener
+        set(value) { previewCtrl.onSessionConfiguredListener = value }
+
+    var onSessionFailedListener: ((String) -> Unit)?
+        get() = previewCtrl.onSessionFailedListener
+        set(value) { previewCtrl.onSessionFailedListener = value }
+
+    var onPreviewCaptureResultListener: ((TotalCaptureResult) -> Unit)?
+        get() = previewCtrl.onPreviewCaptureResultListener
+        set(value) { previewCtrl.onPreviewCaptureResultListener = value }
+
+    var previewRequestConfigProvider: ((CaptureRequest.Builder) -> Unit)?
+        get() = previewCtrl.previewRequestConfigProvider
+        set(value) { previewCtrl.previewRequestConfigProvider = value }
+
+    val currentPrimaryLens: PhysicalLensInfo?
+        get() = previewCtrl.currentPrimaryLens
 
     @SuppressLint("MissingPermission")
     suspend fun openAndConfigure(
@@ -117,512 +157,71 @@ class MultiCameraCaptureManager(
         saveRaw: Boolean = false,
         initialLensMultiplier: Float? = null
     ) = lock.withLock {
-        ensureThread()
-        closeInternal()
+        previewCtrl.ensureThread()
+        previewCtrl.closeInternal()
 
-        currentLogicalInfo = logicalInfo
-        currentCountPref = countPref
-        currentPairPref = pairPref
-        currentSaveRaw = saveRaw
-        previewSurface = targetPreviewSurface
+        previewCtrl.currentLogicalInfo = logicalInfo
+        previewCtrl.currentCountPref = countPref
+        previewCtrl.currentPairPref = pairPref
+        previewCtrl.currentSaveRaw = saveRaw
+        previewCtrl.previewSurface = targetPreviewSurface
 
-        // Resolve candidate lenses based on user preferences
         val initialCandidates = MultiCameraHelper.resolveActivePhysicalLenses(
             logicalInfo = logicalInfo,
             countPref = countPref,
             pairPref = pairPref,
             maxHardwareSupported = 3
         )
-        activeLenses = initialCandidates
+        previewCtrl.activeLenses = initialCandidates
         if (initialLensMultiplier != null) {
-            currentPrimaryLens = activeLenses.minByOrNull { kotlin.math.abs(it.multiplier - initialLensMultiplier) }
+            previewCtrl.currentPrimaryLens = previewCtrl.activeLenses.minByOrNull { kotlin.math.abs(it.multiplier - initialLensMultiplier) }
         }
-        if (currentPrimaryLens == null) {
-            currentPrimaryLens = activeLenses.find { it.type == LensType.WIDE } ?: activeLenses.firstOrNull()
+        if (previewCtrl.currentPrimaryLens == null) {
+            previewCtrl.currentPrimaryLens = previewCtrl.activeLenses.find { it.type == LensType.WIDE } ?: previewCtrl.activeLenses.firstOrNull()
         }
-        Log.i(TAG, "Configuring MultiCamera with hardwareType=${logicalInfo.hardwareType}, lenses=${activeLenses.map { it.name }}, primary=${currentPrimaryLens?.name}, saveRaw=$saveRaw")
+        Log.i(
+            TAG,
+            "Configuring MultiCamera with hardwareType=${logicalInfo.hardwareType}, " +
+                "lenses=${previewCtrl.activeLenses.map { it.name }}, primary=${previewCtrl.currentPrimaryLens?.name}, saveRaw=$saveRaw"
+        )
 
         when (logicalInfo.hardwareType) {
-            MultiCameraHardwareType.NATIVE_LOGICAL -> {
-                openNativeLogicalSession(logicalInfo, countPref, pairPref, targetPreviewSurface, saveRaw)
-            }
-            MultiCameraHardwareType.CONCURRENT_STANDALONE -> {
-                openConcurrentStandaloneSessions(activeLenses, targetPreviewSurface, saveRaw)
-            }
-            MultiCameraHardwareType.FAST_RELAY_BURST, MultiCameraHardwareType.NONE -> {
-                openRelayPrimarySession(logicalInfo, targetPreviewSurface, targetLens = currentPrimaryLens, isInitialConfig = true)
-            }
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun openNativeLogicalSession(
-        logicalInfo: LogicalMultiCameraInfo,
-        countPref: MultiCameraCountPreference,
-        pairPref: DualLensPairPreference,
-        targetPreviewSurface: Surface,
-        saveRaw: Boolean
-    ) {
-        val logicalId = logicalInfo.logicalCameraId
-        val openDeferred = CompletableDeferred<CameraDevice>()
-
-        try {
-            cameraManager.openCamera(logicalId, executor, object : CameraDevice.StateCallback() {
-                override fun onOpened(device: CameraDevice) {
-                    cameraDevice = device
-                    openDeferred.complete(device)
-                }
-
-                override fun onDisconnected(device: CameraDevice) {
-                    Log.w(TAG, "Logical camera disconnected: ${device.id}")
-                    scope.launch { close() }
-                }
-
-                override fun onError(device: CameraDevice, error: Int) {
-                    Log.e(TAG, "Logical camera error: $error on device: ${device.id}")
-                    if (!openDeferred.isCompleted) {
-                        openDeferred.completeExceptionally(RuntimeException("Camera open failed: $error"))
-                    }
-                    scope.launch { close() }
-                    onSessionFailedListener?.invoke("Camera open error: $error")
-                }
-            })
-
-            val device = openDeferred.await()
-            createNativeLogicalMultiCameraSession(device, logicalInfo, countPref, pairPref, targetPreviewSurface, saveRaw)
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to open native logical multi-camera", e)
-            closeInternal()
-            onSessionFailedListener?.invoke(e.message ?: "Failed to open camera")
-        }
-    }
-
-    private fun createNativeLogicalMultiCameraSession(
-        device: CameraDevice,
-        logicalInfo: LogicalMultiCameraInfo,
-        countPref: MultiCameraCountPreference,
-        pairPref: DualLensPairPreference,
-        targetPreviewSurface: Surface,
-        saveRaw: Boolean
-    ) {
-        closeReaders()
-
-        var currentSelection = activeLenses
-        var sessionConfig = buildNativeSessionConfiguration(device, currentSelection, targetPreviewSurface, saveRaw)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val supported = device.isSessionConfigurationSupported(sessionConfig)
-            Log.i(TAG, "Native session configuration support check: $supported")
-
-            if (!supported && currentSelection.size > 2) {
-                Log.w(TAG, "Triple-camera stream configuration unsupported. Falling back to Dual camera.")
-                currentSelection = MultiCameraHelper.resolveActivePhysicalLenses(
-                    logicalInfo = logicalInfo,
-                    countPref = MultiCameraCountPreference.DUAL,
-                    pairPref = pairPref,
-                    maxHardwareSupported = 2
+            MultiCameraHardwareType.NATIVE_LOGICAL ->
+                sessionConnector.openNativeLogicalSession(logicalInfo, pairPref, targetPreviewSurface)
+            MultiCameraHardwareType.CONCURRENT_STANDALONE ->
+                sessionConnector.openConcurrentStandaloneSessions(previewCtrl.activeLenses, targetPreviewSurface)
+            MultiCameraHardwareType.FAST_RELAY_BURST, MultiCameraHardwareType.NONE ->
+                sessionConnector.openRelayPrimarySession(
+                    logicalInfo, targetPreviewSurface, targetLens = previewCtrl.currentPrimaryLens, isInitialConfig = true
                 )
-                activeLenses = currentSelection
-                closeReaders()
-                sessionConfig = buildNativeSessionConfiguration(device, currentSelection, targetPreviewSurface, saveRaw)
-            }
         }
+    }
 
-        try {
-            device.createCaptureSession(sessionConfig)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to create native logical capture session, falling back to Fast Relay Burst", e)
-            val fallbackInfo = currentLogicalInfo?.copy(hardwareType = MultiCameraHardwareType.FAST_RELAY_BURST)
-                ?: LogicalMultiCameraInfo(device.id, false, 0, activeLenses, MultiCameraHardwareType.FAST_RELAY_BURST)
-            currentLogicalInfo = fallbackInfo
+    fun getPreviewDevice(): CameraDevice? = previewCtrl.getPreviewDevice()
+    fun getPreviewSession(): CameraCaptureSession? = previewCtrl.getPreviewSession()
+    fun getPreviewSurface(): Surface? = previewCtrl.previewSurface
+    fun getCameraHandler(): Handler? = previewCtrl.cameraHandler
+
+    internal fun resolveActivePreviewPhysicalId(): String? = previewCtrl.resolveActivePreviewPhysicalId()
+    internal fun resolveActivePreviewLens(): PhysicalLensInfo? = previewCtrl.resolveActivePreviewLens()
+    fun getActivePreviewPhysicalCharacteristics(): CameraCharacteristics? = previewCtrl.getActivePreviewPhysicalCharacteristics()
+    fun getActivePreviewZoomRatio(): Float = previewCtrl.getActivePreviewZoomRatio()
+    fun applyCurrentPreviewZoomAndCrop(builder: CaptureRequest.Builder) = previewCtrl.applyCurrentPreviewZoomAndCrop(builder)
+    fun updatePreviewRequest() = previewCtrl.updatePreviewRequest()
+
+    fun switchPrimaryPreviewLensByMultiplier(multiplier: Float) =
+        previewCtrl.switchPrimaryPreviewLensByMultiplier(multiplier) { info, surface, lens ->
             scope.launch {
-                closeInternal()
-                openRelayPrimarySession(fallbackInfo, targetPreviewSurface, isInitialConfig = true)
-            }
-        }
-    }
-
-    private fun buildNativeSessionConfiguration(
-        device: CameraDevice,
-        lenses: List<PhysicalLensInfo>,
-        targetPreviewSurface: Surface,
-        saveRaw: Boolean
-    ): SessionConfiguration {
-        val outputConfigs = mutableListOf<OutputConfiguration>()
-
-        val previewConfig = OutputConfiguration(targetPreviewSurface)
-        outputConfigs.add(previewConfig)
-
-        for (lens in lenses) {
-            val jpegSize = getOptimalOutputSize(lens, ImageFormat.JPEG)
-            val jpegReader = ImageReader.newInstance(jpegSize.width, jpegSize.height, ImageFormat.JPEG, 2)
-            jpegImageReaders[lens.physicalId] = jpegReader
-
-            val jpegConfig = OutputConfiguration(jpegReader.surface).apply {
-                setPhysicalCameraId(lens.physicalId)
-            }
-            outputConfigs.add(jpegConfig)
-
-            if (isRawSupportedForLens(lens)) {
-                val rawSize = getOptimalOutputSize(lens, ImageFormat.RAW_SENSOR)
-                val rawReader = ImageReader.newInstance(rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2)
-                rawImageReaders[lens.physicalId] = rawReader
-
-                val rawConfig = OutputConfiguration(rawReader.surface).apply {
-                    setPhysicalCameraId(lens.physicalId)
-                }
-                outputConfigs.add(rawConfig)
+                lock.withLock { sessionConnector.openRelayPrimarySession(info, surface, targetLens = lens) }
             }
         }
 
-        return SessionConfiguration(
-            SessionConfiguration.SESSION_REGULAR,
-            outputConfigs,
-            executor,
-            object : CameraCaptureSession.StateCallback() {
-                override fun onConfigured(session: CameraCaptureSession) {
-                    Log.i(TAG, "Native multi-camera capture session successfully configured!")
-                    captureSession = session
-                    startRepeatingPreview(device, session, targetPreviewSurface)
-                    onSessionConfiguredListener?.invoke()
-                }
-
-                override fun onConfigureFailed(session: CameraCaptureSession) {
-                    Log.w(TAG, "Native multi-camera capture session configuration failed, falling back to Fast Relay Burst")
-                    val fallbackInfo = currentLogicalInfo?.copy(hardwareType = MultiCameraHardwareType.FAST_RELAY_BURST)
-                        ?: LogicalMultiCameraInfo(device.id, false, 0, activeLenses, MultiCameraHardwareType.FAST_RELAY_BURST)
-                    currentLogicalInfo = fallbackInfo
-                    scope.launch {
-                        closeInternal()
-                        openRelayPrimarySession(fallbackInfo, targetPreviewSurface, isInitialConfig = true)
-                    }
-                }
-            }
-        )
-    }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun openConcurrentStandaloneSessions(
-        lenses: List<PhysicalLensInfo>,
-        targetPreviewSurface: Surface,
-        saveRaw: Boolean
-    ) {
-        val primaryLens = lenses.find { it.type == LensType.WIDE } ?: lenses.first()
-        var openedCount = 0
-
-        for (lens in lenses) {
-            val isPrimary = lens.physicalId == primaryLens.physicalId
-            val openDeferred = CompletableDeferred<CameraDevice>()
-
-            try {
-                cameraManager.openCamera(lens.physicalId, executor, object : CameraDevice.StateCallback() {
-                    override fun onOpened(dev: CameraDevice) {
-                        openDevices[lens.physicalId] = dev
-                        openDeferred.complete(dev)
-                    }
-
-                    override fun onDisconnected(dev: CameraDevice) {
-                        openDevices.remove(lens.physicalId)
-                    }
-
-                    override fun onError(dev: CameraDevice, error: Int) {
-                        Log.e(TAG, "Concurrent camera ${lens.physicalId} error: $error")
-                        if (!openDeferred.isCompleted) {
-                            openDeferred.completeExceptionally(RuntimeException("Open error: $error"))
-                        }
-                    }
-                })
-
-                val dev = openDeferred.await()
-                val jpegSize = getOptimalOutputSize(lens, ImageFormat.JPEG)
-                val jpegReader = ImageReader.newInstance(jpegSize.width, jpegSize.height, ImageFormat.JPEG, 2)
-                jpegImageReaders[lens.physicalId] = jpegReader
-
-                val surfaces = mutableListOf<Surface>(jpegReader.surface)
-                if (isPrimary) {
-                    surfaces.add(targetPreviewSurface)
-                }
-
-                if (isRawSupportedForLens(lens)) {
-                    val rawSize = getOptimalOutputSize(lens, ImageFormat.RAW_SENSOR)
-                    val rawReader = ImageReader.newInstance(rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2)
-                    rawImageReaders[lens.physicalId] = rawReader
-                    surfaces.add(rawReader.surface)
-                }
-
-                val sessionDeferred = CompletableDeferred<CameraCaptureSession>()
-                val sessionConfig = SessionConfiguration(
-                    SessionConfiguration.SESSION_REGULAR,
-                    surfaces.map { OutputConfiguration(it) },
-                    executor,
-                    object : CameraCaptureSession.StateCallback() {
-                        override fun onConfigured(sess: CameraCaptureSession) {
-                            openSessions[lens.physicalId] = sess
-                            if (isPrimary) {
-                                startRepeatingPreview(dev, sess, targetPreviewSurface)
-                            }
-                            sessionDeferred.complete(sess)
-                        }
-
-                        override fun onConfigureFailed(sess: CameraCaptureSession) {
-                            sessionDeferred.completeExceptionally(RuntimeException("Session failed on ${lens.physicalId}"))
-                        }
-                    }
-                )
-                dev.createCaptureSession(sessionConfig)
-                sessionDeferred.await()
-                openedCount++
-
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed concurrent open for ${lens.name}, will fallback to relay mode", e)
-                break
-            }
-        }
-
-        if (openedCount == lenses.size) {
-            Log.i(TAG, "Concurrent standalone sessions opened successfully for all $openedCount cameras")
-            onSessionConfiguredListener?.invoke()
-        } else {
-            Log.w(TAG, "Concurrent open incomplete ($openedCount/${lenses.size}), falling back to Fast Relay Burst")
-            closeInternal()
-            val fallbackInfo = currentLogicalInfo?.copy(hardwareType = MultiCameraHardwareType.FAST_RELAY_BURST)
-                ?: LogicalMultiCameraInfo("0", false, 0, lenses, MultiCameraHardwareType.FAST_RELAY_BURST)
-            currentLogicalInfo = fallbackInfo
-            openRelayPrimarySession(fallbackInfo, targetPreviewSurface)
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun openRelayPrimarySession(
-        logicalInfo: LogicalMultiCameraInfo,
-        targetPreviewSurface: Surface,
-        targetLens: PhysicalLensInfo? = null,
-        isInitialConfig: Boolean = false
-    ) {
-        val primaryLens = targetLens ?: currentPrimaryLens ?: activeLenses.find { it.type == LensType.WIDE } ?: activeLenses.firstOrNull()
-        currentPrimaryLens = primaryLens
-        val primaryId = primaryLens?.physicalId ?: logicalInfo.logicalCameraId
-
-        // Close previous session and device cleanly before switching
-        try {
-            captureSession?.close()
-            captureSession = null
-            cameraDevice?.close()
-            cameraDevice = null
-        } catch (e: Exception) {
-            Log.w(TAG, "Error closing previous session during relay switch", e)
-        }
-
-        val openDeferred = CompletableDeferred<CameraDevice>()
-
-        try {
-            cameraManager.openCamera(primaryId, executor, object : CameraDevice.StateCallback() {
-                override fun onOpened(device: CameraDevice) {
-                    cameraDevice = device
-                    openDeferred.complete(device)
-                }
-
-                override fun onDisconnected(device: CameraDevice) {
-                    scope.launch { close() }
-                }
-
-                override fun onError(device: CameraDevice, error: Int) {
-                    Log.e(TAG, "Relay primary camera error: $error on $primaryId")
-                    if (!openDeferred.isCompleted) {
-                        openDeferred.completeExceptionally(RuntimeException("Camera open error: $error"))
-                    }
-                    if (isInitialConfig) {
-                        onSessionFailedListener?.invoke("Camera open error: $error")
-                    }
-                }
-            })
-
-            val dev = openDeferred.await()
-            val jpegSize = if (primaryLens != null) getOptimalOutputSize(primaryLens, ImageFormat.JPEG) else Size(4000, 3000)
-            val jpegReader = ImageReader.newInstance(jpegSize.width, jpegSize.height, ImageFormat.JPEG, 2)
-            jpegImageReaders[primaryId] = jpegReader
-
-            val outputConfigs = mutableListOf(
-                OutputConfiguration(targetPreviewSurface),
-                OutputConfiguration(jpegReader.surface)
-            )
-
-            if (primaryLens != null && isRawSupportedForLens(primaryLens)) {
-                val rawSize = getOptimalOutputSize(primaryLens, ImageFormat.RAW_SENSOR)
-                val rawReader = ImageReader.newInstance(rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2)
-                rawImageReaders[primaryId] = rawReader
-                outputConfigs.add(OutputConfiguration(rawReader.surface))
-            }
-
-            val sessionConfig = SessionConfiguration(
-                SessionConfiguration.SESSION_REGULAR,
-                outputConfigs,
-                executor,
-                object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(session: CameraCaptureSession) {
-                        Log.i(TAG, "Relay primary preview session configured on camera $primaryId")
-                        captureSession = session
-                        startRepeatingPreview(dev, session, targetPreviewSurface)
-                        onSessionConfiguredListener?.invoke()
-                    }
-
-                    override fun onConfigureFailed(session: CameraCaptureSession) {
-                        Log.w(TAG, "Relay preview configuration failed on $primaryId")
-                        if (isInitialConfig) {
-                            onSessionFailedListener?.invoke("Relay preview configuration failed")
-                        }
-                    }
-                }
-            )
-            dev.createCaptureSession(sessionConfig)
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to open relay primary session", e)
-            closeInternal()
-            if (isInitialConfig) {
-                onSessionFailedListener?.invoke(e.message ?: "Failed to open relay session")
-            }
-        }
-    }
-
-    var currentPrimaryLens: PhysicalLensInfo? = null
-        private set
-
-    fun switchPrimaryPreviewLensByMultiplier(multiplier: Float) {
-        val matchingLens = activeLenses.minByOrNull { kotlin.math.abs(it.multiplier - multiplier) } ?: return
-        setPrimaryPreviewLens(matchingLens)
-    }
-
-    fun setPrimaryPreviewLens(lens: PhysicalLensInfo) {
-        currentPrimaryLens = lens
-        val surface = previewSurface ?: return
-        val hwType = currentLogicalInfo?.hardwareType ?: MultiCameraHardwareType.NATIVE_LOGICAL
-
-        if (hwType == MultiCameraHardwareType.FAST_RELAY_BURST || cameraDevice?.id != currentLogicalInfo?.logicalCameraId) {
+    fun setPrimaryPreviewLens(lens: PhysicalLensInfo) =
+        previewCtrl.setPrimaryPreviewLens(lens) { info, surface, targetLens ->
             scope.launch {
-                val info = currentLogicalInfo ?: return@launch
-                openRelayPrimarySession(info, surface, targetLens = lens)
-            }
-            return
-        }
-
-        val dev = cameraDevice ?: return
-        val session = captureSession ?: return
-
-        try {
-            val chars = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, dev.id)
-            val requestBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(surface)
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-
-                applyPreviewZoomAndCrop(this, chars, dev.id, lens)
-            }
-            session.setRepeatingRequest(requestBuilder.build(), null, cameraHandler)
-            triggerFast3AWarmup(dev, session, surface, lens)
-            Log.i(TAG, "Switched primary preview lens to: ${lens.name} (${lens.multiplier}x)")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to switch primary preview lens", e)
-        }
-    }
-
-    private fun startRepeatingPreview(device: CameraDevice, session: CameraCaptureSession, targetPreviewSurface: Surface) {
-        try {
-            if (currentPrimaryLens == null) {
-                currentPrimaryLens = activeLenses.find { it.type == LensType.WIDE } ?: activeLenses.firstOrNull()
-            }
-            val prim = currentPrimaryLens
-            val chars = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, device.id)
-            val requestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(targetPreviewSurface)
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                applyPreviewZoomAndCrop(this, chars, device.id, prim)
-            }
-            session.setRepeatingRequest(requestBuilder.build(), null, cameraHandler)
-            triggerFast3AWarmup(device, session, targetPreviewSurface, prim)
-            Log.i(TAG, "Started repeating preview with lens: ${prim?.name}")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start repeating preview", e)
-        }
-    }
-
-    /**
-     * Configure preview zoom and crop depending on whether the camera device is a logical multi-camera or physical camera.
-     * - Physical camera: Hardware already provides optical focal magnification (e.g. 2.7x telephoto). Keep 1.0x digital zoom & full active array.
-     * - Logical multi-camera: Set CONTROL_ZOOM_RATIO on Android R+ (or SCALER_CROP_REGION on older OS) to switch physical sensor without double-cropping.
-     */
-    private fun applyPreviewZoomAndCrop(
-        builder: CaptureRequest.Builder,
-        chars: CameraCharacteristics,
-        deviceId: String,
-        lens: PhysicalLensInfo?
-    ) {
-        val isNativeLogical = currentLogicalInfo?.isLogicalMultiCamera == true &&
-                deviceId == currentLogicalInfo?.logicalCameraId
-        val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
-
-        if (isNativeLogical && lens != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                if (zoomRange != null) {
-                    builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, lens.multiplier.coerceIn(zoomRange.lower, zoomRange.upper))
-                }
-            } else if (activeArray != null && lens.multiplier >= 1.0f) {
-                val cropW = (activeArray.width() / lens.multiplier).toInt()
-                val cropH = (activeArray.height() / lens.multiplier).toInt()
-                val cropRect = android.graphics.Rect(
-                    activeArray.centerX() - cropW / 2,
-                    activeArray.centerY() - cropH / 2,
-                    activeArray.centerX() + cropW / 2,
-                    activeArray.centerY() + cropH / 2
-                )
-                builder.set(CaptureRequest.SCALER_CROP_REGION, cropRect)
-            }
-        } else {
-            // Standalone physical camera device
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                if (zoomRange != null) {
-                    builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, 1.0f.coerceIn(zoomRange.lower, zoomRange.upper))
-                }
-            }
-            if (activeArray != null) {
-                builder.set(CaptureRequest.SCALER_CROP_REGION, activeArray)
+                lock.withLock { sessionConnector.openRelayPrimarySession(info, surface, targetLens = targetLens) }
             }
         }
-    }
-
-    private fun triggerFast3AWarmup(
-        device: CameraDevice,
-        session: CameraCaptureSession,
-        targetPreviewSurface: Surface,
-        lens: PhysicalLensInfo?
-    ) {
-        try {
-            val chars = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, device.id)
-            val triggerReq = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(targetPreviewSurface)
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
-                set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
-                val isNativeLogical = currentLogicalInfo?.isLogicalMultiCamera == true &&
-                        device.id == currentLogicalInfo?.logicalCameraId
-                if (isNativeLogical && lens != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                    if (zoomRange != null) {
-                        set(CaptureRequest.CONTROL_ZOOM_RATIO, lens.multiplier.coerceIn(zoomRange.lower, zoomRange.upper))
-                    }
-                }
-            }
-            session.capture(triggerReq.build(), null, cameraHandler)
-            Log.i(TAG, "Fast 3A (AF/AE) warmup triggered on camera ${device.id} for lens ${lens?.name}")
-        } catch (e: Exception) {
-            Log.w(TAG, "Fast 3A warmup skipped: ${e.message}")
-        }
-    }
 
     fun captureMultiCamera(
         orientationDegrees: Int,
@@ -631,902 +230,119 @@ class MultiCameraCaptureManager(
         onResult: (MultiCameraCaptureResult) -> Unit,
         onError: (String) -> Unit
     ) {
-        val hwType = currentLogicalInfo?.hardwareType ?: MultiCameraHardwareType.NATIVE_LOGICAL
-        when (hwType) {
-            MultiCameraHardwareType.NATIVE_LOGICAL -> {
-                captureNativeLogical(orientationDegrees, isHdrPlusActive, manualConfig, onResult, onError)
-            }
-            MultiCameraHardwareType.CONCURRENT_STANDALONE -> {
-                captureConcurrentStandalone(orientationDegrees, manualConfig, onResult, onError)
-            }
-            MultiCameraHardwareType.FAST_RELAY_BURST, MultiCameraHardwareType.NONE -> {
-                captureFastRelayBurst(orientationDegrees, isHdrPlusActive, manualConfig, onResult, onError)
-            }
+        when (previewCtrl.currentLogicalInfo?.hardwareType ?: MultiCameraHardwareType.NATIVE_LOGICAL) {
+            MultiCameraHardwareType.NATIVE_LOGICAL ->
+                nativeLogicalStrategy.capture(orientationDegrees, isHdrPlusActive, manualConfig, onResult, onError)
+            MultiCameraHardwareType.CONCURRENT_STANDALONE ->
+                concurrentStandaloneStrategy.capture(orientationDegrees, manualConfig, onResult, onError)
+            MultiCameraHardwareType.FAST_RELAY_BURST, MultiCameraHardwareType.NONE ->
+                fastRelayStrategy.capture(orientationDegrees, isHdrPlusActive, manualConfig, onResult, onError)
         }
     }
 
-    private fun applyManualConfig(
-        builder: CaptureRequest.Builder,
+    internal data class AppliedManualControlSpec(
+        val afMode: Int,
+        val aeMode: Int,
+        val focusDistance: Float? = null,
+        val iso: Int? = null,
+        val exposureTimeNanos: Long? = null,
+        val evIndex: Int? = null,
+        val afRegion: MeteringRectangle? = null,
+        val aeRegion: MeteringRectangle? = null
+    )
+
+    internal fun configurePreviewStateForTesting(
+        logicalInfo: LogicalMultiCameraInfo,
+        lenses: List<PhysicalLensInfo>,
+        primaryLens: PhysicalLensInfo?,
+        standalonePrimaryId: String?
+    ) = previewCtrl.configurePreviewStateForTesting(logicalInfo, lenses, primaryLens, standalonePrimaryId)
+
+    internal fun resolveManualControlSpec(
         isPrimary: Boolean,
-        config: MultiCameraManualConfig?
-    ) {
+        config: MultiCameraManualConfig?,
+        isMeteringPrimary: Boolean = isPrimary
+    ): AppliedManualControlSpec {
         if (config == null) {
-            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-            return
+            return AppliedManualControlSpec(
+                afMode = CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
+                aeMode = CaptureRequest.CONTROL_AE_MODE_ON
+            )
         }
 
         val shouldApply = config.isLinked || isPrimary
         if (shouldApply) {
-            if (config.isManualIso || config.isManualShutter) {
-                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                if (config.isManualIso) {
-                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, config.iso)
-                }
-                if (config.isManualShutter) {
-                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, config.exposureTimeNanos)
-                }
-            } else {
-                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                if (config.evIndex != 0) {
-                    builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, config.evIndex)
-                }
-            }
+            val isManualAe = config.isManualIso || config.isManualShutter
+            val aeMode = if (isManualAe) CaptureRequest.CONTROL_AE_MODE_OFF else CaptureRequest.CONTROL_AE_MODE_ON
+            val aeRegion = if (!isManualAe && isMeteringPrimary) config.exposureMeteringRegion else null
+            val evIndex = if (!isManualAe && config.evIndex != 0) config.evIndex else null
 
+            val afMode: Int
+            val focusDistance: Float?
+            val afRegion: MeteringRectangle?
             if (config.isManualFocus) {
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-                builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, config.focusDistance)
+                afMode = CaptureRequest.CONTROL_AF_MODE_OFF
+                focusDistance = config.focusDistance
+                afRegion = null
+            } else if (isMeteringPrimary && config.focusMeteringRegion != null) {
+                afMode = CaptureRequest.CONTROL_AF_MODE_AUTO
+                focusDistance = null
+                afRegion = config.focusMeteringRegion
             } else {
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-            }
-        } else {
-            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-        }
-    }
-
-    private fun captureNativeLogical(
-        orientationDegrees: Int,
-        isHdrPlusActive: Boolean = false,
-        manualConfig: MultiCameraManualConfig? = null,
-        onResult: (MultiCameraCaptureResult) -> Unit,
-        onError: (String) -> Unit
-    ) {
-        val device = cameraDevice ?: run { onError("Camera device is null"); return }
-        val session = captureSession ?: run { onError("Capture session is null"); return }
-
-        if (isCapturing) {
-            onError("Capture already in progress")
-            return
-        }
-        isCapturing = true
-
-        val captureTimestamp = System.currentTimeMillis()
-        val baseName = DarkbagIdentity.FILE_PREFIX + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(captureTimestamp)
-        val expectedLenses = activeLenses.toList()
-        val totalExpected = expectedLenses.size
-
-        val collectedFrames = ConcurrentHashMap<String, PhysicalCapturedFrame>()
-        val physicalCaptureResults = ConcurrentHashMap<String, TotalCaptureResult>()
-        val resultDeferredMap = ConcurrentHashMap<String, CompletableDeferred<TotalCaptureResult>>()
-        for (lens in expectedLenses) {
-            resultDeferredMap[lens.physicalId] = CompletableDeferred()
-        }
-
-        val collectedJpegs = ConcurrentHashMap<String, Pair<ByteArray, Size>>()
-        val collectedDngPaths = ConcurrentHashMap<String, String>()
-
-        val completionJob = scope.launch(Dispatchers.Default) {
-            withTimeoutOrNull(CAPTURE_TIMEOUT_MS) {
-                while (collectedFrames.size < totalExpected && isActive) {
-                    delay(50)
-                }
+                afMode = CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                focusDistance = null
+                afRegion = null
             }
 
-            isCapturing = false
-
-            if (collectedFrames.isNotEmpty()) {
-                val result = MultiCameraCaptureResult(
-                    baseName = baseName,
-                    captureTimestampMillis = captureTimestamp,
-                    frames = collectedFrames.values.toList().sortedBy { it.lens.multiplier }
-                )
-                withContext(Dispatchers.Main) {
-                    onResult(result)
-                }
-            } else {
-                withContext(Dispatchers.Main) {
-                    onError("Capture timed out without receiving frames")
-                }
-            }
-        }
-
-        try {
-            val captureRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
-                for (lens in expectedLenses) {
-                    jpegImageReaders[lens.physicalId]?.surface?.let { addTarget(it) }
-                    rawImageReaders[lens.physicalId]?.surface?.let { addTarget(it) }
-                }
-                set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
-                applyManualConfig(this, isPrimary = true, manualConfig)
-            }
-
-            fun tryAssembleFrame(lens: PhysicalLensInfo) {
-                val jpegPair = collectedJpegs[lens.physicalId]
-                val dngPath = collectedDngPaths[lens.physicalId]
-                if (jpegPair == null && dngPath == null) return
-
-                val captureRes = physicalCaptureResults[lens.physicalId]
-                val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
-                val metadata = createMetadataFromCaptureResult(captureRes, lens, captureTimestamp)
-                val digitalGain = calculateDigitalGain(captureRes, chars)
-                val lscTriple = top.maary.darkbag.processor.SensorCalibrationHelper.extractLensShading(captureRes)
-                val frame = PhysicalCapturedFrame(
-                    lens = lens,
-                    jpegData = jpegPair?.first,
-                    tempDngPath = dngPath,
-                    width = jpegPair?.second?.width ?: 4000,
-                    height = jpegPair?.second?.height ?: 3000,
-                    orientation = orientationDegrees,
-                    captureMetadata = metadata,
-                    timestamp = captureTimestamp,
-                    digitalGain = digitalGain,
-                    lensShadingMap = lscTriple.first,
-                    lensShadingRows = lscTriple.second,
-                    lensShadingCols = lscTriple.third
-                )
-                collectedFrames[lens.physicalId] = frame
-            }
-
-            for (lens in expectedLenses) {
-                jpegImageReaders[lens.physicalId]?.setOnImageAvailableListener({ r ->
-                    val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    try {
-                        val buffer = image.planes[0].buffer
-                        val data = ByteArray(buffer.remaining())
-                        buffer.get(data)
-                        collectedJpegs[lens.physicalId] = data to Size(image.width, image.height)
-                        tryAssembleFrame(lens)
-                    } finally {
-                        image.close()
-                    }
-                }, cameraHandler)
-
-                rawImageReaders[lens.physicalId]?.setOnImageAvailableListener({ r ->
-                    val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    scope.launch(Dispatchers.IO) {
-                        try {
-                            val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
-                            val captureRes = withTimeoutOrNull(2500L) { resultDeferredMap[lens.physicalId]?.await() }
-                            if (captureRes != null) {
-                                val isPrimary = lens.physicalId == (currentPrimaryLens?.physicalId ?: expectedLenses.first().physicalId)
-                                val digitalGain = calculateDigitalGain(captureRes, chars)
-                                val metadata = createMetadataFromCaptureResult(captureRes, lens, captureTimestamp)
-                                val tempPath = writeDngToFile(
-                                    rawImage = image,
-                                    chars = chars,
-                                    captureResult = captureRes,
-                                    orientationDegrees = orientationDegrees,
-                                    lens = lens,
-                                    isHdrPlus = isHdrPlusActive && isPrimary,
-                                    metadata = metadata,
-                                    digitalGain = digitalGain
-                                )
-                                if (tempPath != null) {
-                                    collectedDngPaths[lens.physicalId] = tempPath
-                                }
-                            }
-                            tryAssembleFrame(lens)
-                        } finally {
-                            image.close()
-                        }
-                    }
-                }, cameraHandler)
-            }
-
-            session.capture(captureRequest.build(), object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(
-                    session: CameraCaptureSession,
-                    request: CaptureRequest,
-                    result: TotalCaptureResult
-                ) {
-                    val physResults = result.physicalCameraResults
-                    for ((pid, presult) in physResults) {
-                        if (presult is TotalCaptureResult) {
-                            physicalCaptureResults[pid] = presult
-                            resultDeferredMap[pid]?.complete(presult)
-                        }
-                    }
-                    for (lens in expectedLenses) {
-                        if (!resultDeferredMap[lens.physicalId]!!.isCompleted) {
-                            physicalCaptureResults[lens.physicalId] = result
-                            resultDeferredMap[lens.physicalId]?.complete(result)
-                        }
-                        tryAssembleFrame(lens)
-                    }
-                }
-
-                override fun onCaptureFailed(session: CameraCaptureSession, request: CaptureRequest, failure: CaptureFailure) {
-                    Log.e(TAG, "Multi-camera capture request failed: reason=${failure.reason}")
-                    completionJob.cancel()
-                    isCapturing = false
-                    onError("Multi-camera capture request failed: reason=${failure.reason}")
-                }
-            }, cameraHandler)
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initiate native logical multi-camera capture", e)
-            completionJob.cancel()
-            isCapturing = false
-            onError(e.message ?: "Failed to initiate capture")
-        }
-    }
-
-    private fun captureConcurrentStandalone(
-        orientationDegrees: Int,
-        manualConfig: MultiCameraManualConfig? = null,
-        onResult: (MultiCameraCaptureResult) -> Unit,
-        onError: (String) -> Unit
-    ) {
-        if (isCapturing) { onError("Capture already in progress"); return }
-        isCapturing = true
-
-        val captureTimestamp = System.currentTimeMillis()
-        val baseName = DarkbagIdentity.FILE_PREFIX + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(captureTimestamp)
-        val expectedLenses = activeLenses.toList()
-        val totalExpected = expectedLenses.size
-
-        val collectedFrames = ConcurrentHashMap<String, PhysicalCapturedFrame>()
-        val resultDeferredMap = ConcurrentHashMap<String, CompletableDeferred<TotalCaptureResult>>()
-        for (lens in expectedLenses) {
-            resultDeferredMap[lens.physicalId] = CompletableDeferred()
-        }
-
-        val collectedJpegs = ConcurrentHashMap<String, Pair<ByteArray, Size>>()
-        val collectedDngPaths = ConcurrentHashMap<String, String>()
-
-        val completionJob = scope.launch(Dispatchers.Default) {
-            withTimeoutOrNull(CAPTURE_TIMEOUT_MS) {
-                while (collectedFrames.size < totalExpected && isActive) {
-                    delay(50)
-                }
-            }
-
-            isCapturing = false
-
-            if (collectedFrames.isNotEmpty()) {
-                val result = MultiCameraCaptureResult(
-                    baseName = baseName,
-                    captureTimestampMillis = captureTimestamp,
-                    frames = collectedFrames.values.toList().sortedBy { it.lens.multiplier }
-                )
-                withContext(Dispatchers.Main) {
-                    onResult(result)
-                }
-            } else {
-                withContext(Dispatchers.Main) {
-                    onError("Concurrent standalone capture timed out")
-                }
-            }
-        }
-
-        try {
-            for (lens in expectedLenses) {
-                val dev = openDevices[lens.physicalId] ?: continue
-                val sess = openSessions[lens.physicalId] ?: continue
-                val jpegReader = jpegImageReaders[lens.physicalId]
-                val rawReader = rawImageReaders[lens.physicalId]
-
-                fun tryAssembleFrame(l: PhysicalLensInfo) {
-                    val jpegPair = collectedJpegs[l.physicalId]
-                    val dngPath = collectedDngPaths[l.physicalId]
-                    if (jpegPair == null && dngPath == null) return
-
-                    val result = resultDeferredMap[l.physicalId]?.let { if (it.isCompleted) it.getCompleted() else null }
-                    val chars = l.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, l.physicalId)
-                    val metadata = createMetadataFromCaptureResult(result, l, captureTimestamp)
-                    val digitalGain = calculateDigitalGain(result, chars)
-                    val lscTriple = top.maary.darkbag.processor.SensorCalibrationHelper.extractLensShading(result)
-                    val frame = PhysicalCapturedFrame(
-                        lens = l,
-                        jpegData = jpegPair?.first,
-                        tempDngPath = dngPath,
-                        width = jpegPair?.second?.width ?: 4000,
-                        height = jpegPair?.second?.height ?: 3000,
-                        orientation = orientationDegrees,
-                        captureMetadata = metadata,
-                        timestamp = captureTimestamp,
-                        digitalGain = digitalGain,
-                        lensShadingMap = lscTriple.first,
-                        lensShadingRows = lscTriple.second,
-                        lensShadingCols = lscTriple.third
-                    )
-                    collectedFrames[l.physicalId] = frame
-                }
-
-                jpegReader?.setOnImageAvailableListener({ r ->
-                    val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    try {
-                        val buffer = image.planes[0].buffer
-                        val data = ByteArray(buffer.remaining())
-                        buffer.get(data)
-                        collectedJpegs[lens.physicalId] = data to Size(image.width, image.height)
-                        tryAssembleFrame(lens)
-                    } finally {
-                        image.close()
-                    }
-                }, cameraHandler)
-
-                rawReader?.setOnImageAvailableListener({ r ->
-                    val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    scope.launch(Dispatchers.IO) {
-                        try {
-                            val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
-                            val captureRes = withTimeoutOrNull(2500L) { resultDeferredMap[lens.physicalId]?.await() }
-                            if (captureRes != null) {
-                                val digitalGain = calculateDigitalGain(captureRes, chars)
-                                val metadata = createMetadataFromCaptureResult(captureRes, lens, captureTimestamp)
-                                val tempPath = writeDngToFile(
-                                    rawImage = image,
-                                    chars = chars,
-                                    captureResult = captureRes,
-                                    orientationDegrees = orientationDegrees,
-                                    lens = lens,
-                                    metadata = metadata,
-                                    digitalGain = digitalGain
-                                )
-                                if (tempPath != null) {
-                                    collectedDngPaths[lens.physicalId] = tempPath
-                                }
-                            }
-                            tryAssembleFrame(lens)
-                        } finally {
-                            image.close()
-                        }
-                    }
-                }, cameraHandler)
-
-                val req = dev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
-                    jpegReader?.surface?.let { addTarget(it) }
-                    rawReader?.surface?.let { addTarget(it) }
-                    set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
-                    val isPrimary = (lens.physicalId == currentPrimaryLens?.physicalId)
-                    applyManualConfig(this, isPrimary, manualConfig)
-                }
-
-                sess.capture(req.build(), object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                        resultDeferredMap[lens.physicalId]?.complete(result)
-                        tryAssembleFrame(lens)
-                    }
-
-                    override fun onCaptureFailed(session: CameraCaptureSession, request: CaptureRequest, failure: CaptureFailure) {
-                        Log.w(TAG, "Concurrent capture failed on ${lens.physicalId}")
-                    }
-                }, cameraHandler)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error initiating concurrent standalone capture", e)
-            completionJob.cancel()
-            isCapturing = false
-            onError(e.message ?: "Concurrent capture failed")
-        }
-    }
-
-    private fun captureFastRelayBurst(
-        orientationDegrees: Int,
-        isHdrPlusActive: Boolean = false,
-        manualConfig: MultiCameraManualConfig? = null,
-        onResult: (MultiCameraCaptureResult) -> Unit,
-        onError: (String) -> Unit
-    ) {
-        if (isCapturing) { onError("Capture already in progress"); return }
-        isCapturing = true
-
-        val captureTimestamp = System.currentTimeMillis()
-        val baseName = DarkbagIdentity.FILE_PREFIX + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(captureTimestamp)
-        val expectedLenses = activeLenses.toList()
-
-        scope.launch(Dispatchers.IO) {
-            val collectedFrames = mutableListOf<PhysicalCapturedFrame>()
-
-            try {
-                // 1. Determine currently active primary preview lens
-                val primaryLens = currentPrimaryLens ?: expectedLenses.find { it.physicalId == cameraDevice?.id } ?: expectedLenses.find { it.type == LensType.WIDE } ?: expectedLenses.first()
-                val primaryDev = cameraDevice
-                val primarySess = captureSession
-                val primaryJpegReader = jpegImageReaders[primaryLens.physicalId]
-                val primaryRawReader = rawImageReaders[primaryLens.physicalId]
-
-                var primaryCaptureResult: TotalCaptureResult? = null
-
-                if (primaryDev != null && primarySess != null && primaryJpegReader != null) {
-                    val resultDeferred = CompletableDeferred<TotalCaptureResult?>()
-                    val jpegDeferred = CompletableDeferred<Pair<ByteArray, Size>?>()
-                    val dngDeferred = CompletableDeferred<String?>()
-
-                    primaryJpegReader.setOnImageAvailableListener({ r ->
-                        val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                        try {
-                            val buffer = image.planes[0].buffer
-                            val data = ByteArray(buffer.remaining())
-                            buffer.get(data)
-                            jpegDeferred.complete(data to Size(image.width, image.height))
-                        } finally {
-                            image.close()
-                        }
-                    }, cameraHandler)
-
-                    if (primaryRawReader != null) {
-                        primaryRawReader.setOnImageAvailableListener({ r ->
-                            val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                            scope.launch(Dispatchers.IO) {
-                                try {
-                                    val chars = primaryLens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, primaryLens.physicalId)
-                                    val captureRes = withTimeoutOrNull(2500L) { resultDeferred.await() }
-                                    if (captureRes != null) {
-                                        val digitalGain = calculateDigitalGain(captureRes, chars)
-                                        val metadata = createMetadataFromCaptureResult(captureRes, primaryLens, captureTimestamp)
-                                        val tempPath = writeDngToFile(
-                                            rawImage = image,
-                                            chars = chars,
-                                            captureResult = captureRes,
-                                            orientationDegrees = orientationDegrees,
-                                            lens = primaryLens,
-                                            isHdrPlus = isHdrPlusActive,
-                                            metadata = metadata,
-                                            digitalGain = digitalGain
-                                        )
-                                        dngDeferred.complete(tempPath)
-                                    } else {
-                                        Log.e(TAG, "Primary captureResult timed out")
-                                        dngDeferred.complete(null)
-                                    }
-                                } finally {
-                                    image.close()
-                                }
-                            }
-                        }, cameraHandler)
-                    } else {
-                        dngDeferred.complete(null)
-                    }
-
-                    val req = primaryDev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
-                        addTarget(primaryJpegReader.surface)
-                        primaryRawReader?.surface?.let { addTarget(it) }
-                        set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
-                        applyManualConfig(this, isPrimary = true, manualConfig)
-                    }
-
-                    primarySess.capture(req.build(), object : CameraCaptureSession.CaptureCallback() {
-                        override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, res: TotalCaptureResult) {
-                            resultDeferred.complete(res)
-                        }
-                        override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, failure: CaptureFailure) {
-                            resultDeferred.complete(null)
-                        }
-                    }, cameraHandler)
-
-                    val captureRes = withTimeoutOrNull(3000L) { resultDeferred.await() }
-                    primaryCaptureResult = captureRes
-                    val jpegDataPair = withTimeoutOrNull(3000L) { jpegDeferred.await() }
-                    val dngPath = if (primaryRawReader != null) withTimeoutOrNull(3000L) { dngDeferred.await() } else null
-
-                    if (jpegDataPair != null || dngPath != null) {
-                        val chars = primaryLens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, primaryLens.physicalId)
-                        val metadata = createMetadataFromCaptureResult(captureRes, primaryLens, captureTimestamp)
-                        val digitalGain = calculateDigitalGain(captureRes, chars)
-                        val lscTriple = top.maary.darkbag.processor.SensorCalibrationHelper.extractLensShading(captureRes)
-                        collectedFrames.add(
-                            PhysicalCapturedFrame(
-                                lens = primaryLens,
-                                jpegData = jpegDataPair?.first,
-                                tempDngPath = dngPath,
-                                width = jpegDataPair?.second?.width ?: 4000,
-                                height = jpegDataPair?.second?.height ?: 3000,
-                                orientation = orientationDegrees,
-                                captureMetadata = metadata,
-                                timestamp = captureTimestamp,
-                                digitalGain = digitalGain,
-                                lensShadingMap = lscTriple.first,
-                                lensShadingRows = lscTriple.second,
-                                lensShadingCols = lscTriple.third
-                            )
-                        )
-                    }
-                }
-
-                // 2. Relay sequentially to remaining lenses
-                val remainingLenses = expectedLenses.filter { it.physicalId != primaryLens.physicalId }
-                if (remainingLenses.isNotEmpty()) {
-                    // Close primary device temporarily to free hardware
-                    closeInternal()
-
-                    for (relayLens in remainingLenses) {
-                        val relayFrame = captureSingleRelayLens(
-                            lens = relayLens,
-                            orientationDegrees = orientationDegrees,
-                            primaryCaptureResult = primaryCaptureResult,
-                            primaryLens = primaryLens,
-                            manualConfig = manualConfig
-                        )
-                        if (relayFrame != null) {
-                            collectedFrames.add(relayFrame)
-                        }
-                    }
-
-                    // Re-open primary preview session after burst relay finishes on the selected lens
-                    val pSurface = previewSurface
-                    val info = currentLogicalInfo
-                    if (pSurface != null && info != null) {
-                        openRelayPrimarySession(info, pSurface, targetLens = primaryLens)
-                    }
-                }
-
-                isCapturing = false
-
-                if (collectedFrames.isNotEmpty()) {
-                    val result = MultiCameraCaptureResult(
-                        baseName = baseName,
-                        captureTimestampMillis = captureTimestamp,
-                        frames = collectedFrames.sortedBy { it.lens.multiplier }
-                    )
-                    withContext(Dispatchers.Main) { onResult(result) }
-                } else {
-                    withContext(Dispatchers.Main) { onError("No frames captured in fast relay burst") }
-                }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in captureFastRelayBurst", e)
-                isCapturing = false
-                withContext(Dispatchers.Main) { onError(e.message ?: "Relay capture failed") }
-            }
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun captureSingleRelayLens(
-        lens: PhysicalLensInfo,
-        orientationDegrees: Int,
-        primaryCaptureResult: TotalCaptureResult? = null,
-        primaryLens: PhysicalLensInfo? = null,
-        manualConfig: MultiCameraManualConfig? = null
-    ): PhysicalCapturedFrame? {
-        var dev: CameraDevice? = null
-        var sess: CameraCaptureSession? = null
-        var jpegReader: ImageReader? = null
-        var rawReader: ImageReader? = null
-
-        return try {
-            val openDeferred = CompletableDeferred<CameraDevice>()
-            cameraManager.openCamera(lens.physicalId, executor, object : CameraDevice.StateCallback() {
-                override fun onOpened(device: CameraDevice) {
-                    dev = device
-                    openDeferred.complete(device)
-                }
-                override fun onDisconnected(device: CameraDevice) { dev?.close(); dev = null }
-                override fun onError(device: CameraDevice, error: Int) {
-                    if (!openDeferred.isCompleted) openDeferred.completeExceptionally(RuntimeException("Open err $error"))
-                }
-            })
-
-            val device = openDeferred.await()
-            val jpegSize = getOptimalOutputSize(lens, ImageFormat.JPEG)
-            jpegReader = ImageReader.newInstance(jpegSize.width, jpegSize.height, ImageFormat.JPEG, 2)
-
-            rawReader = if (isRawSupportedForLens(lens)) {
-                val rawSize = getOptimalOutputSize(lens, ImageFormat.RAW_SENSOR)
-                ImageReader.newInstance(rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2)
-            } else null
-
-            val outputConfigs = mutableListOf(OutputConfiguration(jpegReader.surface))
-            if (rawReader != null) {
-                outputConfigs.add(OutputConfiguration(rawReader.surface))
-            }
-
-            val sessionDeferred = CompletableDeferred<CameraCaptureSession>()
-            val sessionConfig = SessionConfiguration(
-                SessionConfiguration.SESSION_REGULAR,
-                outputConfigs,
-                executor,
-                object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(session: CameraCaptureSession) {
-                        sess = session
-                        sessionDeferred.complete(session)
-                    }
-                    override fun onConfigureFailed(session: CameraCaptureSession) {
-                        sessionDeferred.completeExceptionally(RuntimeException("Relay session config failed on ${lens.name}"))
-                    }
-                }
+            return AppliedManualControlSpec(
+                afMode = afMode,
+                aeMode = aeMode,
+                focusDistance = focusDistance,
+                iso = if (isManualAe && config.isManualIso) config.iso else null,
+                exposureTimeNanos = if (isManualAe && config.isManualShutter) config.exposureTimeNanos else null,
+                evIndex = evIndex,
+                afRegion = afRegion,
+                aeRegion = aeRegion
             )
-
-            device.createCaptureSession(sessionConfig)
-            val session = sessionDeferred.await()
-
-            val jpegDeferred = CompletableDeferred<Pair<ByteArray, Size>?>()
-            val dngDeferred = CompletableDeferred<String?>()
-            val resultDeferred = CompletableDeferred<TotalCaptureResult?>()
-
-            jpegReader.setOnImageAvailableListener({ r ->
-                val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                try {
-                    val buffer = image.planes[0].buffer
-                    val data = ByteArray(buffer.remaining())
-                    buffer.get(data)
-                    jpegDeferred.complete(data to Size(image.width, image.height))
-                } finally {
-                    image.close()
-                }
-            }, cameraHandler)
-
-            if (rawReader != null) {
-                rawReader.setOnImageAvailableListener({ r ->
-                    val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    scope.launch(Dispatchers.IO) {
-                        try {
-                            val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
-                            val captureRes = withTimeoutOrNull(2500L) { resultDeferred.await() }
-                            if (captureRes != null) {
-                                val digitalGain = calculateDigitalGain(captureRes, chars)
-                                val metadata = createMetadataFromCaptureResult(captureRes, lens, System.currentTimeMillis())
-                                val tempPath = writeDngToFile(
-                                    rawImage = image,
-                                    chars = chars,
-                                    captureResult = captureRes,
-                                    orientationDegrees = orientationDegrees,
-                                    lens = lens,
-                                    metadata = metadata,
-                                    digitalGain = digitalGain
-                                )
-                                dngDeferred.complete(tempPath)
-                            } else {
-                                Log.e(TAG, "CaptureResult timed out for relay lens ${lens.name}")
-                                dngDeferred.complete(null)
-                            }
-                        } finally {
-                            image.close()
-                        }
-                    }
-                }, cameraHandler)
-            } else {
-                dngDeferred.complete(null)
-            }
-
-            val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
-            val req = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
-                addTarget(jpegReader.surface)
-                rawReader?.surface?.let { addTarget(it) }
-                set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
-
-                if (manualConfig != null && manualConfig.isLinked) {
-                    applyManualConfig(this, isPrimary = false, manualConfig)
-                } else {
-                    // Photometric Exposure Transfer from converged primary preview
-                    val primExpTime = primaryCaptureResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME)
-                    val primIso = primaryCaptureResult?.get(CaptureResult.SENSOR_SENSITIVITY)
-                    val primAperture = primaryCaptureResult?.get(CaptureResult.LENS_APERTURE) ?: 1.8f
-                    val relayApertures = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
-                    val relayAperture = relayApertures?.firstOrNull() ?: primAperture
-
-                    if (primExpTime != null && primIso != null && primExpTime > 0 && primIso > 0) {
-                        val apertureRatio = relayAperture / primAperture
-                        val targetExposure = (primExpTime.toDouble() * primIso.toDouble()) * (apertureRatio * apertureRatio)
-
-                        val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-                        val expTimeRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-
-                        val targetIso = primIso.coerceIn(isoRange?.lower ?: 100, isoRange?.upper ?: 3200)
-                        val calculatedTime = (targetExposure / targetIso).toLong()
-                        val targetExpTime = calculatedTime.coerceIn(expTimeRange?.lower ?: 100_000L, expTimeRange?.upper ?: 1_000_000_000L)
-
-                        set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                        set(CaptureRequest.SENSOR_EXPOSURE_TIME, targetExpTime)
-                        set(CaptureRequest.SENSOR_SENSITIVITY, targetIso)
-                        Log.i(TAG, "Transferred photometric exposure to ${lens.name}: time=${targetExpTime / 1_000_000.0}ms, ISO=$targetIso (from prim: ${primExpTime / 1_000_000.0}ms, ISO=$primIso)")
-                    } else {
-                        set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                        set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
-                    }
-
-                    // Focus & AWB Transfer
-                    val focusDist = primaryCaptureResult?.get(CaptureResult.LENS_FOCUS_DISTANCE)
-                    if (focusDist != null && focusDist > 0f) {
-                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-                        set(CaptureRequest.LENS_FOCUS_DISTANCE, focusDist)
-                    } else {
-                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                        set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
-                    }
-                }
-
-                val awbGains = primaryCaptureResult?.get(CaptureResult.COLOR_CORRECTION_GAINS)
-                val awbTransform = primaryCaptureResult?.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)
-                if (awbGains != null && awbTransform != null) {
-                    set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
-                    set(CaptureRequest.COLOR_CORRECTION_GAINS, awbGains)
-                    set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, awbTransform)
-                } else {
-                    set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
-                }
-            }
-
-            session.capture(req.build(), object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, result: TotalCaptureResult) {
-                    resultDeferred.complete(result)
-                }
-                override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, failure: CaptureFailure) {
-                    resultDeferred.complete(null)
-                }
-            }, cameraHandler)
-
-            val captureRes = withTimeoutOrNull(3000L) { resultDeferred.await() }
-            val jpegDataPair = withTimeoutOrNull(3000L) { jpegDeferred.await() }
-            val dngPath = if (rawReader != null) withTimeoutOrNull(3000L) { dngDeferred.await() } else null
-
-            if (jpegDataPair != null || dngPath != null) {
-                val captureTime = System.currentTimeMillis()
-                val metadata = createMetadataFromCaptureResult(captureRes, lens, captureTime)
-                val digitalGain = calculateDigitalGain(captureRes, chars)
-                val lscTriple = top.maary.darkbag.processor.SensorCalibrationHelper.extractLensShading(captureRes)
-                PhysicalCapturedFrame(
-                    lens = lens,
-                    jpegData = jpegDataPair?.first,
-                    tempDngPath = dngPath,
-                    width = jpegDataPair?.second?.width ?: 4000,
-                    height = jpegDataPair?.second?.height ?: 3000,
-                    orientation = orientationDegrees,
-                    captureMetadata = metadata,
-                    timestamp = captureTime,
-                    digitalGain = digitalGain,
-                    lensShadingMap = lscTriple.first,
-                    lensShadingRows = lscTriple.second,
-                    lensShadingCols = lscTriple.third
-                )
-            } else {
-                null
-            }
-
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed single relay capture for ${lens.name}", e)
-            null
-        } finally {
-            try { sess?.close() } catch (e: Exception) {}
-            try { dev?.close() } catch (e: Exception) {}
-            try { jpegReader?.close() } catch (e: Exception) {}
-            try { rawReader?.close() } catch (e: Exception) {}
-        }
-    }
-
-    private fun calculateDigitalGain(result: CaptureResult?, chars: CameraCharacteristics?): Float {
-        val postRawBoost = result?.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST)
-        val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-        val validIsoRange = chars?.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE) ?: android.util.Range(100, 3200)
-        return if (postRawBoost != null && postRawBoost > 100) {
-            postRawBoost / 100.0f
-        } else if (curIso > validIsoRange.upper && validIsoRange.upper > 0) {
-            curIso.toFloat() / validIsoRange.upper.toFloat()
         } else {
-            1.0f
-        }
-    }
-
-    private fun writeDngToFile(
-        rawImage: Image,
-        chars: CameraCharacteristics,
-        captureResult: TotalCaptureResult?,
-        orientationDegrees: Int,
-        lens: PhysicalLensInfo,
-        isHdrPlus: Boolean = false,
-        metadata: CaptureMetadata? = null,
-        digitalGain: Float = 1.0f
-    ): String? {
-        return try {
-            if (captureResult == null) {
-                Log.e(TAG, "Cannot create DNG: captureResult is null for lens ${lens.name}")
-                return null
-            }
-            val tempFile = File(context.cacheDir, "dng_${lens.physicalId}_${System.currentTimeMillis()}.dng")
-            val success = top.maary.darkbag.processor.ColorProcessor.writeRawImageToDng(
-                rawImage = rawImage,
-                chars = chars,
-                captureResult = captureResult,
-                orientationDegrees = orientationDegrees,
-                outputPath = tempFile.absolutePath,
-                dngCompressionMode = 0, // Lossless JPEG 16-bit compression
-                isHdrPlus = isHdrPlus,
-                metadata = metadata,
-                digitalGain = digitalGain
-            )
-            if (success) {
-                Log.i(TAG, "Successfully written compressed DNG via native write_dng to ${tempFile.absolutePath} (${tempFile.length()} bytes)")
-                tempFile.absolutePath
+            val afRegion = if (isMeteringPrimary) config.focusMeteringRegion else null
+            val aeRegion = if (isMeteringPrimary) config.exposureMeteringRegion else null
+            val afMode = if (afRegion != null) {
+                CaptureRequest.CONTROL_AF_MODE_AUTO
             } else {
-                Log.e(TAG, "Native write_dng failed for lens ${lens.name}")
-                null
+                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to write DNG file for lens ${lens.name}", e)
-            null
+            return AppliedManualControlSpec(
+                afMode = afMode,
+                aeMode = CaptureRequest.CONTROL_AE_MODE_ON,
+                afRegion = afRegion,
+                aeRegion = aeRegion
+            )
         }
     }
 
-    private fun isRawSupportedForLens(lens: PhysicalLensInfo): Boolean {
-        val chars = lens.characteristics ?: return false
-        val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return false
-        return map.outputFormats.contains(ImageFormat.RAW_SENSOR)
-    }
+    internal fun applyManualConfig(
+        builder: CaptureRequest.Builder,
+        isPrimary: Boolean,
+        config: MultiCameraManualConfig?,
+        isMeteringPrimary: Boolean = isPrimary
+    ) {
+        val spec = resolveManualControlSpec(isPrimary, config, isMeteringPrimary)
+        builder.set(CaptureRequest.CONTROL_AE_MODE, spec.aeMode)
+        spec.iso?.let { builder.set(CaptureRequest.SENSOR_SENSITIVITY, it) }
+        spec.exposureTimeNanos?.let { builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, it) }
+        spec.evIndex?.let { builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, it) }
+        spec.aeRegion?.let { builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(it)) }
 
-    private fun getOptimalOutputSize(lens: PhysicalLensInfo, format: Int): Size {
-        val chars = lens.characteristics
-        val map = chars?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val sizes = map?.getOutputSizes(format)
-        return sizes?.maxByOrNull { it.width * it.height } ?: Size(4000, 3000)
-    }
-
-    private fun createMetadataFromCaptureResult(
-        result: CaptureResult?,
-        lens: PhysicalLensInfo,
-        captureTime: Long = System.currentTimeMillis()
-    ): CaptureMetadata {
-        val chars = lens.characteristics
-        val focalLength = lens.focalLength
-        val focalLength35mm = lens.equivalentFocalLength.toInt()
-        val iso = result?.get(CaptureResult.SENSOR_SENSITIVITY)
-        val expTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME)
-        val fNumber = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.firstOrNull()
-        val offset = SimpleDateFormat("XXX", Locale.US).format(Date(captureTime))
-
-        return CaptureMetadata(
-            iso = iso,
-            exposureTime = expTime,
-            fNumber = fNumber,
-            focalLength = focalLength,
-            focalLengthIn35mmFilm = focalLength35mm,
-            dateTimeOriginal = captureTime,
-            dateTimeDigitized = captureTime,
-            offsetTime = offset,
-            offsetTimeOriginal = offset,
-            offsetTimeDigitized = offset,
-            make = DarkbagIdentity.normalizedManufacturer(),
-            model = DarkbagIdentity.normalizedModel(),
-            uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(lens.physicalId),
-            software = DarkbagIdentity.softwareString(isHdrPlus = false),
-            imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = false),
-            lensModel = "${lens.name} (${lens.type})"
-        )
-    }
-
-    private fun closeReaders() {
-        jpegImageReaders.values.forEach { it.close() }
-        jpegImageReaders.clear()
-        rawImageReaders.values.forEach { it.close() }
-        rawImageReaders.clear()
-    }
-
-    private fun closeInternal() {
-        try {
-            captureSession?.close()
-            captureSession = null
-            cameraDevice?.close()
-            cameraDevice = null
-
-            openSessions.values.forEach { it.close() }
-            openSessions.clear()
-            openDevices.values.forEach { it.close() }
-            openDevices.clear()
-
-            closeReaders()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error during closeInternal", e)
-        }
+        builder.set(CaptureRequest.CONTROL_AF_MODE, spec.afMode)
+        spec.focusDistance?.let { builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, it) }
+        spec.afRegion?.let { builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(it)) }
     }
 
     suspend fun close() = lock.withLock {
-        closeInternal()
-        cameraThread?.quitSafely()
-        cameraThread = null
-        cameraHandler = null
+        previewCtrl.closeInternal()
+        previewCtrl.shutdownThread()
     }
 
-    fun getActiveLenses(): List<PhysicalLensInfo> = activeLenses
+    fun getActiveLenses(): List<PhysicalLensInfo> = previewCtrl.activeLenses
 }

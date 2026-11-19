@@ -1,12 +1,12 @@
 package top.maary.darkbag.utils
 
 import android.content.Context
-import android.content.SharedPreferences
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.DarkbagDataStoreProvider
+import top.maary.darkbag.repository.PreferenceKeys
 import java.io.File
 
 class HalfFrameSessionStore(private val context: Context) {
-    private val prefs: SharedPreferences = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+    private val store = DarkbagDataStoreProvider.getStore(context)
 
     data class Session(
         val profile: String,
@@ -20,29 +20,31 @@ class HalfFrameSessionStore(private val context: Context) {
     )
 
     fun currentProfile(): String {
-        val activeMode = prefs.getString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, null)
+        val snapshot = store.current()
+        val activeMode = snapshot[PreferenceKeys.ACTIVE_CAPTURE_MODE]
         if (activeMode != null) {
             return when (activeMode) {
-                SettingsFragment.MODE_HALF_FRAME_SBS -> PROFILE_HALF_SIDE
-                SettingsFragment.MODE_HALF_FRAME_TB -> PROFILE_HALF_TOP
+                PreferenceKeys.MODE_HALF_FRAME_SBS -> PROFILE_HALF_SIDE
+                PreferenceKeys.MODE_HALF_FRAME_TB -> PROFILE_HALF_TOP
                 else -> PROFILE_NORMAL
             }
         }
-        val mode = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+        val mode = snapshot[PreferenceKeys.HALF_FRAME_MODE] ?: false
         if (!mode) return PROFILE_NORMAL
-        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
-        return if (layout == SettingsFragment.HALF_FRAME_LAYOUT_SBS) PROFILE_HALF_SIDE else PROFILE_HALF_TOP
+        val layout = snapshot[PreferenceKeys.HALF_FRAME_LAYOUT] ?: PreferenceKeys.HALF_FRAME_LAYOUT_SBS
+        return if (layout == PreferenceKeys.HALF_FRAME_LAYOUT_SBS) PROFILE_HALF_SIDE else PROFILE_HALF_TOP
     }
 
     fun readSession(strict: Boolean = false, profile: String? = null): Session {
         val activeProfile = profile ?: currentProfile()
-        val step = prefs.getInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, activeProfile), 0)
-        val tempPath = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, activeProfile), null)
-        val baseName = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, activeProfile), null)
-        val captureTime = prefs.getLong(key(KEY_CAPTURE_TIME, activeProfile), 0L)
-        val digitalGain = prefs.getFloat(key(KEY_DIGITAL_GAIN, activeProfile), 1.0f)
-        val flareType = prefs.getInt(key(KEY_FLARE_TYPE, activeProfile), -1)
-        val tempDngPath = prefs.getString(key(KEY_TEMP_DNG_PATH, activeProfile), null)
+        val snapshot = store.current()
+        val step = snapshot[PreferenceKeys.halfFrameStepKey(activeProfile)] ?: 0
+        val tempPath = snapshot[PreferenceKeys.halfFrameTempPathKey(activeProfile)]
+        val baseName = snapshot[PreferenceKeys.halfFrameBaseNameKey(activeProfile)]
+        val captureTime = snapshot[PreferenceKeys.halfFrameCaptureTimeKey(activeProfile)] ?: 0L
+        val digitalGain = snapshot[PreferenceKeys.halfFrameDigitalGainKey(activeProfile)] ?: 1.0f
+        val flareType = snapshot[PreferenceKeys.halfFrameFlareTypeKey(activeProfile)] ?: -1
+        val tempDngPath = snapshot[PreferenceKeys.halfFrameTempDngPathKey(activeProfile)]
 
         var resolvedStep = step
         var resolvedTemp = tempPath
@@ -58,15 +60,7 @@ class HalfFrameSessionStore(private val context: Context) {
                 resolvedTemp = null
                 resolvedBase = null
                 resolvedDng = null
-                prefs.edit()
-                    .putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, activeProfile), 0)
-                    .remove(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, activeProfile))
-                    .remove(key(KEY_TEMP_DNG_PATH, activeProfile))
-                    .remove(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, activeProfile))
-                    .remove(key(KEY_CAPTURE_TIME, activeProfile))
-                    .remove(key(KEY_DIGITAL_GAIN, activeProfile))
-                    .remove(key(KEY_FLARE_TYPE, activeProfile))
-                    .apply()
+                clearProfile(activeProfile)
             }
         }
 
@@ -75,50 +69,70 @@ class HalfFrameSessionStore(private val context: Context) {
 
     fun markStep(step: Int, captureTimeMillis: Long? = null, profile: String? = null, digitalGain: Float = 1.0f, flareType: Int = -1) {
         val activeProfile = profile ?: currentProfile()
-        val editor = prefs.edit().putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, activeProfile), step)
-        if (step == 1) {
-            editor.putLong(key(KEY_CAPTURE_TIME, activeProfile), captureTimeMillis ?: System.currentTimeMillis())
-            editor.putFloat(key(KEY_DIGITAL_GAIN, activeProfile), digitalGain)
-            editor.putInt(key(KEY_FLARE_TYPE, activeProfile), flareType)
-        } else {
-            editor.remove(key(KEY_CAPTURE_TIME, activeProfile))
-            editor.remove(key(KEY_DIGITAL_GAIN, activeProfile))
-            editor.remove(key(KEY_FLARE_TYPE, activeProfile))
+        store.updateAsync { mutable ->
+            mutable[PreferenceKeys.halfFrameStepKey(activeProfile)] = step
+            if (step == 1) {
+                mutable[PreferenceKeys.halfFrameCaptureTimeKey(activeProfile)] = captureTimeMillis ?: System.currentTimeMillis()
+                mutable[PreferenceKeys.halfFrameDigitalGainKey(activeProfile)] = digitalGain
+                mutable[PreferenceKeys.halfFrameFlareTypeKey(activeProfile)] = flareType
+            } else {
+                mutable.remove(PreferenceKeys.halfFrameCaptureTimeKey(activeProfile))
+                mutable.remove(PreferenceKeys.halfFrameDigitalGainKey(activeProfile))
+                mutable.remove(PreferenceKeys.halfFrameFlareTypeKey(activeProfile))
+            }
         }
-        editor.apply()
     }
 
     fun setTempPath(path: String?, profile: String? = null) {
         val activeProfile = profile ?: currentProfile()
-        prefs.edit().putString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, activeProfile), path).apply()
+        store.updateAsync { mutable ->
+            if (path != null) {
+                mutable[PreferenceKeys.halfFrameTempPathKey(activeProfile)] = path
+            } else {
+                mutable.remove(PreferenceKeys.halfFrameTempPathKey(activeProfile))
+            }
+        }
     }
 
     fun setTempDngPath(path: String?, profile: String? = null) {
         val activeProfile = profile ?: currentProfile()
-        prefs.edit().putString(key(KEY_TEMP_DNG_PATH, activeProfile), path).apply()
+        store.updateAsync { mutable ->
+            if (path != null) {
+                mutable[PreferenceKeys.halfFrameTempDngPathKey(activeProfile)] = path
+            } else {
+                mutable.remove(PreferenceKeys.halfFrameTempDngPathKey(activeProfile))
+            }
+        }
     }
 
     fun setBaseName(baseName: String?, profile: String? = null) {
         val activeProfile = profile ?: currentProfile()
-        prefs.edit().putString(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, activeProfile), baseName).apply()
+        store.updateAsync { mutable ->
+            if (baseName != null) {
+                mutable[PreferenceKeys.halfFrameBaseNameKey(activeProfile)] = baseName
+            } else {
+                mutable.remove(PreferenceKeys.halfFrameBaseNameKey(activeProfile))
+            }
+        }
     }
 
     fun clearProfile(profile: String) {
-        prefs.edit()
-            .putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, profile), 0)
-            .remove(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, profile))
-            .remove(key(KEY_TEMP_DNG_PATH, profile))
-            .remove(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, profile))
-            .remove(key(KEY_CAPTURE_TIME, profile))
-            .remove(key(KEY_DIGITAL_GAIN, profile))
-            .remove(key(KEY_FLARE_TYPE, profile))
-            .apply()
+        store.updateAsync { mutable ->
+            mutable[PreferenceKeys.halfFrameStepKey(profile)] = 0
+            mutable.remove(PreferenceKeys.halfFrameTempPathKey(profile))
+            mutable.remove(PreferenceKeys.halfFrameTempDngPathKey(profile))
+            mutable.remove(PreferenceKeys.halfFrameBaseNameKey(profile))
+            mutable.remove(PreferenceKeys.halfFrameCaptureTimeKey(profile))
+            mutable.remove(PreferenceKeys.halfFrameDigitalGainKey(profile))
+            mutable.remove(PreferenceKeys.halfFrameFlareTypeKey(profile))
+        }
     }
 
     fun clearCurrentSession(deleteTempFile: Boolean = false) {
         val profile = currentProfile()
-        val tempPath = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, profile), null)
-        val tempDngPath = prefs.getString(key(KEY_TEMP_DNG_PATH, profile), null)
+        val snapshot = store.current()
+        val tempPath = snapshot[PreferenceKeys.halfFrameTempPathKey(profile)]
+        val tempDngPath = snapshot[PreferenceKeys.halfFrameTempDngPathKey(profile)]
         if (deleteTempFile) {
             if (!tempPath.isNullOrBlank()) {
                 runCatching { File(tempPath).delete() }
@@ -139,15 +153,9 @@ class HalfFrameSessionStore(private val context: Context) {
 
     fun tempDngFileForCurrentProfile(): File = tempDngFileForProfile(currentProfile())
 
-    fun scopedStepKeyForCurrentProfile(): String = key(SettingsFragment.KEY_HALF_FRAME_STEP, currentProfile())
-
-    private fun key(base: String, profile: String): String = "${base}_$profile"
+    fun scopedStepKeyForCurrentProfile(): String = "${PreferenceKeys.KEY_HALF_FRAME_STEP}_${currentProfile()}"
 
     companion object {
-        private const val KEY_CAPTURE_TIME = "half_frame_capture_time"
-        private const val KEY_DIGITAL_GAIN = "half_frame_digital_gain"
-        private const val KEY_FLARE_TYPE = "half_frame_flare_type"
-        private const val KEY_TEMP_DNG_PATH = "half_frame_temp_dng_path"
         private const val MAX_RECOVER_WINDOW_MS = 120_000L
         const val PROFILE_NORMAL = "normal"
         const val PROFILE_HALF_SIDE = "half_side"

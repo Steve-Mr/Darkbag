@@ -9,14 +9,33 @@ set(HALIDE_SHA256 "b629c80de18f1534ec71fddd8b567aa7027a0876") # SHA256 might not
 set(HALIDE_ROOT "${CMAKE_BINARY_DIR}/halide_distrib")
 
 if(NOT EXISTS "${HALIDE_ROOT}/lib/libHalide.so")
-    message(STATUS "Downloading Halide from ${HALIDE_URL}...")
-    file(DOWNLOAD "${HALIDE_URL}" "${CMAKE_BINARY_DIR}/halide.tar.gz"
-         STATUS download_status
-         LOG download_log)
+    set(MAX_RETRIES 3)
+    set(RETRY_COUNT 0)
+    set(DOWNLOAD_SUCCESS FALSE)
 
-    list(GET download_status 0 status_code)
-    if(NOT status_code EQUAL 0)
-        message(FATAL_ERROR "Error downloading Halide: ${download_log}")
+    while(RETRY_COUNT LESS MAX_RETRIES AND NOT DOWNLOAD_SUCCESS)
+        math(EXPR RETRY_COUNT "${RETRY_COUNT} + 1")
+        message(STATUS "Downloading Halide (Attempt ${RETRY_COUNT}/${MAX_RETRIES}) from ${HALIDE_URL}...")
+        file(DOWNLOAD "${HALIDE_URL}" "${CMAKE_BINARY_DIR}/halide.tar.gz"
+             STATUS download_status
+             LOG download_log
+             TIMEOUT 300
+             INACTIVITY_TIMEOUT 60)
+
+        list(GET download_status 0 status_code)
+        if(status_code EQUAL 0)
+            set(DOWNLOAD_SUCCESS TRUE)
+        else()
+            list(GET download_status 1 error_message)
+            message(WARNING "Download attempt ${RETRY_COUNT} failed: ${error_message}")
+            if(RETRY_COUNT LESS MAX_RETRIES)
+                execute_process(COMMAND ${CMAKE_COMMAND} -E sleep 3)
+            endif()
+        endif()
+    endwhile()
+
+    if(NOT DOWNLOAD_SUCCESS)
+        message(FATAL_ERROR "Error downloading Halide after ${MAX_RETRIES} attempts: ${download_log}")
     endif()
 
     message(STATUS "Extracting Halide...")

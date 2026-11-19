@@ -72,6 +72,14 @@
     <string name="share_as_tiff_dialog_message">是否在分享前保存当前的参数调整？</string>
     <string name="save_and_share">保存并分享</string>
     <string name="share_without_saving">直接分享不保存</string>
+    <string name="save_replacement">保存修改（覆盖）</string>
+    <string name="save_as_new">另存为新文件</string>
+    <string name="save_processed_jpg">导出 JPG 到相册</string>
+    <string name="export_to_jpg">导出 JPG</string>
+    <string name="export_jpg_dialog_message">是否在导出前保存当前的参数调整？</string>
+    <string name="save_and_export">保存并导出</string>
+    <string name="export_without_saving">直接导出不保存</string>
+    <string name="toast_export_jpg_success">已导出 JPG 到相册</string>
     <string name="delete_image_title">删除图片</string>
     <string name="delete_image_message">确定要删除当前图片吗？</string>
     <string name="delete_entire_group">删除整组</string>
@@ -88,6 +96,21 @@
     <string name="playground_btn_disband">解散分组</string>
     <string name="playground_delete_title">确认删除</string>
     <string name="playground_delete_message">确定要删除所选项目吗？\n\n若选中了半格成片组，关联的源 DNG 也会被同步删除。若组内 DNG 被删除，该组将自动解散。</string>
+    <string name="playground_title">暗房工坊</string>
+    <string name="playground_subtitle_format">外部暗房 · %1$d 组</string>
+    <string name="playground_btn_import">导入</string>
+    <string name="playground_btn_merge">拼图</string>
+    <string name="playground_btn_export">导出</string>
+    <string name="playground_import_success">已成功导入 %1$d 个底片</string>
+    <string name="playground_export_hint">长按或点击全选以选择导出的底片</string>
+    <string name="playground_merge_layout_title">选择拼图版式</string>
+    <string name="playground_merge_need_two">请选择两张 DNG 照片进行拼图</string>
+    <string name="playground_exporting">正在导出 %1$d 个项目…</string>
+    <string name="playground_export_success">已成功导出 %1$d 个项目</string>
+    <string name="playground_empty_hint">工坊中暂无 DNG 底片\n点击下方 ＋ 导入外部底片</string>
+    <string name="playground_loading">正在加载暗房工坊…</string>
+    <string name="gallery_groups_count">%1$d 组</string>
+    <string name="gallery_layout_waterfall">原比例</string>
 
     <string name="save_location_title">地理位置信息</string>
     <string name="save_location_summary">将 GPS 经纬度写入照片 EXIF 元数据</string>
@@ -139,12 +162,17 @@
     <string name="gallery_delete_desc_raw_only">释放海量存储空间，保留导出的 JPG/MP4 调色成品</string>
     <string name="gallery_delete_option_jpg_only">仅删除成品 (JPG/MP4)</string>
     <string name="gallery_delete_desc_jpg_only">删除 JPG/MP4 成片，保留原始 RAW/RAWVID 母带以供二次调色</string>
+    <string name="gallery_delete_option_current_derivative">仅删除当前版本 (%1$s)</string>
+    <string name="gallery_delete_desc_current_derivative">仅删除当前正在查看的成片版本，保留其他调色版本与 RAW 母带</string>
+    <string name="gallery_delete_option_all_derivatives">删除全部调色版本 (共 %1$d 个版本)</string>
+    <string name="gallery_delete_desc_all_derivatives">删除所有已渲染的 JPG/MP4 成片，保留原始 RAW 母带以供重新调色</string>
     <string name="batch_delete_cdng_only">仅清理 CinemaDNG 序列包</string>
     <string name="batch_delete_cdng_only_desc">释放数十 GB 序列帧文件夹，保留 RAWVID 录制源文件与调色成片</string>
     <string name="gallery_delete_confirm_format">删除 (共 %1$d 项)</string>
     <string name="gallery_delete_summary">已选中 %1$d 个条目，请选择删除范围：</string>
     <string name="gallery_deleting">正在删除…</string>
     <string name="gallery_deleting_count">正在删除 %1$d 项…</string>
+    <string name="gallery_loading">正在载入暗房…</string>
     <string name="format_raw_jpg">RAW+JPG</string>
     <string name="format_jpg">JPG</string>
     <string name="format_half_frame">HF</string>
@@ -447,9 +475,27 @@
 
     <!-- 首次安装引导流程 -->
     <string name="onboarding_header_title">DARKBAG 配置向导</string>
+    <string name="onboarding_welcome_title">欢迎使用 Darkbag</string>
     <string name="onboarding_subtitle">计算摄影 · 无损底片 · 胶片暗房工作台</string>
     <string name="onboarding_skip">跳过</string>
     <string name="onboarding_step_format">步骤 %1$02d / %2$02d</string>
+    <string name="onboarding_section_permissions">核心权限</string>
+    <string name="onboarding_badge_step_1">步骤 1</string>
+    <string name="onboarding_badge_format">格式</string>
+    <string name="onboarding_section_optics">1.0x 默认焦段与元数据</string>
+    <string name="onboarding_badge_optics">光学</string>
+    <string name="onboarding_focal_24_desc">原生广角</string>
+    <string name="onboarding_focal_28_desc">经典街拍</string>
+    <string name="onboarding_focal_35_desc">人文叙事</string>
+    <string name="onboarding_section_recipe_pairing">胶片配方与 Log 曲线绑定</string>
+    <string name="onboarding_badge_recipe">配方</string>
+    <string name="onboarding_recipe_step1_select_log">1. 选择配方适用的 Log 曲线</string>
+    <string name="onboarding_section_ui_tier">取景器操控层级</string>
+    <string name="onboarding_badge_ui_tier">操控层级</string>
+    <string name="onboarding_tier_ps_short">极简快拍</string>
+    <string name="onboarding_tier_film_short">胶片创作</string>
+    <string name="onboarding_tier_pro_short">专业手动</string>
+    <string name="onboarding_shutter_hold_title">长按快门动作</string>
     <string name="onboarding_btn_next">下一步 →</string>
     <string name="onboarding_btn_start">完成配置 · 进入 Darkbag</string>
     <string name="onboarding_btn_grant_perms">一键授予核心权限并继续 →</string>
@@ -479,6 +525,12 @@
     <string name="onboarding_viewer_title">相册与查看器</string>
     <string name="onboarding_viewer_internal_desc">使用内置暗房查看器：直接浏览与缩放 DNG 底片、预览实况照片、一键调入暗房工作台冲印。</string>
     <string name="onboarding_viewer_external_desc">使用第三方查看器：轻触相册缩略图时直接调用系统默认相册或外部图片应用。</string>
+    <string name="toast_camera_permission_required">需要相机权限才能拍摄照片</string>
+    <string name="toast_camera_permission_continue">需要相机权限才能继续</string>
+    <string name="toast_lut_imported_paired">已导入 %1$s 并关联至 %2$s</string>
+    <string name="toast_lut_import_failed">导入 LUT (.cube) 失败</string>
+    <string name="camera_recipe_log_off">Log: 关</string>
+    <string name="camera_recipe_lut_off">LUT: 关</string>
     <string name="pref_replay_onboarding">配置向导</string>
     <string name="pref_replay_onboarding_desc">重新配置初始模块、格式与操控层级</string>
     <string name="lut_import_select_log_title">选择基准 Log 曲线</string>
@@ -513,4 +565,7 @@
     <string name="lut_mgmt_empty_title">暂无导入的胶片配方</string>
     <string name="lut_mgmt_empty_desc">导入匹配相机 Log 曲线的 .cube 3D LUT 胶片模拟配方。</string>
     <string name="lut_mgmt_filter_all">全部</string>
+    <string name="toast_queue_full">处理队列已满：正在处理 %1$d 张照片，请稍候…</string>
+    <string name="toast_memory_low">系统内存不足，正在等待处理完成…</string>
+    <string name="error_configure_camera_session">配置相机对话失败</string>
 </resources>

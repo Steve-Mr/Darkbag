@@ -1,93 +1,49 @@
 package top.maary.darkbag.fragments
 
-import android.net.Uri
-import top.maary.darkbag.models.ImageGroup
-import top.maary.darkbag.pipeline.composer.HalfFrameComposer
-import top.maary.darkbag.processor.ColorProcessor
-import top.maary.darkbag.fragments.SettingsFragment
-import top.maary.darkbag.ui.bento.BentoContainerRole
-import top.maary.darkbag.ui.bento.BentoTrayCard
-
 import android.os.Bundle
-import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.launch
-import android.provider.OpenableColumns
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
-import android.content.Context
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
-import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.updatePadding
-import androidx.core.view.updateLayoutParams
-import android.view.ViewGroup.MarginLayoutParams
-import androidx.navigation.Navigation
-import com.google.android.material.button.MaterialButton
-
-import kotlinx.coroutines.Dispatchers
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentPlaygroundGalleryBinding
+import top.maary.darkbag.fragments.gallery.GalleryEdgeToEdgeHelper
+import top.maary.darkbag.fragments.gallery.PlaygroundAdapter
+import top.maary.darkbag.models.PlaygroundItem
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
+import top.maary.darkbag.ui.bento.BentoTrayCard
+import top.maary.darkbag.viewmodel.PlaygroundEffect
+import top.maary.darkbag.viewmodel.PlaygroundGalleryUiState
+import top.maary.darkbag.viewmodel.PlaygroundGalleryViewModel
+import top.maary.darkbag.viewmodel.PlaygroundUserIntent
 import java.io.File
-import java.io.FileOutputStream
-import android.graphics.BitmapFactory
-import android.graphics.Bitmap
-import android.util.Log
-import androidx.exifinterface.media.ExifInterface
-import androidx.recyclerview.widget.RecyclerView
-import com.bumptech.glide.Glide
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import top.maary.darkbag.databinding.ItemPlaygroundImageBinding
-import top.maary.darkbag.utils.ImageSaver
-import java.util.UUID
-
-
-sealed class PlaygroundItem {
-    abstract val mainFile: File
-    abstract val aspectRatio: String?
-
-    data class Single(
-        val file: File,
-        override val aspectRatio: String? = null
-    ) : PlaygroundItem() {
-        override val mainFile: File = file
-    }
-
-    data class Group(
-        val jpgFile: File,
-        val dng1: File,
-        val dng2: File,
-        var isExpanded: Boolean = false,
-        override val aspectRatio: String? = null
-    ) : PlaygroundItem() {
-        override val mainFile: File = jpgFile
-    }
-}
 
 class PlaygroundGalleryFragment : Fragment() {
 
     private var _binding: FragmentPlaygroundGalleryBinding? = null
     private val binding get() = _binding!!
 
+    private val viewModel: PlaygroundGalleryViewModel by viewModels()
     private lateinit var adapter: PlaygroundAdapter
 
-    private val selectedFiles = mutableSetOf<File>()
-    private var isSelectionMode = false
+    private var prevSelectedFiles: Set<File> = emptySet()
+    private var prevSelectionMode: Boolean = false
 
     private val importDngLauncher = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         if (uris.isNotEmpty()) {
-            importDngs(uris)
+            viewModel.processIntent(PlaygroundUserIntent.ImportDngs(uris, requireContext().contentResolver))
         }
     }
 
@@ -96,46 +52,35 @@ class PlaygroundGalleryFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View {
         _binding = FragmentPlaygroundGalleryBinding.inflate(inflater, container, false)
-
         return binding.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        val dockClearancePx = (88 * resources.displayMetrics.density).toInt()
-        val headerClearancePx = (68 * resources.displayMetrics.density).toInt()
-        binding.appBarLayout.translationZ = 16f * resources.displayMetrics.density
-        binding.recyclerView.updatePadding(
-            top = headerClearancePx,
-            bottom = dockClearancePx
+        GalleryEdgeToEdgeHelper.applyFloatingGalleryInsets(
+            rootView = binding.root,
+            recyclerView = binding.recyclerView,
+            topHeaderView = binding.appBarLayout,
+            bottomDockView = binding.playgroundBentoDock,
+            bottomAppBarView = binding.bottomAppBar,
+            topClearanceDp = 68,
+            bottomClearanceDp = 88,
+            applyTopPaddingOnHeaderInsteadOfMargin = true,
+            applyHorizontalInsets = false,
+            elevateTopHeader = true
         )
-        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            binding.appBarLayout.updatePadding(top = systemBars.top)
-            binding.recyclerView.updatePadding(
-                top = systemBars.top + headerClearancePx,
-                bottom = systemBars.bottom + dockClearancePx
-            )
 
-            binding.playgroundBentoDock.updateLayoutParams<MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + (12 * resources.displayMetrics.density).toInt()
-            }
-            binding.bottomAppBar.updatePadding(bottom = systemBars.bottom)
-
-            insets
-        }
-
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val showToolbar = prefs.getBoolean(SettingsFragment.KEY_SHOW_FLOATING_TOOLBAR, false)
-        val defaultStartup = prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA)
-        val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
+        val currentPrefs = SettingsRepository.getInstance(requireContext()).current()
+        val showToolbar = currentPrefs.showFloatingToolbar
+        val defaultStartup = currentPrefs.defaultStartupPage
+        val enableCamera = currentPrefs.enableCamera
 
         val onBackPressedCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (isSelectionMode) {
-                    clearSelection()
-                } else if (enableCamera && defaultStartup == SettingsFragment.STARTUP_CAMERA) {
+                if (viewModel.uiState.value.isSelectionMode) {
+                    viewModel.processIntent(PlaygroundUserIntent.ClearSelection)
+                } else if (enableCamera && defaultStartup == PreferenceKeys.STARTUP_CAMERA) {
                     if (!findNavController().navigateUp()) {
                         requireActivity().finishAfterTransition()
                     }
@@ -146,7 +91,7 @@ class PlaygroundGalleryFragment : Fragment() {
         }
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, onBackPressedCallback)
 
-        if (!showToolbar && defaultStartup == SettingsFragment.STARTUP_CAMERA && enableCamera) {
+        if (!showToolbar && defaultStartup == PreferenceKeys.STARTUP_CAMERA && enableCamera) {
             binding.toolbar.setNavigationIcon(R.drawable.ic_back)
             binding.toolbar.setNavigationOnClickListener {
                 requireActivity().onBackPressedDispatcher.onBackPressed()
@@ -156,29 +101,28 @@ class PlaygroundGalleryFragment : Fragment() {
         }
 
         val cameraMenu = binding.toolbar.menu.findItem(R.id.action_camera)
-        if (!showToolbar && defaultStartup == SettingsFragment.STARTUP_PLAYGROUND && enableCamera) {
-            cameraMenu?.isVisible = true
-        } else {
-            cameraMenu?.isVisible = false
+        cameraMenu?.isVisible = enableCamera
+
+        binding.btnPlaygroundBack.visibility = if (enableCamera) View.VISIBLE else View.GONE
+        binding.btnPlaygroundBack.setOnClickListener {
+            if (viewModel.uiState.value.isSelectionMode) {
+                viewModel.processIntent(PlaygroundUserIntent.ClearSelection)
+            } else {
+                if (!findNavController().navigateUp()) {
+                    requireActivity().onBackPressedDispatcher.onBackPressed()
+                }
+            }
         }
 
-        binding.btnPlaygroundBack.visibility = if (enableCamera || isSelectionMode) View.VISIBLE else View.GONE
-        binding.btnPlaygroundBack.setOnClickListener {
-            if (isSelectionMode) {
-                clearSelection()
-            } else if (enableCamera) {
-                if (!findNavController().navigateUp()) {
-                    if (findNavController().currentDestination?.id == R.id.playground_gallery_fragment) {
-                        findNavController().navigate(R.id.action_playground_gallery_to_camera)
-                    }
-                }
-            } else {
-                requireActivity().onBackPressedDispatcher.onBackPressed()
+        binding.btnPlaygroundCamera.visibility = if (enableCamera) View.VISIBLE else View.GONE
+        binding.btnPlaygroundCamera.setOnClickListener {
+            if (findNavController().currentDestination?.id == R.id.playground_gallery_fragment) {
+                findNavController().navigate(R.id.action_playground_gallery_to_camera)
             }
         }
 
         binding.btnPlaygroundSelectAll.setOnClickListener {
-            toggleSelectAll()
+            viewModel.processIntent(PlaygroundUserIntent.ToggleSelectAll)
         }
 
         binding.btnPlaygroundSettings.setOnClickListener {
@@ -189,10 +133,6 @@ class PlaygroundGalleryFragment : Fragment() {
 
         binding.toolbar.setOnMenuItemClickListener { menuItem ->
             when (menuItem.itemId) {
-                R.id.action_select_all -> {
-                    toggleSelectAll()
-                    true
-                }
                 R.id.action_settings -> {
                     if (findNavController().currentDestination?.id == R.id.playground_gallery_fragment) {
                         findNavController().navigate(R.id.action_playground_gallery_to_settings)
@@ -211,82 +151,66 @@ class PlaygroundGalleryFragment : Fragment() {
 
         adapter = PlaygroundAdapter(
             coroutineScope = viewLifecycleOwner.lifecycleScope,
-            selectedFiles = selectedFiles,
-            isSelectionMode = { isSelectionMode },
+            selectedFiles = { viewModel.uiState.value.selectedFiles },
+            isSelectionMode = { viewModel.uiState.value.isSelectionMode },
             onItemClick = { file ->
-                if (isSelectionMode) {
-                    toggleSelection(file)
+                if (viewModel.uiState.value.isSelectionMode) {
+                    viewModel.processIntent(PlaygroundUserIntent.ToggleSelection(file))
                 } else {
                     openViewer(listOf(file.absolutePath))
                 }
             },
             onItemLongClick = { file ->
-                val wasSelectionMode = isSelectionMode
-                if (!isSelectionMode) {
-                    isSelectionMode = true
-                }
-                toggleSelection(file)
-
-                if (!wasSelectionMode && isSelectionMode) {
-                    // Transitioned into selection mode, notify all items to show unchecked circles
-                    adapter.notifyItemRangeChanged(0, adapter.itemCount, "SELECTION_CHANGED")
-                }
+                viewModel.processIntent(PlaygroundUserIntent.ToggleSelection(file))
             },
             onExpandClick = { group, position ->
-                if (position != RecyclerView.NO_POSITION) {
-                    group.isExpanded = !group.isExpanded
-                    adapter.notifyItemChanged(position, "EXPANSION_CHANGED")
-                }
+                viewModel.processIntent(PlaygroundUserIntent.ToggleGroupExpansion(group))
             }
         )
 
-        val spanCount = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 3 else 2
-        val staggeredLayoutManager = StaggeredGridLayoutManager(spanCount, StaggeredGridLayoutManager.VERTICAL).apply {
+        val currentSpanCount = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 3 else 2
+        val staggeredLayoutManager = StaggeredGridLayoutManager(currentSpanCount, StaggeredGridLayoutManager.VERTICAL).apply {
             gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_NONE
         }
         binding.recyclerView.layoutManager = staggeredLayoutManager
         binding.recyclerView.adapter = adapter
+
+        binding.btnPlaygroundDockLayout.setOnClickListener {
+            viewModel.processIntent(PlaygroundUserIntent.ToggleLayout)
+        }
+
+        binding.btnPlaygroundDockSelectAll.setOnClickListener {
+            viewModel.processIntent(PlaygroundUserIntent.ToggleSelectAll)
+        }
 
         binding.fabAdd.setOnClickListener {
             importDngLauncher.launch("image/x-adobe-dng")
         }
 
         binding.btnExport.setOnClickListener {
-            if (selectedFiles.isEmpty()) {
-                Toast.makeText(requireContext(), "Long-press or tap ALL to select files to export", Toast.LENGTH_SHORT).show()
-            } else {
-                exportSelected()
-            }
+            viewModel.processIntent(PlaygroundUserIntent.ExportSelected)
         }
 
         binding.btnMerge.setOnClickListener {
-            val allDngs = selectedFiles.all { it.extension.lowercase() == "dng" }
+            val selectedFiles = viewModel.uiState.value.selectedFiles
+            val allDngs = selectedFiles.isNotEmpty() && selectedFiles.all { it.extension.lowercase() == "dng" }
             if (selectedFiles.size == 2 && allDngs) {
                 val paths = selectedFiles.map { it.absolutePath }
-                com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-                    .setTitle("Select Merge Layout")
-                    .setItems(arrayOf("Side-by-side", "Top-bottom")) { _, which ->
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(R.string.playground_merge_layout_title)
+                    .setItems(arrayOf(getString(R.string.collage_layout_sbs), getString(R.string.collage_layout_tb))) { _, which ->
                         val layout = if (which == 0) "SBS" else "TB"
                         openViewer(paths, layout)
-                        clearSelection()
+                        viewModel.processIntent(PlaygroundUserIntent.ClearSelection)
                     }
                     .show()
             } else {
-                Toast.makeText(requireContext(), "Select exactly 2 DNG images to merge", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), R.string.playground_merge_need_two, Toast.LENGTH_SHORT).show()
             }
         }
 
         binding.btnDisband.setOnClickListener {
-            val targets = selectedFiles.mapNotNull { file ->
-                val item = adapter.currentList.find { it is PlaygroundItem.Group && it.jpgFile == file }
-                if (item is PlaygroundItem.Group) item.jpgFile else null
-            }
-            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-                targets.forEach { it.delete() }
-                withContext(Dispatchers.Main) {
-                    clearSelectionAndReload()
-                }
-            }
+            viewModel.processIntent(PlaygroundUserIntent.DisbandSelected)
         }
 
         binding.btnDelete.setOnClickListener {
@@ -294,388 +218,124 @@ class PlaygroundGalleryFragment : Fragment() {
                 .setTitle(R.string.playground_delete_title)
                 .setMessage(R.string.playground_delete_message)
                 .setPositiveButton(R.string.playground_btn_delete) { _, _ ->
-                    val filesToDelete = mutableListOf<File>()
-                    selectedFiles.forEach { file ->
-                        val item = adapter.currentList.find {
-                            when (it) {
-                                is PlaygroundItem.Single -> it.file == file
-                                is PlaygroundItem.Group -> it.jpgFile == file || it.dng1 == file || it.dng2 == file
-                            }
-                        }
-
-                        when (item) {
-                            is PlaygroundItem.Single -> {
-                                filesToDelete.add(item.file)
-                            }
-                            is PlaygroundItem.Group -> {
-                                if (file == item.jpgFile) {
-                                    filesToDelete.add(item.jpgFile)
-                                    filesToDelete.add(item.dng1)
-                                    filesToDelete.add(item.dng2)
-                                } else {
-                                    filesToDelete.add(file)
-                                    filesToDelete.add(item.jpgFile)
-                                }
-                            }
-                            else -> {}
-                        }
-                    }
-
-                    viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-                        filesToDelete.distinct().forEach { it.delete() }
-                        withContext(Dispatchers.Main) {
-                            clearSelectionAndReload()
-                        }
-                    }
+                    viewModel.processIntent(PlaygroundUserIntent.DeleteSelected)
                 }
                 .setNegativeButton(R.string.cancel, null)
                 .show()
         }
 
-        updateBottomBar()
-        loadFiles()
-    }
-
-    private fun getPlaygroundDir(): File {
-        val dir = File(requireContext().filesDir, "playground_dngs")
-        if (!dir.exists()) {
-            dir.mkdirs()
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.uiState.collect { state ->
+                    renderUiState(state)
+                }
+            }
         }
-        return dir
-    }
 
-    private fun loadFiles() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            val dir = getPlaygroundDir()
-            val files = dir.listFiles { file -> file.extension.lowercase() == "dng" || file.extension.lowercase() == "jpg" } ?: emptyArray()
-
-            val dngMap = files.filter { it.extension.lowercase() == "dng" }.groupBy { it.nameWithoutExtension }
-            val jpgMap = files.filter { it.extension.lowercase() == "jpg" }.associateBy { it.nameWithoutExtension }
-
-            val newItems = mutableListOf<PlaygroundItem>()
-            val processedBases = mutableSetOf<String>()
-
-            fun calculateAspectRatio(f: File): String? {
-                try {
-                    val exifInterface = ExifInterface(f.absolutePath)
-                    var width = exifInterface.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
-                    var height = exifInterface.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
-
-                    if (width == 0 || height == 0) {
-                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeFile(f.absolutePath, options)
-                        width = options.outWidth
-                        height = options.outHeight
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.effects.collect { effect ->
+                    when (effect) {
+                        is PlaygroundEffect.ShowToast -> Toast.makeText(requireContext(), effect.message, Toast.LENGTH_SHORT).show()
+                        is PlaygroundEffect.ShowToastRes -> Toast.makeText(requireContext(), getString(effect.resId, *effect.formatArgs.toTypedArray()), Toast.LENGTH_SHORT).show()
+                        is PlaygroundEffect.OpenViewer -> openViewer(effect.paths, effect.hfLayout)
+                        is PlaygroundEffect.RequestRefresh -> viewModel.loadFiles(forceRefresh = true)
                     }
-
-                    if (width > 0 && height > 0) {
-                        val orientation = exifInterface.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-                        val swapDims = orientation == ExifInterface.ORIENTATION_ROTATE_90 ||
-                                       orientation == ExifInterface.ORIENTATION_ROTATE_270 ||
-                                       orientation == ExifInterface.ORIENTATION_TRANSPOSE ||
-                                       orientation == ExifInterface.ORIENTATION_TRANSVERSE
-
-                        return if (swapDims) "$height:$width" else "$width:$height"
-                    }
-                } catch (e: Exception) {
-                    Log.w("Playground", "Failed to calculate aspect ratio for ${f.name}", e)
-                }
-                return null
-            }
-
-            for (file in files) {
-                val baseName = file.nameWithoutExtension
-                if (processedBases.contains(baseName)) continue
-
-                // Check if it's a part of a group (ends with _1 or _2)
-                var groupBase = baseName
-                if (baseName.endsWith("_1")) groupBase = baseName.removeSuffix("_1")
-                if (baseName.endsWith("_2")) groupBase = baseName.removeSuffix("_2")
-
-                if (processedBases.contains(groupBase)) continue
-
-                val dng1 = dngMap["${groupBase}_1"]?.firstOrNull()
-                val dng2 = dngMap["${groupBase}_2"]?.firstOrNull()
-                val groupJpg = jpgMap[groupBase]
-
-                if (dng1 != null && dng2 != null && groupJpg != null) {
-                    val ratio = calculateAspectRatio(groupJpg)
-                    newItems.add(PlaygroundItem.Group(groupJpg, dng1, dng2, aspectRatio = ratio))
-                    processedBases.add(groupBase)
-                    processedBases.add("${groupBase}_1")
-                    processedBases.add("${groupBase}_2")
-                } else if (file.extension.lowercase() == "dng") {
-                     // Only add as single if it's a DNG and wasn't processed as part of a group
-                     if (!processedBases.contains(baseName)) {
-                         // Check if there is an existing JPG to get aspect ratio from to be faster/consistent
-                         val singleJpg = jpgMap[baseName]
-                         val ratioFile = singleJpg ?: file
-                         val ratio = calculateAspectRatio(ratioFile)
-                         newItems.add(PlaygroundItem.Single(file, aspectRatio = ratio))
-                         processedBases.add(baseName)
-                     }
-                }
-            }
-
-            val sortedItems = newItems.sortedByDescending { it.mainFile.lastModified() }
-
-            withContext(Dispatchers.Main) {
-                val currentList = adapter.currentList
-                sortedItems.forEach { newItem ->
-                    if (newItem is PlaygroundItem.Group) {
-                        val oldItem = currentList.find { it is PlaygroundItem.Group && it.mainFile.absolutePath == newItem.mainFile.absolutePath } as? PlaygroundItem.Group
-                        if (oldItem != null) {
-                            newItem.isExpanded = oldItem.isExpanded
-                        }
-                    }
-                }
-                adapter.submitList(sortedItems) {
-                    updateEmptyState()
-                    updateBottomBar()
                 }
             }
         }
     }
 
-    private fun updateEmptyState() {
-        binding.emptyStateText.visibility = if (adapter.currentList.isEmpty()) View.VISIBLE else View.GONE
-    }
-
-    private fun toggleSelection(file: File) {
-        if (selectedFiles.contains(file)) {
-            selectedFiles.remove(file)
+    private fun renderUiState(state: PlaygroundGalleryUiState) {
+        val hasSelection = state.isSelectionMode && state.selectedFiles.isNotEmpty()
+        val titleText = getString(R.string.playground_title)
+        val subtitleText = if (hasSelection) {
+            getString(R.string.gallery_selected_count, state.selectedFiles.size)
         } else {
-            selectedFiles.add(file)
-        }
-
-        if (selectedFiles.isEmpty()) {
-            isSelectionMode = false
-        }
-
-        // Find the index of the item that contains this file
-        val index = adapter.currentList.indexOfFirst { item ->
-            when (item) {
-                is PlaygroundItem.Single -> item.file == file
-                is PlaygroundItem.Group -> item.jpgFile == file || item.dng1 == file || item.dng2 == file
-            }
-        }
-
-        if (index != -1) {
-            val item = adapter.currentList[index]
-            if (item is PlaygroundItem.Group) {
-                if (item.jpgFile == file && selectedFiles.contains(file)) {
-                    // If the user long clicked the group main image to select it, auto-expand so they see the sub-items too
-                    if (!item.isExpanded) {
-                        item.isExpanded = true
-                        adapter.notifyItemChanged(index, "EXPANSION_CHANGED")
-                    }
-                } else if (!selectedFiles.contains(item.jpgFile) && !selectedFiles.contains(item.dng1) && !selectedFiles.contains(item.dng2)) {
-                    // If no items in this group are selected anymore, auto-collapse it
-                    if (item.isExpanded) {
-                        item.isExpanded = false
-                        adapter.notifyItemChanged(index, "EXPANSION_CHANGED")
-                    }
-                }
-            }
-            adapter.notifyItemChanged(index, "SELECTION_CHANGED")
-        }
-
-        if (selectedFiles.isEmpty()) {
-            // Need to notify all items since they might need to hide the unchecked radio button icons
-            adapter.currentList.indices.forEach { i ->
-                val itm = adapter.currentList[i]
-                if (itm is PlaygroundItem.Group && itm.isExpanded) {
-                    itm.isExpanded = false
-                    adapter.notifyItemChanged(i, "EXPANSION_CHANGED")
-                }
-                adapter.notifyItemChanged(i, "SELECTION_CHANGED")
-            }
-        }
-        updateBottomBar()
-    }
-
-    private fun toggleSelectAll() {
-        val allFiles = adapter.currentList.flatMap { item ->
-            when (item) {
-                is PlaygroundItem.Single -> listOf(item.file)
-                is PlaygroundItem.Group -> listOf(item.jpgFile)
-            }
-        }
-        if (allFiles.isEmpty()) return
-
-        if (selectedFiles.size == allFiles.size) {
-            clearSelection()
-        } else {
-            isSelectionMode = true
-            selectedFiles.clear()
-            selectedFiles.addAll(allFiles)
-            adapter.notifyItemRangeChanged(0, adapter.itemCount, "SELECTION_CHANGED")
-            updateBottomBar()
-        }
-    }
-
-    private fun clearSelection() {
-        val oldSelections = selectedFiles.toList()
-        selectedFiles.clear()
-        isSelectionMode = false
-
-        adapter.currentList.indices.forEach { index ->
-            val item = adapter.currentList[index]
-            if (item is PlaygroundItem.Group && item.isExpanded) {
-                item.isExpanded = false
-                adapter.notifyItemChanged(index, "EXPANSION_CHANGED")
-            }
-            adapter.notifyItemChanged(index, "SELECTION_CHANGED")
-        }
-
-        updateBottomBar()
-    }
-
-    private fun updateBottomBar() {
-        val ctx = context ?: return
-        val sandboxCount = adapter.currentList.size
-        val subtitleText = "外部暗房 · $sandboxCount 组"
-        binding.toolbar.subtitle = subtitleText
-        binding.tvPlaygroundSubtitle.text = subtitleText
-
-        (binding.playgroundBentoDock as? BentoTrayCard)?.let { dockCard ->
-            val role = if (isSelectionMode && selectedFiles.isNotEmpty()) {
-                BentoContainerRole.SECONDARY_CONTAINER
-            } else {
-                BentoContainerRole.SURFACE_CONTAINER_LOW
-            }
-            dockCard.setContainerRole(role, animated = true)
-        }
-
-        val prefs = ctx.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
-        binding.btnPlaygroundBack.visibility = if (enableCamera || isSelectionMode) View.VISIBLE else View.GONE
-
-        val titleText = if (isSelectionMode && selectedFiles.isNotEmpty()) {
-            "${selectedFiles.size} SELECTED"
-        } else {
-            "PLAYGROUND"
+            getString(R.string.playground_subtitle_format, state.items.size)
         }
         binding.toolbar.title = titleText
+        binding.toolbar.subtitle = subtitleText
         binding.tvPlaygroundTitle.text = titleText
+        binding.tvPlaygroundSubtitle.text = subtitleText
 
-        val allFilesCount = adapter.currentList.size
-        val isAllSelected = isSelectionMode && selectedFiles.size >= allFilesCount && allFilesCount > 0
-        binding.btnPlaygroundSelectAll.text = if (isAllSelected) "☒ NONE" else "☑ ALL"
+        (binding.playgroundBentoDock as? BentoTrayCard)?.setContainerRole(state.containerRole, animated = true)
+        (binding.playgroundTopBentoCard as? BentoTrayCard)?.setContainerRole(state.containerRole, animated = true)
 
-        val selectAllItem = binding.toolbar.menu.findItem(R.id.action_select_all)
-        if (selectAllItem != null) {
-            selectAllItem.setIcon(if (isAllSelected) R.drawable.ic_deselect else R.drawable.ic_select_all)
-            selectAllItem.title = if (isAllSelected) "Deselect All" else "Select All"
-        }
+        val enableCamera = SettingsRepository.getInstance(requireContext()).current().enableCamera
+        binding.btnPlaygroundBack.visibility = if (enableCamera || state.isSelectionMode || findNavController().previousBackStackEntry != null) View.VISIBLE else View.GONE
+        binding.btnPlaygroundBack.setIconResource(if (state.isSelectionMode) R.drawable.ic_close else R.drawable.ic_back)
 
-        // Always keep playground_bento_dock and fabAdd visible
-        binding.playgroundBentoDock.visibility = View.VISIBLE
-        binding.fabAdd.visibility = View.VISIBLE
-        binding.fabAdd.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "＋ IMPORT",
-            value = "导入外部 DNG",
-            isTabActive = false,
-            context = ctx
-        )
-
-        val density = resources.displayMetrics.density
-        val stroke1dp = (1f * density).toInt()
-        val stroke1_5dp = (1.5f * density).toInt()
-        val radius12dp = (12f * density).toInt()
-        val radius14dp = (14f * density).toInt()
-
-        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, android.graphics.Color.WHITE)
-        val colorPrimaryContainer = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, android.graphics.Color.DKGRAY)
-        val colorSecondaryContainer = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondaryContainer, android.graphics.Color.DKGRAY)
-        val colorOnSecondaryContainer = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSecondaryContainer, android.graphics.Color.WHITE)
-        val colorSurfaceContainerHigh = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerHigh, android.graphics.Color.GRAY)
-        val colorOutlineVariant = com.google.android.material.color.MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, android.graphics.Color.DKGRAY)
-
-        // Merge button: always visible in dock; active when exactly 2 DNGs are selected
-        val allDngs = selectedFiles.isNotEmpty() && selectedFiles.all { it.extension.lowercase() == "dng" }
-        val isMergeActive = isSelectionMode && selectedFiles.size == 2 && allDngs
-        binding.btnMerge.visibility = View.VISIBLE
-        binding.btnMerge.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "⊞ MERGE HF",
-            value = "半格拼图",
-            isTabActive = isMergeActive,
-            context = ctx
-        )
-        if (isMergeActive) {
-            binding.btnMerge.backgroundTintList = android.content.res.ColorStateList.valueOf(colorPrimaryContainer)
-            binding.btnMerge.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
-            binding.btnMerge.strokeWidth = stroke1_5dp
-            binding.btnMerge.cornerRadius = radius12dp
-            binding.btnMerge.alpha = 1.0f
+        if (state.isSelectionMode) {
+            binding.btnPlaygroundCamera.visibility = View.GONE
+            binding.btnPlaygroundSelectAll.visibility = View.VISIBLE
+            val allFilesCount = state.items.size
+            val isAllSelected = state.selectedFiles.size >= allFilesCount && allFilesCount > 0
+            binding.btnPlaygroundSelectAll.setText(if (isAllSelected) R.string.gallery_deselect_all else R.string.gallery_select_all)
         } else {
-            binding.btnMerge.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-            binding.btnMerge.strokeColor = android.content.res.ColorStateList.valueOf(colorOutlineVariant)
-            binding.btnMerge.strokeWidth = stroke1dp
-            binding.btnMerge.cornerRadius = radius14dp
-            binding.btnMerge.alpha = 0.5f
+            binding.btnPlaygroundCamera.visibility = if (enableCamera) View.VISIBLE else View.GONE
+            binding.btnPlaygroundSelectAll.visibility = View.GONE
         }
 
-        // Disband button: visible when all selected items are merged Half-Frame groups
-        val allGroups = isSelectionMode && selectedFiles.isNotEmpty() && selectedFiles.all { selectedFile ->
-            adapter.currentList.any { item -> item is PlaygroundItem.Group && item.jpgFile == selectedFile }
-        }
-        binding.btnDisband.visibility = if (allGroups) View.VISIBLE else View.GONE
-        binding.btnDisband.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "✂ DISBAND",
-            value = "拆分半格",
-            isTabActive = allGroups,
-            context = ctx
-        )
+        binding.playgroundLoadingIndicator.visibility = if (state.isLoading && state.items.isEmpty()) View.VISIBLE else View.GONE
+        binding.emptyStateText.visibility = if (state.items.isEmpty() && !state.isLoading) View.VISIBLE else View.GONE
 
-        // Export button: always visible in dock
-        val hasSelection = isSelectionMode && selectedFiles.isNotEmpty()
-        binding.btnExport.visibility = View.VISIBLE
-        binding.btnExport.isEnabled = true
-        binding.btnExport.text = top.maary.darkbag.ui.CameraBentoDeckView.formatProTelemetry(
-            label = "↗ EXPORT",
-            value = if (hasSelection) "导出 (${selectedFiles.size})" else "批量导出",
-            isTabActive = false,
-            context = ctx
-        )
+        // Dock buttons layout
         if (hasSelection) {
-            binding.btnExport.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSecondaryContainer)
-            binding.btnExport.setTextColor(colorOnSecondaryContainer)
-            binding.btnExport.alpha = 1.0f
-        } else {
-            binding.btnExport.backgroundTintList = android.content.res.ColorStateList.valueOf(colorSurfaceContainerHigh)
-            binding.btnExport.alpha = 0.5f
-        }
+            binding.layoutPlaygroundNormalActions.visibility = View.GONE
+            binding.layoutPlaygroundSelectionActions.visibility = View.VISIBLE
 
-        // Delete button: always visible in dock
-        binding.btnDelete.visibility = View.VISIBLE
-        binding.btnDelete.isEnabled = hasSelection
-        binding.btnDelete.alpha = if (hasSelection) 1.0f else 0.4f
-    }
+            val allDngs = state.selectedFiles.all { it.extension.lowercase() == "dng" }
+            val isMergeActive = state.selectedFiles.size == 2 && allDngs
+            binding.btnMerge.isEnabled = isMergeActive && !state.isExporting && !state.isDeleting
+            binding.btnMerge.alpha = if (isMergeActive && !state.isExporting && !state.isDeleting) 1.0f else 0.4f
 
-    private fun clearSelectionAndReload() {
-        selectedFiles.clear()
-        isSelectionMode = false
-
-        adapter.currentList.indices.forEach { index ->
-            val item = adapter.currentList[index]
-            if (item is PlaygroundItem.Group && item.isExpanded) {
-                item.isExpanded = false
-                adapter.notifyItemChanged(index, "EXPANSION_CHANGED")
+            val allGroups = state.selectedFiles.all { selectedFile ->
+                state.items.any { item -> item is PlaygroundItem.Group && item.jpgFile == selectedFile }
             }
-            adapter.notifyItemChanged(index, "SELECTION_CHANGED")
+            binding.btnDisband.visibility = if (allGroups) View.VISIBLE else View.GONE
+            binding.btnDisband.isEnabled = !state.isExporting && !state.isDeleting
+            binding.btnDisband.alpha = if (state.isExporting || state.isDeleting) 0.4f else 1.0f
+
+            binding.btnExport.isEnabled = !state.isExporting && !state.isDeleting
+            binding.btnExport.alpha = if (state.isExporting || state.isDeleting) 0.4f else 1.0f
+
+            binding.btnDelete.isEnabled = !state.isDeleting && !state.isExporting
+            binding.btnDelete.alpha = if (state.isDeleting || state.isExporting) 0.4f else 1.0f
+        } else {
+            binding.layoutPlaygroundNormalActions.visibility = View.VISIBLE
+            binding.layoutPlaygroundSelectionActions.visibility = View.GONE
         }
 
-        updateBottomBar()
-        loadFiles()
+        // Layout manager span count
+        (binding.recyclerView.layoutManager as? StaggeredGridLayoutManager)?.let { lm ->
+            if (lm.spanCount != state.columnCount) {
+                lm.spanCount = state.columnCount
+            }
+        }
+        binding.btnPlaygroundDockLayout.text = getString(R.string.gallery_layout_cols, state.columnCount)
+
+        // Submit list to adapter
+        val selectionChanged = prevSelectedFiles != state.selectedFiles || prevSelectionMode != state.isSelectionMode
+        prevSelectedFiles = state.selectedFiles
+        prevSelectionMode = state.isSelectionMode
+
+        adapter.submitList(state.items) {
+            if (_binding != null) {
+                (binding.recyclerView.layoutManager as? StaggeredGridLayoutManager)?.invalidateSpanAssignments()
+                if (selectionChanged) {
+                    adapter.notifyItemRangeChanged(0, adapter.itemCount, "SELECTION_CHANGED")
+                }
+            }
+        }
     }
 
     private fun openViewer(paths: List<String>, hfLayout: String? = null) {
-        // Find if the path belongs to a Group. If it's a group's JPG, pass all its DNGs to the viewer.
+        val currentItems = viewModel.uiState.value.items
         val finalPaths = mutableListOf<String>()
         for (path in paths) {
             val file = File(path)
-            val item = adapter.currentList.find {
+            val item = currentItems.find {
                 when (it) {
                     is PlaygroundItem.Single -> it.file == file
                     is PlaygroundItem.Group -> it.jpgFile == file
@@ -698,695 +358,19 @@ class PlaygroundGalleryFragment : Fragment() {
         findNavController().navigate(R.id.action_playground_to_image_viewer, bundle)
     }
 
-    private fun importDngs(uris: List<Uri>) {
-        val ctx = context ?: return
-        val appContext = ctx.applicationContext
-        lifecycleScope.launch(Dispatchers.IO) {
-            val dir = getPlaygroundDir()
-            var importedCount = 0
-            for (uri in uris) {
-                try {
-                    val fileName = getFileName(appContext, uri) ?: "imported_${UUID.randomUUID()}.dng"
-                    val sanitizedFileName = File(fileName).name.ifEmpty { "imported_${UUID.randomUUID()}.dng" }
-                    var destFile = File(dir, sanitizedFileName)
-                    var counter = 1
-                    val baseName = destFile.nameWithoutExtension
-                    val extension = destFile.extension.let { if (it.isNotEmpty()) ".$it" else "" }
-                    while (destFile.exists()) {
-                        destFile = File(dir, "${baseName}_$counter$extension")
-                        counter++
-                    }
-                    appContext.contentResolver.openInputStream(uri)?.use { input ->
-                        FileOutputStream(destFile).use { output ->
-                            input.copyTo(output)
-                        }
-                    }
-                    importedCount++
-                } catch (e: Exception) {
-                    Log.e("Playground", "Failed to import URI: $uri", e)
-                }
-            }
-            withContext(Dispatchers.Main) {
-                context?.let { Toast.makeText(it, "Imported $importedCount files", Toast.LENGTH_SHORT).show() }
-                loadFiles()
-            }
-        }
-    }
-
-    private fun getFileName(context: android.content.Context, uri: Uri): String? {
-        var result: String? = null
-        if (uri.scheme == "content") {
-            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (index != -1) {
-                        result = cursor.getString(index)
-                    }
-                }
-            }
-        }
-        if (result == null) {
-            result = uri.path?.let { path -> File(path).name }
-        }
-        return result
-    }
-
-    private fun exportSelected() {
-        val filesToExport = selectedFiles.toList()
-        if (filesToExport.isEmpty()) return
-
-        android.widget.Toast.makeText(requireContext(), "Exporting ${filesToExport.size} files...", android.widget.Toast.LENGTH_SHORT).show()
-
-        lifecycleScope.launch(top.maary.darkbag.processor.ColorProcessor.imageProcessingDispatcher) {
-            var successCount = 0
-            val ctx = context ?: return@launch
-            val appContext = ctx.applicationContext
-            val repository = top.maary.darkbag.repository.ImageRepository(appContext)
-
-            val itemsSnapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { adapter.currentList.toList() }
-            val processedGroups = mutableSetOf<String>()
-
-            for (file in filesToExport) {
-                try {
-                    // Find which item this file belongs to
-                    val item = itemsSnapshot.find {
-                        when (it) {
-                            is PlaygroundItem.Single -> it.file == file
-                            is PlaygroundItem.Group -> it.jpgFile == file || it.dng1 == file || it.dng2 == file
-                        }
-                    }
-
-                    if (item == null) continue
-
-                    when (item) {
-                        is PlaygroundItem.Single -> {
-                            val baseName = item.file.nameWithoutExtension
-                            val dngUri = Uri.fromFile(item.file)
-
-                            val jpgFile = java.io.File(item.file.parent, "$baseName.jpg")
-                            val jpgUri = if (jpgFile.exists()) Uri.fromFile(jpgFile) else null
-
-                            val group = ImageGroup(
-                                baseName = baseName,
-                                dngUri = dngUri,
-                                jpgUri = jpgUri,
-                                captureTime = item.file.lastModified(),
-                                lastModified = item.file.lastModified()
-                            )
-                            val loadedGroup = repository.loadMetadata(group)
-                            val config = loadedGroup.editConfig ?: top.maary.darkbag.models.EditConfig()
-
-                            val logIndex = top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(config.log)
-                            val lutManager = top.maary.darkbag.utils.LutManager(appContext)
-                            val lutPath = if (config.lut != null && config.lut != "None") {
-                                java.io.File(lutManager.lutDir, config.lut).absolutePath
-                            } else null
-
-                            if (item.file.extension.lowercase() == "jpg") {
-                                // If the user selected an already processed JPG, we just decode and save it
-                                // rather than trying to process it as a RAW byte array
-                                val decodeOpts = android.graphics.BitmapFactory.Options().apply {
-                                    inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
-                                }
-                                val inputBitmap = android.graphics.BitmapFactory.decodeFile(item.file.absolutePath, decodeOpts)
-
-                                val uri = ImageSaver.saveProcessedImage(
-                                    context = appContext,
-                                    inputBitmap = inputBitmap,
-                                    bmpPath = null,
-                                    rotationDegrees = 0,
-                                    zoomFactor = config.zoomFactor,
-                                    baseName = baseName,
-                                    linearDngPath = null,
-                                    saveJpg = true,
-                                    saveRaw = false,
-                                    editConfig = config,
-                                    isAlreadyStitched = true,
-                                    captureMetadata = repository.getCaptureMetadata(Uri.fromFile(item.file))
-                                )
-                                if (uri != null) successCount++
-                                inputBitmap?.recycle()
-                            } else {
-                                val finalBytes = java.io.FileInputStream(item.file).use { it.readBytes() }
-                                val orientation = try {
-                                    appContext.contentResolver.openInputStream(dngUri)?.use { input ->
-                                        androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                                    } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                                } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-
-                                val rotDegrees = when(orientation) {
-                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                                    else -> 0
-                                }
-
-                                val adj = config.adjustments?.getOrNull(0) ?: top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
-                                val meta = repository.getCaptureMetadata(dngUri)
-
-                                val tempJpgFile = java.io.File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}.jpg")
-
-                                top.maary.darkbag.processor.ColorProcessor.processRaw(
-                                    dngData = finalBytes,
-                                    targetLog = logIndex,
-                                    lutPath = lutPath,
-                                    exposure = adj.exposure,
-                                    contrast = adj.contrast,
-                                    saturation = adj.saturation,
-                                    highlights = adj.highlights,
-                                    shadows = adj.shadows,
-                                    whites = adj.whites,
-                                    blacks = adj.blacks,
-                                    digitalGain = adj.digitalGain,
-                                    outputJpgPath = tempJpgFile.absolutePath,
-                                    useGpu = false,
-                                    orientation = rotDegrees,
-                                    mirror = false,
-                                    outputBitmap = null,
-                                    downsampleFactor = 1,
-                                    zoomFactor = config.zoomFactor,
-                                    metadata = meta
-                                )
-
-                                if (tempJpgFile.exists()) {
-                                    val uri = ImageSaver.saveProcessedImage(
-                                        context = appContext,
-                                        inputBitmap = null,
-                                        bmpPath = tempJpgFile.absolutePath,
-                                        rotationDegrees = 0,
-                                        zoomFactor = 1.0f,
-                                        baseName = baseName,
-                                        linearDngPath = null,
-                                        saveJpg = true,
-                                        saveRaw = false,
-                                        editConfig = config,
-                                        isAlreadyStitched = true,
-                                        captureMetadata = meta
-                                    )
-                                    if (uri != null) successCount++
-                                    tempJpgFile.delete()
-                                }
-                            }
-                        }
-                        is PlaygroundItem.Group -> {
-                            val baseName = item.jpgFile.nameWithoutExtension
-
-                            // Prevent exporting the same group multiple times if multiple sub-files are selected
-                            if (processedGroups.contains(baseName)) continue
-                            processedGroups.add(baseName)
-
-                            val dngUri1 = Uri.fromFile(item.dng1)
-                            val dngUri2 = Uri.fromFile(item.dng2)
-                            val jpgUri = Uri.fromFile(item.jpgFile)
-
-                            val group = ImageGroup(
-                                baseName = baseName,
-                                dngUri1 = dngUri1,
-                                dngUri2 = dngUri2,
-                                jpgUri = jpgUri,
-                                captureTime = item.jpgFile.lastModified(),
-                                lastModified = item.jpgFile.lastModified()
-                            )
-
-                            val loadedGroup = repository.loadMetadata(group)
-                            val config = loadedGroup.editConfig ?: top.maary.darkbag.models.EditConfig()
-
-                            val logIndex = top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(config.log)
-                            val lutManager = top.maary.darkbag.utils.LutManager(appContext)
-                            val lutPath = if (config.lut != null && config.lut != "None") {
-                                java.io.File(lutManager.lutDir, config.lut).absolutePath
-                            } else null
-
-                            fun processFullSafe(targetFile: java.io.File?, uri: Uri?, index: Int): android.graphics.Bitmap? {
-                                if (targetFile == null || !targetFile.exists() || uri == null) return null
-                                val finalBytes = java.io.FileInputStream(targetFile).use { it.readBytes() }
-
-                                val orientation = try {
-                                    appContext.contentResolver.openInputStream(uri)?.use { input ->
-                                        androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                                    } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                                } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-
-                                val rotDegrees = when(orientation) {
-                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                                    else -> 0
-                                }
-
-                                val adj = config.adjustments?.getOrNull(index) ?: top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
-                                val meta = repository.getCaptureMetadata(uri)
-
-                                val tempJpgFile = java.io.File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}_$index.jpg")
-
-                                top.maary.darkbag.processor.ColorProcessor.processRaw(
-                                    dngData = finalBytes,
-                                    targetLog = logIndex,
-                                    lutPath = lutPath,
-                                    exposure = adj.exposure,
-                                    contrast = adj.contrast,
-                                    saturation = adj.saturation,
-                                    highlights = adj.highlights,
-                                    shadows = adj.shadows,
-                                    whites = adj.whites,
-                                    blacks = adj.blacks,
-                                    digitalGain = adj.digitalGain,
-                                    outputJpgPath = tempJpgFile.absolutePath,
-                                    useGpu = false,
-                                    orientation = rotDegrees,
-                                    mirror = false,
-                                    outputBitmap = null,
-                                    downsampleFactor = 1,
-                                    zoomFactor = config.zoomFactor,
-                                    metadata = meta
-                                )
-
-                                if (!tempJpgFile.exists()) return null
-
-                                val decodeOpts = android.graphics.BitmapFactory.Options().apply {
-                                    inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
-                                }
-                                val bitmap = android.graphics.BitmapFactory.decodeFile(tempJpgFile.absolutePath, decodeOpts)
-                                tempJpgFile.delete()
-                                return bitmap
-                            }
-
-                            val f1 = processFullSafe(item.dng1, dngUri1, 0)
-                            val f2 = processFullSafe(item.dng2, dngUri2, 1)
-
-                            val time1 = repository.getCaptureMetadata(dngUri1)?.dateTimeOriginal ?: item.dng1.lastModified()
-                            val time2 = repository.getCaptureMetadata(dngUri2)?.dateTimeOriginal ?: item.dng2.lastModified()
-
-                            val finalCompositeBitmap = HalfFrameComposer.compose(
-                                frame1 = f1,
-                                frame2 = f2,
-                                layout = config.hfLayout,
-                                isSwapped = config.isSwapped,
-                                showTimestamp = config.showTimestamp,
-                                flareType = config.flareType,
-                                time1 = time1,
-                                time2 = time2,
-                                downsample = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample
-                            )
-                            f1?.recycle()
-                            f2?.recycle()
-
-                            finalCompositeBitmap?.let { bitmap ->
-                                val captureMetadata = repository.getCaptureMetadata(dngUri1) ?: repository.getCaptureMetadata(jpgUri)
-
-                                val uri = ImageSaver.saveProcessedImage(
-                                    context = appContext,
-                                    inputBitmap = bitmap,
-                                    bmpPath = null,
-                                    rotationDegrees = 0,
-                                    zoomFactor = 1.0f,
-                                    baseName = baseName,
-                                    linearDngPath = null,
-                                    saveJpg = true,
-                                    saveRaw = false,
-                                    editConfig = config,
-                                    isAlreadyStitched = true,
-                                    captureMetadata = captureMetadata
-                                )
-                                if (uri != null) successCount++
-                                bitmap.recycle()
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("Playground", "Failed to export ${file.name}", e)
-                }
-            }
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                android.widget.Toast.makeText(requireContext(), "Exported $successCount files", android.widget.Toast.LENGTH_SHORT).show()
-                clearSelection()
-            }
-        }
-    }
-
     override fun onResume() {
         super.onResume()
-        // Trigger a fresh load to catch any changes from PlaygroundViewerFragment
-        loadFiles()
-        // Re-synchronize the bottom bar state which updates the forced hidden state
-        // of the floating toolbar based on selection mode.
-        updateBottomBar()
+        viewModel.loadFiles(forceRefresh = true)
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
-        val spanCount = if (newConfig.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 3 else 2
+        val spanCount = viewModel.uiState.value.columnCount
         (binding.recyclerView.layoutManager as? StaggeredGridLayoutManager)?.spanCount = spanCount
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
-    }
-}
-
-class PlaygroundAdapter(
-    private val coroutineScope: kotlinx.coroutines.CoroutineScope,
-    private val selectedFiles: Set<File>,
-    private val isSelectionMode: () -> Boolean,
-    private val onItemClick: (File) -> Unit,
-    private val onItemLongClick: (File) -> Unit,
-    private val onExpandClick: (PlaygroundItem.Group, Int) -> Unit
-) : androidx.recyclerview.widget.ListAdapter<PlaygroundItem, PlaygroundAdapter.ViewHolder>(PlaygroundItemDiffCallback()) {
-
-    class PlaygroundItemDiffCallback : androidx.recyclerview.widget.DiffUtil.ItemCallback<PlaygroundItem>() {
-        override fun areItemsTheSame(oldItem: PlaygroundItem, newItem: PlaygroundItem): Boolean {
-            return oldItem.mainFile.absolutePath == newItem.mainFile.absolutePath
-        }
-
-        override fun areContentsTheSame(oldItem: PlaygroundItem, newItem: PlaygroundItem): Boolean {
-            if (oldItem.javaClass != newItem.javaClass) return false
-            if (oldItem is PlaygroundItem.Group && newItem is PlaygroundItem.Group) {
-                if (oldItem.isExpanded != newItem.isExpanded) return false
-                if (oldItem.dng1.lastModified() != newItem.dng1.lastModified() || oldItem.dng2.lastModified() != newItem.dng2.lastModified()) return false
-            }
-            return oldItem.mainFile.lastModified() == newItem.mainFile.lastModified()
-        }
-
-        override fun getChangePayload(oldItem: PlaygroundItem, newItem: PlaygroundItem): Any? {
-            val payloads = mutableListOf<String>()
-
-            if (oldItem is PlaygroundItem.Group && newItem is PlaygroundItem.Group) {
-                if (oldItem.isExpanded != newItem.isExpanded) {
-                    payloads.add("EXPANSION_CHANGED")
-                }
-            }
-
-            val isModified = oldItem.mainFile.lastModified() != newItem.mainFile.lastModified() ||
-                (oldItem is PlaygroundItem.Group && newItem is PlaygroundItem.Group &&
-                (oldItem.dng1.lastModified() != newItem.dng1.lastModified() || oldItem.dng2.lastModified() != newItem.dng2.lastModified()))
-
-            if (isModified) {
-                payloads.add("MODIFIED")
-            }
-
-            if (payloads.isNotEmpty()) {
-                // Return just the first string if it's one, or we can handle it differently.
-                // The onBindViewHolder expects String payloads, if we pass a list it might get wrapped in another list.
-                // Let's just return the first string because onBindViewHolder currently only looks at payloads list string elements.
-                // Or better, let's return a special string and handle both if needed.
-                // Let's just check the most important or return all and let onBindViewHolder handle List inside payloads.
-                // Actually, if we return multiple strings in a list, we can just return the payloads list.
-                return payloads
-            }
-
-            return super.getChangePayload(oldItem, newItem)
-        }
-    }
-
-    class ViewHolder(val binding: ItemPlaygroundImageBinding) : RecyclerView.ViewHolder(binding.root) {
-        var jobMain: kotlinx.coroutines.Job? = null
-        var bitmapMain: Bitmap? = null
-        var jobSub1: kotlinx.coroutines.Job? = null
-        var bitmapSub1: Bitmap? = null
-        var jobSub2: kotlinx.coroutines.Job? = null
-        var bitmapSub2: Bitmap? = null
-    }
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val binding = ItemPlaygroundImageBinding.inflate(LayoutInflater.from(parent.context), parent, false)
-        return ViewHolder(binding)
-    }
-
-    override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
-        if (payloads.isEmpty()) {
-            super.onBindViewHolder(holder, position, payloads)
-            return
-        }
-
-        // Flatten the payloads since getChangePayload might return a List<String>
-        val flattenedPayloads = payloads.flatMap { if (it is List<*>) it else listOf(it) }
-
-        val item = getItem(position)
-        var handled = false
-
-        if (flattenedPayloads.contains("SELECTION_CHANGED")) {
-            val isMainSelected = selectedFiles.contains(item.mainFile)
-            val selectionMode = isSelectionMode()
-            holder.binding.selectionOverlay.visibility = if (isMainSelected) View.VISIBLE else View.GONE
-            holder.binding.iconSelected.visibility = if (selectionMode) View.VISIBLE else View.GONE
-            holder.binding.iconSelected.setImageResource(if (isMainSelected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
-
-            if (item is PlaygroundItem.Group) {
-                val isDng1Selected = selectedFiles.contains(item.dng1)
-                val isDng2Selected = selectedFiles.contains(item.dng2)
-                holder.binding.subSelectionOverlay1.visibility = if (isDng1Selected) View.VISIBLE else View.GONE
-                holder.binding.subIconSelected1.visibility = if (selectionMode) View.VISIBLE else View.GONE
-                holder.binding.subIconSelected1.setImageResource(if (isDng1Selected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
-
-                holder.binding.subSelectionOverlay2.visibility = if (isDng2Selected) View.VISIBLE else View.GONE
-                holder.binding.subIconSelected2.visibility = if (selectionMode) View.VISIBLE else View.GONE
-                holder.binding.subIconSelected2.setImageResource(if (isDng2Selected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
-            }
-            handled = true
-        }
-
-        if (flattenedPayloads.contains("EXPANSION_CHANGED")) {
-            if (item is PlaygroundItem.Group) {
-                holder.binding.subImagesContainer.visibility = if (item.isExpanded) View.VISIBLE else View.GONE
-            }
-            handled = true
-        }
-
-        if (flattenedPayloads.contains("MODIFIED")) {
-            val context = holder.itemView.context
-            when (item) {
-                is PlaygroundItem.Single -> {
-                    holder.jobMain?.cancel()
-                    holder.jobMain = null
-                    // Recycle the previous main bitmap to avoid memory leaks before loading the new one.
-                    holder.binding.imageViewThumbnail.setImageDrawable(null)
-                    holder.bitmapMain?.recycle()
-                    holder.bitmapMain = null
-
-                    val file = item.file
-                    val jpgFile = java.io.File(file.parent, file.nameWithoutExtension + ".jpg")
-                    if (jpgFile.exists()) {
-                        loadThumbnail(context, jpgFile, holder.binding.imageViewThumbnail, holder, true)
-                    } else {
-                        loadThumbnail(context, file, holder.binding.imageViewThumbnail, holder, true)
-                    }
-                }
-                is PlaygroundItem.Group -> {
-                    holder.jobMain?.cancel()
-                    holder.jobSub1?.cancel()
-                    holder.jobSub2?.cancel()
-                    holder.jobMain = null
-                    holder.jobSub1 = null
-                    holder.jobSub2 = null
-                    holder.bitmapMain?.recycle()
-                    holder.bitmapSub1?.recycle()
-                    holder.bitmapSub2?.recycle()
-                    holder.bitmapMain = null
-                    holder.bitmapSub1 = null
-                    holder.bitmapSub2 = null
-
-                    loadThumbnail(context, item.jpgFile, holder.binding.imageViewThumbnail, holder, true)
-                    loadThumbnail(context, item.dng1, holder.binding.subImageView1, holder, isMain = false, isSub1 = true)
-                    loadThumbnail(context, item.dng2, holder.binding.subImageView2, holder, isMain = false, isSub2 = true)
-                }
-            }
-            handled = true
-        }
-
-        if (!handled) {
-            super.onBindViewHolder(holder, position, payloads)
-        }
-    }
-
-    private fun loadThumbnail(
-        context: android.content.Context,
-        file: File,
-        imageView: android.widget.ImageView,
-        holder: ViewHolder,
-        isMain: Boolean,
-        isSub1: Boolean = false,
-        isSub2: Boolean = false
-    ) {
-        val currentTag = file.absolutePath + "_" + file.lastModified()
-        imageView.tag = currentTag
-
-        // Use JPG directly if available
-        if (file.extension.lowercase() == "jpg") {
-            Glide.with(context).load(file).signature(com.bumptech.glide.signature.ObjectKey(file.lastModified())).into(imageView)
-            return
-        }
-
-        // Otherwise, it's a DNG, decode it
-        val job = coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            var decodedBitmap: Bitmap? = null
-            var bitmapAssigned = false
-            try {
-                decodedBitmap = top.maary.darkbag.utils.GalleryThumbnailLoader.loadDngThumbnail(
-                    context = context,
-                    uri = Uri.fromFile(file),
-                    reqWidth = 400,
-                    reqHeight = 400
-                )
-
-                ensureActive()
-
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                    if (imageView.tag == currentTag) {
-                        if (decodedBitmap != null) {
-                            if (isMain) holder.bitmapMain = decodedBitmap
-                            else if (isSub1) holder.bitmapSub1 = decodedBitmap
-                            else if (isSub2) holder.bitmapSub2 = decodedBitmap
-
-                            bitmapAssigned = true
-                            imageView.setImageBitmap(decodedBitmap)
-                        } else {
-                            Glide.with(context).load(file).signature(com.bumptech.glide.signature.ObjectKey(file.lastModified())).into(imageView)
-                        }
-                    }
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e("Playground", "Failed to load thumbnail for ${file.name}", e)
-            } finally {
-                // If the coroutine was cancelled or the tag changed before setting, recycle the bitmap
-                if (decodedBitmap != null && !bitmapAssigned) {
-                    decodedBitmap?.recycle()
-                }
-            }
-        }
-
-        if (isMain) holder.jobMain = job
-        else if (isSub1) holder.jobSub1 = job
-        else if (isSub2) holder.jobSub2 = job
-    }
-
-    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val item = getItem(position)
-        val isMainSelected = selectedFiles.contains(item.mainFile)
-
-        // Apply aspect ratio to pre-allocate exact height to prevent StaggeredGridLayoutManager jumping
-        val layoutParams = holder.binding.imageViewThumbnail.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-        if (item.aspectRatio != null) {
-            layoutParams.dimensionRatio = item.aspectRatio
-            layoutParams.height = 0 // 0dp means match_constraint in ConstraintLayout
-        } else {
-            // Fallback for extremely rare case where we couldn't parse bounds: allow it to wrap
-            layoutParams.dimensionRatio = null
-            layoutParams.height = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.WRAP_CONTENT
-        }
-        holder.binding.imageViewThumbnail.layoutParams = layoutParams
-
-        val selectionMode = isSelectionMode()
-        holder.binding.selectionOverlay.visibility = if (isMainSelected) View.VISIBLE else View.GONE
-        holder.binding.iconSelected.visibility = if (selectionMode) View.VISIBLE else View.GONE
-        holder.binding.iconSelected.setImageResource(if (isMainSelected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
-
-        val context = holder.itemView.context
-        Glide.with(context).clear(holder.binding.imageViewThumbnail)
-        Glide.with(context).clear(holder.binding.subImageView1)
-        Glide.with(context).clear(holder.binding.subImageView2)
-        holder.binding.imageViewThumbnail.setImageDrawable(null)
-        holder.binding.subImageView1.setImageDrawable(null)
-        holder.binding.subImageView2.setImageDrawable(null)
-
-        holder.jobMain?.cancel()
-        holder.jobSub1?.cancel()
-        holder.jobSub2?.cancel()
-        holder.jobMain = null
-        holder.jobSub1 = null
-        holder.jobSub2 = null
-        holder.bitmapMain?.recycle()
-        holder.bitmapSub1?.recycle()
-        holder.bitmapSub2?.recycle()
-        holder.bitmapMain = null
-        holder.bitmapSub1 = null
-        holder.bitmapSub2 = null
-
-        when (item) {
-            is PlaygroundItem.Single -> {
-                holder.binding.badgeFormat.text = if (item.file.extension.lowercase() == "dng") "EXT DNG" else "EXT JPG"
-                holder.binding.iconLayer.visibility = View.GONE
-                holder.binding.subImagesContainer.visibility = View.GONE
-
-                val file = item.file
-                val jpgFile = File(file.parent, file.nameWithoutExtension + ".jpg")
-                if (jpgFile.exists()) {
-                    loadThumbnail(context, jpgFile, holder.binding.imageViewThumbnail, holder, true)
-                } else {
-                    loadThumbnail(context, file, holder.binding.imageViewThumbnail, holder, true)
-                }
-            }
-            is PlaygroundItem.Group -> {
-                holder.binding.badgeFormat.text = "HF MERGED"
-                holder.binding.iconLayer.visibility = View.VISIBLE
-                holder.binding.subImagesContainer.visibility = if (item.isExpanded) View.VISIBLE else View.GONE
-
-                loadThumbnail(context, item.jpgFile, holder.binding.imageViewThumbnail, holder, true)
-
-                // Load sub images
-                holder.binding.subImageView1.setImageDrawable(null)
-                holder.binding.subImageView2.setImageDrawable(null)
-                loadThumbnail(context, item.dng1, holder.binding.subImageView1, holder, isMain = false, isSub1 = true)
-                loadThumbnail(context, item.dng2, holder.binding.subImageView2, holder, isMain = false, isSub2 = true)
-
-                val isDng1Selected = selectedFiles.contains(item.dng1)
-                val isDng2Selected = selectedFiles.contains(item.dng2)
-                holder.binding.subSelectionOverlay1.visibility = if (isDng1Selected) View.VISIBLE else View.GONE
-                holder.binding.subIconSelected1.visibility = if (selectionMode) View.VISIBLE else View.GONE
-                holder.binding.subIconSelected1.setImageResource(if (isDng1Selected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
-
-                holder.binding.subSelectionOverlay2.visibility = if (isDng2Selected) View.VISIBLE else View.GONE
-                holder.binding.subIconSelected2.visibility = if (selectionMode) View.VISIBLE else View.GONE
-                holder.binding.subIconSelected2.setImageResource(if (isDng2Selected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
-
-                holder.binding.iconLayer.setOnClickListener {
-                    onExpandClick(item, holder.bindingAdapterPosition)
-                }
-
-                holder.binding.subImageView1.setOnClickListener { onItemClick(item.dng1) }
-                holder.binding.subImageView1.setOnLongClickListener {
-                    onItemLongClick(item.dng1)
-                    true
-                }
-                holder.binding.subImageView2.setOnClickListener { onItemClick(item.dng2) }
-                holder.binding.subImageView2.setOnLongClickListener {
-                    onItemLongClick(item.dng2)
-                    true
-                }
-            }
-        }
-
-        holder.binding.imageViewThumbnail.setOnClickListener { onItemClick(item.mainFile) }
-        holder.binding.imageViewThumbnail.setOnLongClickListener {
-            onItemLongClick(item.mainFile)
-            true
-        }
-    }
-
-
-
-    override fun onViewRecycled(holder: ViewHolder) {
-        super.onViewRecycled(holder)
-        val context = holder.itemView.context
-        Glide.with(context).clear(holder.binding.imageViewThumbnail)
-        Glide.with(context).clear(holder.binding.subImageView1)
-        Glide.with(context).clear(holder.binding.subImageView2)
-        holder.binding.imageViewThumbnail.setImageDrawable(null)
-        holder.binding.subImageView1.setImageDrawable(null)
-        holder.binding.subImageView2.setImageDrawable(null)
-
-        holder.jobMain?.cancel()
-        holder.jobSub1?.cancel()
-        holder.jobSub2?.cancel()
-        holder.jobMain = null
-        holder.jobSub1 = null
-        holder.jobSub2 = null
-        holder.bitmapMain?.recycle()
-        holder.bitmapSub1?.recycle()
-        holder.bitmapSub2?.recycle()
-        holder.bitmapMain = null
-        holder.bitmapSub1 = null
     }
 }

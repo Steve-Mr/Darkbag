@@ -26,7 +26,8 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.R
-import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.repository.PreferenceKeys
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.LutManager
 import kotlin.math.roundToInt
 
@@ -37,12 +38,80 @@ import kotlin.math.roundToInt
  */
 object ColorRecipeBottomSheet {
 
-    private data class LutEntry(
+    internal data class LutEntry(
         val displayName: String,
         val fileName: String?,
         val associatedLog: String? = null,
         val isUniversal: Boolean = false
     )
+
+    /**
+     * Pure state machine managing Log + LUT selection within a recipe session.
+     * Ensures that if a user starts from a baseline Log curve (e.g. `F-Log2` with a Universal LUT A),
+     * temporarily previews a Log-specific LUT B (e.g. `Rec.709` -> auto-switches `currentLog` to `"None"`),
+     * and then re-selects Universal LUT A, `currentLog` is faithfully restored to `baselineLog` unless
+     * the user explicitly clicked a Log curve button.
+     */
+    internal class RecipeSelectionSession(
+        initialLog: String,
+        initialLut: String?,
+        val baselineLog: String = initialLog,
+        initialUserExplicitlySelectedLog: Boolean = false,
+        private val lutManager: LutManager
+    ) {
+        var currentLog: String = initialLog
+            private set
+        var currentLut: String? = initialLut?.takeIf { it != "None" }
+            private set
+        var userExplicitlySelectedLog: Boolean = initialUserExplicitlySelectedLog
+            private set
+
+        /**
+         * Handles clicking a LUT entry.
+         * @return true if `currentLog` was automatically changed as a side effect.
+         */
+        fun selectLut(entry: LutEntry): Boolean {
+            val prevLog = currentLog
+            if (entry.fileName == null) {
+                currentLut = null
+                if (!userExplicitlySelectedLog && currentLog != baselineLog) {
+                    currentLog = baselineLog
+                }
+            } else {
+                currentLut = entry.fileName
+                val assocLog = entry.associatedLog
+                if (!entry.isUniversal && !assocLog.isNullOrEmpty()) {
+                    val targetPrefLog = lutManager.toTargetLogPreference(assocLog)
+                    if (targetPrefLog != currentLog) {
+                        currentLog = targetPrefLog
+                    }
+                } else if (entry.isUniversal && !userExplicitlySelectedLog && currentLog != baselineLog) {
+                    currentLog = baselineLog
+                }
+            }
+            return currentLog != prevLog
+        }
+
+        /**
+         * Handles explicitly clicking a Log curve button.
+         * @return true if the previously active LUT was incompatible and reset to null.
+         */
+        fun selectLog(logName: String): Boolean {
+            currentLog = logName
+            userExplicitlySelectedLog = true
+            if (currentLut != null && !lutManager.isLutCompatibleWithLog(currentLut, currentLog)) {
+                currentLut = null
+                return true
+            }
+            return false
+        }
+
+        fun reset() {
+            currentLog = "None"
+            currentLut = null
+            userExplicitlySelectedLog = true
+        }
+    }
 
     /**
      * Custom RecyclerView that caps its measured height to a percentage of the display height,
@@ -66,19 +135,43 @@ object ColorRecipeBottomSheet {
      *
      * @param context Host Android context.
      * @param lutManager Darkbag LUT manager providing available `.cube` files.
+     * @param initialLog Optional initial Log curve override (e.g. from image EditConfig in darkroom viewer).
+     * @param initialLut Optional initial LUT filename override (e.g. from image EditConfig in darkroom viewer).
+     * @param baselineLog Optional baseline Log curve of the photo for restoring after Log-specific LUT detours.
+     * @param userExplicitlySelectedLog Whether the user has already manually overridden the Log curve in the current edit session.
+     * @param persistToPrefs Whether selections should be persisted to global camera SharedPreferences.
+     * @param onLogExplicitlyChanged Optional callback invoked when the user manually taps a Log curve button or Reset.
      * @param onRecipeSelected Callback triggered whenever the log curve or LUT selection changes.
      */
     fun show(
         context: Context,
         lutManager: LutManager,
+        initialLog: String? = null,
+        initialLut: String? = null,
+        baselineLog: String? = null,
+        userExplicitlySelectedLog: Boolean = false,
+        persistToPrefs: Boolean = true,
+        onLogExplicitlyChanged: ((Boolean) -> Unit)? = null,
         onRecipeSelected: (logName: String, lutFileName: String?) -> Unit
     ): BottomSheetDialog {
         val dialog = BottomSheetDialog(context)
         val density = context.resources.displayMetrics.density
 
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        var currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
-        var currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+        val settingsRepository = SettingsRepository.getInstance(context)
+        val snapshot = settingsRepository.current()
+        val startLog = initialLog ?: snapshot.targetLog
+        val startLut = if (initialLog != null || initialLut != null) {
+            initialLut?.takeIf { it != "None" }
+        } else {
+            snapshot.activeLut.takeIf { it != "None" }
+        }
+        val session = RecipeSelectionSession(
+            initialLog = startLog,
+            initialLut = startLut,
+            baselineLog = baselineLog ?: startLog,
+            initialUserExplicitlySelectedLog = userExplicitlySelectedLog,
+            lutManager = lutManager
+        )
 
         // Dynamic Material 3 colors
         val colorSurfaceContainerLow = MaterialColors.getColor(
@@ -327,7 +420,7 @@ object ColorRecipeBottomSheet {
         fun reloadLutEntries() {
             lutEntries.clear()
             lutEntries.add(LutEntry(displayName = "None", fileName = null))
-            val filteredItems = lutManager.getLutsForLog(currentLog)
+            val filteredItems = lutManager.getLutsForLog(session.currentLog)
             filteredItems.forEach { item ->
                 val baseDisplay = CameraBentoDeckView.formatRecipeLabel(item.name, item.file.nameWithoutExtension)
                 val display = if (item.isUniversal) {
@@ -345,8 +438,8 @@ object ColorRecipeBottomSheet {
                 )
             }
 
-            if (lutEntries.size <= 1 && currentLog != "None") {
-                emptyHintView.text = "${context.getString(R.string.lut_empty_log_hint, currentLog)}\n${context.getString(R.string.lut_empty_import_action, currentLog)}"
+            if (lutEntries.size <= 1 && session.currentLog != "None") {
+                emptyHintView.text = "${context.getString(R.string.lut_empty_log_hint, session.currentLog)}\n${context.getString(R.string.lut_empty_import_action, session.currentLog)}"
                 emptyHintView.visibility = View.VISIBLE
             } else {
                 emptyHintView.visibility = View.GONE
@@ -374,7 +467,7 @@ object ColorRecipeBottomSheet {
             for (i in 0 until logButtonsContainer.childCount) {
                 val btn = logButtonsContainer.getChildAt(i) as? MaterialButton ?: continue
                 val logName = btn.tag as? String ?: continue
-                val isActive = logName == currentLog
+                val isActive = logName == session.currentLog
                 if (isActive) {
                     btn.backgroundTintList = ColorStateList.valueOf(colorPrimaryContainer)
                     btn.setTextColor(colorOnPrimaryContainer)
@@ -425,7 +518,7 @@ object ColorRecipeBottomSheet {
                 val btn = holder.button
                 btn.text = entry.displayName
 
-                val isActive = isEntryActive(entry, currentLut)
+                val isActive = isEntryActive(entry, session.currentLut)
                 if (isActive) {
                     // Bento active tile: 10dp corner radius squircle morph, colorSecondaryContainer fill, colorPrimary stroke 1.5dp
                     btn.backgroundTintList = ColorStateList.valueOf(colorSecondaryContainer)
@@ -443,28 +536,24 @@ object ColorRecipeBottomSheet {
                 }
 
                 btn.setOnClickListener {
-                    if (entry.fileName == null) {
-                        // User chose "None" LUT
-                        currentLut = null
-                        prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
-                    } else {
-                        val fileName = entry.fileName
-                        currentLut = fileName
-                        prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, currentLut).apply()
-
-                        // If clicking a log-specific LUT, ensure current Log synchronizes
-                        val assocLog = entry.associatedLog
-                        if (!entry.isUniversal && !assocLog.isNullOrEmpty()) {
-                            val targetPrefLog = lutManager.toTargetLogPreference(assocLog)
-                            if (targetPrefLog != currentLog) {
-                                currentLog = targetPrefLog
-                                prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, currentLog).apply()
-                                updateLogButtonsUi()
-                                reloadLutEntries()
+                    val logChanged = session.selectLut(entry)
+                    if (persistToPrefs) {
+                        settingsRepository.edit {
+                            if (session.currentLut == null) {
+                                remove(PreferenceKeys.ACTIVE_LUT)
+                            } else {
+                                this[PreferenceKeys.ACTIVE_LUT] = session.currentLut!!
+                            }
+                            if (logChanged) {
+                                this[PreferenceKeys.TARGET_LOG] = session.currentLog
                             }
                         }
                     }
-                    onRecipeSelected(currentLog, currentLut)
+                    if (logChanged) {
+                        updateLogButtonsUi()
+                        reloadLutEntries()
+                    }
+                    onRecipeSelected(session.currentLog, session.currentLut)
                     notifyDataSetChanged()
                 }
             }
@@ -472,7 +561,7 @@ object ColorRecipeBottomSheet {
         lutRecyclerView.adapter = lutAdapter
 
         // Populate BASE LOG CURVE buttons
-        SettingsFragment.LOG_CURVES.forEach { logName ->
+        PreferenceKeys.LOG_CURVES.forEach { logName ->
             val logBtn = MaterialButton(
                 context,
                 null,
@@ -493,19 +582,23 @@ object ColorRecipeBottomSheet {
                 insetBottom = 0
 
                 setOnClickListener {
-                    currentLog = logName
-                    prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, currentLog).apply()
-
-                    // Check active LUT compatibility
-                    if (currentLut != null && !lutManager.isLutCompatibleWithLog(currentLut, currentLog)) {
-                        currentLut = null
-                        prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
-                        val msg = context.getString(R.string.lut_reset_incompatible_toast, currentLog)
+                    val lutReset = session.selectLog(logName)
+                    onLogExplicitlyChanged?.invoke(true)
+                    if (persistToPrefs) {
+                        settingsRepository.edit {
+                            this[PreferenceKeys.TARGET_LOG] = session.currentLog
+                            if (lutReset) {
+                                remove(PreferenceKeys.ACTIVE_LUT)
+                            }
+                        }
+                    }
+                    if (lutReset) {
+                        val msg = context.getString(R.string.lut_reset_incompatible_toast, session.currentLog)
                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     }
 
                     reloadLutEntries()
-                    onRecipeSelected(currentLog, currentLut)
+                    onRecipeSelected(session.currentLog, session.currentLut)
                     updateLogButtonsUi()
                     lutAdapter.notifyDataSetChanged()
                 }
@@ -516,12 +609,14 @@ object ColorRecipeBottomSheet {
 
         // Reset button action
         resetButton.setOnClickListener {
-            currentLog = "None"
-            currentLut = null
-            prefs.edit()
-                .putString(SettingsFragment.KEY_TARGET_LOG, "None")
-                .remove(SettingsFragment.KEY_ACTIVE_LUT)
-                .apply()
+            session.reset()
+            onLogExplicitlyChanged?.invoke(true)
+            if (persistToPrefs) {
+                settingsRepository.edit {
+                    this[PreferenceKeys.TARGET_LOG] = "None"
+                    remove(PreferenceKeys.ACTIVE_LUT)
+                }
+            }
             reloadLutEntries()
             onRecipeSelected("None", null)
             updateLogButtonsUi()

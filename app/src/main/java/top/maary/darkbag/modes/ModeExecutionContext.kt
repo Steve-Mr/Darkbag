@@ -1,11 +1,11 @@
 package top.maary.darkbag.modes
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.graphics.Bitmap
 import kotlinx.coroutines.CompletableDeferred
 import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.pipeline.sink.CaptureSink
+import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.utils.HalfFrameManager
 
 /**
@@ -14,7 +14,7 @@ import top.maary.darkbag.utils.HalfFrameManager
  */
 interface ModeExecutionContext {
     val context: Context
-    val preferences: SharedPreferences
+    val settingsRepository: SettingsRepository
     val isHdrPlusEnabled: Boolean
     val isRawSupported: Boolean
     val deviceOrientationDegrees: Int
@@ -58,4 +58,13 @@ interface ModeExecutionContext {
 
     /** 触发多摄同拍抓拍 */
     fun triggerMultiCameraPicture(timing: StandardTimingTracker)
+
+    /** 多摄模式切换前置画中画 */
+    fun toggleFrontPipInMultiCameraMode() {}
+
+    /** 多摄模式切换主摄物理预览镜头 */
+    fun switchMultiCameraPrimaryLens(multiplier: Float) {}
+
+    /** 绑定多摄 Camera2 Session */
+    fun bindMultiCameraSession(): Boolean = false
 }

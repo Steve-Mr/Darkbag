@@ -87,6 +87,14 @@
     <string name="share_as_tiff_dialog_message">Would you like to save your current adjustments before sharing?</string>
     <string name="save_and_share">Save and Share</string>
     <string name="share_without_saving">Share without Saving</string>
+    <string name="save_replacement">Save edit (replace)</string>
+    <string name="save_as_new">Save as new file</string>
+    <string name="save_processed_jpg">Export to JPG (Pictures)</string>
+    <string name="export_to_jpg">Export to JPG</string>
+    <string name="export_jpg_dialog_message">Save adjustments and export to JPG?</string>
+    <string name="save_and_export">Save &amp; Export</string>
+    <string name="export_without_saving">Export without Saving</string>
+    <string name="toast_export_jpg_success">Exported JPG to Pictures</string>
     <string name="delete_image_title">Delete Image</string>
     <string name="delete_image_message">Are you sure you want to delete this image?</string>
     <string name="delete_entire_group">Delete entire group</string>
@@ -103,6 +111,21 @@
     <string name="playground_btn_disband">Disband</string>
     <string name="playground_delete_title">Confirm Delete</string>
     <string name="playground_delete_message">Are you sure you want to delete the selected items?\n\nIf a half-frame group is selected, its original DNGs will also be deleted. If a DNG from a group is deleted, the group will be disbanded automatically.</string>
+    <string name="playground_title">PLAYGROUND</string>
+    <string name="playground_subtitle_format">External Darkroom · %1$d groups</string>
+    <string name="playground_btn_import">Import</string>
+    <string name="playground_btn_merge">Merge</string>
+    <string name="playground_btn_export">Export</string>
+    <string name="playground_import_success">Successfully imported %1$d files</string>
+    <string name="playground_export_hint">Long-press or tap ALL to select files to export</string>
+    <string name="playground_merge_layout_title">Select Collage Layout</string>
+    <string name="playground_merge_need_two">Select exactly 2 DNG images to merge</string>
+    <string name="playground_exporting">Exporting %1$d files…</string>
+    <string name="playground_export_success">Successfully exported %1$d files</string>
+    <string name="playground_empty_hint">No DNG files in Playground\nTap + below to import</string>
+    <string name="playground_loading">Loading playground…</string>
+    <string name="gallery_groups_count">%1$d groups</string>
+    <string name="gallery_layout_waterfall">Aspect</string>
 
     <string name="save_location_title">Save Location</string>
     <string name="save_location_summary">Attach GPS coordinates to photo EXIF metadata</string>
@@ -154,12 +177,17 @@
     <string name="gallery_delete_desc_raw_only">Frees storage space while keeping JPG/MP4 deliverables</string>
     <string name="gallery_delete_option_jpg_only">Delete Deliverables (JPG/MP4) only</string>
     <string name="gallery_delete_desc_jpg_only">Removes JPG/MP4 deliverables while keeping original RAW/RAWVID files</string>
+    <string name="gallery_delete_option_current_derivative">Delete current version (%1$s) only</string>
+    <string name="gallery_delete_desc_current_derivative">Deletes only the currently viewed deliverable version while keeping other versions and RAW</string>
+    <string name="gallery_delete_option_all_derivatives">Delete all rendered versions (%1$d versions)</string>
+    <string name="gallery_delete_desc_all_derivatives">Removes all rendered JPG/MP4 versions while keeping original RAW</string>
     <string name="batch_delete_cdng_only">Clean Up CinemaDNG Sequences Only</string>
     <string name="batch_delete_cdng_only_desc">Frees multi-gigabyte frame sequence folders while keeping RAWVID masters and graded deliverables</string>
     <string name="gallery_delete_confirm_format">Delete (%1$d items)</string>
     <string name="gallery_delete_summary">Selected %1$d item(s). Choose deletion scope:</string>
     <string name="gallery_deleting">Deleting…</string>
     <string name="gallery_deleting_count">Deleting %1$d item(s)…</string>
+    <string name="gallery_loading">Loading darkroom…</string>
     <string name="format_raw_jpg">RAW+JPG</string>
     <string name="format_jpg">JPG</string>
     <string name="format_half_frame">HF</string>
@@ -471,9 +499,27 @@
 
     <!-- Onboarding Flow -->
     <string name="onboarding_header_title">DARKBAG SETUP</string>
+    <string name="onboarding_welcome_title">Welcome to Darkbag</string>
     <string name="onboarding_subtitle">Computational Photography · Lossless Negatives · Darkroom</string>
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_step_format">STEP %1$02d / %2$02d</string>
+    <string name="onboarding_section_permissions">CORE PERMISSIONS</string>
+    <string name="onboarding_badge_step_1">STEP 1</string>
+    <string name="onboarding_badge_format">FORMAT</string>
+    <string name="onboarding_section_optics">1.0X FOCAL BASE &amp; METADATA</string>
+    <string name="onboarding_badge_optics">OPTICS</string>
+    <string name="onboarding_focal_24_desc">Native Wide</string>
+    <string name="onboarding_focal_28_desc">Classic Street</string>
+    <string name="onboarding_focal_35_desc">Documentary</string>
+    <string name="onboarding_section_recipe_pairing">FILM RECIPE &amp; LOG PAIRING</string>
+    <string name="onboarding_badge_recipe">RECIPE</string>
+    <string name="onboarding_recipe_step1_select_log">1. Select matching Log curve for recipe</string>
+    <string name="onboarding_section_ui_tier">VIEWFINDER DECK TIER</string>
+    <string name="onboarding_badge_ui_tier">UI TIER</string>
+    <string name="onboarding_tier_ps_short">Minimal Snap</string>
+    <string name="onboarding_tier_film_short">Film Recipe</string>
+    <string name="onboarding_tier_pro_short">Manual Pro</string>
+    <string name="onboarding_shutter_hold_title">Shutter Hold Action</string>
     <string name="onboarding_btn_next">Next →</string>
     <string name="onboarding_btn_start">Complete Setup · Enter Darkbag</string>
     <string name="onboarding_btn_grant_perms">Grant Core Permissions &amp; Continue →</string>
@@ -503,6 +549,12 @@
     <string name="onboarding_viewer_title">PHOTO VIEWER</string>
     <string name="onboarding_viewer_internal_desc">Built-in Darkroom Viewer: inspect lossless DNG negatives, play back Motion Photos, and launch one-tap darkroom grading.</string>
     <string name="onboarding_viewer_external_desc">External Viewer: launch system default gallery or third-party photo viewer when tapping thumbnail.</string>
+    <string name="toast_camera_permission_required">Camera permission is required for taking photos</string>
+    <string name="toast_camera_permission_continue">Camera permission is required to continue</string>
+    <string name="toast_lut_imported_paired">Imported %1$s paired with %2$s</string>
+    <string name="toast_lut_import_failed">Failed to import LUT (.cube)</string>
+    <string name="camera_recipe_log_off">Log: Off</string>
+    <string name="camera_recipe_lut_off">LUT: Off</string>
     <string name="pref_replay_onboarding">Setup Wizard</string>
     <string name="pref_replay_onboarding_desc">Re-run startup module, formats, and UI tier setup</string>
     <string name="lut_import_select_log_title">Select Base Log Curve</string>
@@ -537,4 +589,7 @@
     <string name="lut_mgmt_empty_title">No Film Recipes Imported</string>
     <string name="lut_mgmt_empty_desc">Import .cube 3D LUT film simulation recipes paired with your camera Log curves.</string>
     <string name="lut_mgmt_filter_all">All</string>
+    <string name="toast_queue_full">Queue full: processing %1$d photos, please wait…</string>
+    <string name="toast_memory_low">System memory low, waiting for processing to complete…</string>
+    <string name="error_configure_camera_session">Failed to configure camera session</string>
 </resources>
