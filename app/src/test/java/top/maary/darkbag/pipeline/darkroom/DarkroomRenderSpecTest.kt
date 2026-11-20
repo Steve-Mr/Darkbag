@@ -43,7 +43,11 @@ class DarkroomRenderSpecTest {
             shadows = 0.4f,
             whites = 0.1f,
             blacks = -0.2f,
-            digitalGain = 1.5f
+            digitalGain = 1.5f,
+            wbMode = 1,
+            wbTempOffset = 25f,
+            wbTintOffset = -10f,
+            wbManualTempK = 6000f
         )
         val basic = config.toBasic()
         assertEquals(0.5f, basic.exposure, 0.001f)
@@ -54,6 +58,36 @@ class DarkroomRenderSpecTest {
         assertEquals(0.1f, basic.whites, 0.001f)
         assertEquals(-0.2f, basic.blacks, 0.001f)
         assertEquals(1.5f, basic.digitalGain, 0.001f)
+        assertEquals(1, basic.wbMode)
+        assertEquals(25f, basic.wbTempOffset, 0.001f)
+        assertEquals(-10f, basic.wbTintOffset, 0.001f)
+        assertEquals(6000f, basic.wbManualTempK, 0.001f)
+    }
+
+    @Test
+    fun testDarkroomRenderSpec_EffectiveAdjustments_WbPassThrough() {
+        val frame1 = DarkroomSource.Single(baseName = "HF_WB_1")
+        val frame2 = DarkroomSource.Single(baseName = "HF_WB_2")
+        val hfSource = DarkroomSource.HalfFrame(
+            frame1 = frame1,
+            frame2 = frame2,
+            baseName = "HF_WB"
+        )
+        val adj1 = BasicAdjustments(wbMode = 1, wbTempOffset = 30f, wbTintOffset = 15f)
+        val adj2 = BasicAdjustments(wbMode = 0, wbTempOffset = -20f, wbTintOffset = -5f)
+        val spec = DarkroomRenderSpec(
+            source = hfSource,
+            editConfig = EditConfig(adjustments = listOf(adj1, adj2)),
+            sink = BitmapPreviewSink()
+        )
+
+        assertEquals(1, spec.effectiveAdjustments(0).wbMode)
+        assertEquals(30f, spec.effectiveAdjustments(0).wbTempOffset, 0.001f)
+        assertEquals(15f, spec.effectiveAdjustments(0).wbTintOffset, 0.001f)
+
+        assertEquals(0, spec.effectiveAdjustments(1).wbMode)
+        assertEquals(-20f, spec.effectiveAdjustments(1).wbTempOffset, 0.001f)
+        assertEquals(-5f, spec.effectiveAdjustments(1).wbTintOffset, 0.001f)
     }
 
     @Test

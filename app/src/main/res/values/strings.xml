@@ -649,4 +649,17 @@
     <string name="toast_queue_full">Queue full: processing %1$d photos, please wait…</string>
     <string name="toast_memory_low">System memory low, waiting for processing to complete…</string>
     <string name="error_configure_camera_session">Failed to configure camera session</string>
+
+    <!-- Darkroom Editor Tabs & WB Controls -->
+    <string name="edit_tab_light">LIGHT</string>
+    <string name="edit_tab_range">RANGE</string>
+    <string name="edit_tab_tone">TONE</string>
+    <string name="edit_tab_wb">WB</string>
+    <string name="edit_tab_color">COLOR</string>
+    <string name="wb_mode_ambience">AMBIENCE</string>
+    <string name="wb_mode_neutral">NEUTRAL</string>
+    <string name="edit_label_temp">Temp</string>
+    <string name="edit_label_tint">Tint</string>
+    <string name="pill_wb_label">WB</string>
+    <string name="pill_wb_auto">AUTO</string>
 </resources>

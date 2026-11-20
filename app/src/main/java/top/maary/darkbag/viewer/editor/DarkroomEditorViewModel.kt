@@ -23,6 +23,7 @@ import top.maary.darkbag.pipeline.darkroom.model.RenderOutputFormat
 import top.maary.darkbag.pipeline.darkroom.sink.BitmapPreviewSink
 import top.maary.darkbag.repository.ImageRepository
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * 图像编辑器响应式 ViewModel (DarkroomEditorViewModel).
@@ -69,6 +70,7 @@ class DarkroomEditorViewModel(
             DarkroomEditorUserIntent.ToggleTimestamp -> handleToggleTimestamp()
             DarkroomEditorUserIntent.ToggleSwap -> handleToggleSwap()
             DarkroomEditorUserIntent.ResetAdjustments -> handleResetAdjustments()
+            is DarkroomEditorUserIntent.SetWbMode -> handleSetWbMode(intent.mode)
             is DarkroomEditorUserIntent.SetDngBytes -> {
                 sourceDngBytes1 = intent.bytes1
                 sourceDngBytes2 = intent.bytes2
@@ -93,6 +95,12 @@ class DarkroomEditorViewModel(
             "None"
         }
         val logName = if (!baseConfig.log.isNullOrBlank() && baseConfig.log != "None") baseConfig.log else "None"
+        val currentWbMode = if (isHalfFrame) {
+            val adjIndex = if (baseConfig.isSwapped) 1 - _uiState.value.selectedHalfFrameIndex else _uiState.value.selectedHalfFrameIndex
+            baseConfig.adjustments?.getOrNull(adjIndex)?.wbMode ?: 0
+        } else {
+            baseConfig.wbMode
+        }
 
         _uiState.update { current ->
             current.copy(
@@ -105,6 +113,7 @@ class DarkroomEditorViewModel(
                 showTimestamp = baseConfig.showTimestamp,
                 flareType = baseConfig.flareType,
                 isSwapped = baseConfig.isSwapped,
+                wbMode = currentWbMode,
                 slider1Label = sliderState.label1,
                 slider1Min = sliderState.min1,
                 slider1Max = sliderState.max1,
@@ -134,6 +143,12 @@ class DarkroomEditorViewModel(
             isHalfFrame = isHalfFrame,
             selectedHalfFrameIndex = _uiState.value.selectedHalfFrameIndex
         )
+        val currentWbMode = if (isHalfFrame) {
+            val adjIndex = if (baseConfig.isSwapped) 1 - _uiState.value.selectedHalfFrameIndex else _uiState.value.selectedHalfFrameIndex
+            baseConfig.adjustments?.getOrNull(adjIndex)?.wbMode ?: 0
+        } else {
+            baseConfig.wbMode
+        }
 
         _uiState.update { current ->
             current.copy(
@@ -141,6 +156,7 @@ class DarkroomEditorViewModel(
                 isHalfFrame = isHalfFrame,
                 activeConfig = baseConfig,
                 originalConfig = current.originalConfig ?: baseConfig.copy(),
+                wbMode = currentWbMode,
                 slider1Label = sliderState.label1,
                 slider1Min = sliderState.min1,
                 slider1Max = sliderState.max1,
@@ -166,12 +182,19 @@ class DarkroomEditorViewModel(
                 isHalfFrame = isHalfFrame,
                 selectedHalfFrameIndex = _uiState.value.selectedHalfFrameIndex
             )
+            val restoredWbMode = if (isHalfFrame) {
+                val adjIndex = if (restoredConfig?.isSwapped == true) 1 - _uiState.value.selectedHalfFrameIndex else _uiState.value.selectedHalfFrameIndex
+                restoredConfig?.adjustments?.getOrNull(adjIndex)?.wbMode ?: 0
+            } else {
+                restoredConfig?.wbMode ?: 0
+            }
 
             _uiState.update { current ->
                 current.copy(
                     isEditing = false,
                     isAdjusted = false,
                     activeConfig = restoredConfig,
+                    wbMode = restoredWbMode,
                     slider1Value = sliderState.value1,
                     slider1DisplayValue = sliderState.display1,
                     slider2Value = sliderState.value2,
@@ -222,16 +245,43 @@ class DarkroomEditorViewModel(
             isHalfFrame = _uiState.value.isHalfFrame,
             selectedHalfFrameIndex = index
         )
+        val adjIndex = if (config.isSwapped) 1 - index else index
+        val targetWbMode = config.adjustments?.getOrNull(adjIndex)?.wbMode ?: 0
 
         _uiState.update { current ->
             current.copy(
                 selectedHalfFrameIndex = index,
+                wbMode = targetWbMode,
                 slider1Value = sliderState.value1,
                 slider1DisplayValue = sliderState.display1,
                 slider2Value = sliderState.value2,
                 slider2DisplayValue = sliderState.display2
             )
         }
+    }
+
+    private fun handleSetWbMode(mode: Int) {
+        val currentConfig = _uiState.value.activeConfig ?: EditConfig()
+        val isHalfFrame = _uiState.value.isHalfFrame
+        val selectedIndex = _uiState.value.selectedHalfFrameIndex
+        val updatedConfig = if (isHalfFrame) {
+            val adjs = currentConfig.adjustments?.toMutableList() ?: mutableListOf(BasicAdjustments(), BasicAdjustments())
+            while (adjs.size < 2) adjs.add(BasicAdjustments())
+            val adjIndex = if (currentConfig.isSwapped) 1 - selectedIndex else selectedIndex
+            adjs[adjIndex] = adjs[adjIndex].copy(wbMode = mode)
+            currentConfig.copy(adjustments = adjs)
+        } else {
+            currentConfig.copy(wbMode = mode)
+        }
+
+        _uiState.update { current ->
+            current.copy(
+                isAdjusted = true,
+                activeConfig = updatedConfig,
+                wbMode = mode
+            )
+        }
+        scheduleDebouncedPreview(updatedConfig)
     }
 
     private fun handleUpdateSlider(sliderId: Int, value: Float) {
@@ -369,6 +419,11 @@ class DarkroomEditorViewModel(
             isHalfFrame = isHalfFrame,
             selectedHalfFrameIndex = 0
         )
+        val resetWbMode = if (isHalfFrame) {
+            baseConfig.adjustments?.getOrNull(0)?.wbMode ?: 0
+        } else {
+            baseConfig.wbMode
+        }
 
         val lutName = if (!baseConfig.lut.isNullOrBlank() && baseConfig.lut != "None") {
             baseConfig.lut.substringBeforeLast(".")
@@ -385,6 +440,7 @@ class DarkroomEditorViewModel(
                 originalConfig = baseConfig.copy(),
                 selectedTab = 0,
                 selectedHalfFrameIndex = 0,
+                wbMode = resetWbMode,
                 currentLutName = lutName,
                 currentLogName = logName,
                 showTimestamp = baseConfig.showTimestamp,
@@ -422,6 +478,17 @@ class DarkroomEditorViewModel(
                     val forceUpdate1 = lastPreviewConfig == null ||
                             lastPreviewConfig?.log != config.log ||
                             lastPreviewConfig?.lut != config.lut ||
+                            lastPreviewConfig?.exposure != config.exposure ||
+                            lastPreviewConfig?.contrast != config.contrast ||
+                            lastPreviewConfig?.saturation != config.saturation ||
+                            lastPreviewConfig?.highlights != config.highlights ||
+                            lastPreviewConfig?.shadows != config.shadows ||
+                            lastPreviewConfig?.whites != config.whites ||
+                            lastPreviewConfig?.blacks != config.blacks ||
+                            lastPreviewConfig?.wbMode != config.wbMode ||
+                            lastPreviewConfig?.wbTempOffset != config.wbTempOffset ||
+                            lastPreviewConfig?.wbTintOffset != config.wbTintOffset ||
+                            lastPreviewConfig?.wbManualTempK != config.wbManualTempK ||
                             lastPreviewConfig?.adjustments?.getOrNull(0) != config.adjustments?.getOrNull(0)
 
                     val forceUpdate2 = lastPreviewConfig == null ||
@@ -511,7 +578,12 @@ class DarkroomEditorViewModel(
                 highlights = config.highlights,
                 shadows = config.shadows,
                 whites = config.whites,
-                blacks = config.blacks
+                blacks = config.blacks,
+                digitalGain = config.digitalGain,
+                wbMode = config.wbMode,
+                wbTempOffset = config.wbTempOffset,
+                wbTintOffset = config.wbTintOffset,
+                wbManualTempK = config.wbManualTempK
             )
         }
 
@@ -555,6 +627,19 @@ class DarkroomEditorViewModel(
                 display2 = String.format(Locale.US, "%.2f", target.blacks),
                 isSlider2Visible = true
             )
+            3 -> SliderState(
+                label1 = "Temp",
+                min1 = -100.0f,
+                max1 = 100.0f,
+                value1 = target.wbTempOffset.coerceIn(-100.0f, 100.0f),
+                display1 = String.format(Locale.US, "%+d", target.wbTempOffset.roundToInt()),
+                label2 = "Tint",
+                min2 = -80.0f,
+                max2 = 80.0f,
+                value2 = target.wbTintOffset.coerceIn(-80.0f, 80.0f),
+                display2 = String.format(Locale.US, "%+d", target.wbTintOffset.roundToInt()),
+                isSlider2Visible = true
+            )
             else -> SliderState(
                 label1 = "Saturation",
                 min1 = ADJUSTMENT_MIN,
@@ -584,7 +669,8 @@ class DarkroomEditorViewModel(
                 0 -> if (sliderId == 1) old.copy(exposure = value) else old.copy(contrast = value)
                 1 -> if (sliderId == 1) old.copy(highlights = value) else old.copy(shadows = value)
                 2 -> if (sliderId == 1) old.copy(whites = value) else old.copy(blacks = value)
-                3 -> if (sliderId == 1) old.copy(saturation = value) else old
+                3 -> if (sliderId == 1) old.copy(wbTempOffset = value) else old.copy(wbTintOffset = value)
+                4 -> if (sliderId == 1) old.copy(saturation = value) else old
                 else -> old
             }
         }
@@ -604,7 +690,12 @@ class DarkroomEditorViewModel(
                     highlights = currentConfig.highlights,
                     shadows = currentConfig.shadows,
                     whites = currentConfig.whites,
-                    blacks = currentConfig.blacks
+                    blacks = currentConfig.blacks,
+                    digitalGain = currentConfig.digitalGain,
+                    wbMode = currentConfig.wbMode,
+                    wbTempOffset = currentConfig.wbTempOffset,
+                    wbTintOffset = currentConfig.wbTintOffset,
+                    wbManualTempK = currentConfig.wbManualTempK
                 )
             )
             currentConfig.copy(
@@ -614,7 +705,11 @@ class DarkroomEditorViewModel(
                 shadows = basic.shadows,
                 whites = basic.whites,
                 blacks = basic.blacks,
-                saturation = basic.saturation
+                saturation = basic.saturation,
+                wbMode = basic.wbMode,
+                wbTempOffset = basic.wbTempOffset,
+                wbTintOffset = basic.wbTintOffset,
+                wbManualTempK = basic.wbManualTempK
             )
         }
     }

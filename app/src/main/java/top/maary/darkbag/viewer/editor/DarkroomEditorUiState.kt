@@ -12,9 +12,10 @@ data class DarkroomEditorUiState(
     val isAdjusted: Boolean = false,
     val activeConfig: EditConfig? = null,
     val originalConfig: EditConfig? = null,
-    val selectedTab: Int = 0, // 0: Light, 1: Range, 2: Tone, 3: Color
+    val selectedTab: Int = 0, // 0: Light, 1: Range, 2: Tone, 3: WB, 4: Color
     val selectedHalfFrameIndex: Int = 0, // 0: Frame 1, 1: Frame 2
     val isHalfFrame: Boolean = false,
+    val wbMode: Int = 0,
     val isGeneratingPreview: Boolean = false,
     val slider1Label: String = "Exposure",
     val slider1Value: Float = 0.0f,

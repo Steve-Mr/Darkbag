@@ -240,6 +240,35 @@ object SensorCalibrationHelper {
     }
 
     /**
+     * CAT16 Ambience warmth retention curve (Section 3.6).
+     * T >= 5000K retains 0 Mired.
+     * T = 3000K retains 26 +/- 2 Mired.
+     * T <= 2000K retains <= 48 Mired.
+     */
+    fun applyAmbienceRetention(tempK: Float): Float {
+        val ms = 1e6f / tempK.coerceIn(1667.0f, 50000.0f)
+        if (ms <= 200.0f) return tempK
+        val tStep = ((ms - 200.0f) / (230.0f - 200.0f)).coerceIn(0.0f, 1.0f)
+        val w = tStep * tStep * (3.0f - 2.0f * tStep)
+        val d = ms - 200.0f
+        val deltaM = 48.0f * kotlin.math.tanh(0.22f * d * w / 48.0f)
+        val mBase = ms - deltaM
+        return 1e6f / mBase.coerceIn(20.0f, 600.0f)
+    }
+
+    /**
+     * Planckian locus tint soft clamping (Section 3.6).
+     * |tint| <= 18 remains untouched.
+     * Large tint values smoothly compress asymptotically to +/- 36.
+     */
+    fun clampPlanckianTint(tint: Float): Float {
+        val absTint = kotlin.math.abs(tint)
+        if (absTint <= 18.0f) return tint
+        val sgn = if (tint >= 0.0f) 1.0f else -1.0f
+        return sgn * (18.0f + 18.0f * kotlin.math.tanh((absTint - 18.0f) / 18.0f))
+    }
+
+    /**
      * Resolves canonical sensor WB gains [R, Ge, Go, B] (G=1.0) and physical neutral point [nR, 1.0, nB].
      * Strict single-source priority contract (AGENTS.md Invariant 1 & Section 3.2).
      */
@@ -539,18 +568,9 @@ object SensorCalibrationHelper {
             var tintBase = sceneTint
 
             if (wbMode == 1) { // AMBIENCE
-                if (ms > 200.0f) {
-                    val tStep = ((ms - 200.0f) / (230.0f - 200.0f)).coerceIn(0.0f, 1.0f)
-                    val w = tStep * tStep * (3.0f - 2.0f * tStep)
-                    val d = ms - 200.0f
-                    val deltaM = 48.0f * kotlin.math.tanh(0.22f * d * w / 48.0f)
-                    mBase = ms - deltaM
-                }
-                val absTint = kotlin.math.abs(sceneTint)
-                if (absTint > 18.0f) {
-                    val sgn = if (sceneTint >= 0.0f) 1.0f else -1.0f
-                    tintBase = sgn * (18.0f + 18.0f * kotlin.math.tanh((absTint - 18.0f) / 18.0f))
-                }
+                val retainedTempK = applyAmbienceRetention(sceneTempK)
+                mBase = 1e6f / retainedTempK.coerceIn(1667.0f, 50000.0f)
+                tintBase = clampPlanckianTint(sceneTint)
             } else if (wbMode == 2) { // PRESET_OR_MANUAL
                 val tMan = wbManualTempK.coerceIn(1667.0f, 50000.0f)
                 mBase = 1e6f / tMan

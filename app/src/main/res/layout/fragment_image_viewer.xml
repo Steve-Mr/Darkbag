@@ -591,13 +591,14 @@
                     android:layout_height="1dp"
                     android:visibility="gone"
                     app:tabMode="fixed">
-                    <com.google.android.material.tabs.TabItem android:text="Light" />
-                    <com.google.android.material.tabs.TabItem android:text="Range" />
-                    <com.google.android.material.tabs.TabItem android:text="Tone" />
-                    <com.google.android.material.tabs.TabItem android:text="Color" />
+                    <com.google.android.material.tabs.TabItem android:text="@string/edit_tab_light" />
+                    <com.google.android.material.tabs.TabItem android:text="@string/edit_tab_range" />
+                    <com.google.android.material.tabs.TabItem android:text="@string/edit_tab_tone" />
+                    <com.google.android.material.tabs.TabItem android:text="@string/edit_tab_wb" />
+                    <com.google.android.material.tabs.TabItem android:text="@string/edit_tab_color" />
                 </com.google.android.material.tabs.TabLayout>
 
-                <!-- Row 1: Header Row (Frame Selector + 4 Bento Category Tiles) -->
+                <!-- Row 1: Header Row (Frame Selector + 5 Bento Category Tiles) -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="40dp"
@@ -646,7 +647,7 @@
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:padding="0dp"
-                        android:text="LIGHT"
+                        android:text="@string/edit_tab_light"
                         android:textSize="10.5sp"
                         android:textStyle="bold"
                         app:cornerRadius="14dp" />
@@ -661,7 +662,7 @@
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:padding="0dp"
-                        android:text="RANGE"
+                        android:text="@string/edit_tab_range"
                         android:textSize="10.5sp"
                         android:textStyle="bold"
                         app:cornerRadius="14dp" />
@@ -676,7 +677,22 @@
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:padding="0dp"
-                        android:text="TONE"
+                        android:text="@string/edit_tab_tone"
+                        android:textSize="10.5sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="14dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_tab_wb"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="4dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="0dp"
+                        android:text="@string/edit_tab_wb"
                         android:textSize="10.5sp"
                         android:textStyle="bold"
                         app:cornerRadius="14dp" />
@@ -690,7 +706,7 @@
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:padding="0dp"
-                        android:text="COLOR"
+                        android:text="@string/edit_tab_color"
                         android:textSize="10.5sp"
                         android:textStyle="bold"
                         app:cornerRadius="14dp" />
@@ -713,6 +729,45 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical">
+
+                        <!-- Compact Bento Mode Chips (AMBIENCE / NEUTRAL) for WB Tab -->
+                        <LinearLayout
+                            android:id="@+id/layout_wb_mode_chips"
+                            android:layout_width="match_parent"
+                            android:layout_height="32dp"
+                            android:layout_marginBottom="8dp"
+                            android:orientation="horizontal"
+                            android:visibility="gone">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_wb_chip_ambience"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1"
+                                android:layout_marginEnd="6dp"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:padding="0dp"
+                                android:text="@string/wb_mode_ambience"
+                                android:textSize="10.5sp"
+                                android:textStyle="bold"
+                                app:cornerRadius="10dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_wb_chip_neutral"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:padding="0dp"
+                                android:text="@string/wb_mode_neutral"
+                                android:textSize="10.5sp"
+                                android:textStyle="bold"
+                                app:cornerRadius="10dp" />
+                        </LinearLayout>
 
                         <LinearLayout
                             android:id="@+id/layout_slider_1"
