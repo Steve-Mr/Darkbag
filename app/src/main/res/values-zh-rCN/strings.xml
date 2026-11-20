@@ -343,6 +343,10 @@
     <string name="pref_burst_frames_label">连拍帧数</string>
     <string name="pref_underexposure_label">动态欠曝</string>
     <string name="pref_color_engine_label">色彩引擎</string>
+    <string name="pref_wb_strategy_label">白平衡风格</string>
+    <string name="pref_wb_strategy_title">白平衡风格</string>
+    <string name="pref_wb_strategy_ambience">氛围优先</string>
+    <string name="pref_wb_strategy_neutral">准确中性</string>
     <string name="pref_antibanding_label">工频抗频闪</string>
     <string name="pref_burst_strategy_label">处理策略</string>
     <string name="pref_shutter_hold_label">快门长按</string>

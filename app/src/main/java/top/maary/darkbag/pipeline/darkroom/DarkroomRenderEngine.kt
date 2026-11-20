@@ -356,6 +356,13 @@ object DarkroomRenderEngine {
         val scaledH = (fullH / ds / spec.zoomFactor).toInt().coerceAtLeast(1)
         val bitmap = Bitmap.createBitmap(scaledW, scaledH, Bitmap.Config.ARGB_8888)
 
+        val wbParams = floatArrayOf(
+            adj.wbMode.toFloat(),
+            adj.wbTempOffset,
+            adj.wbTintOffset,
+            adj.wbManualTempK
+        )
+
         val ret = ColorProcessor.processRaw(
             dngData = bytes,
             targetLog = logIndex,
@@ -377,7 +384,8 @@ object DarkroomRenderEngine {
             downsampleFactor = ds,
             zoomFactor = spec.zoomFactor,
             metadata = single.captureMetadata,
-            colorEngineMode = spec.editConfig.colorEngineMode
+            colorEngineMode = spec.editConfig.colorEngineMode,
+            wbParams = wbParams
         )
 
         return if (ret >= 0) {
@@ -401,6 +409,13 @@ object DarkroomRenderEngine {
         val bytes = resolveDngBytes(context, single) ?: return false
         val rotDegrees = resolveRotationDegrees(context, single, bytes)
 
+        val wbParams = floatArrayOf(
+            adj.wbMode.toFloat(),
+            adj.wbTempOffset,
+            adj.wbTintOffset,
+            adj.wbManualTempK
+        )
+
         val ret = ColorProcessor.processRaw(
             dngData = bytes,
             targetLog = logIndex,
@@ -422,7 +437,8 @@ object DarkroomRenderEngine {
             downsampleFactor = 1,
             zoomFactor = spec.zoomFactor,
             metadata = single.captureMetadata,
-            colorEngineMode = spec.editConfig.colorEngineMode
+            colorEngineMode = spec.editConfig.colorEngineMode,
+            wbParams = wbParams
         )
 
         return ret >= 0

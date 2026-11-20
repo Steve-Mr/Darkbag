@@ -475,7 +475,11 @@ class ImageRepository(
                         shadows = adjJson.optDouble("shadows", 0.0).toFloat(),
                         whites = adjJson.optDouble("whites", 0.0).toFloat(),
                         blacks = adjJson.optDouble("blacks", 0.0).toFloat(),
-                        digitalGain = adjJson.optDouble("digital_gain", 1.0).toFloat()
+                        digitalGain = adjJson.optDouble("digital_gain", 1.0).toFloat(),
+                        wbMode = adjJson.optInt("wb_mode", 0),
+                        wbTempOffset = adjJson.optDouble("wb_temp_offset", 0.0).toFloat(),
+                        wbTintOffset = adjJson.optDouble("wb_tint_offset", 0.0).toFloat(),
+                        wbManualTempK = adjJson.optDouble("wb_manual_temp_k", 5500.0).toFloat()
                     )
                 }
             } else null
@@ -497,7 +501,11 @@ class ImageRepository(
                 hfLayout = if (json.has("hf_layout")) json.optString("hf_layout") else null,
                 isSwapped = json.optBoolean("is_swapped", false),
                 zoomFactor = json.optDouble("zoom_factor", 1.0).toFloat(),
-                colorEngineMode = json.optInt("color_engine_mode", 0)
+                colorEngineMode = json.optInt("color_engine_mode", 0),
+                wbMode = json.optInt("wb_mode", 0),
+                wbTempOffset = json.optDouble("wb_temp_offset", 0.0).toFloat(),
+                wbTintOffset = json.optDouble("wb_tint_offset", 0.0).toFloat(),
+                wbManualTempK = json.optDouble("wb_manual_temp_k", 5500.0).toFloat()
             )
         } catch (e: Exception) {
             null

@@ -185,7 +185,8 @@ object ColorProcessor {
         colorEngineMode: Int = 0,
         lensShadingMap: FloatArray? = null,
         lensShadingRows: Int = 0,
-        lensShadingCols: Int = 0
+        lensShadingCols: Int = 0,
+        wbParams: FloatArray? = null
     ): Int
 
     /**

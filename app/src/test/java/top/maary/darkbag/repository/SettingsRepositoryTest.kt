@@ -35,6 +35,7 @@ class SettingsRepositoryTest {
         assertFalse(prefs.saveRaw)
         assertEquals(5, prefs.hdrBurstCount)
         assertEquals(PreferenceKeys.HDR_FUSION_AUTO, prefs.hdrFusionMode)
+        assertEquals(PreferenceKeys.WB_STRATEGY_AMBIENCE, prefs.wbStrategy)
     }
 
     @Test
@@ -53,6 +54,9 @@ class SettingsRepositoryTest {
 
         repository.setHdrBurstCount(8)
         assertEquals(8, repository.preferences.value.hdrBurstCount)
+
+        repository.setWbStrategy(PreferenceKeys.WB_STRATEGY_NEUTRAL)
+        assertEquals(PreferenceKeys.WB_STRATEGY_NEUTRAL, repository.preferences.value.wbStrategy)
     }
 
     @Test
@@ -178,5 +182,44 @@ class SettingsRepositoryTest {
         assertNull(reopened.current().selectedLensSensorId)
         assertNull(reopened.current().lensFacing)
         assertEquals("Portra_400.cube", reopened.current().activeLut)
+    }
+
+    @Test
+    fun testExifEditConfigSerialization_BackwardCompatibility() {
+        // 1. Old JSON without wb_mode
+        val oldJson = """
+            {
+                "log": "Apple Log",
+                "lut": "Classic Neg",
+                "exposure": 0.5,
+                "contrast": 0.1
+            }
+        """.trimIndent()
+        val json = org.json.JSONObject(oldJson)
+        val wbMode = json.optInt("wb_mode", 0)
+        val wbTempOffset = json.optDouble("wb_temp_offset", 0.0).toFloat()
+        val wbTintOffset = json.optDouble("wb_tint_offset", 0.0).toFloat()
+        val wbManualTempK = json.optDouble("wb_manual_temp_k", 5500.0).toFloat()
+
+        assertEquals("Old JSON must default to NEUTRAL (0)", 0, wbMode)
+        assertEquals(0f, wbTempOffset, 1e-5f)
+        assertEquals(0f, wbTintOffset, 1e-5f)
+        assertEquals(5500f, wbManualTempK, 1e-5f)
+
+        // 2. Full serialization roundtrip
+        val cfg = top.maary.darkbag.models.EditConfig(
+            log = "Apple Log",
+            lut = "None",
+            wbMode = 1,
+            wbTempOffset = 15.0f,
+            wbTintOffset = -8.0f,
+            wbManualTempK = 4800.0f
+        )
+        val serialized = top.maary.darkbag.utils.ExifMetadataApplier.buildEditConfigJson(cfg)
+        assertNotNull(serialized)
+        assertEquals(1, serialized!!.getInt("wb_mode"))
+        assertEquals(15.0, serialized.getDouble("wb_temp_offset"), 1e-4)
+        assertEquals(-8.0, serialized.getDouble("wb_tint_offset"), 1e-4)
+        assertEquals(4800.0, serialized.getDouble("wb_manual_temp_k"), 1e-4)
     }
 }

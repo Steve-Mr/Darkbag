@@ -256,7 +256,11 @@ fun EditConfig.toBasic(): BasicAdjustments {
         shadows = shadows,
         whites = whites,
         blacks = blacks,
-        digitalGain = digitalGain
+        digitalGain = digitalGain,
+        wbMode = wbMode,
+        wbTempOffset = wbTempOffset,
+        wbTintOffset = wbTintOffset,
+        wbManualTempK = wbManualTempK
     )
 }
 

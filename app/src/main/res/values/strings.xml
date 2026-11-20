@@ -370,6 +370,10 @@
     <string name="pref_burst_frames_label">BURST FRAMES</string>
     <string name="pref_underexposure_label">UNDEREXPOSURE</string>
     <string name="pref_color_engine_label">COLOR ENGINE</string>
+    <string name="pref_wb_strategy_label">WHITE BALANCE</string>
+    <string name="pref_wb_strategy_title">White Balance Style</string>
+    <string name="pref_wb_strategy_ambience">Ambience Priority</string>
+    <string name="pref_wb_strategy_neutral">Neutral</string>
     <string name="pref_antibanding_label">ANTIBANDING</string>
     <string name="pref_burst_strategy_label">BURST STRATEGY</string>
     <string name="pref_shutter_hold_label">SHUTTER HOLD ACTION</string>

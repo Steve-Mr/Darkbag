@@ -61,6 +61,10 @@ class SettingsViewModel @JvmOverloads constructor(
         settingsRepository.setColorEngineMode(mode)
     }
 
+    fun updateWbStrategy(strategy: Int) {
+        settingsRepository.setWbStrategy(strategy)
+    }
+
     fun updateFlashMode(flashMode: String) {
         settingsRepository.setFlashMode(flashMode)
     }

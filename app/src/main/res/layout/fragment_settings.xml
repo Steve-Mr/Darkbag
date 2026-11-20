@@ -656,6 +656,20 @@
                             android:text="3D LUT RECIPES\nClassic Neg" />
                     </top.maary.darkbag.ui.bento.BentoRowLayout>
 
+                    <!-- White Balance Style Tile (btn_menu_wb_strategy) -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_menu_wb_strategy"
+                        style="@style/Widget.Darkbag.BentoTile.Button"
+                        android:layout_width="match_parent"
+                        android:layout_height="50dp"
+                        android:layout_marginBottom="8dp"
+                        app:backgroundTint="?attr/colorSurface"
+                        android:textColor="?attr/colorOnSurface"
+                        app:strokeWidth="0dp"
+                        android:maxLines="2"
+                        android:ellipsize="end"
+                        tools:text="WHITE BALANCE\nAmbience Priority" />
+
                     <!-- Live Preview Switch (switch_live_preview) -->
                     <top.maary.darkbag.ui.bento.BentoSwitchTile
                         android:id="@+id/switch_live_preview"

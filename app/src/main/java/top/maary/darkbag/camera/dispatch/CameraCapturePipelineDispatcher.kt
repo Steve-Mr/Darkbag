@@ -225,7 +225,12 @@ class CameraCapturePipelineDispatcher(
                     motionStillPtsUs = pts
                 }
 
-                val singleCalib = metadataExtractor.extractSensorCalibration(chars, captureResult, wb)
+                val singleCalib = metadataExtractor.extractSensorCalibration(
+                    characteristics = chars,
+                    result = captureResult,
+                    wb = wb,
+                    wbMode = prefs.wbStrategy
+                )
                 val useSensorColorMatrix = true
                 val finalCcm = if (useSensorColorMatrix && singleCalib.renderCcm != null) {
                     singleCalib.renderCcm

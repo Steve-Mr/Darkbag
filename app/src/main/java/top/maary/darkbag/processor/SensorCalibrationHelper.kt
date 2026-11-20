@@ -444,25 +444,35 @@ object SensorCalibrationHelper {
         neutralColorPoint: FloatArray? = null,
         wb: FloatArray? = null,
         colorMatrix1: FloatArray? = null,
-        colorMatrix2: FloatArray? = null
+        colorMatrix2: FloatArray? = null,
+        wbMode: Int = 0,
+        wbTempOffset: Float = 0f,
+        wbTintOffset: Float = 0f,
+        wbManualTempK: Float = 5500f
     ): FloatArray? {
         val (canonWb, canonNeutral) = resolveCanonicalWbAndNeutral(neutralColorPoint, wb)
 
         val fmMag = forwardMatrix1?.fold(0f) { acc, fl -> acc + kotlin.math.abs(fl) } ?: 0f
         val hasValidFm = forwardMatrix1 != null && fmMag > 1e-3f
 
+        val illum = estimateSceneIlluminant(
+            colorMatrix1 = colorMatrix1,
+            colorMatrix2 = colorMatrix2,
+            calibrationIlluminant1 = calibrationIlluminant1,
+            calibrationIlluminant2 = calibrationIlluminant2,
+            neutralColorPoint = canonNeutral,
+            wb = canonWb
+        )
+        val weight = illum.weight
+        val sceneTempK = illum.tempK
+        val sceneTint = illum.tint
+        val wScene = xyToXyz(illum.x, illum.y)
+
+        var fmD50: FloatArray? = null
+
         if (hasValidFm) {
             val fm1 = forwardMatrix1!!
             val fm2 = forwardMatrix2 ?: forwardMatrix1
-
-            val (_, weight) = estimateCctAndWeight(
-                colorMatrix1 = colorMatrix1,
-                colorMatrix2 = colorMatrix2,
-                calibrationIlluminant1 = calibrationIlluminant1,
-                calibrationIlluminant2 = calibrationIlluminant2,
-                neutralColorPoint = canonNeutral,
-                wb = canonWb
-            )
 
             val interpFm = FloatArray(9) { i ->
                 weight * fm1[i] + (1f - weight) * fm2[i]
@@ -474,33 +484,24 @@ object SensorCalibrationHelper {
             val wFm2 = interpFm[6] + interpFm[7] + interpFm[8]
 
             if (wFm0 > 0.1f && wFm1 > 0.1f && wFm2 > 0.1f) {
-                val fmD50 = FloatArray(9)
+                val candidateFm = FloatArray(9)
                 val scale0 = W_D50[0] / wFm0
                 val scale1 = W_D50[1] / wFm1
                 val scale2 = W_D50[2] / wFm2
 
                 for (c in 0 until 3) {
-                    fmD50[0 * 3 + c] = interpFm[0 * 3 + c] * scale0
-                    fmD50[1 * 3 + c] = interpFm[1 * 3 + c] * scale1
-                    fmD50[2 * 3 + c] = interpFm[2 * 3 + c] * scale2
+                    candidateFm[0 * 3 + c] = interpFm[0 * 3 + c] * scale0
+                    candidateFm[1 * 3 + c] = interpFm[1 * 3 + c] * scale1
+                    candidateFm[2 * 3 + c] = interpFm[2 * 3 + c] * scale2
                 }
-                return multiply3x3(M_XYZ_D50_TO_SRGB, fmD50)
+                fmD50 = candidateFm
             }
         }
 
         // Path B Fallback: ColorMatrix-only with CAT16 adaptation (Section 3.4)
-        if (colorMatrix1 != null) {
+        if (fmD50 == null && colorMatrix1 != null) {
             val cm1 = colorMatrix1
             val cm2 = colorMatrix2 ?: colorMatrix1
-
-            val (_, weight) = estimateCctAndWeight(
-                colorMatrix1 = cm1,
-                colorMatrix2 = cm2,
-                calibrationIlluminant1 = calibrationIlluminant1,
-                calibrationIlluminant2 = calibrationIlluminant2,
-                neutralColorPoint = canonNeutral,
-                wb = canonWb
-            )
 
             val cm = FloatArray(9) { i ->
                 weight * cm1[i] + (1f - weight) * cm2[i]
@@ -510,9 +511,9 @@ object SensorCalibrationHelper {
 
             val wRaw = multiply3x3Vec3(invCm, canonNeutral)
             val s = 1.0f / maxOf(1e-5f, wRaw[1])
-            val wScene = floatArrayOf(s * wRaw[0], 1.0f, s * wRaw[2])
+            val wSceneRaw = floatArrayOf(s * wRaw[0], 1.0f, s * wRaw[2])
 
-            val mCatAdapt = cat16AdaptMatrix(wScene, W_D50)
+            val mCatAdapt = cat16AdaptMatrix(wSceneRaw, W_D50)
 
             val dwbInv = floatArrayOf(
                 canonNeutral[0], 0f, 0f,
@@ -522,12 +523,55 @@ object SensorCalibrationHelper {
 
             val tempA = multiply3x3(mCatAdapt, invCm)
             val tempB = multiply3x3(tempA, dwbInv)
-            val fmD50 = FloatArray(9) { i -> s * tempB[i] }
-
-            return multiply3x3(M_XYZ_D50_TO_SRGB, fmD50)
+            fmD50 = FloatArray(9) { i -> s * tempB[i] }
         }
 
-        return null
+        if (fmD50 == null) return null
+
+        val intermediate = if (wbMode == 0 &&
+            kotlin.math.abs(wbTempOffset) < 1e-4f &&
+            kotlin.math.abs(wbTintOffset) < 1e-4f
+        ) {
+            M_XYZ_D50_TO_SRGB
+        } else {
+            val ms = 1e6f / sceneTempK.coerceIn(1667.0f, 50000.0f)
+            var mBase = ms
+            var tintBase = sceneTint
+
+            if (wbMode == 1) { // AMBIENCE
+                if (ms > 200.0f) {
+                    val tStep = ((ms - 200.0f) / (230.0f - 200.0f)).coerceIn(0.0f, 1.0f)
+                    val w = tStep * tStep * (3.0f - 2.0f * tStep)
+                    val d = ms - 200.0f
+                    val deltaM = 48.0f * kotlin.math.tanh(0.22f * d * w / 48.0f)
+                    mBase = ms - deltaM
+                }
+                val absTint = kotlin.math.abs(sceneTint)
+                if (absTint > 18.0f) {
+                    val sgn = if (sceneTint >= 0.0f) 1.0f else -1.0f
+                    tintBase = sgn * (18.0f + 18.0f * kotlin.math.tanh((absTint - 18.0f) / 18.0f))
+                }
+            } else if (wbMode == 2) { // PRESET_OR_MANUAL
+                val tMan = wbManualTempK.coerceIn(1667.0f, 50000.0f)
+                mBase = 1e6f / tMan
+                tintBase = 0.0f
+            }
+
+            val mTarget = (mBase - wbTempOffset).coerceIn(20.0f, 600.0f)
+            val targetTempK = 1e6f / mTarget
+            val targetTint = (tintBase - wbTintOffset).coerceIn(-150.0f, 150.0f)
+
+            val (xTarget, yTarget) = tempTintToXy(targetTempK, targetTint)
+            val wTarget = xyToXyz(xTarget, yTarget)
+
+            val mShift = cat16AdaptMatrix(wTarget, wScene)
+            val yOut = mShift[3] * W_D50[0] + mShift[4] * W_D50[1] + mShift[5] * W_D50[2]
+            val lumaScale = 1.0f / maxOf(0.2f, yOut)
+            val mShiftNorm = FloatArray(9) { i -> mShift[i] * lumaScale }
+            multiply3x3(M_XYZ_D50_TO_SRGB, mShiftNorm)
+        }
+
+        return multiply3x3(intermediate, fmD50)
     }
 
     /**
