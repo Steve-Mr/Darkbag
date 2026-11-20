@@ -178,18 +178,20 @@ class CameraCaptureMetadataExtractor(
         val calibrationIlluminant1 = (characteristics?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21).toInt()
         val calibrationIlluminant2 = (characteristics?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2) ?: 17).toInt()
 
-        val neutral = result?.get(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
-        val neutralColorPoint = if (neutral != null && neutral.size >= 3) {
-            FloatArray(3) { neutral[it].numerator.toFloat() / neutral[it].denominator.toFloat() }
-        } else null
+        val hasResultOrWb = result != null || wb != null
+        val (canonicalWb, canonicalNeutral) = if (hasResultOrWb) {
+            SensorCalibrationHelper.resolveCanonicalWbAndNeutral(result, wb)
+        } else {
+            Pair(null, null)
+        }
 
         val renderCcm = SensorCalibrationHelper.computeRenderCcm(
             forwardMatrix1 = forwardMatrix1,
             forwardMatrix2 = forwardMatrix2,
             calibrationIlluminant1 = calibrationIlluminant1,
             calibrationIlluminant2 = calibrationIlluminant2,
-            neutralColorPoint = neutralColorPoint,
-            wb = wb,
+            neutralColorPoint = canonicalNeutral,
+            wb = canonicalWb,
             colorMatrix1 = colorMatrix1,
             colorMatrix2 = colorMatrix2
         )
@@ -201,7 +203,7 @@ class CameraCaptureMetadataExtractor(
             forwardMatrix2 = forwardMatrix2,
             calibrationIlluminant1 = calibrationIlluminant1,
             calibrationIlluminant2 = calibrationIlluminant2,
-            neutralColorPoint = neutralColorPoint,
+            neutralColorPoint = canonicalNeutral,
             renderCcm = renderCcm
         )
     }
@@ -267,14 +269,8 @@ class CameraCaptureMetadataExtractor(
     }
 
     fun extractWbAndCcm(result: CaptureResult?): Pair<FloatArray, FloatArray> {
-        val wb = floatArrayOf(2.0f, 1.0f, 1.0f, 1.5f)
+        val (canonicalWb, _) = SensorCalibrationHelper.resolveCanonicalWbAndNeutral(result)
         val ccm = floatArrayOf(2.0f, -1.0f, 0.0f, -0.5f, 2.0f, -0.5f, 0.0f, -1.0f, 2.0f)
-        result?.get(CaptureResult.COLOR_CORRECTION_GAINS)?.let { wbVec ->
-            wb[0] = wbVec.red
-            wb[1] = wbVec.greenEven
-            wb[2] = wbVec.greenOdd
-            wb[3] = wbVec.blue
-        }
         result?.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)?.let { ccmMat ->
             var idx = 0
             for (row in 0 until 3) {
@@ -283,7 +279,7 @@ class CameraCaptureMetadataExtractor(
                 }
             }
         }
-        return Pair(wb, ccm)
+        return Pair(canonicalWb, ccm)
     }
 
     fun extractBlackLevelPattern(chars: CameraCharacteristics?): IntArray {

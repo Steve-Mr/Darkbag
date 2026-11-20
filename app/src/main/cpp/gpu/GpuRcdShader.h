@@ -49,6 +49,7 @@ uniform int uCfaPattern; // 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR
 // Sensor calibration uniforms
 uniform vec4 uBlackLevel; // x: R, y: G0, z: G1, w: B
 uniform float uWhiteLevel;
+uniform vec3 uWbScale;    // x: wR, y: wG (1.0), z: wB
 
 // Input & Output
 uniform highp usampler2D uBayerTex;
@@ -74,7 +75,7 @@ int getCfaColor(int pattern, int r, int c) {
     }
 }
 
-// Normalize raw 16-bit Bayer CFA pixel with channel-dependent black level
+// Normalize raw 16-bit Bayer CFA pixel with channel-dependent black level and internal WB guidance
 float normalizePixel(uint raw, int r, int c) {
     int color = getCfaColor(uCfaPattern, r, c);
     float bl;
@@ -86,7 +87,9 @@ float normalizePixel(uint raw, int r, int c) {
         bl = uBlackLevel.w; // B
     }
     float denom = max(1.0, uWhiteLevel - bl);
-    return clamp((float(raw) - bl) / denom, 0.0, 1.0);
+    float val = clamp((float(raw) - bl) / denom, 0.0, 1.0);
+    float scale = (color == 0) ? uWbScale.x : ((color == 1) ? uWbScale.y : uWbScale.z);
+    return val * scale; // Retain [0, scale] floating-point range without premature truncation
 }
 
 // Quantize normalized float [0.0, 1.0] to 16-bit integer [0, 65535]
@@ -237,6 +240,7 @@ uniform int uCfaPattern; // 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR
 // Sensor calibration uniforms
 uniform vec4 uBlackLevel; // x: R, y: G0, z: G1, w: B
 uniform float uWhiteLevel;
+uniform vec3 uWbScale;    // x: wR, y: 1.0, z: wB
 
 // Inputs
 uniform highp usampler2D uBayerTex;
@@ -269,7 +273,7 @@ int getCfaColor(int pattern, int r, int c) {
     }
 }
 
-// Normalize raw 16-bit Bayer CFA pixel with channel-dependent black level
+// Normalize raw 16-bit Bayer CFA pixel with channel-dependent black level and internal WB guidance
 float normalizePixel(uint raw, int r, int c) {
     int color = getCfaColor(uCfaPattern, r, c);
     float bl;
@@ -281,7 +285,9 @@ float normalizePixel(uint raw, int r, int c) {
         bl = uBlackLevel.w; // B
     }
     float denom = max(1.0, uWhiteLevel - bl);
-    return clamp((float(raw) - bl) / denom, 0.0, 1.0);
+    float val = clamp((float(raw) - bl) / denom, 0.0, 1.0);
+    float scale = (color == 0) ? uWbScale.x : ((color == 1) ? uWbScale.y : uWbScale.z);
+    return val * scale; // Retain [0, scale] floating-point range without premature truncation
 }
 
 // Quantize normalized float [0.0, 1.0] to 16-bit integer [0, 65535]
@@ -403,11 +409,11 @@ void main() {
     if (color == 0) {
         // Red pixel: Red is native sensor sample; Blue is ratio-reconstructed
         redVal = sBayer[sy][sx];
-        blueVal = clamp(sRatioB[sy][sx] * greenVal, 0.0, 1.0);
+        blueVal = max(0.0, sRatioB[sy][sx] * greenVal);
     } else if (color == 2) {
         // Blue pixel: Blue is native sensor sample; Red is ratio-reconstructed
         blueVal = sBayer[sy][sx];
-        redVal = clamp(sRatioR[sy][sx] * greenVal, 0.0, 1.0);
+        redVal = max(0.0, sRatioR[sy][sx] * greenVal);
     } else {
         // Green pixel: Interpolate Red and Blue ratios from cardinal neighbors
         float gN = sGreen[sy-1][sx];
@@ -431,7 +437,7 @@ void main() {
         float estV_R = 0.5 * (rN + rS);
 
         float ratioR = (wH_R * estH_R + wV_R * estV_R) / (wH_R + wV_R);
-        redVal = clamp(ratioR * greenVal, 0.0, 1.0);
+        redVal = max(0.0, ratioR * greenVal);
 
         // 2. Blue channel cardinal reconstruction
         float bN = sRatioB[sy-1][sx];
@@ -449,8 +455,13 @@ void main() {
         float estV_B = 0.5 * (bN + bS);
 
         float ratioB = (wH_B * estH_B + wV_B * estV_B) / (wH_B + wV_B);
-        blueVal = clamp(ratioB * greenVal, 0.0, 1.0);
+        blueVal = max(0.0, ratioB * greenVal);
     }
+
+    // Divide back by uWbScale and clamp to [0.0, 1.0] before writing out
+    redVal = clamp(redVal / uWbScale.x, 0.0, 1.0);
+    greenVal = clamp(greenVal / uWbScale.y, 0.0, 1.0);
+    blueVal = clamp(blueVal / uWbScale.z, 0.0, 1.0);
 
     // Write RGBA16F output image containing fully demosaiced R, G, B channels
     imageStore(uOutRgbImg, outCoord, vec4(
