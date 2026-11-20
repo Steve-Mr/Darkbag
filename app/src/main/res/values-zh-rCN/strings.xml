@@ -638,4 +638,11 @@
     <string name="edit_label_tint">色调</string>
     <string name="pill_wb_label">白平衡</string>
     <string name="pill_wb_auto">自动</string>
+    <!-- White Balance Presets -->
+    <string name="wb_preset_candle">烛光</string>
+    <string name="wb_preset_tungsten">白炽灯</string>
+    <string name="wb_preset_fluorescent">荧光灯</string>
+    <string name="wb_preset_daylight">日光</string>
+    <string name="wb_preset_cloudy">多云</string>
+    <string name="wb_preset_shade">阴影</string>
 </resources>

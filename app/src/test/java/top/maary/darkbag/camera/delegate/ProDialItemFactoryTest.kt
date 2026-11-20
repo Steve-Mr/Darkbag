@@ -1,8 +1,11 @@
 package top.maary.darkbag.camera.delegate
 
+import android.content.Context
 import android.util.Range
+import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -81,5 +84,18 @@ class ProDialItemFactoryTest {
         assertTrue(items.isNotEmpty())
         assertEquals(100.0, items.first().rawValue, 1e-4)
         assertEquals(3200.0, items.last().rawValue, 1e-4)
+    }
+
+    @Test
+    fun testGetWbPresetName() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertEquals("Candle", ProDialItemFactory.getWbPresetName(2800, context))
+        assertEquals("Tungsten", ProDialItemFactory.getWbPresetName(3200, context))
+        assertEquals("Fluorescent", ProDialItemFactory.getWbPresetName(4000, context))
+        assertEquals("Daylight", ProDialItemFactory.getWbPresetName(5500, context))
+        assertEquals("Cloudy", ProDialItemFactory.getWbPresetName(6500, context))
+        assertEquals("Shade", ProDialItemFactory.getWbPresetName(7500, context))
+        assertNull(ProDialItemFactory.getWbPresetName(5000, context))
+        assertNull(ProDialItemFactory.getWbPresetName(3400, context))
     }
 }

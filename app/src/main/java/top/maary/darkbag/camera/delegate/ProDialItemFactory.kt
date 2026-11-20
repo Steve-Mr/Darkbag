@@ -1,6 +1,8 @@
 package top.maary.darkbag.camera.delegate
 
+import android.content.Context
 import android.util.Range
+import top.maary.darkbag.R
 import top.maary.darkbag.ui.ProDialWheelView
 import java.util.Locale
 
@@ -179,5 +181,17 @@ internal object ProDialItemFactory {
             )
         }
         return items
+    }
+
+    fun getWbPresetName(kelvin: Int, context: Context): String? {
+        return when (kelvin) {
+            2800 -> context.getString(R.string.wb_preset_candle)
+            3200 -> context.getString(R.string.wb_preset_tungsten)
+            4000 -> context.getString(R.string.wb_preset_fluorescent)
+            5500 -> context.getString(R.string.wb_preset_daylight)
+            6500 -> context.getString(R.string.wb_preset_cloudy)
+            7500 -> context.getString(R.string.wb_preset_shade)
+            else -> null
+        }
     }
 }

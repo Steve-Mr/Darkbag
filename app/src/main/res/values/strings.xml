@@ -662,4 +662,11 @@
     <string name="edit_label_tint">Tint</string>
     <string name="pill_wb_label">WB</string>
     <string name="pill_wb_auto">AUTO</string>
+    <!-- White Balance Presets -->
+    <string name="wb_preset_candle">Candle</string>
+    <string name="wb_preset_tungsten">Tungsten</string>
+    <string name="wb_preset_fluorescent">Fluorescent</string>
+    <string name="wb_preset_daylight">Daylight</string>
+    <string name="wb_preset_cloudy">Cloudy</string>
+    <string name="wb_preset_shade">Shade</string>
 </resources>

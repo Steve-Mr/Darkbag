@@ -368,6 +368,63 @@
                         android:text="Infinity"
                         app:cornerRadius="15dp" />
                 </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/wb_extras"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:visibility="gone"
+                    android:paddingTop="4dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_wb_preset_tungsten"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="30dp"
+                        android:layout_marginEnd="8dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:paddingHorizontal="10dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:textSize="11sp"
+                        android:textColor="@android:color/white"
+                        android:text="3200K"
+                        app:cornerRadius="15dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_wb_preset_daylight"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="30dp"
+                        android:layout_marginEnd="8dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:paddingHorizontal="10dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:textSize="11sp"
+                        android:textColor="@android:color/white"
+                        android:text="5500K"
+                        app:cornerRadius="15dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_wb_preset_cloudy"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="30dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:paddingHorizontal="10dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:textSize="11sp"
+                        android:textColor="@android:color/white"
+                        android:text="6500K"
+                        app:cornerRadius="15dp" />
+                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
