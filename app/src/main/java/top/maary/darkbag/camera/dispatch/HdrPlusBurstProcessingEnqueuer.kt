@@ -75,7 +75,13 @@ internal class HdrPlusBurstProcessingEnqueuer(
                 val cfa = chars.get(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
                 val (wb, ccmCapture) = metadataExtractor.extractWbAndCcm(result)
                 val useSensorColorMatrix = true
-                val burstCalib = metadataExtractor.extractSensorCalibration(chars, result, wb)
+                val activeWbStrategy = SettingsRepository.getInstance(appContext).current().wbStrategy
+                val burstCalib = metadataExtractor.extractSensorCalibration(
+                    characteristics = chars,
+                    result = result,
+                    wb = wb,
+                    wbMode = activeWbStrategy
+                )
                 val ccmSensor = burstCalib.renderCcm ?: ccmCapture
                 val finalCcm = if (useSensorColorMatrix) ccmSensor else ccmCapture
                 val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
@@ -121,7 +127,9 @@ internal class HdrPlusBurstProcessingEnqueuer(
                     faithfulHighlights = false,
                     hfMetadata = hfMetadata,
                     timing = timing,
-                    sink = null
+                    sink = null,
+                    wbModeOverride = if (env.runtimeState.isManualWb) 2 else null,
+                    wbManualTempKOverride = if (env.runtimeState.isManualWb) env.runtimeState.manualWbTempK.toFloat() else null
                 )
                 enqueueBurstRequestInternal(
                     appContext = appContext,
@@ -164,12 +172,29 @@ internal class HdrPlusBurstProcessingEnqueuer(
                     "processStreamingHdrPlusBurst started with ${frames.size} frames. " +
                         "DigitalGain=${burstContext.digitalGain}, session=${streamingResult.sessionHandle}"
                 )
-                val result = burstContext.result
-                val burstCalib = metadataExtractor.extractSensorCalibration(burstContext.chars, result, burstContext.wb)
+                val baseFrameTs = frames.firstOrNull()?.timestampNs
+                val baseResult = if (baseFrameTs != null) metadataExtractor.findCaptureResult(baseFrameTs) else null
+                val result = baseResult ?: burstContext.result
+                val (effectiveWb, effectiveCcm) = metadataExtractor.extractWbAndCcm(result)
+                val activeWbStrategy = SettingsRepository.getInstance(appContext).current().wbStrategy
+                val burstCalib = metadataExtractor.extractSensorCalibration(
+                    characteristics = burstContext.chars,
+                    result = result,
+                    wb = effectiveWb,
+                    wbMode = activeWbStrategy
+                )
 
                 var effectiveLsc = burstContext.lensShadingMapData
                 var effectiveRows = burstContext.lensShadingRows
                 var effectiveCols = burstContext.lensShadingCols
+                if (baseResult != null) {
+                    val (baseLsc, baseRows, baseCols) = metadataExtractor.findLatestLensShadingMap(baseResult)
+                    if (baseLsc != null && baseRows > 1 && baseCols > 1) {
+                        effectiveLsc = baseLsc
+                        effectiveRows = baseRows
+                        effectiveCols = baseCols
+                    }
+                }
                 if (effectiveLsc == null || effectiveRows <= 1 || effectiveCols <= 1) {
                     val (latchedLsc, latchedRows, latchedCols) = metadataExtractor.findLatestLensShadingMap(result)
                     if (latchedLsc != null) {
@@ -205,8 +230,8 @@ internal class HdrPlusBurstProcessingEnqueuer(
                     cfa = burstContext.cfa,
                     whiteLevel = burstContext.whiteLevel,
                     blackLevelPattern = burstContext.blackLevelPattern,
-                    wb = burstContext.wb,
-                    ccm = burstContext.ccm,
+                    wb = effectiveWb,
+                    ccm = effectiveCcm,
                     ccmAlt = burstContext.ccmAlt,
                     exportMatrixAB = burstContext.exportMatrixAB,
                     useSensorColorMatrix = burstContext.useSensorColorMatrix,
@@ -219,7 +244,9 @@ internal class HdrPlusBurstProcessingEnqueuer(
                     faithfulHighlights = false,
                     hfMetadata = burstContext.hfMetadata,
                     timing = burstContext.timing,
-                    sink = burstContext.sink
+                    sink = burstContext.sink,
+                    wbModeOverride = if (env.runtimeState.isManualWb) 2 else null,
+                    wbManualTempKOverride = if (env.runtimeState.isManualWb) env.runtimeState.manualWbTempK.toFloat() else null
                 )
                 enqueueBurstRequestInternal(
                     appContext = appContext,

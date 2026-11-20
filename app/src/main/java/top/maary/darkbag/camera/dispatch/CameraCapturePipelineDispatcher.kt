@@ -291,7 +291,12 @@ class CameraCapturePipelineDispatcher(
                     timing?.motionPhotoStillPtsUs = pts
                 }
 
-                val singleCalib = metadataExtractor.extractSensorCalibration(chars, captureResult, wb)
+                val singleCalib = metadataExtractor.extractSensorCalibration(
+                    characteristics = chars,
+                    result = captureResult,
+                    wb = wb,
+                    wbMode = prefs.wbStrategy
+                )
                 val useSensorColorMatrix = true
                 val finalCcm = if (useSensorColorMatrix && singleCalib.renderCcm != null) {
                     singleCalib.renderCcm
@@ -335,7 +340,9 @@ class CameraCapturePipelineDispatcher(
                         motionPhotoMp4Path = motionMp4Path,
                         motionPhotoStillPtsUs = motionStillPtsUs,
                         sink = image.sink,
-                        saveRawOverride = if (settingsRepo.hasExplicitKey(PreferenceKeys.SAVE_RAW)) prefs.saveRaw else true
+                        saveRawOverride = if (settingsRepo.hasExplicitKey(PreferenceKeys.SAVE_RAW)) prefs.saveRaw else true,
+                        wbModeOverride = if (env.runtimeState.isManualWb) 2 else null,
+                        wbManualTempKOverride = if (env.runtimeState.isManualWb) env.runtimeState.manualWbTempK.toFloat() else null
                     ),
                     frameTimestampOverride = image.timestamp
                 )

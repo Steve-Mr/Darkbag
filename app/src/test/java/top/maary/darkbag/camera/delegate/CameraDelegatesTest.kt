@@ -204,4 +204,38 @@ class CameraDelegatesTest {
         assertFalse(gateway.runtimeState.isManualFocus)
         assertNull(gateway.runtimeState.focusMeteringRegion)
     }
+
+    @Test
+    fun testCameraTierController_WbDialSelectionAndPresets() {
+        val gateway = FakeTierGateway(context)
+        val uiHost = FakeUiHost()
+        val controller = CameraTierController(gateway, uiHost, gateway)
+
+        gateway.runtimeState.activeManualTab = "WB"
+
+        // 1. Dial selection of 5500K
+        controller.handleDialSelection(ProDialWheelView.DialItem("5500K", "5500K", 5500.0, true))
+        assertTrue(gateway.runtimeState.isManualWb)
+        assertEquals(5500, gateway.runtimeState.manualWbTempK)
+
+        // 2. Preset selection (Tungsten 3200K)
+        controller.selectWbPreset(3200)
+        assertTrue(gateway.runtimeState.isManualWb)
+        assertEquals(3200, gateway.runtimeState.manualWbTempK)
+
+        // 3. Preset selection (Cloudy 6500K)
+        controller.selectWbPreset(6500)
+        assertTrue(gateway.runtimeState.isManualWb)
+        assertEquals(6500, gateway.runtimeState.manualWbTempK)
+
+        // 4. Dial selection of AUTO
+        controller.handleDialSelection(ProDialWheelView.DialItem("AUTO", "AUTO", 0.0, true))
+        assertFalse(gateway.runtimeState.isManualWb)
+
+        // 5. Reset
+        controller.selectWbPreset(5500)
+        assertTrue(gateway.runtimeState.isManualWb)
+        controller.resetCurrentManualParameter()
+        assertFalse(gateway.runtimeState.isManualWb)
+    }
 }

@@ -95,6 +95,7 @@ object PreferenceKeys {
     const val KEY_EXP_MULTICAM_COLOR_HARMONIZATION = "exp_multicam_color_harmonization"
     const val KEY_FOCUS_PEAKING_ACTIVE = "pref_focus_peaking_active"
     const val KEY_COLOR_ENGINE_MODE = "color_engine_mode"
+    const val KEY_WB_STRATEGY = "wb_strategy"
     const val KEY_GALLERY_COLUMNS_PORTRAIT = "gallery_columns_portrait"
     const val KEY_GALLERY_COLUMNS_LANDSCAPE = "gallery_columns_landscape"
     const val KEY_GALLERY_WATERFALL = "gallery_waterfall"
@@ -190,6 +191,7 @@ object PreferenceKeys {
     val EXP_MULTICAM_COLOR_HARMONIZATION = booleanPreferencesKey(KEY_EXP_MULTICAM_COLOR_HARMONIZATION)
     val FOCUS_PEAKING_ACTIVE = booleanPreferencesKey(KEY_FOCUS_PEAKING_ACTIVE)
     val COLOR_ENGINE_MODE = intPreferencesKey(KEY_COLOR_ENGINE_MODE)
+    val WB_STRATEGY = intPreferencesKey(KEY_WB_STRATEGY)
     val GALLERY_COLUMNS_PORTRAIT = intPreferencesKey(KEY_GALLERY_COLUMNS_PORTRAIT)
     val GALLERY_COLUMNS_LANDSCAPE = intPreferencesKey(KEY_GALLERY_COLUMNS_LANDSCAPE)
     val GALLERY_WATERFALL = booleanPreferencesKey(KEY_GALLERY_WATERFALL)
@@ -294,6 +296,10 @@ object PreferenceKeys {
         "Sony Uchimura (GT7, Default)",
         "Legacy ACES Filmic (Original)"
     )
+
+    const val WB_STRATEGY_NEUTRAL = 0
+    const val WB_STRATEGY_AMBIENCE = 1
+    val WB_STRATEGIES = listOf(WB_STRATEGY_NEUTRAL, WB_STRATEGY_AMBIENCE)
 
     val FOCAL_LENGTHS = listOf("24", "28", "35")
     val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

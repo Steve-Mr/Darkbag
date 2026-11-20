@@ -57,6 +57,7 @@ data class DarkbagPreferences(
     val expMultiCamColorHarmonization: Boolean = true,
     val focusPeakingActive: Boolean = true,
     val colorEngineMode: Int = 2,
+    val wbStrategy: Int = PreferenceKeys.WB_STRATEGY_AMBIENCE,
     val shutterLongPressAction: String = PreferenceKeys.SHUTTER_LONG_PRESS_MP4,
     val rawVideoFps: String = "24",
     val rawVideoResolution: String = PreferenceKeys.DEFAULT_RAW_VIDEO_RESOLUTION,

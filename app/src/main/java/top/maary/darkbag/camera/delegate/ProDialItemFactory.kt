@@ -1,6 +1,8 @@
 package top.maary.darkbag.camera.delegate
 
+import android.content.Context
 import android.util.Range
+import top.maary.darkbag.R
 import top.maary.darkbag.ui.ProDialWheelView
 import java.util.Locale
 
@@ -149,6 +151,47 @@ internal object ProDialItemFactory {
                 rawValue = i.toDouble(),
                 isMajor = (i % 3 == 0 || i == 0)
             )
+        }
+    }
+
+    fun buildWbDialItems(): List<ProDialWheelView.DialItem> {
+        val items = mutableListOf<ProDialWheelView.DialItem>()
+        items.add(
+            ProDialWheelView.DialItem(
+                id = "AUTO",
+                label = "AUTO",
+                rawValue = 0.0,
+                isMajor = true
+            )
+        )
+
+        val majorKelvins = setOf(2800, 3200, 4000, 5500, 6500, 7500)
+        val kelvins = (generateSequence(2400) { it + 200 }.takeWhile { it <= 9000 }.toList() + listOf(5500, 6500, 7500))
+            .distinct()
+            .sorted()
+
+        for (k in kelvins) {
+            items.add(
+                ProDialWheelView.DialItem(
+                    id = "${k}K",
+                    label = "${k}K",
+                    rawValue = k.toDouble(),
+                    isMajor = k in majorKelvins
+                )
+            )
+        }
+        return items
+    }
+
+    fun getWbPresetName(kelvin: Int, context: Context): String? {
+        return when (kelvin) {
+            2800 -> context.getString(R.string.wb_preset_candle)
+            3200 -> context.getString(R.string.wb_preset_tungsten)
+            4000 -> context.getString(R.string.wb_preset_fluorescent)
+            5500 -> context.getString(R.string.wb_preset_daylight)
+            6500 -> context.getString(R.string.wb_preset_cloudy)
+            7500 -> context.getString(R.string.wb_preset_shade)
+            else -> null
         }
     }
 }

@@ -1,10 +1,12 @@
 package top.maary.darkbag.camera.delegate
 
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.R
 import top.maary.darkbag.repository.SettingsRepository
@@ -45,6 +47,7 @@ class CameraTierController(
         binding.pillFocus?.setOnClickListener { toggleManualTab("Focus") }
         binding.pillIso?.setOnClickListener { toggleManualTab("ISO") }
         binding.pillShutter?.setOnClickListener { toggleManualTab("Shutter") }
+        binding.pillWb?.setOnClickListener { toggleManualTab("WB") }
         binding.pillEv?.setOnClickListener { toggleManualTab("EV") }
 
         // Multi-Camera Sync Link Button
@@ -90,8 +93,28 @@ class CameraTierController(
             updateProInfoBar()
         }
 
+        // WB Preset Extras
+        binding.btnWbPresetTungsten?.setOnClickListener {
+            selectWbPreset(3200)
+        }
+        binding.btnWbPresetDaylight?.setOnClickListener {
+            selectWbPreset(5500)
+        }
+        binding.btnWbPresetCloudy?.setOnClickListener {
+            selectWbPreset(6500)
+        }
+
         updateProInfoBar()
         updateTierUi()
+    }
+
+    fun selectWbPreset(kelvin: Int) {
+        val state = env.runtimeState
+        state.isManualWb = true
+        state.manualWbTempK = kelvin
+        coordinator.applyCameraControls()
+        updateDialPanel()
+        updateProInfoBar()
     }
 
     fun updateTierUi(tier: CameraUiTier = env.cameraViewModel.uiState.value.uiTier) {
@@ -203,6 +226,18 @@ class CameraTierController(
                 state.isManualShutter = true
                 binding?.tvDialTargetValue?.text = formatShutterTime(state.currentExposureTime)
             }
+            "WB" -> {
+                if (item.rawValue == 0.0 || item.id == "AUTO") {
+                    state.isManualWb = false
+                    binding?.tvDialTargetValue?.text = "AUTO (${state.liveWbTempK}K)"
+                } else {
+                    state.isManualWb = true
+                    state.manualWbTempK = item.rawValue.toInt()
+                    val presetName = ProDialItemFactory.getWbPresetName(state.manualWbTempK, binding?.root?.context ?: env.hostContext)
+                    binding?.tvDialTargetValue?.text = if (presetName != null) "${state.manualWbTempK}K ($presetName)" else "${state.manualWbTempK}K"
+                }
+                updateWbPresetChipsStyle()
+            }
             "EV" -> {
                 state.currentEvIndex = item.rawValue.toInt()
                 binding?.tvDialTargetValue?.text = formatEvVal(state.currentEvIndex)
@@ -228,6 +263,9 @@ class CameraTierController(
                 state.isManualShutter = false
                 state.exposureMeteringRegion = null
             }
+            "WB" -> {
+                state.isManualWb = false
+            }
             "EV" -> {
                 state.currentEvIndex = 0
                 state.exposureMeteringRegion = null
@@ -243,6 +281,7 @@ class CameraTierController(
         val wheel = binding.dialWheelView ?: return
         val state = env.runtimeState
         binding.focusExtras?.visibility = if (activeManualTab == "Focus") View.VISIBLE else View.GONE
+        binding.wbExtras?.visibility = if (activeManualTab == "WB") View.VISIBLE else View.GONE
 
         when (activeManualTab) {
             "Focus" -> {
@@ -293,6 +332,33 @@ class CameraTierController(
                 wheel.setItems(items, closestIndex)
                 binding.tvDialTargetValue?.text = if (state.isManualShutter) formatShutterTime(state.currentExposureTime) else "AUTO (${formatShutterTime(state.liveExposureTime)})"
             }
+            "WB" -> {
+                binding.tvDialTargetLabel?.text = "WB"
+                val items = buildWbDialItems()
+                var closestIndex = 0
+                if (state.isManualWb) {
+                    var minDiff = Double.MAX_VALUE
+                    items.forEachIndexed { i, it ->
+                        if (it.rawValue > 0.0) {
+                            val diff = abs(it.rawValue - state.manualWbTempK.toDouble())
+                            if (diff < minDiff) {
+                                minDiff = diff
+                                closestIndex = i
+                            }
+                        }
+                    }
+                } else {
+                    closestIndex = 0
+                }
+                wheel.setItems(items, closestIndex)
+                val presetName = ProDialItemFactory.getWbPresetName(state.manualWbTempK, binding.root.context)
+                binding.tvDialTargetValue?.text = if (state.isManualWb) {
+                    if (presetName != null) "${state.manualWbTempK}K ($presetName)" else "${state.manualWbTempK}K"
+                } else {
+                    "AUTO (${state.liveWbTempK}K)"
+                }
+                updateWbPresetChipsStyle()
+            }
             "EV" -> {
                 binding.tvDialTargetLabel?.text = "EV"
                 val items = buildEvDialItems(state.evRange)
@@ -309,6 +375,39 @@ class CameraTierController(
                 binding.tvDialTargetValue?.text = formatEvVal(state.currentEvIndex)
             }
         }
+    }
+
+    fun updateWbPresetChipsStyle() {
+        val binding = ui.cameraUiContainerBinding ?: return
+        val state = env.runtimeState
+        val isTungsten = state.isManualWb && state.manualWbTempK == 3200
+        val isDaylight = state.isManualWb && state.manualWbTempK == 5500
+        val isCloudy = state.isManualWb && state.manualWbTempK == 6500
+
+        stylePresetChip(binding.btnWbPresetTungsten, isTungsten)
+        stylePresetChip(binding.btnWbPresetDaylight, isDaylight)
+        stylePresetChip(binding.btnWbPresetCloudy, isCloudy)
+    }
+
+    private fun stylePresetChip(btn: MaterialButton?, isSelected: Boolean) {
+        if (btn == null) return
+        val density = btn.resources.displayMetrics.density
+        val strokeWidth = if (isSelected) (1.5f * density).roundToInt() else 0
+        val strokeColor = if (isSelected) MaterialColors.getColor(btn, android.R.attr.colorPrimary, Color.WHITE) else Color.TRANSPARENT
+        val bgColor = if (isSelected) {
+            MaterialColors.getColor(btn, com.google.android.material.R.attr.colorPrimaryContainer, Color.DKGRAY)
+        } else {
+            MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurfaceContainerHigh, Color.GRAY)
+        }
+        val textColor = if (isSelected) {
+            MaterialColors.getColor(btn, com.google.android.material.R.attr.colorOnPrimaryContainer, Color.WHITE)
+        } else {
+            MaterialColors.getColor(btn, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.LTGRAY)
+        }
+        btn.backgroundTintList = ColorStateList.valueOf(bgColor)
+        btn.setTextColor(textColor)
+        btn.strokeWidth = strokeWidth
+        btn.strokeColor = ColorStateList.valueOf(strokeColor)
     }
 
     private var isUpdatingProInfoBar = false
@@ -355,6 +454,15 @@ class CameraTierController(
                 val isTabActive = activeManualTab == "Shutter"
                 CameraBentoDeckView.styleBentoProPill(pill, isTabActive, state.isManualShutter)
                 pill.text = CameraBentoDeckView.formatProTelemetry(shutterLabel, shutterVal, isTabActive, state.isManualShutter, pill.context)
+            }
+
+            // WB
+            val wbLabel = "WB"
+            val wbVal = if (state.isManualWb) "${state.manualWbTempK}K" else "${state.liveWbTempK}K"
+            binding.pillWb?.let { pill ->
+                val isTabActive = activeManualTab == "WB"
+                CameraBentoDeckView.styleBentoProPill(pill, isTabActive, state.isManualWb)
+                pill.text = CameraBentoDeckView.formatProTelemetry(wbLabel, wbVal, isTabActive, state.isManualWb, pill.context)
             }
 
             // EV
@@ -453,6 +561,9 @@ class CameraTierController(
 
     fun buildEvDialItems(range: android.util.Range<Int>?): List<ProDialWheelView.DialItem> =
         ProDialItemFactory.buildEvDialItems(range)
+
+    fun buildWbDialItems(): List<ProDialWheelView.DialItem> =
+        ProDialItemFactory.buildWbDialItems()
 
     fun bindTierControls(
         onVisibilityRefresh: () -> Unit,

@@ -100,7 +100,16 @@ void rcd_demosaic(const uint16_t* bayer_input,
     constexpr float eps = 1e-5f;
     constexpr float epssq = 1e-10f;
 
-    (void)white_balance;
+    float w_R = 1.0f, w_G = 1.0f, w_B = 1.0f;
+    if (white_balance) {
+        float gR = white_balance[0];
+        float gG = 0.5f * (white_balance[1] + white_balance[2]);
+        if (gG <= 1e-4f) gG = 1.0f;
+        float gB = white_balance[3];
+        w_R = std::clamp(gR / gG, 0.25f, 8.0f);
+        w_G = 1.0f;
+        w_B = std::clamp(gB / gG, 0.25f, 8.0f);
+    }
     
     #pragma omp parallel
     {
@@ -150,6 +159,8 @@ void rcd_demosaic(const uint16_t* bayer_input,
                         float val = static_cast<float>(bayer_input[row * width + col]);
                         float denom = std::max(1.0f, static_cast<float>(white_level) - bl);
                         val = LIM01((val - bl) / denom);
+                        float w_c = (c_color == 0) ? w_R : ((c_color == 1) ? w_G : w_B);
+                        val *= w_c; // Internal temporary pre-multiplication in [0, w_c]
                         
                         cfa[indx] = val;
                         rgb0[indx] = val;
@@ -318,9 +329,9 @@ void rcd_demosaic(const uint16_t* bayer_input,
                     for (int col = firstHorizontal; col < lastHorizontal; ++col) {
                         int idx = (row - rowStart) * tileSize + col - colStart;
                         size_t out_idx = static_cast<size_t>(row) * width + col;
-                        rgb_output[out_idx] = static_cast<uint16_t>(std::clamp(rgb0[idx] * 65535.0f, 0.0f, 65535.0f));
-                        rgb_output[out_idx + plane_stride] = static_cast<uint16_t>(std::clamp(rgb1[idx] * 65535.0f, 0.0f, 65535.0f));
-                        rgb_output[out_idx + 2 * plane_stride] = static_cast<uint16_t>(std::clamp(rgb2[idx] * 65535.0f, 0.0f, 65535.0f));
+                        rgb_output[out_idx] = static_cast<uint16_t>(std::clamp((rgb0[idx] / w_R) * 65535.0f, 0.0f, 65535.0f));
+                        rgb_output[out_idx + plane_stride] = static_cast<uint16_t>(std::clamp((rgb1[idx] / w_G) * 65535.0f, 0.0f, 65535.0f));
+                        rgb_output[out_idx + 2 * plane_stride] = static_cast<uint16_t>(std::clamp((rgb2[idx] / w_B) * 65535.0f, 0.0f, 65535.0f));
                     }
                 }
             }

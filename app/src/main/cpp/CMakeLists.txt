@@ -242,6 +242,7 @@ file(GLOB_RECURSE LIBRAW_SOURCES
 list(FILTER LIBRAW_SOURCES EXCLUDE REGEX ".*_ph\\.cpp$")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+include_directories(color)
 include_directories(rawvideo)
 include_directories(rawvideo/lz4)
 include_directories(gpu)
@@ -253,6 +254,7 @@ add_library(
         HdrPlusJNI.cpp
         HdrPlusStreamingSession.cpp
         ColorPipe.cpp
+        color/WhiteBalanceEngine.cpp
         demosaic/RcdDemosaic.cpp
         sabre/SabreEngine.cpp
         sabre/TileAligner.cpp

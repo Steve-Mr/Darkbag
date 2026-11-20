@@ -41,10 +41,12 @@ class CameraRuntimeStateHolder {
     @Volatile var isManualFocus: Boolean = false
     @Volatile var isManualIso: Boolean = false
     @Volatile var isManualShutter: Boolean = false
+    @Volatile var isManualWb: Boolean = false
+    @Volatile var manualWbTempK: Int = 5500
     val isManualExposure: Boolean
         get() = isManualIso || isManualShutter
     val hasAnyManualOverride: Boolean
-        get() = isManualFocus || isManualIso || isManualShutter || currentEvIndex != 0
+        get() = isManualFocus || isManualIso || isManualShutter || isManualWb || currentEvIndex != 0
 
     @Volatile var currentFocusDistance: Float = 0.0f
     @Volatile var currentIso: Int = 100
@@ -62,6 +64,12 @@ class CameraRuntimeStateHolder {
     @Volatile var liveIso: Int = 100
     @Volatile var liveExposureTime: Long = 10_000_000L
     @Volatile var liveFocusDistance: Float = 0.0f
+    @Volatile var liveWbTempK: Int = 5500
+    @Volatile var liveWbTint: Float = 0f
+    @Volatile var colorMatrix1: FloatArray? = null
+    @Volatile var colorMatrix2: FloatArray? = null
+    @Volatile var calibrationIlluminant1: Int = 21
+    @Volatile var calibrationIlluminant2: Int = 17
     @Volatile var lastTelemetryUpdateMs: Long = 0L
     @Volatile var lastClippingRatio: Double = 0.0
     val captureResults: MutableMap<Long, TotalCaptureResult> =

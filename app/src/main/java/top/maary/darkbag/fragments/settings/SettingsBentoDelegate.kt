@@ -105,6 +105,20 @@ class SettingsBentoDelegate(
             context = context
         )
 
+        // 4b. White Balance Strategy
+        val wbDisplay = if (state.wbStrategy == PreferenceKeys.WB_STRATEGY_NEUTRAL) {
+            context.getString(R.string.pref_wb_strategy_neutral)
+        } else {
+            context.getString(R.string.pref_wb_strategy_ambience)
+        }
+        binding.btnMenuWbStrategy.text = CameraBentoDeckView.formatProTelemetry(
+            label = context.getString(R.string.pref_wb_strategy_label),
+            value = wbDisplay,
+            isTabActive = false,
+            isValueManual = state.wbStrategy != PreferenceKeys.WB_STRATEGY_AMBIENCE,
+            context = context
+        )
+
         // 5. HDR+ Fusion Mode
         val fusionDisplay = when (state.hdrFusionMode) {
             PreferenceKeys.HDR_FUSION_SABRE -> context.getString(R.string.pref_fusion_sabre)

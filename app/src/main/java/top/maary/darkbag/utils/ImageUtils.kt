@@ -306,7 +306,9 @@ object ImageUtils {
             val bmpH = kotlin.math.max(1, (fullH / zoomFactor).toInt())
             val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
 
-            val engineMode = top.maary.darkbag.repository.SettingsRepository.getInstance(context).current().colorEngineMode
+            val currentPrefs = top.maary.darkbag.repository.SettingsRepository.getInstance(context).current()
+            val engineMode = currentPrefs.colorEngineMode
+            val wbParams = floatArrayOf(currentPrefs.wbStrategy.toFloat(), 0f, 0f, 5500f)
 
             coroutineContext.ensureActive()
             val result = ColorProcessor.processRaw(
@@ -322,7 +324,8 @@ object ImageUtils {
                 downsampleFactor = downsample,
                 zoomFactor = zoomFactor,
                 enableMemoryColor = false,
-                colorEngineMode = engineMode
+                colorEngineMode = engineMode,
+                wbParams = wbParams
             )
 
             if (result < 0) {

@@ -260,6 +260,7 @@ class SettingsFragment : Fragment() {
         binding.btnMenuHdrBurstMode.setOnClickListener { sheetDispatcher.showHdrBurstSheet() }
         binding.btnMenuUnderexposureMode.setOnClickListener { sheetDispatcher.showUnderexposureSheet() }
         binding.btnMenuColorEngine.setOnClickListener { sheetDispatcher.showColorEngineSheet() }
+        binding.btnMenuWbStrategy.setOnClickListener { sheetDispatcher.showWbStrategySheet() }
         binding.btnMenuAntibanding.setOnClickListener { sheetDispatcher.showAntibandingSheet() }
         binding.btnMenuBurstProcessingStrategy.setOnClickListener { sheetDispatcher.showBurstStrategySheet() }
         binding.btnMenuShutterLongPress.setOnClickListener {

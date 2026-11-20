@@ -19,5 +19,9 @@ data class RenderRecipe(
     val colorEngineMode: Int = 2,
     val faithfulHighlights: Boolean = false,
     val enableMemoryColor: Boolean = false,
+    val wbMode: Int = 1,
+    val wbTempOffset: Float = 0f,
+    val wbTintOffset: Float = 0f,
+    val wbManualTempK: Float = 5500f,
     val editConfig: EditConfig? = null
 )

@@ -74,7 +74,65 @@ class LutGlShaderPipelineTest {
         assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("uniform sampler3D uLut;"))
         assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("uniform int uFocusPeakingEnabled;"))
         assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("uniform int uColorEngineMode;"))
+        assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("uniform mat3 uWbPreviewMatrix;"))
         assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("applyLogCurve"))
         assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("triangularDither"))
+    }
+
+    @Test
+    fun computeWbPreviewMatrix_identityWhenNoOffset() {
+        val matrix = LutGlShaderPipeline.computeWbPreviewMatrix(5500f, 0f, 5500f, 0f)
+        assertEquals(9, matrix.size)
+        val identity = floatArrayOf(
+            1f, 0f, 0f,
+            0f, 1f, 0f,
+            0f, 0f, 1f
+        )
+        assertArrayEquals(identity, matrix, 1e-4f)
+    }
+
+    @Test
+    fun computeWbPreviewMatrix_warmOffsetYieldsRedDominanceAndLumaConservation() {
+        // Target 3000K (warm) under live 5500K
+        val matrixColMajor = LutGlShaderPipeline.computeWbPreviewMatrix(
+            liveTempK = 5500f,
+            liveTint = 0f,
+            targetTempK = 3000f,
+            targetTint = 0f
+        )
+        // Transform neutral gray [1, 1, 1]^T by column-major 3x3 matrix:
+        // R = m[0] + m[3] + m[6]
+        // G = m[1] + m[4] + m[7]
+        // B = m[2] + m[5] + m[8]
+        val r = matrixColMajor[0] + matrixColMajor[3] + matrixColMajor[6]
+        val g = matrixColMajor[1] + matrixColMajor[4] + matrixColMajor[7]
+        val b = matrixColMajor[2] + matrixColMajor[5] + matrixColMajor[8]
+
+        assertTrue("Warm WB target must yield R > G, got R=$r, G=$g", r > g)
+        assertTrue("Warm WB target must yield G > B, got G=$g, B=$b", g > b)
+
+        // Check luminance conservation: Y = 0.2126 * R + 0.7152 * G + 0.0722 * B ~ 1.0 (+/- 0.03)
+        val luma = 0.2126f * r + 0.7152f * g + 0.0722f * b
+        assertEquals(1.0f, luma, 0.03f)
+    }
+
+    @Test
+    fun computeWbPreviewMatrix_coolOffsetYieldsBlueDominanceAndLumaConservation() {
+        // Target 7500K (cool) under live 5500K
+        val matrixColMajor = LutGlShaderPipeline.computeWbPreviewMatrix(
+            liveTempK = 5500f,
+            liveTint = 0f,
+            targetTempK = 7500f,
+            targetTint = 0f
+        )
+        val r = matrixColMajor[0] + matrixColMajor[3] + matrixColMajor[6]
+        val g = matrixColMajor[1] + matrixColMajor[4] + matrixColMajor[7]
+        val b = matrixColMajor[2] + matrixColMajor[5] + matrixColMajor[8]
+
+        assertTrue("Cool WB target must yield B > G, got B=$b, G=$g", b > g)
+        assertTrue("Cool WB target must yield G > R, got G=$g, R=$r", g > r)
+
+        val luma = 0.2126f * r + 0.7152f * g + 0.0722f * b
+        assertEquals(1.0f, luma, 0.03f)
     }
 }

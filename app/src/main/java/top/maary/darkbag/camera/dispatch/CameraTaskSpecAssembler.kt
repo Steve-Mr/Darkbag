@@ -64,7 +64,9 @@ data class TaskSpecAssemblyRequest(
     val motionPhotoMp4Path: String? = null,
     val motionPhotoStillPtsUs: Long = 0L,
     val sink: CaptureSink? = null,
-    val saveRawOverride: Boolean? = null
+    val saveRawOverride: Boolean? = null,
+    val wbModeOverride: Int? = null,
+    val wbManualTempKOverride: Float? = null
 )
 
 /**
@@ -186,13 +188,17 @@ class CameraTaskSpecAssembler(
         digitalGain: Float,
         hfMetadata: HalfFrameManager.Metadata?,
         zoomFactor: Float,
-        faithfulHighlights: Boolean
+        faithfulHighlights: Boolean,
+        wbModeOverride: Int? = null,
+        wbManualTempKOverride: Float? = null
     ): Pair<EditConfig, RenderRecipe> {
         val targetLogName = prefs.targetLog
         val targetLogIndex = PreferenceKeys.LOG_CURVES.indexOf(targetLogName)
         val activeLutName = prefs.activeLut.takeIf { it != "None" }
         val nativeLutPath = resolveNativeLutPath(context, activeLutName)
         val colorEngineMode = prefs.colorEngineMode
+        val effectiveWbMode = wbModeOverride ?: prefs.wbStrategy
+        val effectiveManualTempK = wbManualTempKOverride ?: 5500f
 
         val editConfig = EditConfig(
             log = targetLogName,
@@ -200,8 +206,8 @@ class CameraTaskSpecAssembler(
             digitalGain = digitalGain,
             adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
                 listOf(
-                    BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
-                    BasicAdjustments(digitalGain = digitalGain)
+                    BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain, wbMode = effectiveWbMode, wbManualTempK = effectiveManualTempK),
+                    BasicAdjustments(digitalGain = digitalGain, wbMode = effectiveWbMode, wbManualTempK = effectiveManualTempK)
                 )
             } else null,
             hfLayout = when (hfMetadata?.profile) {
@@ -212,7 +218,9 @@ class CameraTaskSpecAssembler(
             showTimestamp = hfMetadata?.dateStamp ?: false,
             flareType = hfMetadata?.flareType ?: -1,
             zoomFactor = zoomFactor,
-            colorEngineMode = colorEngineMode
+            colorEngineMode = colorEngineMode,
+            wbMode = effectiveWbMode,
+            wbManualTempK = effectiveManualTempK
         )
 
         val renderRecipe = RenderRecipe(
@@ -229,6 +237,8 @@ class CameraTaskSpecAssembler(
             colorEngineMode = colorEngineMode,
             faithfulHighlights = faithfulHighlights,
             enableMemoryColor = false,
+            wbMode = effectiveWbMode,
+            wbManualTempK = effectiveManualTempK,
             editConfig = editConfig
         )
         return Pair(editConfig, renderRecipe)
@@ -253,7 +263,9 @@ class CameraTaskSpecAssembler(
             digitalGain = request.digitalGain,
             hfMetadata = request.hfMetadata,
             zoomFactor = request.zoomFactor,
-            faithfulHighlights = request.faithfulHighlights
+            faithfulHighlights = request.faithfulHighlights,
+            wbModeOverride = request.wbModeOverride,
+            wbManualTempKOverride = request.wbManualTempKOverride
         )
 
         return CaptureTaskSpec(

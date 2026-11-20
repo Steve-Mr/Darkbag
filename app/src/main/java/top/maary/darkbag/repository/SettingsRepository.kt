@@ -4,9 +4,12 @@ import android.content.Context
 import androidx.annotation.VisibleForTesting
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import java.util.Collections
 import java.util.WeakHashMap
 
@@ -20,6 +23,7 @@ class SettingsRepository(context: Context) {
 
     private val _preferences = MutableStateFlow(decodePreferences(store.current()))
     val preferences: StateFlow<DarkbagPreferences> = _preferences.asStateFlow()
+    val wbStrategy: Flow<Int> = preferences.map { it.wbStrategy }.distinctUntilChanged()
 
     private val storeListener: (Preferences) -> Unit = { prefs ->
         _preferences.value = decodePreferences(prefs)
@@ -181,6 +185,7 @@ class SettingsRepository(context: Context) {
             expMultiCamColorHarmonization = bool(PreferenceKeys.KEY_EXP_MULTICAM_COLOR_HARMONIZATION, true),
             focusPeakingActive = bool(PreferenceKeys.KEY_FOCUS_PEAKING_ACTIVE, true),
             colorEngineMode = int(PreferenceKeys.KEY_COLOR_ENGINE_MODE, 2),
+            wbStrategy = int(PreferenceKeys.KEY_WB_STRATEGY, PreferenceKeys.WB_STRATEGY_AMBIENCE),
             shutterLongPressAction = str(
                 PreferenceKeys.KEY_SHUTTER_LONG_PRESS_ACTION,
                 PreferenceKeys.SHUTTER_LONG_PRESS_MP4
@@ -276,6 +281,10 @@ class SettingsRepository(context: Context) {
 
     fun setColorEngineMode(mode: Int) {
         edit { this[PreferenceKeys.COLOR_ENGINE_MODE] = mode }
+    }
+
+    fun setWbStrategy(strategy: Int) {
+        edit { this[PreferenceKeys.WB_STRATEGY] = strategy }
     }
 
     fun setFlashMode(flashMode: String) {
