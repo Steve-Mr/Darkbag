@@ -1,16 +1,14 @@
 package top.maary.darkbag.ui.viewer.playback
 
 import android.content.Context
-import android.graphics.Matrix
-import android.graphics.RectF
 import android.net.Uri
-import android.view.View
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.CoroutineScope
 import top.maary.darkbag.R
 import top.maary.darkbag.fragments.ImageViewerAdapter
 import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.models.ImageGroup
+import top.maary.darkbag.ui.ImageDisplayGeometry
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
@@ -24,7 +22,6 @@ class ViewerPagePlaybackController(
     private val getRecyclerView: () -> RecyclerView?,
     private val getGroupAt: (Int) -> ImageGroup?,
     private val getBackingList: () -> List<ImageGroup>,
-    private val radius: Float,
     private val loadCinemaDngFrame: (ImageViewerAdapter.ViewHolder, ImageGroup, Uri, Int) -> Unit,
     private val onCinemaDngFrameSelected: ((group: ImageGroup, index: Int, uri: Uri?) -> Unit)?,
     var onVideoPlaybackStateChanged: ((position: Int, isPlaying: Boolean, currentMs: Long, totalMs: Long) -> Unit)? = null
@@ -35,7 +32,7 @@ class ViewerPagePlaybackController(
     val motionPhotoDelegate = MotionPhotoPlaybackDelegate(
         context = context,
         scope = scope,
-        updateBounds = { holder, rect -> updateVideoViewBounds(holder, rect) },
+        updateBounds = { holder -> updateVideoViewBounds(holder) },
         onPlaybackEnded = { holder -> stopVideoProgressTracking(holder) }
     )
 
@@ -43,7 +40,7 @@ class ViewerPagePlaybackController(
         context = context,
         videoDurationCache = videoDurationCache,
         formatVideoTime = ::formatVideoTime,
-        updateBounds = { holder, rect -> updateVideoViewBounds(holder, rect) },
+        updateBounds = { holder -> updateVideoViewBounds(holder) },
         onPlaybackStateChanged = { holder, isPlaying, curMs, totalMs ->
             val pos = holder.bindingAdapterPosition
             if (pos != RecyclerView.NO_POSITION) {
@@ -55,7 +52,7 @@ class ViewerPagePlaybackController(
     val mp4VideoDelegate = Mp4VideoPlaybackDelegate(
         context = context,
         videoDurationCache = videoDurationCache,
-        updateBounds = { holder, rect -> updateVideoViewBounds(holder, rect) },
+        updateBounds = { holder -> updateVideoViewBounds(holder) },
         onPlaybackEnded = { holder -> stopVideoProgressTracking(holder) }
     )
 
@@ -74,7 +71,16 @@ class ViewerPagePlaybackController(
         return String.format(Locale.US, "%02d:%02d", minutes, seconds)
     }
 
-    fun updateVideoViewBounds(holder: ImageViewerAdapter.ViewHolder, rect: RectF) {
+    fun updateVideoViewBounds(holder: ImageViewerAdapter.ViewHolder) {
+        val geometry = holder.binding.imageView.currentDisplayGeometry() ?: return
+        updateVideoViewBounds(holder, geometry)
+    }
+
+    /**
+     * 将 TextureView 的完整视频帧映射到图像未经视口裁切的 [ImageDisplayGeometry.contentRect]。
+     * 必须使用未裁切的 contentRect，否则单轴先触达视口边界时会产生非等比拉伸。
+     */
+    fun updateVideoViewBounds(holder: ImageViewerAdapter.ViewHolder, geometry: ImageDisplayGeometry) {
         val videoView = holder.binding.videoView
         val viewWidth = videoView.width.toFloat().takeIf { it > 0 }
             ?: holder.binding.imageView.measuredWidth.toFloat().takeIf { it > 0 }
@@ -83,22 +89,19 @@ class ViewerPagePlaybackController(
             ?: holder.binding.imageView.measuredHeight.toFloat().takeIf { it > 0 }
             ?: return
 
-        if (rect.width() <= 0 || rect.height() <= 0) return
+        val contentRect = geometry.contentRect
+        if (contentRect.width() <= 0f || contentRect.height() <= 0f) return
 
-        val matrix = Matrix()
-        val scaleX = rect.width() / viewWidth
-        val scaleY = rect.height() / viewHeight
-        matrix.setScale(scaleX, scaleY)
-        matrix.postTranslate(rect.left, rect.top)
-        videoView.setTransform(matrix)
+        videoView.setTransform(VideoSurfaceTransform.compute(contentRect, viewWidth, viewHeight))
 
+        val outlineRect = geometry.outlineRect
         holder.videoOutlineRect.set(
-            rect.left.toInt(),
-            rect.top.toInt(),
-            rect.right.toInt(),
-            rect.bottom.toInt()
+            outlineRect.left.toInt(),
+            outlineRect.top.toInt(),
+            outlineRect.right.toInt(),
+            outlineRect.bottom.toInt()
         )
-        holder.videoOutlineRadius = radius
+        holder.videoOutlineRadius = geometry.outlineRadius
         videoView.invalidateOutline()
     }
 

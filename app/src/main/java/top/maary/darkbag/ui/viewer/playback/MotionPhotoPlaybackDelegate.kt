@@ -1,7 +1,6 @@
 package top.maary.darkbag.ui.viewer.playback
 
 import android.content.Context
-import android.graphics.RectF
 import android.net.Uri
 import android.view.View
 import androidx.media3.common.MediaItem
@@ -26,7 +25,7 @@ import top.maary.darkbag.motionphoto.MotionPhotoReader
 class MotionPhotoPlaybackDelegate(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val updateBounds: (ImageViewerAdapter.ViewHolder, RectF) -> Unit,
+    private val updateBounds: (ImageViewerAdapter.ViewHolder) -> Unit,
     private val onPlaybackEnded: (ImageViewerAdapter.ViewHolder) -> Unit
 ) {
 
@@ -44,16 +43,8 @@ class MotionPhotoPlaybackDelegate(
         holder.extractJob?.cancel()
         holder.playCompletionCallback = onComplete
 
-        // Align videoView bounds immediately to match current imageView rect
-        val iv = holder.binding.imageView
-        val d = iv.drawable
-        if (d != null && iv.width > 0 && iv.height > 0) {
-            val rect = RectF(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
-            iv.imageMatrix.mapRect(rect)
-            rect.intersect(0f, 0f, iv.width.toFloat(), iv.height.toFloat())
-            holder.lastDisplayRect = RectF(rect)
-            updateBounds(holder, rect)
-        }
+        // Align videoView bounds immediately to match the current image geometry
+        updateBounds(holder)
 
         // Make TextureView part of layout hierarchy with alpha 0 so its SurfaceTexture is allocated immediately
         holder.binding.videoView.alpha = 0f

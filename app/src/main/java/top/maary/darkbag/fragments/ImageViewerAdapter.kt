@@ -1,7 +1,6 @@
 package top.maary.darkbag.fragments
 
 import android.graphics.Bitmap
-import android.graphics.RectF
 import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
@@ -64,7 +63,6 @@ class ImageViewerAdapter(
         getRecyclerView = { recyclerView },
         getGroupAt = { pos -> backingList.getOrNull(pos) },
         getBackingList = { backingList },
-        radius = radius,
         loadCinemaDngFrame = { h, g, u, idx -> loadCinemaDngFrame(h, g, u, idx) },
         onCinemaDngFrameSelected = { g, idx, u -> onCinemaDngFrameSelected?.invoke(g, idx, u) },
         onVideoPlaybackStateChanged = { pos, isPlaying, cur, total -> onVideoPlaybackStateChanged?.invoke(pos, isPlaying, cur, total) }
@@ -112,7 +110,6 @@ class ImageViewerAdapter(
         var activeCinemaDngFrameIndex: Int = 0
         var activeCinemaDngFrameUri: Uri? = null
         var filmstripFadeRunnable: Runnable? = null
-        var lastDisplayRect: RectF? = null
         var videoProgressRunnable: Runnable? = null
         var cinemaDngPlaybackJob: Job? = null
 
@@ -145,7 +142,7 @@ class ImageViewerAdapter(
         val binding = ItemImageGroupBinding.inflate(LayoutInflater.from(parent.context), parent, false)
         val holder = ViewHolder(binding)
         holder.binding.videoView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            holder.lastDisplayRect?.let { rect -> playbackController.updateVideoViewBounds(holder, rect) }
+            playbackController.updateVideoViewBounds(holder)
         }
         return holder
     }
@@ -204,17 +201,17 @@ class ImageViewerAdapter(
             stopMotionVideo(holder)
         }
 
-        holder.binding.imageView.onMatrixChanged = { rect ->
-            holder.lastDisplayRect = RectF(rect)
+        holder.binding.imageView.onDisplayGeometryChanged = { geometry ->
             val w = holder.binding.imageView.measuredWidth.takeIf { it > 0 } ?: holder.binding.imageView.width
             val h = holder.binding.imageView.measuredHeight.takeIf { it > 0 } ?: holder.binding.imageView.height
             if (w > 0 && h > 0) {
-                val rMargin = (w - rect.right).coerceAtLeast(0f)
-                val bMargin = (h - rect.bottom).coerceAtLeast(0f)
+                val visibleRect = geometry.visibleRect
+                val rMargin = (w - visibleRect.right).coerceAtLeast(0f)
+                val bMargin = (h - visibleRect.bottom).coerceAtLeast(0f)
                 holder.binding.cameraOverlaysVerticalGroup.translationY = -bMargin
                 holder.binding.videoDurationGroup.translationX = -rMargin
                 holder.binding.videoDurationGroup.translationY = -bMargin
-                playbackController.updateVideoViewBounds(holder, rect)
+                playbackController.updateVideoViewBounds(holder, geometry)
             }
         }
 
@@ -421,8 +418,6 @@ class ImageViewerAdapter(
         val uri = holder?.activeCinemaDngFrameUri ?: group.cinemaDngFrameUris.getOrNull(index) ?: group.cinemaDngFirstFrameUri
         return Pair(index, uri)
     }
-
-    fun updateVideoViewBounds(holder: ViewHolder, rect: RectF) = playbackController.updateVideoViewBounds(holder, rect)
 
     fun getCurrentUri(position: Int): Uri? {
         val group = backingList.getOrNull(position) ?: return null

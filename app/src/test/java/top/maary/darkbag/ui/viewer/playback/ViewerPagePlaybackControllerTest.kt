@@ -37,7 +37,6 @@ class ViewerPagePlaybackControllerTest {
             getRecyclerView = { null },
             getGroupAt = { testGroups.getOrNull(it) },
             getBackingList = { testGroups },
-            radius = 16f,
             loadCinemaDngFrame = { _, _, _, _ -> },
             onCinemaDngFrameSelected = null
         )
@@ -63,7 +62,6 @@ class ViewerPagePlaybackControllerTest {
             getRecyclerView = { null },
             getGroupAt = { testGroups.getOrNull(it) },
             getBackingList = { testGroups },
-            radius = 16f,
             loadCinemaDngFrame = { _, _, _, _ -> },
             onCinemaDngFrameSelected = null
         )
@@ -86,7 +84,6 @@ class ViewerPagePlaybackControllerTest {
             getRecyclerView = { null },
             getGroupAt = { testGroups.getOrNull(it) },
             getBackingList = { testGroups },
-            radius = 16f,
             loadCinemaDngFrame = { _, _, _, _ -> },
             onCinemaDngFrameSelected = null
         )
@@ -109,7 +106,6 @@ class ViewerPagePlaybackControllerTest {
             getRecyclerView = { null },
             getGroupAt = { testGroups.getOrNull(it) },
             getBackingList = { testGroups },
-            radius = 16f,
             loadCinemaDngFrame = { _, _, _, _ -> },
             onCinemaDngFrameSelected = null
         )
@@ -126,7 +122,6 @@ class ViewerPagePlaybackControllerTest {
             getRecyclerView = { null },
             getGroupAt = { null },
             getBackingList = { emptyList() },
-            radius = 16f,
             loadCinemaDngFrame = { _, _, _, _ -> },
             onCinemaDngFrameSelected = null
         )
