@@ -228,4 +228,92 @@ class WhiteBalanceEngineTest {
         assertTrue("Sub gain R must be in [0.5, 5.0]", subWb[0] in 0.5f..5.0f)
         assertTrue("Sub gain B must be in [0.5, 5.0]", subWb[3] in 0.5f..5.0f)
     }
+
+    @Test
+    fun testAmbienceWarmthRetentionCurve() {
+        fun calcDeltaM(tempK: Float): Float {
+            val ms = 1e6f / tempK.coerceIn(1667.0f, 50000.0f)
+            if (ms <= 200.0f) return 0f
+            val tStep = ((ms - 200.0f) / (230.0f - 200.0f)).coerceIn(0.0f, 1.0f)
+            val w = tStep * tStep * (3.0f - 2.0f * tStep)
+            val d = ms - 200.0f
+            return 48.0f * kotlin.math.tanh(0.22f * d * w / 48.0f)
+        }
+
+        // T >= 5000K: retain 0 Mired
+        assertEquals("6500K retain must be 0", 0f, calcDeltaM(6500f), 1e-5f)
+        assertEquals("5500K retain must be 0", 0f, calcDeltaM(5500f), 1e-5f)
+        assertEquals("5000K retain must be 0", 0f, calcDeltaM(5000f), 1e-5f)
+
+        // T = 3000K: retain 26 +/- 2 Mired
+        val deltaM3000 = calcDeltaM(3000f)
+        assertTrue("3000K retain ($deltaM3000) must be in [24, 28] Mired", deltaM3000 in 24f..28f)
+
+        // T = 2000K: <= 48 Mired
+        val deltaM2000 = calcDeltaM(2000f)
+        assertTrue("2000K retain ($deltaM2000) must be <= 48 Mired", deltaM2000 <= 48.0f)
+        assertTrue("2000K retain ($deltaM2000) must be > 40 Mired", deltaM2000 > 40.0f)
+    }
+
+    @Test
+    fun testPlanckianTintSoftClamp() {
+        fun calcTintBase(tint: Float): Float {
+            val absTint = abs(tint)
+            if (absTint <= 18.0f) return tint
+            val sgn = if (tint >= 0f) 1f else -1f
+            return sgn * (18.0f + 18.0f * kotlin.math.tanh((absTint - 18.0f) / 18.0f))
+        }
+
+        // |Tint| <= 18 unchanged
+        assertEquals(0f, calcTintBase(0f), 1e-5f)
+        assertEquals(10f, calcTintBase(10f), 1e-5f)
+        assertEquals(-15f, calcTintBase(-15f), 1e-5f)
+        assertEquals(18f, calcTintBase(18f), 1e-5f)
+        assertEquals(-18f, calcTintBase(-18f), 1e-5f)
+
+        // Tint = -50 converges to -35 +/- 1
+        val tintMinus50 = calcTintBase(-50f)
+        assertTrue("Tint=-50 clamped ($tintMinus50) must be in [-36, -34]", tintMinus50 in -36f..-34f)
+
+        // Extremes strictly in [-36, +36]
+        val extremePositive = calcTintBase(200f)
+        assertTrue("Extreme positive ($extremePositive) must be <= 36.0", extremePositive <= 36.0f)
+        val extremeNegative = calcTintBase(-200f)
+        assertTrue("Extreme negative ($extremeNegative) must be >= -36.0", extremeNegative >= -36.0f)
+    }
+
+    @Test
+    fun testLuminanceConservation_Cat16AmbienceShift() {
+        // Under 3000K tungsten with Ambience mode enabled
+        val neutralA = floatArrayOf(1.2288657f, 1.0f, 0.2626146f)
+        val renderCcm = SensorCalibrationHelper.computeRenderCcm(
+            forwardMatrix1 = sampleFm1,
+            forwardMatrix2 = sampleFm2,
+            calibrationIlluminant1 = 21,
+            calibrationIlluminant2 = 17,
+            neutralColorPoint = neutralA,
+            colorMatrix1 = sampleCm1,
+            colorMatrix2 = sampleCm2,
+            wbMode = 1 // AMBIENCE
+        )
+        assertNotNull(renderCcm)
+
+        // Synthesize shift matrix luminance conservation check
+        val (xTarget, yTarget) = SensorCalibrationHelper.tempTintToXy(3256f, 0f)
+        val wTarget = SensorCalibrationHelper.xyToXyz(xTarget, yTarget)
+        val (xScene, yScene) = SensorCalibrationHelper.tempTintToXy(3000f, 0f)
+        val wScene = SensorCalibrationHelper.xyToXyz(xScene, yScene)
+
+        val mShift = SensorCalibrationHelper.cat16AdaptMatrix(wTarget, wScene)
+        val yOut = mShift[3] * SensorCalibrationHelper.W_D50[0] +
+            mShift[4] * SensorCalibrationHelper.W_D50[1] +
+            mShift[5] * SensorCalibrationHelper.W_D50[2]
+        val lumaScale = 1.0f / maxOf(0.2f, yOut)
+        val mShiftNorm = FloatArray(9) { i -> mShift[i] * lumaScale }
+
+        val yNorm = mShiftNorm[3] * SensorCalibrationHelper.W_D50[0] +
+            mShiftNorm[4] * SensorCalibrationHelper.W_D50[1] +
+            mShiftNorm[5] * SensorCalibrationHelper.W_D50[2]
+        assertTrue("Normalized D50 luminance ($yNorm) must be in [0.99, 1.01]", yNorm in 0.99f..1.01f)
+    }
 }

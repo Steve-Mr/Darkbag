@@ -118,6 +118,10 @@ internal object CinemaDngFrameExporter {
                 }
 
                 val tempJpg = File(context.cacheDir, "temp_graded_${fullBaseName}_${System.currentTimeMillis()}.jpg")
+                val wbParams = editConfig?.let {
+                    floatArrayOf(it.wbMode.toFloat(), it.wbTempOffset, it.wbTintOffset, it.wbManualTempK)
+                }
+
                 val ret = ColorProcessor.processRaw(
                     dngData = dngBytes,
                     targetLog = targetLogIndex,
@@ -138,7 +142,8 @@ internal object CinemaDngFrameExporter {
                     outputBitmap = null,
                     downsampleFactor = 1,
                     zoomFactor = editConfig?.zoomFactor ?: 1.0f,
-                    metadata = captureMetadata
+                    metadata = captureMetadata,
+                    wbParams = wbParams
                 )
 
                 if (ret >= 0 && tempJpg.exists() && tempJpg.length() > 0) {

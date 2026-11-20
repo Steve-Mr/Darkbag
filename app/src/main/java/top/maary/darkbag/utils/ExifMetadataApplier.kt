@@ -114,6 +114,10 @@ internal object ExifMetadataApplier {
                             put("whites", adj.whites.toDouble())
                             put("blacks", adj.blacks.toDouble())
                             put("digital_gain", adj.digitalGain.toDouble())
+                            put("wb_mode", adj.wbMode)
+                            put("wb_temp_offset", adj.wbTempOffset.toDouble())
+                            put("wb_tint_offset", adj.wbTintOffset.toDouble())
+                            put("wb_manual_temp_k", adj.wbManualTempK.toDouble())
                         })
                     }
                     put("adjustments", array)
@@ -124,6 +128,10 @@ internal object ExifMetadataApplier {
                 put("is_swapped", cfg.isSwapped)
                 put("zoom_factor", cfg.zoomFactor.toDouble())
                 put("color_engine_mode", cfg.colorEngineMode)
+                put("wb_mode", cfg.wbMode)
+                put("wb_temp_offset", cfg.wbTempOffset.toDouble())
+                put("wb_tint_offset", cfg.wbTintOffset.toDouble())
+                put("wb_manual_temp_k", cfg.wbManualTempK.toDouble())
             }
         }
     }

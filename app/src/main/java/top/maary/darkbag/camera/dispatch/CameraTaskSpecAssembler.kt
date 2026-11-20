@@ -193,6 +193,7 @@ class CameraTaskSpecAssembler(
         val activeLutName = prefs.activeLut.takeIf { it != "None" }
         val nativeLutPath = resolveNativeLutPath(context, activeLutName)
         val colorEngineMode = prefs.colorEngineMode
+        val wbStrategy = prefs.wbStrategy
 
         val editConfig = EditConfig(
             log = targetLogName,
@@ -200,8 +201,8 @@ class CameraTaskSpecAssembler(
             digitalGain = digitalGain,
             adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
                 listOf(
-                    BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
-                    BasicAdjustments(digitalGain = digitalGain)
+                    BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain, wbMode = wbStrategy),
+                    BasicAdjustments(digitalGain = digitalGain, wbMode = wbStrategy)
                 )
             } else null,
             hfLayout = when (hfMetadata?.profile) {
@@ -212,7 +213,8 @@ class CameraTaskSpecAssembler(
             showTimestamp = hfMetadata?.dateStamp ?: false,
             flareType = hfMetadata?.flareType ?: -1,
             zoomFactor = zoomFactor,
-            colorEngineMode = colorEngineMode
+            colorEngineMode = colorEngineMode,
+            wbMode = wbStrategy
         )
 
         val renderRecipe = RenderRecipe(
@@ -229,6 +231,7 @@ class CameraTaskSpecAssembler(
             colorEngineMode = colorEngineMode,
             faithfulHighlights = faithfulHighlights,
             enableMemoryColor = false,
+            wbMode = wbStrategy,
             editConfig = editConfig
         )
         return Pair(editConfig, renderRecipe)

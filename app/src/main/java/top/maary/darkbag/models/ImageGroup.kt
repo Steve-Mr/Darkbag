@@ -180,7 +180,11 @@ data class EditConfig(
     val hfLayout: String? = null, // "SBS" or "TB"
     val isSwapped: Boolean = false,
     val zoomFactor: Float = 1.0f,
-    val colorEngineMode: Int = 0
+    val colorEngineMode: Int = 0,
+    val wbMode: Int = 0,
+    val wbTempOffset: Float = 0f,
+    val wbTintOffset: Float = 0f,
+    val wbManualTempK: Float = 5500f
 ) : Parcelable
 
 @Parcelize
@@ -192,7 +196,11 @@ data class BasicAdjustments(
     val shadows: Float = 0f,
     val whites: Float = 0f,
     val blacks: Float = 0f,
-    val digitalGain: Float = 1.0f
+    val digitalGain: Float = 1.0f,
+    val wbMode: Int = 0,
+    val wbTempOffset: Float = 0f,
+    val wbTintOffset: Float = 0f,
+    val wbManualTempK: Float = 5500f
 ) : Parcelable
 
 @Parcelize

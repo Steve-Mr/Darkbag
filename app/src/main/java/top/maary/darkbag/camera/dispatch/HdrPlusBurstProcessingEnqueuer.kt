@@ -75,7 +75,13 @@ internal class HdrPlusBurstProcessingEnqueuer(
                 val cfa = chars.get(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
                 val (wb, ccmCapture) = metadataExtractor.extractWbAndCcm(result)
                 val useSensorColorMatrix = true
-                val burstCalib = metadataExtractor.extractSensorCalibration(chars, result, wb)
+                val activeWbStrategy = SettingsRepository.getInstance(appContext).current().wbStrategy
+                val burstCalib = metadataExtractor.extractSensorCalibration(
+                    characteristics = chars,
+                    result = result,
+                    wb = wb,
+                    wbMode = activeWbStrategy
+                )
                 val ccmSensor = burstCalib.renderCcm ?: ccmCapture
                 val finalCcm = if (useSensorColorMatrix) ccmSensor else ccmCapture
                 val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
@@ -168,7 +174,13 @@ internal class HdrPlusBurstProcessingEnqueuer(
                 val baseResult = if (baseFrameTs != null) metadataExtractor.findCaptureResult(baseFrameTs) else null
                 val result = baseResult ?: burstContext.result
                 val (effectiveWb, effectiveCcm) = metadataExtractor.extractWbAndCcm(result)
-                val burstCalib = metadataExtractor.extractSensorCalibration(burstContext.chars, result, effectiveWb)
+                val activeWbStrategy = SettingsRepository.getInstance(appContext).current().wbStrategy
+                val burstCalib = metadataExtractor.extractSensorCalibration(
+                    characteristics = burstContext.chars,
+                    result = result,
+                    wb = effectiveWb,
+                    wbMode = activeWbStrategy
+                )
 
                 var effectiveLsc = burstContext.lensShadingMapData
                 var effectiveRows = burstContext.lensShadingRows

@@ -177,7 +177,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         jint colorEngineMode,
         jfloatArray lensShadingMap,
         jint lensShadingRows,
-        jint lensShadingCols
+        jint lensShadingCols,
+        jfloatArray wbParams
 ) {
     LOGD("Native processRaw started using LibRaw (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
 
@@ -384,11 +385,31 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         }
         int illum1 = RawProcessor.imgdata.color.dng_color[0].illuminant;
         int illum2 = RawProcessor.imgdata.color.dng_color[1].illuminant;
-        compute_render_ccm(
+
+        darkbag::color::WhiteBalanceParams wbConfig;
+        wbConfig.mode = darkbag::color::WhiteBalanceMode::NEUTRAL;
+        if (wbParams) {
+            jsize pLen = env->GetArrayLength(wbParams);
+            if (pLen >= 4) {
+                float pBuf[4];
+                env->GetFloatArrayRegion(wbParams, 0, 4, pBuf);
+                wbConfig.mode = static_cast<darkbag::color::WhiteBalanceMode>(static_cast<int>(pBuf[0]));
+                wbConfig.tempOffsetMired = pBuf[1];
+                wbConfig.tintOffset = pBuf[2];
+                wbConfig.manualTempK = pBuf[3];
+            }
+        }
+
+        darkbag::color::WhiteBalanceResult wbRes;
+        darkbag::color::compute_white_balance(
             fm1, fm2, cm1, cm2,
             illum1 ? illum1 : 21, illum2 ? illum2 : 17,
-            canonicalNeutral, wbVec.data(), ccmVec.data()
+            canonicalNeutral, wbVec.data(),
+            wbConfig, wbRes
         );
+        for (int i = 0; i < 9; ++i) {
+            ccmVec[i] = wbRes.renderCcm[i];
+        }
 
         std::vector<uint16_t> planarRgb(static_cast<size_t>(width) * height * 3);
         darkbag::demosaic::rcd_demosaic(

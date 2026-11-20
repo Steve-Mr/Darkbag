@@ -161,10 +161,12 @@ class CameraMultiCaptureDispatcher(
             } else null
 
             val colorEngineMode = snapshot.colorEngineMode
+            val wbStrategy = snapshot.wbStrategy
             val currentEditConfig = top.maary.darkbag.models.EditConfig(
                 log = currentLog,
                 lut = currentLut,
-                colorEngineMode = colorEngineMode
+                colorEngineMode = colorEngineMode,
+                wbMode = wbStrategy
             )
 
             for (frame in result.frames) {
@@ -202,7 +204,8 @@ class CameraMultiCaptureDispatcher(
                             colorEngineMode = colorEngineMode,
                             lensShadingMap = frame.lensShadingMap,
                             lensShadingRows = frame.lensShadingRows,
-                            lensShadingCols = frame.lensShadingCols
+                            lensShadingCols = frame.lensShadingCols,
+                            wbParams = floatArrayOf(wbStrategy.toFloat(), 0f, 0f, 5500f)
                         )
                         if (ret >= 0 && renderedFile.exists() && renderedFile.length() > 0) {
                             jpgPathToSave = renderedFile.absolutePath

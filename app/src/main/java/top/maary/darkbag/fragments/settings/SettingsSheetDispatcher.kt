@@ -156,6 +156,25 @@ class SettingsSheetDispatcher(
         }
     }
 
+    fun showWbStrategySheet() {
+        val currentStrategy = viewModel.preferences.value.wbStrategy
+        val selectedIndex = if (currentStrategy == PreferenceKeys.WB_STRATEGY_NEUTRAL) 0 else 1
+        val options = listOf(
+            context.getString(R.string.pref_wb_strategy_neutral),
+            context.getString(R.string.pref_wb_strategy_ambience)
+        )
+        BentoSelectionBottomSheet.show(
+            fragmentManager = fragmentManager,
+            title = context.getString(R.string.pref_wb_strategy_title),
+            options = options,
+            selectedIndex = selectedIndex,
+            badge = "COLOR"
+        ) { which ->
+            val strategy = if (which == 0) PreferenceKeys.WB_STRATEGY_NEUTRAL else PreferenceKeys.WB_STRATEGY_AMBIENCE
+            viewModel.updateWbStrategy(strategy)
+        }
+    }
+
     fun showAntibandingSheet() {
         val saved = viewModel.preferences.value.antibandingMode
         val selectedIndex = PreferenceKeys.ANTIBANDING_MODES.indexOf(saved).coerceAtLeast(0)

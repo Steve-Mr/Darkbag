@@ -158,7 +158,11 @@ class CameraCaptureMetadataExtractor(
     fun extractSensorCalibration(
         characteristics: CameraCharacteristics?,
         result: CaptureResult?,
-        wb: FloatArray? = null
+        wb: FloatArray? = null,
+        wbMode: Int = 0,
+        wbTempOffset: Float = 0f,
+        wbTintOffset: Float = 0f,
+        wbManualTempK: Float = 5500f
     ): SensorCalibration {
         val colorMatrix1 = extractColorTransformMatrix(
             characteristics?.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
@@ -193,7 +197,11 @@ class CameraCaptureMetadataExtractor(
             neutralColorPoint = canonicalNeutral,
             wb = canonicalWb,
             colorMatrix1 = colorMatrix1,
-            colorMatrix2 = colorMatrix2
+            colorMatrix2 = colorMatrix2,
+            wbMode = wbMode,
+            wbTempOffset = wbTempOffset,
+            wbTintOffset = wbTintOffset,
+            wbManualTempK = wbManualTempK
         )
 
         return SensorCalibration(
