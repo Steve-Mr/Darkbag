@@ -305,6 +305,7 @@ object BentoDeckPreviewBinder {
         bindPreviewProPill(binding.pillFocus, "AF", "AUTO", context)
         bindPreviewProPill(binding.pillIso, "ISO", "100", context)
         bindPreviewProPill(binding.pillShutter, "SEC", "1/125s", context)
+        bindPreviewProPill(binding.pillWb, "WB", "AUTO", context)
         bindPreviewProPill(binding.pillEv, "EV", "0.0", context)
         binding.btnProLink?.visibility = if (activeMode == CaptureMode.MULTI_CAMERA) View.VISIBLE else View.GONE
         binding.btnProLink?.let { BentoDeckStylingEngine.styleBentoProLink(it, isLinked = true) }

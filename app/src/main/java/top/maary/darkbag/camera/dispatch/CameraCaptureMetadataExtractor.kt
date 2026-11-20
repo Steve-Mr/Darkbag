@@ -209,18 +209,6 @@ class CameraCaptureMetadataExtractor(
         )
     }
 
-    private fun extractColorTransformMatrix(matrix: android.hardware.camera2.params.ColorSpaceTransform?): FloatArray? {
-        if (matrix == null) return null
-        val out = FloatArray(9)
-        for (r in 0 until 3) {
-            for (c in 0 until 3) {
-                val rational = matrix.getElement(c, r)
-                out[r * 3 + c] = rational.numerator.toFloat() / rational.denominator.toFloat()
-            }
-        }
-        return out
-    }
-
     fun extractLensShadingMap(result: CaptureResult?): Triple<FloatArray?, Int, Int> {
         val map = result?.get(CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP) ?: return Triple(null, 0, 0)
         val rows = map.rowCount
@@ -302,8 +290,20 @@ class CameraCaptureMetadataExtractor(
         return intArrayOf(rect.top, rect.left, rect.bottom, rect.right)
     }
 
-    private companion object {
+    companion object {
         const val TAG = "CameraMetaExtractor"
         const val DEFAULT_TOLERANCE_NS = 5_000_000L
+
+        fun extractColorTransformMatrix(matrix: android.hardware.camera2.params.ColorSpaceTransform?): FloatArray? {
+            if (matrix == null) return null
+            val out = FloatArray(9)
+            for (r in 0 until 3) {
+                for (c in 0 until 3) {
+                    val rational = matrix.getElement(c, r)
+                    out[r * 3 + c] = rational.numerator.toFloat() / rational.denominator.toFloat()
+                }
+            }
+            return out
+        }
     }
 }

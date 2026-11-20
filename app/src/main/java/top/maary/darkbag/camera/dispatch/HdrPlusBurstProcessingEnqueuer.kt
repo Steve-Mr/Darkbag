@@ -127,7 +127,9 @@ internal class HdrPlusBurstProcessingEnqueuer(
                     faithfulHighlights = false,
                     hfMetadata = hfMetadata,
                     timing = timing,
-                    sink = null
+                    sink = null,
+                    wbModeOverride = if (env.runtimeState.isManualWb) 2 else null,
+                    wbManualTempKOverride = if (env.runtimeState.isManualWb) env.runtimeState.manualWbTempK.toFloat() else null
                 )
                 enqueueBurstRequestInternal(
                     appContext = appContext,
@@ -242,7 +244,9 @@ internal class HdrPlusBurstProcessingEnqueuer(
                     faithfulHighlights = false,
                     hfMetadata = burstContext.hfMetadata,
                     timing = burstContext.timing,
-                    sink = burstContext.sink
+                    sink = burstContext.sink,
+                    wbModeOverride = if (env.runtimeState.isManualWb) 2 else null,
+                    wbManualTempKOverride = if (env.runtimeState.isManualWb) env.runtimeState.manualWbTempK.toFloat() else null
                 )
                 enqueueBurstRequestInternal(
                     appContext = appContext,

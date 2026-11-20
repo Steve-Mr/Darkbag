@@ -69,6 +69,12 @@ class CameraHardwareStreamController(
         val chars = CameraRepository.getCharacteristics(env.camera2Manager, targetId)
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val availableOis = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
+        val cm1 = chars.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
+        val cm2 = chars.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM2)
+        env.runtimeState.colorMatrix1 = top.maary.darkbag.camera.dispatch.CameraCaptureMetadataExtractor.extractColorTransformMatrix(cm1)
+        env.runtimeState.colorMatrix2 = top.maary.darkbag.camera.dispatch.CameraCaptureMetadataExtractor.extractColorTransformMatrix(cm2)
+        env.runtimeState.calibrationIlluminant1 = (chars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21).toInt()
+        env.runtimeState.calibrationIlluminant2 = (chars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2) ?: 17).toInt()
         return CameraCharacteristicsSnapshot(
             isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE),
             exposureTimeRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE),
@@ -191,6 +197,21 @@ class CameraHardwareStreamController(
         if (resIso != null) env.runtimeState.liveIso = resIso
         if (resTime != null) env.runtimeState.liveExposureTime = resTime
         if (resFocus != null) env.runtimeState.liveFocusDistance = resFocus
+        val resGains = result.get(CaptureResult.COLOR_CORRECTION_GAINS)
+        if (resGains != null) {
+            val gainsArray = floatArrayOf(resGains.red, resGains.greenEven, resGains.greenOdd, resGains.blue)
+            val (canonWb, canonNeutral) = top.maary.darkbag.processor.SensorCalibrationHelper.resolveCanonicalWbAndNeutral(result, gainsArray)
+            val illum = top.maary.darkbag.processor.SensorCalibrationHelper.estimateSceneIlluminant(
+                env.runtimeState.colorMatrix1,
+                env.runtimeState.colorMatrix2,
+                env.runtimeState.calibrationIlluminant1,
+                env.runtimeState.calibrationIlluminant2,
+                neutralColorPoint = canonNeutral,
+                wb = canonWb
+            )
+            env.runtimeState.liveWbTempK = illum.tempK.toInt().coerceIn(1000, 20000)
+            env.runtimeState.liveWbTint = illum.tint
+        }
         env.runtimeState.captureResultFlow.tryEmit(result)
 
         val activeTier = env.cameraViewModel.uiState.value.uiTier
@@ -212,6 +233,30 @@ class CameraHardwareStreamController(
                 val shutterVal = if (env.runtimeState.isManualShutter) ui.formatShutterTime(env.runtimeState.currentExposureTime) else ui.formatShutterTime(env.runtimeState.liveExposureTime)
                 val evLabel = "EV"
                 val evVal = if (env.runtimeState.currentEvIndex == 0) "0.0" else String.format(Locale.US, "%+d", env.runtimeState.currentEvIndex)
+                val wbLabel = "WB"
+                val wbVal = if (env.runtimeState.isManualWb) "${env.runtimeState.manualWbTempK}K" else "${env.runtimeState.liveWbTempK}K"
+
+                // Compute incremental CAT16 preview matrix
+                val prefs = SettingsRepository.getInstance(env.hostContext).current()
+                val targetTempK: Float
+                val targetTint: Float
+                if (env.runtimeState.isManualWb) {
+                    targetTempK = env.runtimeState.manualWbTempK.toFloat()
+                    targetTint = 0f
+                } else if (prefs.wbStrategy == 1) { // AMBIENCE
+                    targetTempK = top.maary.darkbag.processor.SensorCalibrationHelper.applyAmbienceRetention(env.runtimeState.liveWbTempK.toFloat())
+                    targetTint = top.maary.darkbag.processor.SensorCalibrationHelper.clampPlanckianTint(env.runtimeState.liveWbTint)
+                } else { // NEUTRAL
+                    targetTempK = env.runtimeState.liveWbTempK.toFloat()
+                    targetTint = env.runtimeState.liveWbTint
+                }
+                val previewMatrix = top.maary.darkbag.processor.LutGlShaderPipeline.computeWbPreviewMatrix(
+                    liveTempK = env.runtimeState.liveWbTempK.toFloat(),
+                    liveTint = env.runtimeState.liveWbTint,
+                    targetTempK = targetTempK,
+                    targetTint = targetTint
+                )
+                env.sessionArbiter.lutProcessor?.setWbPreviewMatrix(previewMatrix)
 
                 env.lifecycleScope.launch(Dispatchers.Main.immediate) {
                     val binding = ui.cameraUiContainerBinding ?: return@launch
@@ -231,6 +276,11 @@ class CameraHardwareStreamController(
                         val isTabActive = env.runtimeState.activeManualTab == "Shutter"
                         CameraBentoDeckView.styleBentoProPill(pill, isTabActive, env.runtimeState.isManualShutter)
                         pill.text = CameraBentoDeckView.formatProTelemetry(shutterLabel, shutterVal, isTabActive, env.runtimeState.isManualShutter, ctx)
+                    }
+                    binding.pillWb?.let { pill ->
+                        val isTabActive = env.runtimeState.activeManualTab == "WB"
+                        CameraBentoDeckView.styleBentoProPill(pill, isTabActive, env.runtimeState.isManualWb)
+                        pill.text = CameraBentoDeckView.formatProTelemetry(wbLabel, wbVal, isTabActive, env.runtimeState.isManualWb, ctx)
                     }
                     binding.pillEv?.let { pill ->
                         val isTabActive = env.runtimeState.activeManualTab == "EV"

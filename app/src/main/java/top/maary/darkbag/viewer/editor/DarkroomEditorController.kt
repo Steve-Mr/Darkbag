@@ -31,7 +31,16 @@ class DarkroomEditorController(
         binding.btnTabLight.setOnClickListener { viewModel.processIntent(DarkroomEditorUserIntent.SelectTab(0)) }
         binding.btnTabRange.setOnClickListener { viewModel.processIntent(DarkroomEditorUserIntent.SelectTab(1)) }
         binding.btnTabTone.setOnClickListener { viewModel.processIntent(DarkroomEditorUserIntent.SelectTab(2)) }
-        binding.btnTabColor.setOnClickListener { viewModel.processIntent(DarkroomEditorUserIntent.SelectTab(3)) }
+        binding.btnTabWb.setOnClickListener { viewModel.processIntent(DarkroomEditorUserIntent.SelectTab(3)) }
+        binding.btnTabColor.setOnClickListener { viewModel.processIntent(DarkroomEditorUserIntent.SelectTab(4)) }
+
+        // 白平衡模式 Chip 绑定 (0: Neutral, 1: Ambience)
+        binding.btnWbChipAmbience.setOnClickListener {
+            viewModel.processIntent(DarkroomEditorUserIntent.SetWbMode(1))
+        }
+        binding.btnWbChipNeutral.setOnClickListener {
+            viewModel.processIntent(DarkroomEditorUserIntent.SetWbMode(0))
+        }
 
         binding.editTabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: TabLayout.Tab?) {
@@ -124,6 +133,14 @@ class DarkroomEditorController(
             binding.editTabs.getTabAt(state.selectedTab)?.select()
         }
 
+        // 2.1 白平衡模式 Chip 显示与选中反馈 (仅在 WB Tab 下可见)
+        if (state.selectedTab == 3) {
+            binding.layoutWbModeChips.visibility = View.VISIBLE
+            updateWbModeChips(context, state.wbMode)
+        } else {
+            binding.layoutWbModeChips.visibility = View.GONE
+        }
+
         // 3. 半格单帧选择器
         if (state.isHalfFrame && state.isEditing) {
             binding.groupFrameSelectionIntegrated.visibility = View.VISIBLE
@@ -202,6 +219,7 @@ class DarkroomEditorController(
             binding.btnTabLight,
             binding.btnTabRange,
             binding.btnTabTone,
+            binding.btnTabWb,
             binding.btnTabColor
         )
         tabs.forEachIndexed { idx, btn ->
@@ -220,6 +238,53 @@ class DarkroomEditorController(
                 btn.strokeWidth = (1f * density).toInt()
                 btn.cornerRadius = (14f * density).toInt()
             }
+        }
+    }
+
+    private fun updateWbModeChips(context: Context, wbMode: Int) {
+        val density = context.resources.displayMetrics.density
+        val colorPrimaryContainer = MaterialColors.getColor(
+            context, com.google.android.material.R.attr.colorPrimaryContainer, 0xFF334433.toInt()
+        )
+        val colorOnPrimaryContainer = MaterialColors.getColor(
+            context, com.google.android.material.R.attr.colorOnPrimaryContainer, 0xFFFFFFFF.toInt()
+        )
+        val colorPrimary = MaterialColors.getColor(
+            context, androidx.appcompat.R.attr.colorPrimary, 0xFF88CC88.toInt()
+        )
+        val colorSurfaceContainerHigh = MaterialColors.getColor(
+            context, com.google.android.material.R.attr.colorSurfaceContainerHigh, 0xFF2B2B2B.toInt()
+        )
+        val colorOnSurfaceVariant = MaterialColors.getColor(
+            context, com.google.android.material.R.attr.colorOnSurfaceVariant, 0xFFCCCCCC.toInt()
+        )
+        val colorOutlineVariant = MaterialColors.getColor(
+            context, com.google.android.material.R.attr.colorOutlineVariant, 0xFF444444.toInt()
+        )
+
+        val isAmbience = wbMode == 1
+        if (isAmbience) {
+            binding.btnWbChipAmbience.backgroundTintList = ColorStateList.valueOf(colorPrimaryContainer)
+            binding.btnWbChipAmbience.setTextColor(colorOnPrimaryContainer)
+            binding.btnWbChipAmbience.strokeColor = ColorStateList.valueOf(colorPrimary)
+            binding.btnWbChipAmbience.strokeWidth = (1.5f * density).toInt()
+        } else {
+            binding.btnWbChipAmbience.backgroundTintList = ColorStateList.valueOf(colorSurfaceContainerHigh)
+            binding.btnWbChipAmbience.setTextColor(colorOnSurfaceVariant)
+            binding.btnWbChipAmbience.strokeColor = ColorStateList.valueOf(colorOutlineVariant)
+            binding.btnWbChipAmbience.strokeWidth = (1f * density).toInt()
+        }
+
+        if (!isAmbience) {
+            binding.btnWbChipNeutral.backgroundTintList = ColorStateList.valueOf(colorPrimaryContainer)
+            binding.btnWbChipNeutral.setTextColor(colorOnPrimaryContainer)
+            binding.btnWbChipNeutral.strokeColor = ColorStateList.valueOf(colorPrimary)
+            binding.btnWbChipNeutral.strokeWidth = (1.5f * density).toInt()
+        } else {
+            binding.btnWbChipNeutral.backgroundTintList = ColorStateList.valueOf(colorSurfaceContainerHigh)
+            binding.btnWbChipNeutral.setTextColor(colorOnSurfaceVariant)
+            binding.btnWbChipNeutral.strokeColor = ColorStateList.valueOf(colorOutlineVariant)
+            binding.btnWbChipNeutral.strokeWidth = (1f * density).toInt()
         }
     }
 

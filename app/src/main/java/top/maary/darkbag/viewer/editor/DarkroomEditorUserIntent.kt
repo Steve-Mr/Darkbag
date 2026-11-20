@@ -26,8 +26,11 @@ sealed interface DarkroomEditorUserIntent {
     /** 退出编辑模式 (apply = true 保留修改，apply = false 恢复进入前配置) */
     data class ExitEditMode(val apply: Boolean) : DarkroomEditorUserIntent
 
-    /** 切换调整维度 Tab (0: Light, 1: Range, 2: Tone, 3: Color) */
+    /** 切换调整维度 Tab (0: Light, 1: Range, 2: Tone, 3: WB, 4: Color) */
     data class SelectTab(val tabIndex: Int) : DarkroomEditorUserIntent
+
+    /** 设置白平衡策略模式 (0: NEUTRAL, 1: AMBIENCE) */
+    data class SetWbMode(val mode: Int) : DarkroomEditorUserIntent
 
     /** 半格模式下切换选中的单帧 (0: Frame 1, 1: Frame 2) */
     data class SelectHalfFrameIndex(val index: Int) : DarkroomEditorUserIntent

@@ -45,6 +45,7 @@ class CameraTierController(
         binding.pillFocus?.setOnClickListener { toggleManualTab("Focus") }
         binding.pillIso?.setOnClickListener { toggleManualTab("ISO") }
         binding.pillShutter?.setOnClickListener { toggleManualTab("Shutter") }
+        binding.pillWb?.setOnClickListener { toggleManualTab("WB") }
         binding.pillEv?.setOnClickListener { toggleManualTab("EV") }
 
         // Multi-Camera Sync Link Button
@@ -203,6 +204,16 @@ class CameraTierController(
                 state.isManualShutter = true
                 binding?.tvDialTargetValue?.text = formatShutterTime(state.currentExposureTime)
             }
+            "WB" -> {
+                if (item.rawValue == 0.0 || item.id == "AUTO") {
+                    state.isManualWb = false
+                    binding?.tvDialTargetValue?.text = "AUTO (${state.liveWbTempK}K)"
+                } else {
+                    state.isManualWb = true
+                    state.manualWbTempK = item.rawValue.toInt()
+                    binding?.tvDialTargetValue?.text = "${state.manualWbTempK}K"
+                }
+            }
             "EV" -> {
                 state.currentEvIndex = item.rawValue.toInt()
                 binding?.tvDialTargetValue?.text = formatEvVal(state.currentEvIndex)
@@ -227,6 +238,9 @@ class CameraTierController(
             "Shutter" -> {
                 state.isManualShutter = false
                 state.exposureMeteringRegion = null
+            }
+            "WB" -> {
+                state.isManualWb = false
             }
             "EV" -> {
                 state.currentEvIndex = 0
@@ -293,6 +307,27 @@ class CameraTierController(
                 wheel.setItems(items, closestIndex)
                 binding.tvDialTargetValue?.text = if (state.isManualShutter) formatShutterTime(state.currentExposureTime) else "AUTO (${formatShutterTime(state.liveExposureTime)})"
             }
+            "WB" -> {
+                binding.tvDialTargetLabel?.text = "WB"
+                val items = buildWbDialItems()
+                var closestIndex = 0
+                if (state.isManualWb) {
+                    var minDiff = Double.MAX_VALUE
+                    items.forEachIndexed { i, it ->
+                        if (it.rawValue > 0.0) {
+                            val diff = abs(it.rawValue - state.manualWbTempK.toDouble())
+                            if (diff < minDiff) {
+                                minDiff = diff
+                                closestIndex = i
+                            }
+                        }
+                    }
+                } else {
+                    closestIndex = 0
+                }
+                wheel.setItems(items, closestIndex)
+                binding.tvDialTargetValue?.text = if (state.isManualWb) "${state.manualWbTempK}K" else "AUTO (${state.liveWbTempK}K)"
+            }
             "EV" -> {
                 binding.tvDialTargetLabel?.text = "EV"
                 val items = buildEvDialItems(state.evRange)
@@ -355,6 +390,15 @@ class CameraTierController(
                 val isTabActive = activeManualTab == "Shutter"
                 CameraBentoDeckView.styleBentoProPill(pill, isTabActive, state.isManualShutter)
                 pill.text = CameraBentoDeckView.formatProTelemetry(shutterLabel, shutterVal, isTabActive, state.isManualShutter, pill.context)
+            }
+
+            // WB
+            val wbLabel = "WB"
+            val wbVal = if (state.isManualWb) "${state.manualWbTempK}K" else "${state.liveWbTempK}K"
+            binding.pillWb?.let { pill ->
+                val isTabActive = activeManualTab == "WB"
+                CameraBentoDeckView.styleBentoProPill(pill, isTabActive, state.isManualWb)
+                pill.text = CameraBentoDeckView.formatProTelemetry(wbLabel, wbVal, isTabActive, state.isManualWb, pill.context)
             }
 
             // EV
@@ -453,6 +497,9 @@ class CameraTierController(
 
     fun buildEvDialItems(range: android.util.Range<Int>?): List<ProDialWheelView.DialItem> =
         ProDialItemFactory.buildEvDialItems(range)
+
+    fun buildWbDialItems(): List<ProDialWheelView.DialItem> =
+        ProDialItemFactory.buildWbDialItems()
 
     fun bindTierControls(
         onVisibilityRefresh: () -> Unit,

@@ -151,4 +151,33 @@ internal object ProDialItemFactory {
             )
         }
     }
+
+    fun buildWbDialItems(): List<ProDialWheelView.DialItem> {
+        val items = mutableListOf<ProDialWheelView.DialItem>()
+        items.add(
+            ProDialWheelView.DialItem(
+                id = "AUTO",
+                label = "AUTO",
+                rawValue = 0.0,
+                isMajor = true
+            )
+        )
+
+        val majorKelvins = setOf(2800, 3200, 4000, 5500, 6500, 7500)
+        val kelvins = (generateSequence(2400) { it + 200 }.takeWhile { it <= 9000 }.toList() + listOf(5500, 6500, 7500))
+            .distinct()
+            .sorted()
+
+        for (k in kelvins) {
+            items.add(
+                ProDialWheelView.DialItem(
+                    id = "${k}K",
+                    label = "${k}K",
+                    rawValue = k.toDouble(),
+                    isMajor = k in majorKelvins
+                )
+            )
+        }
+        return items
+    }
 }

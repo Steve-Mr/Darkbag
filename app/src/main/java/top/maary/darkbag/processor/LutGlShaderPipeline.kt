@@ -32,6 +32,7 @@ internal class LutGlShaderPipeline {
     private var lutSizeLoc = -1
     private var focusPeakingLoc = -1
     private var texelSizeLoc = -1
+    private var wbPreviewMatrixLoc = -1
     private var posHandle = -1
     private var texHandle = -1
 
@@ -74,7 +75,8 @@ internal class LutGlShaderPipeline {
         currentLogType: Int,
         currentGamutMatrix: FloatArray,
         currentColorEngineMode: Int,
-        focusPeakingEnabled: Boolean
+        focusPeakingEnabled: Boolean,
+        currentWbPreviewMatrix: FloatArray? = null
     ) {
         GLES30.glViewport(0, 0, targetWidth, targetHeight)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
@@ -82,6 +84,9 @@ internal class LutGlShaderPipeline {
 
         val (scaleX, scaleY) = computeAspectScale(targetWidth, targetHeight, inputWidth, inputHeight, transformMatrix)
         if (scaleLoc >= 0) GLES30.glUniform2f(scaleLoc, scaleX, scaleY)
+
+        val activeWbMatrix = currentWbPreviewMatrix ?: IDENTITY_MATRIX_3X3
+        if (wbPreviewMatrixLoc >= 0) GLES30.glUniformMatrix3fv(wbPreviewMatrixLoc, 1, false, activeWbMatrix, 0)
 
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTextureId)
@@ -176,6 +181,7 @@ internal class LutGlShaderPipeline {
         colorEngineModeLoc = GLES30.glGetUniformLocation(program, "uColorEngineMode")
         focusPeakingLoc = GLES30.glGetUniformLocation(program, "uFocusPeakingEnabled")
         texelSizeLoc = GLES30.glGetUniformLocation(program, "uTexelSize")
+        wbPreviewMatrixLoc = GLES30.glGetUniformLocation(program, "uWbPreviewMatrix")
 
         posHandle = GLES30.glGetAttribLocation(program, "aPosition")
         texHandle = GLES30.glGetAttribLocation(program, "aTexCoord")
@@ -195,6 +201,50 @@ internal class LutGlShaderPipeline {
     }
 
     companion object {
+        val IDENTITY_MATRIX_3X3 = floatArrayOf(
+            1f, 0f, 0f,
+            0f, 1f, 0f,
+            0f, 0f, 1f
+        )
+
+        /**
+         * Computes OpenGL sRGB CAT16 incremental preview matrix (Section 4.3.2):
+         * M_preview_wb = M_XYZ_to_sRGB_D65 * M_CAT16_adapt(W_target -> W_live)_luma_norm * M_sRGB_D65_to_XYZ
+         * Returns column-major 3x3 matrix for glUniformMatrix3fv.
+         */
+        fun computeWbPreviewMatrix(
+            liveTempK: Float,
+            liveTint: Float,
+            targetTempK: Float,
+            targetTint: Float
+        ): FloatArray {
+            if (kotlin.math.abs(liveTempK - targetTempK) < 1.0f && kotlin.math.abs(liveTint - targetTint) < 0.1f) {
+                return IDENTITY_MATRIX_3X3.copyOf()
+            }
+
+            val (xTarget, yTarget) = SensorCalibrationHelper.tempTintToXy(targetTempK, targetTint)
+            val wTarget = SensorCalibrationHelper.xyToXyz(xTarget, yTarget)
+
+            val (xLive, yLive) = SensorCalibrationHelper.tempTintToXy(liveTempK, liveTint)
+            val wLive = SensorCalibrationHelper.xyToXyz(xLive, yLive)
+
+            val mCat = SensorCalibrationHelper.cat16AdaptMatrix(wLive, wTarget)
+            val yOut = mCat[3] * wLive[0] + mCat[4] * wLive[1] + mCat[5] * wLive[2]
+            val lumaScale = 1.0f / maxOf(0.1f, yOut)
+            val mCatNorm = FloatArray(9) { i -> mCat[i] * lumaScale }
+
+            val mInter = SensorCalibrationHelper.multiply3x3(M_XYZ_to_Rec709_D65, mCatNorm)
+            val mRowMajor = SensorCalibrationHelper.multiply3x3(mInter, M_sRGB_D65_to_XYZ)
+
+            val mColMajor = FloatArray(9)
+            for (r in 0 until 3) {
+                for (c in 0 until 3) {
+                    mColMajor[c * 3 + r] = mRowMajor[r * 3 + c]
+                }
+            }
+            return mColMajor
+        }
+
         // Standard CIE XYZ and Gamut Matrices (Row-Major definitions matching ColorPipe.cpp)
         private val M_sRGB_D65_to_XYZ = floatArrayOf(0.41239080f, 0.35758434f, 0.18048079f, 0.21263901f, 0.71516868f, 0.07219232f, 0.01933082f, 0.11919478f, 0.95053215f)
         private val M_XYZ_to_AlexaWideGamut_D65 = floatArrayOf(1.78906555f, -0.48253386f, -0.20007579f, -0.63984866f, 1.39639996f, 0.19443229f, -0.04153155f, 0.08233537f, 0.87886848f)
@@ -272,6 +322,7 @@ internal class LutGlShaderPipeline {
             uniform int uColorEngineMode;
             uniform int uFocusPeakingEnabled;
             uniform vec2 uTexelSize;
+            uniform mat3 uWbPreviewMatrix;
             in vec2 vTexCoord;
             out vec4 outColor;
 
@@ -372,19 +423,19 @@ internal class LutGlShaderPipeline {
 
             void main() {
                 vec4 src = texture(uTexture, vTexCoord);
+                vec3 linearRgb = max(vec3(0.0), uWbPreviewMatrix * srgbToLinear(src.rgb));
                 vec3 finalRgb;
                 if (uLutSize > 0) {
-                    vec3 wideGamutRgb = max(vec3(0.0), uGamutMatrix * srgbToLinear(src.rgb));
+                    vec3 wideGamutRgb = max(vec3(0.0), uGamutMatrix * linearRgb);
                     vec3 logRgb = vec3(applyLogCurve(wideGamutRgb.r, uLogType), applyLogCurve(wideGamutRgb.g, uLogType), applyLogCurve(wideGamutRgb.b, uLogType));
                     float lutSizeFloat = float(uLutSize);
                     vec3 lutCoord = logRgb * ((lutSizeFloat - 1.0) / lutSizeFloat) + vec3(0.5 / lutSizeFloat);
                     finalRgb = triangularDither(texture(uLut, lutCoord).rgb, gl_FragCoord.xy);
                 } else if (uLogType > 0) {
-                    vec3 wideGamutRgb = max(vec3(0.0), uGamutMatrix * srgbToLinear(src.rgb));
+                    vec3 wideGamutRgb = max(vec3(0.0), uGamutMatrix * linearRgb);
                     vec3 logRgb = vec3(applyLogCurve(wideGamutRgb.r, uLogType), applyLogCurve(wideGamutRgb.g, uLogType), applyLogCurve(wideGamutRgb.b, uLogType));
                     finalRgb = triangularDither(logRgb, gl_FragCoord.xy);
                 } else {
-                    vec3 linearRgb = srgbToLinear(src.rgb);
                     vec3 mapped = uColorEngineMode == 0 ? applyPbrNeutral(linearRgb)
                         : (uColorEngineMode == 1 ? applyPureLuma(linearRgb)
                         : (uColorEngineMode == 2 ? applySonyUchimura(linearRgb) : applyAcesFit(linearRgb)));

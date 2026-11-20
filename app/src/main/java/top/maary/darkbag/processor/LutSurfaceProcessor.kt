@@ -53,6 +53,7 @@ class LutSurfaceProcessor {
 
     private val transformMatrix = FloatArray(16)
     private var currentColorEngineMode = 0
+    private var currentWbPreviewMatrix = LutGlShaderPipeline.IDENTITY_MATRIX_3X3.copyOf()
 
     @Volatile private var isFocusPeakingEnabled = false
 
@@ -181,6 +182,12 @@ class LutSurfaceProcessor {
         }
     }
 
+    fun setWbPreviewMatrix(matrix: FloatArray) {
+        handler.post {
+            currentWbPreviewMatrix = matrix.copyOf()
+        }
+    }
+
     fun release() {
         handler.post {
             releaseGl()
@@ -258,7 +265,8 @@ class LutSurfaceProcessor {
             currentLogType = currentLogType,
             currentGamutMatrix = currentGamutMatrix,
             currentColorEngineMode = currentColorEngineMode,
-            focusPeakingEnabled = isFocusPeakingEnabled
+            focusPeakingEnabled = isFocusPeakingEnabled,
+            currentWbPreviewMatrix = currentWbPreviewMatrix
         )
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
 
@@ -276,7 +284,8 @@ class LutSurfaceProcessor {
                 currentLogType = currentLogType,
                 currentGamutMatrix = currentGamutMatrix,
                 currentColorEngineMode = currentColorEngineMode,
-                focusPeakingEnabled = false
+                focusPeakingEnabled = false,
+                currentWbPreviewMatrix = currentWbPreviewMatrix
             )
             val frameTimestampNs = System.nanoTime()
             EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, frameTimestampNs)

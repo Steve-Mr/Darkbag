@@ -127,11 +127,96 @@ class DarkroomEditorViewModelTest {
         assertEquals("Blacks", state.slider2Label)
         assertTrue(state.isSlider2Visible)
 
-        // Tab 3: Color
+        // Tab 3: WB (Temp & Tint)
         viewModel.processIntent(DarkroomEditorUserIntent.SelectTab(3))
+        state = viewModel.uiState.value
+        assertEquals("Temp", state.slider1Label)
+        assertEquals(-100f, state.slider1Min, 0.001f)
+        assertEquals(100f, state.slider1Max, 0.001f)
+        assertEquals("Tint", state.slider2Label)
+        assertEquals(-80f, state.slider2Min, 0.001f)
+        assertEquals(80f, state.slider2Max, 0.001f)
+        assertTrue(state.isSlider2Visible)
+
+        // Tab 4: Color
+        viewModel.processIntent(DarkroomEditorUserIntent.SelectTab(4))
         state = viewModel.uiState.value
         assertEquals("Saturation", state.slider1Label)
         assertFalse(state.isSlider2Visible)
+    }
+
+    @Test
+    fun testWbAdjustmentsAndModeSelection() {
+        val group = ImageGroup(baseName = "WB_TEST_001")
+        viewModel.processIntent(DarkroomEditorUserIntent.SetActiveGroup(group))
+        viewModel.processIntent(DarkroomEditorUserIntent.EnterEditMode(group))
+
+        // Select Tab 3 (WB)
+        viewModel.processIntent(DarkroomEditorUserIntent.SelectTab(3))
+        assertEquals("Temp", viewModel.uiState.value.slider1Label)
+        assertEquals("Tint", viewModel.uiState.value.slider2Label)
+        assertEquals(0, viewModel.uiState.value.wbMode)
+
+        // Adjust Temp & Tint
+        viewModel.processIntent(DarkroomEditorUserIntent.UpdateSlider1(25f))
+        viewModel.processIntent(DarkroomEditorUserIntent.UpdateSlider2(-12f))
+        assertEquals("+25", viewModel.uiState.value.slider1DisplayValue)
+        assertEquals("-12", viewModel.uiState.value.slider2DisplayValue)
+        assertEquals(25f, viewModel.uiState.value.activeConfig?.wbTempOffset ?: 0f, 0.001f)
+        assertEquals(-12f, viewModel.uiState.value.activeConfig?.wbTintOffset ?: 0f, 0.001f)
+
+        // Toggle WB Mode to Ambience (1)
+        viewModel.processIntent(DarkroomEditorUserIntent.SetWbMode(1))
+        assertEquals(1, viewModel.uiState.value.wbMode)
+        assertEquals(1, viewModel.uiState.value.activeConfig?.wbMode)
+
+        // Exit without applying -> restored to baseline
+        viewModel.processIntent(DarkroomEditorUserIntent.ExitEditMode(apply = false))
+        assertEquals(0f, viewModel.uiState.value.activeConfig?.wbTempOffset ?: 0f, 0.001f)
+        assertEquals(0f, viewModel.uiState.value.activeConfig?.wbTintOffset ?: 0f, 0.001f)
+        assertEquals(0, viewModel.uiState.value.wbMode)
+    }
+
+    @Test
+    fun testHalfFrameWbIsolation() {
+        val hfGroup = ImageGroup(
+            baseName = "HF_WB_001",
+            dngUri1 = android.net.Uri.parse("file:///dummy1.dng"),
+            dngUri2 = android.net.Uri.parse("file:///dummy2.dng"),
+            hfLayout = "SBS",
+            editConfig = EditConfig(
+                adjustments = listOf(
+                    BasicAdjustments(wbMode = 1, wbTempOffset = 30f, wbTintOffset = 10f),
+                    BasicAdjustments(wbMode = 0, wbTempOffset = -20f, wbTintOffset = -5f)
+                )
+            )
+        )
+        viewModel.processIntent(DarkroomEditorUserIntent.SetActiveGroup(hfGroup))
+        viewModel.processIntent(DarkroomEditorUserIntent.EnterEditMode(hfGroup))
+        viewModel.processIntent(DarkroomEditorUserIntent.SelectTab(3))
+
+        // Check Frame 1 (Index 0)
+        viewModel.processIntent(DarkroomEditorUserIntent.SelectHalfFrameIndex(0))
+        assertEquals(1, viewModel.uiState.value.wbMode)
+        assertEquals(30f, viewModel.uiState.value.slider1Value, 0.001f)
+        assertEquals(10f, viewModel.uiState.value.slider2Value, 0.001f)
+
+        // Check Frame 2 (Index 1)
+        viewModel.processIntent(DarkroomEditorUserIntent.SelectHalfFrameIndex(1))
+        assertEquals(0, viewModel.uiState.value.wbMode)
+        assertEquals(-20f, viewModel.uiState.value.slider1Value, 0.001f)
+        assertEquals(-5f, viewModel.uiState.value.slider2Value, 0.001f)
+
+        // Modify Frame 2 independently
+        viewModel.processIntent(DarkroomEditorUserIntent.UpdateSlider1(-40f))
+        viewModel.processIntent(DarkroomEditorUserIntent.SetWbMode(1))
+        assertEquals(-40f, viewModel.uiState.value.slider1Value, 0.001f)
+        assertEquals(1, viewModel.uiState.value.wbMode)
+
+        // Switch back to Frame 1: must remain unchanged
+        viewModel.processIntent(DarkroomEditorUserIntent.SelectHalfFrameIndex(0))
+        assertEquals(30f, viewModel.uiState.value.slider1Value, 0.001f)
+        assertEquals(1, viewModel.uiState.value.wbMode)
     }
 
     @Test
