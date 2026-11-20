@@ -1,7 +1,6 @@
 package top.maary.darkbag.ui.viewer.playback
 
 import android.content.Context
-import android.graphics.RectF
 import android.net.Uri
 import android.view.View
 import androidx.media3.common.MediaItem
@@ -19,20 +18,13 @@ import java.util.concurrent.ConcurrentHashMap
 class Mp4VideoPlaybackDelegate(
     private val context: Context,
     private val videoDurationCache: ConcurrentHashMap<Uri, Long>,
-    private val updateBounds: (ImageViewerAdapter.ViewHolder, RectF) -> Unit,
+    private val updateBounds: (ImageViewerAdapter.ViewHolder) -> Unit,
     private val onPlaybackEnded: (ImageViewerAdapter.ViewHolder) -> Unit
 ) {
 
     fun play(holder: ImageViewerAdapter.ViewHolder, uri: Uri) {
-        val iv = holder.binding.imageView
-        val d = iv.drawable
-        if (d != null && iv.width > 0 && iv.height > 0) {
-            val rect = RectF(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
-            iv.imageMatrix.mapRect(rect)
-            rect.intersect(0f, 0f, iv.width.toFloat(), iv.height.toFloat())
-            holder.lastDisplayRect = RectF(rect)
-            updateBounds(holder, rect)
-        }
+        // Align videoView bounds immediately to match the current image geometry
+        updateBounds(holder)
 
         holder.binding.videoView.alpha = 0f
         holder.binding.videoView.visibility = View.VISIBLE
@@ -66,19 +58,7 @@ class Mp4VideoPlaybackDelegate(
                 }
 
                 override fun onVideoSizeChanged(videoSize: VideoSize) {
-                    val innerIv = holder.binding.imageView
-                    val innerD = innerIv.drawable
-                    if (innerD != null && innerIv.width > 0 && innerIv.height > 0) {
-                        val rect = RectF(0f, 0f, innerD.intrinsicWidth.toFloat(), innerD.intrinsicHeight.toFloat())
-                        innerIv.imageMatrix.mapRect(rect)
-                        rect.intersect(0f, 0f, innerIv.width.toFloat(), innerIv.height.toFloat())
-                        holder.lastDisplayRect = RectF(rect)
-                        updateBounds(holder, rect)
-                    } else {
-                        holder.lastDisplayRect?.let { rect ->
-                            updateBounds(holder, rect)
-                        }
-                    }
+                    updateBounds(holder)
                 }
             })
         }

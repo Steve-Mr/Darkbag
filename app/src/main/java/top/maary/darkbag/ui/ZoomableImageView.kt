@@ -3,6 +3,7 @@ package top.maary.darkbag.ui
 import android.content.Context
 import android.graphics.Matrix
 import android.graphics.PointF
+import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -49,7 +50,6 @@ class ZoomableImageView @JvmOverloads constructor(
     }
 
     private var maintainZoomOnNextImage = false
-    private val matrixRect = android.graphics.RectF()
 
     fun setMaintainZoomOnNextImage(maintain: Boolean) {
         maintainZoomOnNextImage = maintain
@@ -76,7 +76,7 @@ class ZoomableImageView @JvmOverloads constructor(
 
     var onTapped: (() -> Unit)? = null
     var onZoomChanged: ((Boolean) -> Unit)? = null
-    var onMatrixChanged: ((android.graphics.RectF) -> Unit)? = null
+    var onDisplayGeometryChanged: ((ImageDisplayGeometry) -> Unit)? = null
     var onLongPressStarted: ((ZoomableImageView) -> Unit)? = null
     var onLongPressEnded: ((ZoomableImageView) -> Unit)? = null
     var onPinchToOverview: (() -> Unit)? = null
@@ -104,21 +104,22 @@ class ZoomableImageView @JvmOverloads constructor(
         mGestureDetector = GestureDetector(context, GestureListener())
         matrixValue = Matrix()
         imageMatrix = Matrix(matrixValue)
-        notifyMatrixChanged()
+        notifyDisplayGeometryChanged()
         scaleType = ScaleType.MATRIX
         clipToOutline = true
         outlineProvider = object : android.view.ViewOutlineProvider() {
             override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
                 // Smoothly interpolate between card shape and full screen
-                val t = ((saveScale - 1.0f) / OUTLINE_TRANSITION_RANGE).coerceIn(0f, 1f)
-
-                val left = (redundancyX * (1f - t)).toInt()
-                val top = (redundancyY * (1f - t)).toInt()
-                val right = (view.width - (redundancyX * (1f - t))).toInt()
-                val bottom = (view.height - (redundancyY * (1f - t))).toInt()
-                val radius = visualCornerRadius * (1f - t)
-
-                outline.setRoundRect(left, top, right, bottom, radius)
+                val t = outlineTransitionFraction()
+                val insetX = outlineInsetX(t)
+                val insetY = outlineInsetY(t)
+                outline.setRoundRect(
+                    insetX,
+                    insetY,
+                    outlineWidth() - insetX,
+                    outlineHeight() - insetY,
+                    outlineRadiusFor(t)
+                )
             }
         }
     }
@@ -169,7 +170,7 @@ class ZoomableImageView @JvmOverloads constructor(
 
         imageMatrix = Matrix(matrixValue)
         invalidate()
-        notifyMatrixChanged()
+        notifyDisplayGeometryChanged()
 
         // Handle ViewPager2 conflict: Intercept if zoomed in
         if (saveScale > 1f) {
@@ -252,7 +253,7 @@ class ZoomableImageView @JvmOverloads constructor(
             fixTrans()
             imageMatrix = Matrix(matrixValue)
             invalidate()
-            notifyMatrixChanged()
+            notifyDisplayGeometryChanged()
             invalidateOutline()
         }
         animator.addListener(object : android.animation.AnimatorListenerAdapter() {
@@ -295,13 +296,63 @@ class ZoomableImageView @JvmOverloads constructor(
         } else delta
     }
 
-    private fun notifyMatrixChanged() {
-        val drawable = drawable ?: return
-        matrixRect.set(0f, 0f, drawable.intrinsicWidth.toFloat(), drawable.intrinsicHeight.toFloat())
-        matrixValue.mapRect(matrixRect)
-        matrixRect.intersect(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
+    /**
+     * 构建当前图像的完整几何快照。
+     * [contentRect] 保留超出视口的完整映射边界，视频纹理只有使用该矩形才能与图像保持等比同步；
+     * [visibleRect] 才承担视口裁切职责，供浮动控件定位。
+     */
+    fun currentDisplayGeometry(): ImageDisplayGeometry? {
+        val drawable = drawable ?: return null
+        if (viewWidth <= 0 || viewHeight <= 0) return null
+        val intrinsicWidth = drawable.intrinsicWidth.toFloat()
+        val intrinsicHeight = drawable.intrinsicHeight.toFloat()
+        if (intrinsicWidth <= 0f || intrinsicHeight <= 0f) return null
 
-        onMatrixChanged?.invoke(matrixRect)
+        val contentRect = RectF(0f, 0f, intrinsicWidth, intrinsicHeight)
+        matrixValue.mapRect(contentRect)
+
+        val visibleRect = RectF(contentRect)
+        visibleRect.intersect(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
+
+        val t = outlineTransitionFraction()
+        val outlineRect = RectF()
+        computeOutlineRect(outlineRect, t)
+
+        return ImageDisplayGeometry(
+            contentRect = contentRect,
+            visibleRect = visibleRect,
+            outlineRect = outlineRect,
+            outlineRadius = outlineRadiusFor(t)
+        )
+    }
+
+    private fun notifyDisplayGeometryChanged() {
+        val geometry = currentDisplayGeometry() ?: return
+        onDisplayGeometryChanged?.invoke(geometry)
+    }
+
+    private fun outlineTransitionFraction(): Float =
+        ((saveScale - 1.0f) / OUTLINE_TRANSITION_RANGE).coerceIn(0f, 1f)
+
+    private fun outlineRadiusFor(t: Float): Float = visualCornerRadius * (1f - t)
+
+    private fun outlineInsetX(t: Float): Int = (redundancyX * (1f - t)).toInt()
+
+    private fun outlineInsetY(t: Float): Int = (redundancyY * (1f - t)).toInt()
+
+    private fun outlineWidth(): Int = viewWidth.takeIf { it > 0 } ?: width
+
+    private fun outlineHeight(): Int = viewHeight.takeIf { it > 0 } ?: height
+
+    private fun computeOutlineRect(target: RectF, t: Float) {
+        val insetX = outlineInsetX(t)
+        val insetY = outlineInsetY(t)
+        target.set(
+            insetX.toFloat(),
+            insetY.toFloat(),
+            (outlineWidth() - insetX).toFloat(),
+            (outlineHeight() - insetY).toFloat()
+        )
     }
 
     fun resetZoom() {
@@ -338,7 +389,7 @@ class ZoomableImageView @JvmOverloads constructor(
 
         imageMatrix = Matrix(this.matrixValue)
         invalidate()
-        notifyMatrixChanged()
+        notifyDisplayGeometryChanged()
         invalidateOutline()
         onZoomChanged?.invoke(saveScale > 1f)
     }
@@ -433,7 +484,7 @@ class ZoomableImageView @JvmOverloads constructor(
         fixTrans()
         imageMatrix = Matrix(matrixValue)
         invalidate()
-        notifyMatrixChanged()
+        notifyDisplayGeometryChanged()
         invalidateOutline()
     }
 
@@ -460,6 +511,6 @@ class ZoomableImageView @JvmOverloads constructor(
         origWidth = viewWidth - 2 * redundancyX
         origHeight = viewHeight - 2 * redundancyY
         imageMatrix = Matrix(matrixValue)
-        notifyMatrixChanged()
+        notifyDisplayGeometryChanged()
     }
 }
