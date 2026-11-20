@@ -347,10 +347,14 @@ internal class LutGlShaderPipeline {
             float log10_f(float x) { return log(max(x, 1e-7)) * 0.4342944819; }
 
             vec3 applyPbrNeutral(vec3 color) {
-                const float startCompression = 0.8 - 0.04;
+                // Photographic black floor (see ColorPipe.cpp): 0.003 floor, 0.012 threshold, and a
+                // shoulder entry coupled to the offset so highlight range is not eaten twice.
+                const float kBlackOffset = 0.003;
+                const float kBlackThreshold = 4.0 * kBlackOffset;
+                const float startCompression = 0.8 - kBlackOffset;
                 const float desaturation = 0.15;
                 float x = min(color.r, min(color.g, color.b));
-                color -= (x < 0.08 ? x - 6.25 * x * x : 0.04);
+                color -= (x < kBlackThreshold ? 0.5 * x - 20.8333 * x * x : kBlackOffset);
                 float peak = max(color.r, max(color.g, color.b));
                 if (peak < startCompression) return max(vec3(0.0), color);
                 const float d = 1.0 - startCompression;
@@ -360,47 +364,74 @@ internal class LutGlShaderPipeline {
                 return clamp(mix(color, vec3(newPeak), g), 0.0, 1.0);
             }
 
-            float filmicLumaCurve(float Y) {
-                if (Y <= 0.0) return 0.0;
-                return clamp((Y * (2.35 * Y + 0.02)) / (Y * (2.35 * Y + 0.70) + 0.12), 0.0, 1.0);
-            }
-
-            vec3 applyPureLuma(vec3 c) {
-                float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
-                if (luma <= 0.00001) return vec3(0.0);
-                float mappedLuma = filmicLumaCurve(luma);
-                vec3 outCol = c * (mappedLuma / luma);
-                if (mappedLuma > 0.85) {
-                    float t = (mappedLuma - 0.85) / 0.15;
-                    outCol = vec3(mappedLuma) + (outCol - vec3(mappedLuma)) * (1.0 - (t * t * (3.0 - 2.0 * t)) * 0.5);
+            // Natural Filmic (AgX-style inset -> per-channel curve -> outset), see ColorPipe.cpp.
+            // Matrices are built inside the function: GLSL ES rejects a global `const mat3`
+            // whose initializer is a constructor call.
+            vec3 applyNaturalFilmic(vec3 c) {
+                mat3 inset = mat3(
+                    vec3(0.8566271533, 0.1373189729, 0.1118982130),
+                    vec3(0.0951212405, 0.7612419906, 0.0767994186),
+                    vec3(0.0482516061, 0.1014390365, 0.8113023684));
+                mat3 outset = mat3(
+                    vec3(1.1974410769, -0.1964746263, -0.1465574171),
+                    vec3(-0.1442615127, 1.3540951315, -0.1082840588),
+                    vec3(-0.0531795642, -0.1576205051, 1.2548414759));
+                vec3 v = inset * max(c, vec3(0.0));
+                // f(x) = N / (N + 1), N = x * (A*x + B).
+                vec3 n = v * (2.3134378 * v + 0.8030934);
+                vec3 mapped = n / (n + vec3(1.0));
+                vec3 outRgb = outset * mapped;
+                // Scale by 1/peak so the peak lands exactly on 1.0 instead of clipping the
+                // dominant channel; origin-anchored, so hue and channel ratios survive.
+                float peak = max(outRgb.r, max(outRgb.g, outRgb.b));
+                if (peak > 1.0) {
+                    outRgb *= 1.0 / peak;
                 }
-                return clamp(outCol, 0.0, 1.0);
+                return clamp(outRgb, 0.0, 1.0);
             }
 
-            float uchimuraScalar(float x) {
+            float uchimuraScalar(float x, float gain) {
                 if (x <= 0.0) return 0.0;
                 const float P = 1.0, a = 1.25, m = 0.22, l = 0.40, c = 1.33, b = 0.0;
                 const float l0 = ((P - m) * l) / a, S0 = m + l0, S1 = m + a * l0;
-                const float CP = -((a * P) / (P - S1)) / P;
+                // Gain-aware shoulder, matching ColorPipe.cpp and GpuColorPipeShader.h.
+                float CP = -((a * P) / (P - S1)) / (P * max(1.0, gain * 0.75));
                 if (x <= m) return m * pow(x / m, c) + b;
                 if (x < m + l0) return m + a * (x - m);
                 return P - (P - S1) * exp(CP * (x - S0));
             }
 
-            vec3 applySonyUchimura(vec3 c) {
+            vec3 applySonyUchimura(vec3 c, float gain) {
                 float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
-                if (luma <= 0.00001) return vec3(0.0);
-                float mappedLuma = uchimuraScalar(luma);
-                vec3 outCol = c * (mappedLuma / luma);
-                if (mappedLuma > 0.85) {
-                    float t = (mappedLuma - 0.85) / 0.15;
-                    outCol = vec3(mappedLuma) + (outCol - vec3(mappedLuma)) * (1.0 - (t * t * (3.0 - 2.0 * t)) * 0.5);
-                }
-                return clamp(outCol, 0.0, 1.0);
+                float peak = max(c.r, max(c.g, c.b));
+                if (peak <= 0.00001) return vec3(0.0);
+                float mappedLuma = uchimuraScalar(luma, gain);
+                float mappedPeak = uchimuraScalar(peak, gain);
+                // Bound the scale by the peak channel's own mapping (see ColorPipe.cpp):
+                // luma-only scaling overshoots 1.0 on saturated colours and hard-clips.
+                float lumaScale = (luma > 1e-5) ? (mappedLuma / luma) : 1.0;
+                float peakScale = mappedPeak / peak;
+                vec3 outCol = c * min(lumaScale, peakScale);
+                // Compression-driven highlight desaturation, replacing the hard 0.85 ramp.
+                float compression = max(0.0, peak - mappedPeak);
+                float desat = 1.0 - 1.0 / (0.20 * compression + 1.0);
+                float outLuma = 0.2126 * outCol.r + 0.7152 * outCol.g + 0.0722 * outCol.b;
+                float targetWhite = max(outLuma, mappedPeak);
+                return clamp(mix(outCol, vec3(targetWhite), desat), 0.0, 1.0);
             }
 
             vec3 applyAcesFit(vec3 v) {
                 return clamp((v * (2.51 * v + 0.03)) / (v * (2.43 * v + 0.59) + 0.14), 0.0, 1.0);
+            }
+
+            // Subtractive colour density (see ColorPipe.cpp). Ships at 0.0 until A/B decides.
+            const float kColorDensityReduction = 0.0;
+            vec3 applySubtractiveDensity(vec3 c, float reduction) {
+                float peak = max(c.r, max(c.g, c.b));
+                float trough = min(c.r, min(c.g, c.b));
+                if (peak <= 1e-4) return c;
+                float chroma = (peak - trough) / peak;
+                return c * (1.0 - reduction * chroma * chroma);
             }
 
             float applyLogCurve(float x, int type) {
@@ -447,8 +478,12 @@ internal class LutGlShaderPipeline {
                     finalRgb = triangularDither(logRgb, gl_FragCoord.xy);
                 } else {
                     vec3 mapped = uColorEngineMode == 0 ? applyPbrNeutral(linearRgb)
-                        : (uColorEngineMode == 1 ? applyPureLuma(linearRgb)
-                        : (uColorEngineMode == 2 ? applySonyUchimura(linearRgb) : applyAcesFit(linearRgb)));
+                        : (uColorEngineMode == 1 ? applyNaturalFilmic(linearRgb)
+                        : (uColorEngineMode == 2 ? applySonyUchimura(linearRgb, uPreviewGain) : applyAcesFit(linearRgb)));
+                    // Subtractive density: Sony engine only, after the tone map (see ColorPipe.cpp).
+                    if (uColorEngineMode == 2 && kColorDensityReduction > 0.0) {
+                        mapped = applySubtractiveDensity(mapped, kColorDensityReduction);
+                    }
                     finalRgb = triangularDither(linearToSrgb(mapped), gl_FragCoord.xy);
                 }
                 if (uFocusPeakingEnabled == 1) {
