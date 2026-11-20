@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <iostream>
 #include <memory>
+#include "color/WhiteBalanceEngine.h"
 
 // --- File Writers ---
 struct ImageMetadata {

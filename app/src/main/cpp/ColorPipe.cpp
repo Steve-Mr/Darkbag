@@ -2190,85 +2190,6 @@ bool parse_dng_gainmap_opcodes(
     return (outRows > 1 && outCols > 1 && !outMap.empty());
 }
 
-struct RobertsonRow {
-    float r, u, v, t;
-};
-
-static const RobertsonRow kRobertsonTable[31] = {
-    {0.0f, 0.18006f, 0.26352f, -0.24341f},
-    {10.0f, 0.18066f, 0.26589f, -0.25479f},
-    {20.0f, 0.18133f, 0.26846f, -0.26876f},
-    {30.0f, 0.18208f, 0.27119f, -0.28539f},
-    {40.0f, 0.18293f, 0.27407f, -0.30470f},
-    {50.0f, 0.18388f, 0.27709f, -0.32675f},
-    {60.0f, 0.18494f, 0.28021f, -0.35156f},
-    {70.0f, 0.18611f, 0.28342f, -0.37915f},
-    {80.0f, 0.18740f, 0.28668f, -0.40955f},
-    {90.0f, 0.18880f, 0.28997f, -0.44278f},
-    {100.0f, 0.19032f, 0.29326f, -0.47888f},
-    {125.0f, 0.19462f, 0.30141f, -0.58204f},
-    {150.0f, 0.19962f, 0.30921f, -0.70471f},
-    {175.0f, 0.20525f, 0.31647f, -0.84901f},
-    {200.0f, 0.21142f, 0.32312f, -1.0182f},
-    {225.0f, 0.21807f, 0.32909f, -1.2168f},
-    {250.0f, 0.22511f, 0.33439f, -1.4512f},
-    {275.0f, 0.23247f, 0.33904f, -1.7298f},
-    {300.0f, 0.24010f, 0.34308f, -2.0637f},
-    {325.0f, 0.24702f, 0.34655f, -2.4681f},
-    {350.0f, 0.25591f, 0.34951f, -2.9641f},
-    {375.0f, 0.26400f, 0.35200f, -3.5814f},
-    {400.0f, 0.27218f, 0.35407f, -4.3633f},
-    {425.0f, 0.28039f, 0.35577f, -5.3762f},
-    {450.0f, 0.28863f, 0.35714f, -6.7262f},
-    {475.0f, 0.29685f, 0.35821f, -8.4955f},
-    {500.0f, 0.30505f, 0.35903f, -10.841f},
-    {525.0f, 0.31320f, 0.35961f, -13.994f},
-    {550.0f, 0.32129f, 0.35998f, -18.285f},
-    {575.0f, 0.32931f, 0.36017f, -24.222f},
-    {600.0f, 0.33724f, 0.36020f, -32.613f}
-};
-
-static float robertson_xy_to_temp(float x, float y) {
-    float denom = 1.5f - x + 6.0f * y;
-    if (std::abs(denom) < 1e-6f) return 6500.0f;
-    float u = 2.0f * x / denom;
-    float v = 3.0f * y / denom;
-    float lastDt = 0.0f;
-    for (int i = 1; i < 31; ++i) {
-        const auto& row = kRobertsonTable[i];
-        float dv0 = row.t;
-        float len = std::sqrt(1.0f + dv0 * dv0);
-        float du = 1.0f / len;
-        float dv = dv0 / len;
-        float uu = u - row.u;
-        float vv = v - row.v;
-        float dt = -uu * dv + vv * du;
-        if (dt <= 0.0f || i == 30) {
-            if (dt > 0.0f) dt = 0.0f;
-            dt = -dt;
-            float f = (i == 1) ? 0.0f : (dt / std::max(1e-6f, lastDt + dt));
-            float r = kRobertsonTable[i - 1].r * f + row.r * (1.0f - f);
-            return (r > 1e-4f) ? (1e6f / r) : 6500.0f;
-        }
-        lastDt = dt;
-    }
-    return 6500.0f;
-}
-
-static float illuminant_to_temp(int illuminant) {
-    switch (illuminant) {
-        case 17:
-        case 3:  return 2856.0f;
-        case 21: return 6504.0f;
-        case 20: return 5500.0f;
-        case 22: return 7500.0f;
-        case 1:
-        case 4:  return 5500.0f;
-        case 2:  return 4000.0f;
-        default: return (illuminant == 17) ? 2856.0f : 6504.0f;
-    }
-}
-
 bool compute_render_ccm(
     const float* forwardMatrix1,
     const float* forwardMatrix2,
@@ -2280,103 +2201,17 @@ bool compute_render_ccm(
     const float* wb,
     float* outCcm
 ) {
-    if (!outCcm) return false;
-    float fmMag = 0.0f;
-    if (forwardMatrix1) {
-        for (int i = 0; i < 9; ++i) fmMag += std::abs(forwardMatrix1[i]);
-    }
-    if (!forwardMatrix1 || fmMag < 1e-4f) {
-        std::fill(outCcm, outCcm + 9, 0.0f);
-        outCcm[0] = 1.0f; outCcm[4] = 1.0f; outCcm[8] = 1.0f;
-        return false;
-    }
-    const float* fm1 = forwardMatrix1;
-    const float* fm2 = forwardMatrix2 ? forwardMatrix2 : forwardMatrix1;
-
-    float t1 = illuminant_to_temp(calibIllum1);
-    float t2 = illuminant_to_temp(calibIllum2);
-    float m1 = 1e6f / t1;
-    float m2 = 1e6f / t2;
-
-    float weight = 1.0f;
-    if (colorMatrix1 && colorMatrix2) {
-        float neutral[3] = {1.0f, 1.0f, 1.0f};
-        if (neutralColorPoint) {
-            neutral[0] = neutralColorPoint[0];
-            neutral[1] = neutralColorPoint[1];
-            neutral[2] = neutralColorPoint[2];
-        } else if (wb) {
-            neutral[0] = (wb[0] > 1e-4f) ? (1.0f / wb[0]) : 1.0f;
-            neutral[1] = (wb[1] > 1e-4f) ? (1.0f / wb[1]) : 1.0f;
-            neutral[2] = (wb[3] > 1e-4f) ? (1.0f / wb[3]) : 1.0f;
-        }
-
-        float lastX = 0.34567f;
-        float lastY = 0.35850f;
-        bool iterSuccess = true;
-
-        for (int pass = 0; pass < 10; ++pass) {
-            float temp = robertson_xy_to_temp(lastX, lastY);
-            float g = (std::abs(m1 - m2) > 1e-4f) ? std::clamp((1e6f / temp - m2) / (m1 - m2), 0.0f, 1.0f) : 1.0f;
-            Matrix3x3 cm;
-            for (int i = 0; i < 9; ++i) cm.m[i] = g * colorMatrix1[i] + (1.0f - g) * colorMatrix2[i];
-            Matrix3x3 invCm = invert(cm);
-
-            float xX = invCm.m[0] * neutral[0] + invCm.m[1] * neutral[1] + invCm.m[2] * neutral[2];
-            float xY = invCm.m[3] * neutral[0] + invCm.m[4] * neutral[1] + invCm.m[5] * neutral[2];
-            float xZ = invCm.m[6] * neutral[0] + invCm.m[7] * neutral[1] + invCm.m[8] * neutral[2];
-
-            float sum = xX + xY + xZ;
-            if (std::abs(sum) < 1e-6f) { iterSuccess = false; break; }
-
-            float rawNextX = xX / sum;
-            float rawNextY = xY / sum;
-            float nextX = 0.5f * lastX + 0.5f * rawNextX;
-            float nextY = 0.5f * lastY + 0.5f * rawNextY;
-
-            if (std::abs(nextX - lastX) + std::abs(nextY - lastY) < 1e-7f) {
-                lastX = nextX;
-                lastY = nextY;
-                break;
-            }
-            lastX = nextX;
-            lastY = nextY;
-        }
-
-        if (iterSuccess) {
-            float finalT = robertson_xy_to_temp(lastX, lastY);
-            weight = (std::abs(m1 - m2) > 1e-4f) ? std::clamp((1e6f / finalT - m2) / (m1 - m2), 0.0f, 1.0f) : 1.0f;
-        }
-    } else {
-        float wbR = (neutralColorPoint && neutralColorPoint[0] > 1e-4f) ? neutralColorPoint[0] : (wb && wb[0] > 1e-4f ? 1.0f / wb[0] : 1.0f);
-        float wbB = (neutralColorPoint && neutralColorPoint[2] > 1e-4f) ? neutralColorPoint[2] : (wb && wb[3] > 1e-4f ? 1.0f / wb[3] : 1.0f);
-        float ratio = wbB / std::max(wbR, 1e-4f);
-        float cct = 2000.0f + ratio * 3500.0f;
-        float mCur = 1e6f / std::clamp(cct, 2000.0f, 10000.0f);
-        weight = (std::abs(m1 - m2) > 1e-4f) ? std::clamp((mCur - m2) / (m1 - m2), 0.0f, 1.0f) : 1.0f;
-    }
-
-    Matrix3x3 interpFm;
-    for (int i = 0; i < 9; ++i) {
-        interpFm.m[i] = weight * fm1[i] + (1.0f - weight) * fm2[i];
-    }
-
-    static const float M_XYZ_D50_TO_SRGB[9] = {
-        3.1338561f, -1.6168667f, -0.4906146f,
-       -0.9787684f,  1.9161415f,  0.0334540f,
-        0.0719453f, -0.2289914f,  1.4052427f
-    };
-
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-            float sum = 0.0f;
-            for (int k = 0; k < 3; ++k) {
-                sum += M_XYZ_D50_TO_SRGB[r * 3 + k] * interpFm.m[k * 3 + c];
-            }
-            outCcm[r * 3 + c] = sum;
-        }
-    }
-    return true;
+    return darkbag::color::compute_render_ccm(
+        forwardMatrix1,
+        forwardMatrix2,
+        colorMatrix1,
+        colorMatrix2,
+        calibIllum1,
+        calibIllum2,
+        neutralColorPoint,
+        wb,
+        outCcm
+    );
 }
 
 static std::vector<uint8_t> build_dng_warp_opcodes(

@@ -396,15 +396,37 @@ internal class FastRelayCaptureStrategy(
                 }
             }
 
-            val awbGains = primaryCaptureResult?.get(CaptureResult.COLOR_CORRECTION_GAINS)
-            val awbTransform = primaryCaptureResult?.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)
-            if (awbGains != null && awbTransform != null) {
-                set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
-                set(CaptureRequest.COLOR_CORRECTION_GAINS, awbGains)
-                set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, awbTransform)
-            } else {
-                set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
-            }
+            // Multi-camera relay: Keep secondary camera on CONTROL_AWB_MODE_AUTO for HAL stability (Section 3.7).
+            // Cross-sensor gains must never be blindly copied across different CMOS CFA responses.
+            set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
         }
+    }
+
+    /**
+     * Cross-camera CIE xy neutral point anchor helper (Section 3.7).
+     * Maps primary sensor neutral to secondary sensor domain via device-independent CIE xy space.
+     */
+    fun anchorSecondaryNeutralViaCieXy(
+        primaryNeutral: FloatArray,
+        primaryCm1: FloatArray,
+        primaryCm2: FloatArray?,
+        primaryIllum1: Int,
+        primaryIllum2: Int,
+        secondaryCm1: FloatArray,
+        secondaryCm2: FloatArray?,
+        secondaryIllum1: Int,
+        secondaryIllum2: Int
+    ): Pair<FloatArray, FloatArray>? {
+        return top.maary.darkbag.processor.SensorCalibrationHelper.mapNeutralAcrossCameras(
+            mainNeutral = primaryNeutral,
+            mainCm1 = primaryCm1,
+            mainCm2 = primaryCm2,
+            mainIllum1 = primaryIllum1,
+            mainIllum2 = primaryIllum2,
+            subCm1 = secondaryCm1,
+            subCm2 = secondaryCm2,
+            subIllum1 = secondaryIllum1,
+            subIllum2 = secondaryIllum2
+        )
     }
 }

@@ -227,9 +227,59 @@ class SensorCalibrationTest {
     fun testNullForwardMatrix_ReturnsNull() {
         val renderCcm = SensorCalibrationHelper.computeRenderCcm(
             forwardMatrix1 = null,
-            forwardMatrix2 = null
+            forwardMatrix2 = null,
+            colorMatrix1 = null
         )
-        assertNull("renderCcm must be null when ForwardMatrix is not available", renderCcm)
+        assertNull("renderCcm must be null when neither ForwardMatrix nor ColorMatrix is available", renderCcm)
+    }
+
+    @Test
+    fun testNullForwardMatrix_WithColorMatrix_UsesCat16Fallback() {
+        val neutralD65 = floatArrayOf(0.3815246f, 1.0f, 0.7913494f)
+        val renderCcm = SensorCalibrationHelper.computeRenderCcm(
+            forwardMatrix1 = null,
+            forwardMatrix2 = null,
+            calibrationIlluminant1 = 21,
+            calibrationIlluminant2 = 17,
+            neutralColorPoint = neutralD65,
+            colorMatrix1 = sampleCm1,
+            colorMatrix2 = sampleCm2
+        )
+        assertNotNull("renderCcm must use CAT16 fallback when ColorMatrix1 is available", renderCcm)
+
+        val neutralInput = floatArrayOf(1.0f, 1.0f, 1.0f)
+        val neutralOutput = multiplyMatrix3x3WithVec3(renderCcm!!, neutralInput)
+
+        assertEquals("Red channel must preserve neutral gray within 1e-4 on CAT16 fallback", 1.0f, neutralOutput[0], 0.0001f)
+        assertEquals("Green channel must preserve neutral gray within 1e-4 on CAT16 fallback", 1.0f, neutralOutput[1], 0.0001f)
+        assertEquals("Blue channel must preserve neutral gray within 1e-4 on CAT16 fallback", 1.0f, neutralOutput[2], 0.0001f)
+    }
+
+    @Test
+    fun testRowNormalization_PerturbedForwardMatrixHeals() {
+        // Artificially perturb FM1 rows by +3% to simulate sensor calibration float rounding deviation
+        val perturbedFm1 = sampleFm1.copyOf().apply {
+            this[0] *= 1.03f; this[1] *= 1.03f; this[2] *= 1.03f
+            this[3] *= 0.98f; this[4] *= 0.98f; this[5] *= 0.98f
+        }
+        val neutralD65 = floatArrayOf(0.3815246f, 1.0f, 0.7913494f)
+        val renderCcm = SensorCalibrationHelper.computeRenderCcm(
+            forwardMatrix1 = perturbedFm1,
+            forwardMatrix2 = sampleFm2,
+            calibrationIlluminant1 = 21,
+            calibrationIlluminant2 = 17,
+            neutralColorPoint = neutralD65,
+            colorMatrix1 = sampleCm1,
+            colorMatrix2 = sampleCm2
+        )
+        assertNotNull(renderCcm)
+
+        val neutralInput = floatArrayOf(1.0f, 1.0f, 1.0f)
+        val neutralOutput = multiplyMatrix3x3WithVec3(renderCcm!!, neutralInput)
+
+        assertEquals("Row normalization must heal perturbed FM to exactly 1.0 on Red", 1.0f, neutralOutput[0], 0.0001f)
+        assertEquals("Row normalization must heal perturbed FM to exactly 1.0 on Green", 1.0f, neutralOutput[1], 0.0001f)
+        assertEquals("Row normalization must heal perturbed FM to exactly 1.0 on Blue", 1.0f, neutralOutput[2], 0.0001f)
     }
 
     @Test

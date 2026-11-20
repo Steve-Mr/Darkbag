@@ -282,6 +282,17 @@ bool GpuRcdComputeEngine::demosaicFromBayerTextureLocked(
     float blB  = blackLevel ? static_cast<float>(blackLevel[3]) : 64.0f;
     float wl   = static_cast<float>(whiteLevel > 0 ? whiteLevel : 1023);
 
+    float wR = 1.0f, wG = 1.0f, wB = 1.0f;
+    if (whiteBalance) {
+        float gR = whiteBalance[0];
+        float gG = 0.5f * (whiteBalance[1] + whiteBalance[2]);
+        if (gG <= 1e-4f) gG = 1.0f;
+        float gB = whiteBalance[3];
+        wR = std::clamp(gR / gG, 0.25f, 8.0f);
+        wG = 1.0f;
+        wB = std::clamp(gB / gG, 0.25f, 8.0f);
+    }
+
     int numGroupsX = (width + kRcdWorkgroupSizeX - 1) / kRcdWorkgroupSizeX;
     int numGroupsY = (height + kRcdWorkgroupSizeY - 1) / kRcdWorkgroupSizeY;
 
@@ -292,6 +303,7 @@ bool GpuRcdComputeEngine::demosaicFromBayerTextureLocked(
     glUniform1i(glGetUniformLocation(programPassA_, "uCfaPattern"), cfaPattern);
     glUniform4f(glGetUniformLocation(programPassA_, "uBlackLevel"), blR, blG0, blG1, blB);
     glUniform1f(glGetUniformLocation(programPassA_, "uWhiteLevel"), wl);
+    glUniform3f(glGetUniformLocation(programPassA_, "uWbScale"), wR, wG, wB);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, inputBayerTex);
@@ -313,6 +325,7 @@ bool GpuRcdComputeEngine::demosaicFromBayerTextureLocked(
     glUniform1i(glGetUniformLocation(programPassB_, "uCfaPattern"), cfaPattern);
     glUniform4f(glGetUniformLocation(programPassB_, "uBlackLevel"), blR, blG0, blG1, blB);
     glUniform1f(glGetUniformLocation(programPassB_, "uWhiteLevel"), wl);
+    glUniform3f(glGetUniformLocation(programPassB_, "uWbScale"), wR, wG, wB);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, inputBayerTex);

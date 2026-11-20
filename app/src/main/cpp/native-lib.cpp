@@ -11,6 +11,7 @@
 #include <android/bitmap.h>
 #include <libraw/libraw.h>
 #include "ColorPipe.h"
+#include "color/WhiteBalanceEngine.h"
 #include "demosaic/RcdDemosaic.h"
 #include "gpu/GpuColorPipeEngine.h"
 
@@ -338,18 +339,15 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
              cfaPattern, bl_array[0], bl_array[1], bl_array[2], bl_array[3], wl);
 
         std::vector<float> wbVec(4, 1.0f);
+        float canonicalNeutral[3] = {1.0f, 1.0f, 1.0f};
         const float* asn = RawProcessor.imgdata.color.dng_levels.asshotneutral;
-        if (asn[0] > 1e-4f && asn[1] > 1e-4f && asn[2] > 1e-4f) {
-            wbVec[0] = 1.0f / asn[0];
-            wbVec[1] = 1.0f / asn[1];
-            wbVec[2] = 1.0f / asn[1];
-            wbVec[3] = 1.0f / asn[2];
-        } else if (RawProcessor.imgdata.color.cam_mul[0] > 1e-4f) {
-            wbVec[0] = RawProcessor.imgdata.color.cam_mul[0];
-            wbVec[1] = RawProcessor.imgdata.color.cam_mul[1];
-            wbVec[2] = RawProcessor.imgdata.color.cam_mul[1];
-            wbVec[3] = RawProcessor.imgdata.color.cam_mul[2];
-        }
+        float camMul[4] = {
+            static_cast<float>(RawProcessor.imgdata.color.cam_mul[0]),
+            static_cast<float>(RawProcessor.imgdata.color.cam_mul[1]),
+            static_cast<float>(RawProcessor.imgdata.color.cam_mul[1]),
+            static_cast<float>(RawProcessor.imgdata.color.cam_mul[2])
+        };
+        darkbag::color::resolve_canonical_wb(asn, camMul, wbVec.data(), canonicalNeutral);
 
         std::vector<float> lensShadingVec;
         const float* lens_shading_ptr = nullptr;
@@ -389,7 +387,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         compute_render_ccm(
             fm1, fm2, cm1, cm2,
             illum1 ? illum1 : 21, illum2 ? illum2 : 17,
-            asn, wbVec.data(), ccmVec.data()
+            canonicalNeutral, wbVec.data(), ccmVec.data()
         );
 
         std::vector<uint16_t> planarRgb(static_cast<size_t>(width) * height * 3);
@@ -400,7 +398,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
             cfaPattern,
             bl_array,
             wl,
-            nullptr, // apply WB in ColorPipe after LSC
+            wbVec.data(), // Internal temporary WB guidance
             planarRgb.data()
         );
 
