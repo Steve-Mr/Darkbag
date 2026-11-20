@@ -210,8 +210,12 @@ class CameraControllerHub(
         )
     }
 
-    override fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder) =
+    override fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder) {
         streamController.applyFocusAndExposureSettingsToRequest(builder, false)
+        // Multi-camera preview also feeds the same LUT processor, so it needs the 1B tone map
+        // policy too; without it that mode would keep the double tone curve.
+        streamController.applyPreviewToneMapPolicy(builder)
+    }
 
     override fun handleCaptureResult(result: TotalCaptureResult) =
         streamController.handleCaptureResult(result)
@@ -499,7 +503,8 @@ class CameraControllerHub(
                 evRange = snapshot.evRange,
                 isRawSupported = snapshot.isRawSupported,
                 isOisSupported = snapshot.isOisSupported,
-                isHdrOisEnabledPref = snapshot.isHdrOisEnabledPref
+                isHdrOisEnabledPref = snapshot.isHdrOisEnabledPref,
+                isPresetCurveToneMapSupported = snapshot.isPresetCurveToneMapSupported
             )
 
             withContext(Dispatchers.Main) {

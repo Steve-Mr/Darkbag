@@ -91,6 +91,10 @@ interface CameraCoordinatorHost {
     fun bindCameraUseCases()
     fun applyCameraControls()
     fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean = false)
+    /**
+     * Applies 3A settings to a *preview* request. Implementations also apply preview-only
+     * overrides such as the tone map policy, so this must never be used for still captures.
+     */
     fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder)
     fun handleCaptureResult(result: TotalCaptureResult)
     fun getCombinedOrientation(): Int

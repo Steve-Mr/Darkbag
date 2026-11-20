@@ -36,6 +36,8 @@ class CameraRuntimeStateHolder {
     @Volatile var isRawSupported: Boolean = false
     @Volatile var isOisSupported: Boolean = false
     @Volatile var isHdrOisEnabledPref: Boolean = true
+    /** Device advertises TONEMAP_MODE_PRESET_CURVE; gates the preview 1B tone map bypass. */
+    @Volatile var isPresetCurveToneMapSupported: Boolean = false
 
     // 3A Manual Control State
     @Volatile var isManualFocus: Boolean = false
@@ -116,7 +118,8 @@ class CameraRuntimeStateHolder {
         evRange: Range<Int>?,
         isRawSupported: Boolean,
         isOisSupported: Boolean,
-        isHdrOisEnabledPref: Boolean
+        isHdrOisEnabledPref: Boolean,
+        isPresetCurveToneMapSupported: Boolean
     ) {
         this.isoRange = isoRange
         this.exposureTimeRange = exposureTimeRange
@@ -125,6 +128,7 @@ class CameraRuntimeStateHolder {
         this.isRawSupported = isRawSupported
         this.isOisSupported = isOisSupported
         this.isHdrOisEnabledPref = isHdrOisEnabledPref
+        this.isPresetCurveToneMapSupported = isPresetCurveToneMapSupported
         isoRange?.let { currentIso = currentIso.coerceIn(it.lower, it.upper) }
         exposureTimeRange?.let { currentExposureTime = currentExposureTime.coerceIn(it.lower, it.upper) }
     }
