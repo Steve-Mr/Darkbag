@@ -5,7 +5,10 @@ import java.nio.ByteBuffer
 
 object RawVideoNative {
     init {
-        System.loadLibrary("native-lib")
+        try {
+            System.loadLibrary("native-lib")
+        } catch (_: UnsatisfiedLinkError) {
+        }
     }
 
     const val CFA_RGGB = 0
@@ -193,6 +196,23 @@ object RawVideoNative {
         exposure: Float,
         contrast: Float,
         saturation: Float
+    ): Boolean
+
+    external fun nativeSubsampleBayer4x4(
+        srcBuffer: ByteBuffer,
+        srcWidth: Int,
+        srcHeight: Int,
+        srcRowStride: Int,
+        dstBuffer: ByteBuffer
+    ): Int
+
+    external fun nativeComputeAdaptiveColorMatrix(
+        neutralPoint: FloatArray,
+        forwardMatrix1: FloatArray?,
+        forwardMatrix2: FloatArray?,
+        calibIllum1: Int,
+        calibIllum2: Int,
+        outColMajor: FloatArray
     ): Boolean
 
     fun readHeader(handle: Long): Header? {

@@ -134,6 +134,56 @@ void BayerProcessor::bayer2x2BinningNEON(
     }
 }
 
+void BayerProcessor::bayer4x4SubsampleNEON(
+    const uint8_t* srcBytes,
+    uint32_t srcWidth,
+    uint32_t srcHeight,
+    uint32_t srcRowStrideBytes,
+    uint16_t* dst
+) {
+    if (!srcBytes || !dst || srcWidth < 8 || srcHeight < 8) {
+        return;
+    }
+
+    const uint32_t dstWidth = ((srcWidth / 4) & ~1u);
+    const uint32_t dstHeight = ((srcHeight / 4) & ~1u);
+    const uint32_t numQuadsY = dstHeight / 2;
+    const uint32_t numQuadsX = dstWidth / 2;
+
+    #if defined(_OPENMP)
+    #pragma omp parallel for schedule(static)
+    #endif
+    for (uint32_t qy = 0; qy < numQuadsY; ++qy) {
+        uint32_t srcY = 8 * qy;
+        if (srcY + 3 >= srcHeight) continue;
+
+        const auto* r0 = reinterpret_cast<const uint16_t*>(srcBytes + (srcY + 0) * srcRowStrideBytes);
+        const auto* r1 = reinterpret_cast<const uint16_t*>(srcBytes + (srcY + 1) * srcRowStrideBytes);
+        const auto* r2 = reinterpret_cast<const uint16_t*>(srcBytes + (srcY + 2) * srcRowStrideBytes);
+        const auto* r3 = reinterpret_cast<const uint16_t*>(srcBytes + (srcY + 3) * srcRowStrideBytes);
+
+        uint16_t* outRow0 = dst + (2 * qy + 0) * dstWidth;
+        uint16_t* outRow1 = dst + (2 * qy + 1) * dstWidth;
+
+        for (uint32_t qx = 0; qx < numQuadsX; ++qx) {
+            uint32_t srcX = 8 * qx;
+            uint32_t dstX = 2 * qx;
+
+            if (srcX + 3 < srcWidth && dstX + 1 < dstWidth) {
+                uint32_t c0 = (static_cast<uint32_t>(r0[srcX])     + r0[srcX + 2] + r2[srcX]     + r2[srcX + 2] + 2) / 4;
+                uint32_t c1 = (static_cast<uint32_t>(r0[srcX + 1]) + r0[srcX + 3] + r2[srcX + 1] + r2[srcX + 3] + 2) / 4;
+                uint32_t c2 = (static_cast<uint32_t>(r1[srcX])     + r1[srcX + 2] + r3[srcX]     + r3[srcX + 2] + 2) / 4;
+                uint32_t c3 = (static_cast<uint32_t>(r1[srcX + 1]) + r1[srcX + 3] + r3[srcX + 1] + r3[srcX + 3] + 2) / 4;
+
+                outRow0[dstX]     = static_cast<uint16_t>(c0);
+                outRow0[dstX + 1] = static_cast<uint16_t>(c1);
+                outRow1[dstX]     = static_cast<uint16_t>(c2);
+                outRow1[dstX + 1] = static_cast<uint16_t>(c3);
+            }
+        }
+    }
+}
+
 void BayerProcessor::cropBayer16(
     const uint8_t* srcBytes,
     uint32_t srcWidth,

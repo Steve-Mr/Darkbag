@@ -107,6 +107,7 @@ interface CameraCoordinatorHost {
     fun handleCaptureResult(result: TotalCaptureResult)
     fun getCombinedOrientation(): Int
     fun updateMotionPhotoEncoder()
+    fun setRawMotionPhotoTargetEnabled(enabled: Boolean) {}
     fun triggerAutoBurst()
     fun onCaptureModeCycled(modeChanged: Boolean)
     fun readScopedHalfFrameState(requireFileForStep1: Boolean = false)

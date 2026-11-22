@@ -10,6 +10,7 @@ import top.maary.darkbag.R
 import top.maary.darkbag.motionphoto.MotionPhotoEncoder
 import top.maary.darkbag.motionphoto.MotionPhotoStillTimestampSlot
 import top.maary.darkbag.motionphoto.MotionPhotoTimebase
+import top.maary.darkbag.motionphoto.RawMotionPhotoRelay
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import java.io.File
@@ -30,6 +31,20 @@ class CameraMotionPhotoController(
 
     private val settingsRepository by lazy { SettingsRepository.getInstance(env.hostContext) }
 
+    private val rawMotionRelay by lazy {
+        RawMotionPhotoRelay(
+            lutSurfaceProcessorProvider = { env.sessionArbiter.lutProcessor },
+            characteristicsProvider = {
+                val cameraId = env.sessionArbiter.sessionController.cameraDevice?.id
+                    ?: env.runtimeState.currentToneMapCameraId
+                    ?: env.runtimeState.currentLens?.id
+                if (cameraId != null) {
+                    top.maary.darkbag.utils.CameraRepository.getCharacteristics(env.camera2Manager, cameraId)
+                } else null
+            }
+        )
+    }
+
     /** Re-reads preferences and starts/stops the encoder + LUT encoder surface accordingly. */
     fun updateEncoder() {
         if (!env.isHostAdded) return
@@ -39,6 +54,9 @@ class CameraMotionPhotoController(
         val isAudioEnabled = snapshot.motionPhotoAudioEnabled &&
             ContextCompat.checkSelfPermission(env.hostContext, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
+
+        val isRawMotion = isEnabled && snapshot.expRawMotionPhoto &&
+            coordinator.effectiveCaptureMode.supportsMotionPhoto && env.runtimeState.isRawSupported
 
         if (isEnabled && coordinator.effectiveCaptureMode.supportsMotionPhoto) {
             val current = encoder
@@ -54,6 +72,17 @@ class CameraMotionPhotoController(
                 current.updateAudioEnabled(isAudioEnabled)
             }
             env.sessionArbiter.lutProcessor?.setEncoderSurface(encoder?.surface, ENCODER_WIDTH, ENCODER_HEIGHT)
+
+            if (isRawMotion) {
+                rawMotionRelay.start()
+                env.sessionArbiter.lutProcessor?.setRawMotionEnabled(true)
+                coordinator.setRawMotionPhotoTargetEnabled(true)
+                env.sessionArbiter.rawFrameRouter?.rawMotionTap = { img, res ->
+                    rawMotionRelay.onRawFrame(img, res)
+                }
+            } else {
+                stopRawMotion()
+            }
         } else {
             release()
         }
@@ -62,9 +91,17 @@ class CameraMotionPhotoController(
 
     /** Detaches the encoder surface from the LUT processor and stops the encoder. */
     fun release() {
+        stopRawMotion()
         env.sessionArbiter.lutProcessor?.setEncoderSurface(null, 0, 0)
         encoder?.stop()
         encoder = null
+    }
+
+    private fun stopRawMotion() {
+        rawMotionRelay.stop()
+        env.sessionArbiter.rawFrameRouter?.rawMotionTap = null
+        env.sessionArbiter.lutProcessor?.setRawMotionEnabled(false)
+        coordinator.setRawMotionPhotoTargetEnabled(false)
     }
 
     fun updateButton() {

@@ -1839,6 +1839,16 @@
                                 app:bentoSwitchBadge="AWB"
                                 app:bentoSwitchBadgeStyle="secondary" />
 
+                            <!-- switch_exp_raw_motion_photo -->
+                            <top.maary.darkbag.ui.bento.BentoSwitchTile
+                                android:id="@+id/switch_exp_raw_motion_photo"
+                                android:layout_width="match_parent"
+                                android:layout_height="48dp"
+                                android:layout_marginBottom="8dp"
+                                app:bentoSwitchTitle="@string/pref_exp_raw_motion_photo"
+                                app:bentoSwitchBadge="RAW"
+                                app:bentoSwitchBadgeStyle="tertiary" />
+
                             <!-- btn_open_lens_calibration -->
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btn_open_lens_calibration"

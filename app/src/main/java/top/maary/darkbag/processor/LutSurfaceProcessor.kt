@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
+import java.nio.ByteBuffer
 
 /**
  * EGL lifecycle, background GL thread, and dual-surface (Viewfinder + MediaCodec Encoder)
@@ -57,6 +58,14 @@ class LutSurfaceProcessor {
 
     @Volatile private var isFocusPeakingEnabled = false
     @Volatile private var previewGain = 1.0f
+    @Volatile private var previewInputDomain = 0
+
+    @Volatile private var rawMotionEnabled = false
+    @Volatile private var lastRawFrameNs = 0L
+
+    private var rawBayerTextureId = 0
+    private var currentRawTexWidth = 0
+    private var currentRawTexHeight = 0
 
     init {
         thread.start()
@@ -73,6 +82,16 @@ class LutSurfaceProcessor {
     /** Viewfinder-only gain used to compensate HDR+ ZSL underexposure. */
     fun setPreviewGain(gain: Float) {
         previewGain = gain.coerceIn(1.0f, 4.0f)
+    }
+
+    fun setPreviewInputDomain(domain: Int) {
+        handler.post {
+            previewInputDomain = domain
+        }
+    }
+
+    fun setRawMotionEnabled(enabled: Boolean) {
+        rawMotionEnabled = enabled
     }
 
     fun updateColorEngineMode(engineMode: Int) {
@@ -254,6 +273,83 @@ class LutSurfaceProcessor {
         }
     }
 
+    private fun uploadRawBayerTexture(buffer: ByteBuffer, w: Int, h: Int) {
+        if (rawBayerTextureId == 0) {
+            val textures = IntArray(1)
+            GLES30.glGenTextures(1, textures, 0)
+            rawBayerTextureId = textures[0]
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, rawBayerTextureId)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        } else {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, rawBayerTextureId)
+        }
+
+        buffer.position(0)
+        if (currentRawTexWidth != w || currentRawTexHeight != h) {
+            GLES30.glTexImage2D(
+                GLES30.GL_TEXTURE_2D, 0, GLES30.GL_R16UI,
+                w, h, 0,
+                GLES30.GL_RED_INTEGER, GLES30.GL_UNSIGNED_SHORT, buffer
+            )
+            currentRawTexWidth = w
+            currentRawTexHeight = h
+        } else {
+            GLES30.glTexSubImage2D(
+                GLES30.GL_TEXTURE_2D, 0, 0, 0,
+                w, h,
+                GLES30.GL_RED_INTEGER, GLES30.GL_UNSIGNED_SHORT, buffer
+            )
+        }
+    }
+
+    fun submitRawMotionFrame(
+        bayerBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        cfaPattern: Int,
+        blackLevel: FloatArray,
+        whiteLevel: Float,
+        wbGains: FloatArray,
+        dngCcm: FloatArray,
+        timestampNs: Long
+    ) {
+        if (!rawMotionEnabled) return
+        handler.post {
+            if (!rawMotionEnabled) return@post
+            if (isEncoderActive && encoderEglSurface != EGL14.EGL_NO_SURFACE && encoderWidth > 0 && encoderHeight > 0) {
+                uploadRawBayerTexture(bayerBuffer, width, height)
+                EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
+                shaderPipeline.setPreviewGain(previewGain)
+                shaderPipeline.drawRawFrame(
+                    targetWidth = encoderWidth,
+                    targetHeight = encoderHeight,
+                    rawWidth = width,
+                    rawHeight = height,
+                    rawBayerTextureId = rawBayerTextureId,
+                    cfaPattern = cfaPattern,
+                    blackLevel = blackLevel,
+                    whiteLevel = whiteLevel,
+                    wbGains = wbGains,
+                    dngCcm = dngCcm,
+                    currentLutSize = currentLutSize,
+                    currentLogType = currentLogType,
+                    currentGamutMatrix = currentGamutMatrix,
+                    currentColorEngineMode = currentColorEngineMode
+                )
+                EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, timestampNs)
+                EGL14.eglSwapBuffers(eglDisplay, encoderEglSurface)
+                lastRawFrameNs = System.nanoTime()
+
+                if (eglSurface != EGL14.EGL_NO_SURFACE) {
+                    EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+                }
+            }
+        }
+    }
+
     private fun drawFrame() {
         if (eglSurface == EGL14.EGL_NO_SURFACE || inputSurfaceTexture == null) return
 
@@ -273,12 +369,14 @@ class LutSurfaceProcessor {
             currentGamutMatrix = currentGamutMatrix,
             currentColorEngineMode = currentColorEngineMode,
             focusPeakingEnabled = isFocusPeakingEnabled,
-            currentWbPreviewMatrix = currentWbPreviewMatrix
+            currentWbPreviewMatrix = currentWbPreviewMatrix,
+            previewInputDomain = previewInputDomain
         )
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
 
         // Branch 2: Render to MediaCodec Encoder Surface for Motion Photo (never bake focus peaking lines)
-        if (isEncoderActive && encoderEglSurface != EGL14.EGL_NO_SURFACE && encoderWidth > 0 && encoderHeight > 0) {
+        val isRawActive = rawMotionEnabled && ((System.nanoTime() - lastRawFrameNs) < 1_500_000_000L)
+        if (!isRawActive && isEncoderActive && encoderEglSurface != EGL14.EGL_NO_SURFACE && encoderWidth > 0 && encoderHeight > 0) {
             EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
             // Match the viewfinder gain: HDR+ ZSL physically underexposes the sensor, so a
             // 1.0 encoder gain would record a dark Motion Photo. Focus peaking stays off.
@@ -295,7 +393,8 @@ class LutSurfaceProcessor {
                 currentGamutMatrix = currentGamutMatrix,
                 currentColorEngineMode = currentColorEngineMode,
                 focusPeakingEnabled = false,
-                currentWbPreviewMatrix = currentWbPreviewMatrix
+                currentWbPreviewMatrix = currentWbPreviewMatrix,
+                previewInputDomain = previewInputDomain
             )
             val frameTimestampNs = System.nanoTime()
             EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, frameTimestampNs)
@@ -320,6 +419,13 @@ class LutSurfaceProcessor {
             inputTextureId = 0
         }
 
+        if (rawBayerTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(rawBayerTextureId), 0)
+            rawBayerTextureId = 0
+        }
+        currentRawTexWidth = 0
+        currentRawTexHeight = 0
+
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
             EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
             if (encoderEglSurface != EGL14.EGL_NO_SURFACE) {
@@ -335,6 +441,7 @@ class LutSurfaceProcessor {
         eglSurface = EGL14.EGL_NO_SURFACE
         encoderEglSurface = EGL14.EGL_NO_SURFACE
         isEncoderActive = false
+        rawMotionEnabled = false
     }
 
     companion object {

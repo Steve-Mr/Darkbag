@@ -547,6 +547,8 @@
     <string name="pref_cache_category">Cache &amp; Storage Management</string>
     <string name="pref_force_60fps">Force 60fps Viewfinder Preview</string>
     <string name="pref_exp_multicam_color_harmonization_title">Multi-Camera Color Harmonization</string>
+    <string name="pref_exp_raw_motion_photo">RAW Sensor Motion Photo</string>
+    <string name="pref_exp_raw_motion_photo_summary">Process Motion Photo directly from RAW sensor stream instead of ISP preview</string>
     <string name="dialog_reset_storage_title">Reset Storage Directory</string>
     <string name="dialog_reset_storage_jpg_message">Reset custom JPEG storage back to default (Pictures/Darkbag)?</string>
     <string name="dialog_reset_storage_raw_message">Reset custom RAW storage back to default (Pictures/Darkbag)?</string>

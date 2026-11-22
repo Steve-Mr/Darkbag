@@ -183,6 +183,7 @@ class SettingsRepository(context: Context) {
             onboardingCompleted = bool(PreferenceKeys.KEY_ONBOARDING_COMPLETED, false),
             expFocusPeaking = bool(PreferenceKeys.KEY_EXP_FOCUS_PEAKING, false),
             expMultiCamColorHarmonization = bool(PreferenceKeys.KEY_EXP_MULTICAM_COLOR_HARMONIZATION, true),
+            expRawMotionPhoto = bool(PreferenceKeys.KEY_EXP_RAW_MOTION_PHOTO, false),
             focusPeakingActive = bool(PreferenceKeys.KEY_FOCUS_PEAKING_ACTIVE, true),
             colorEngineMode = int(PreferenceKeys.KEY_COLOR_ENGINE_MODE, 2),
             wbStrategy = int(PreferenceKeys.KEY_WB_STRATEGY, PreferenceKeys.WB_STRATEGY_AMBIENCE),
@@ -564,6 +565,10 @@ class SettingsRepository(context: Context) {
 
     fun setExpMultiCamColorHarmonization(enabled: Boolean) {
         edit { this[PreferenceKeys.EXP_MULTICAM_COLOR_HARMONIZATION] = enabled }
+    }
+
+    fun setExpRawMotionPhoto(enabled: Boolean) {
+        edit { this[PreferenceKeys.EXP_RAW_MOTION_PHOTO] = enabled }
     }
 
     @VisibleForTesting

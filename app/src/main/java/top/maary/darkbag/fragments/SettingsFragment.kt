@@ -419,6 +419,10 @@ class SettingsFragment : Fragment() {
             if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
             settingsViewModel.updateExpMultiCamColorHarmonization(isChecked)
         }
+        binding.switchExpRawMotionPhoto.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateExpRawMotionPhoto(isChecked)
+        }
 
         binding.toggleUiTiers.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (bentoDelegate.isRendering) return@addOnButtonCheckedListener

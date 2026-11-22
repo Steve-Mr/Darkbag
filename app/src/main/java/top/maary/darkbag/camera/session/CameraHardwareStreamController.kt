@@ -57,6 +57,7 @@ class CameraHardwareStreamController(
         get() = env.sessionArbiter.camera2Lock
 
     @Volatile private var zslRawTargetEnabled = false
+    @Volatile private var rawMotionPhotoTargetEnabled = false
     @Volatile private var zslPreviewProfileEnabled = false
     @Volatile private var zslAeCompensationSteps = 0
     @Volatile private var zslFpsRange: Range<Int>? = null
@@ -124,6 +125,7 @@ class CameraHardwareStreamController(
         state.tonemapMaxCurvePoints = tonemapMaxCurvePoints
         state.availableToneMapModes = availableToneMapModes
         state.currentToneMapCameraId = cameraId
+        env.sessionArbiter.lutProcessor?.setPreviewInputDomain(strategy.shaderInputDomain)
     }
 
     fun getTargetOisMode(isHdrBurst: Boolean): Int {
@@ -204,11 +206,10 @@ class CameraHardwareStreamController(
     }
 
     /**
-     * Preview-only 4-tier tone map policy:
-     * 1. [PreviewToneMapStrategy.PRESET_CURVE_SRGB] (`TONEMAP_MODE_PRESET_CURVE` + `SRGB`)
-     * 2. [PreviewToneMapStrategy.CONTRAST_CURVE_SRGB] (32-pt `t^2.2` sampled sRGB OETF `TonemapCurve`)
-     * 3. [PreviewToneMapStrategy.GAMMA_VALUE_22] (`TONEMAP_MODE_GAMMA_VALUE` + `2.2f`)
-     * 4. [PreviewToneMapStrategy.FAST_FALLBACK] (`TONEMAP_MODE_FAST`)
+     * Preview-only 3-tier deterministic tone map policy:
+     * 1. [PreviewToneMapStrategy.PRESET_CURVE_SRGB] (`TONEMAP_MODE_PRESET_CURVE` + `SRGB`, domain = 0)
+     * 2. [PreviewToneMapStrategy.GAMMA_VALUE_22] (`TONEMAP_MODE_GAMMA_VALUE` + `2.2f`, domain = 2)
+     * 3. [PreviewToneMapStrategy.FAST_INVERSE_ISP] (`TONEMAP_MODE_FAST`, domain = 1)
      *
      * Only applied when `isPreviewStream == true` (requests targeting a viewfinder/preview surface);
      * still captures (`TEMPLATE_STILL_CAPTURE`) keep `TONEMAP_MODE_FAST`.
@@ -226,6 +227,7 @@ class CameraHardwareStreamController(
         if (applied != requested) {
             state.previewToneMapStrategy = applied
         }
+        env.sessionArbiter.lutProcessor?.setPreviewInputDomain(applied.shaderInputDomain)
         val cameraId = state.currentToneMapCameraId ?: state.currentLens?.id ?: "unknown"
         val logKey = "$cameraId:${applied.name}"
         if (lastLoggedToneMapKey != logKey) {
@@ -252,6 +254,13 @@ class CameraHardwareStreamController(
     fun setZslRawTargetEnabled(enabled: Boolean) {
         if (zslRawTargetEnabled == enabled) return
         zslRawTargetEnabled = enabled
+        updateCamera2RepeatingRequest()
+    }
+
+    /** Adds/removes the RAW motion photo target without recreating the capture session. */
+    fun setRawMotionPhotoTargetEnabled(enabled: Boolean) {
+        if (rawMotionPhotoTargetEnabled == enabled) return
+        rawMotionPhotoTargetEnabled = enabled
         updateCamera2RepeatingRequest()
     }
 
@@ -287,7 +296,7 @@ class CameraHardwareStreamController(
             try {
                 val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                 request.addTarget(surface)
-                if (zslRawTargetEnabled) {
+                if ((zslRawTargetEnabled || rawMotionPhotoTargetEnabled) && env.runtimeState.isRawSupported) {
                     env.sessionArbiter.rawImageReader?.surface?.let { request.addTarget(it) }
                 }
                 val shouldArmAnalysis = env.runtimeState.isManualExposure || env.isHdrPlusEnabled || env.settings.current().zslEnabled
@@ -571,7 +580,7 @@ class CameraHardwareStreamController(
                                 try {
                                     val previewRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                                     surface?.let { previewRequest.addTarget(it) }
-                                    if (zslRawTargetEnabled) {
+                                    if ((zslRawTargetEnabled || rawMotionPhotoTargetEnabled) && env.runtimeState.isRawSupported) {
                                         env.sessionArbiter.rawImageReader?.surface?.let { previewRequest.addTarget(it) }
                                     }
 

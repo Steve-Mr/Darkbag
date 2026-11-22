@@ -521,6 +521,8 @@
     <string name="pref_cache_category">缓存与存储管理</string>
     <string name="pref_force_60fps">强制 60fps 取景</string>
     <string name="pref_exp_multicam_color_harmonization_title">多摄色彩一致性</string>
+    <string name="pref_exp_raw_motion_photo">RAW 传感器动态照片</string>
+    <string name="pref_exp_raw_motion_photo_summary">动态照片直接从 RAW 传感器流处理，跳过 ISP 预览</string>
     <string name="pref_hdr_fusion_mode_title">HDR+ 融合算法引擎</string>
     <string name="pref_hdr_fusion_mode_helper">自动模式：1.0x 使用 Spatial+RCD，变焦（≥1.25x）启用 Sabre 超分</string>
     <string name="dialog_reset_storage_title">重置存储目录</string>

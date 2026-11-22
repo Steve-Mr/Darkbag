@@ -305,6 +305,7 @@ class SettingsBentoDelegate(
         binding.switchUseInternalViewer.isChecked = state.useInternalViewer
         binding.switchForce60fps.isChecked = state.force60Fps
         binding.switchExpMulticamColorHarmonization.isChecked = state.expMultiCamColorHarmonization
+        binding.switchExpRawMotionPhoto.isChecked = state.expRawMotionPhoto
         binding.switchZsl.isChecked = state.zslEnabled
         binding.switchZslAdaptive.isChecked = state.zslAdaptive
         binding.switchZslLazyRing.isChecked = state.zslLazyRing

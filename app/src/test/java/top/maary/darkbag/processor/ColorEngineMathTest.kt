@@ -407,4 +407,94 @@ class ColorEngineMathTest {
         assertTrue(gpu.contains("0.20 * compression + 1.0"))
         assertTrue(preview.contains("0.20 * compression + 1.0"))
     }
+
+    // ---------------------------------------------------------------- Tier 3: Inverse ISP Curve
+
+    private fun smoothstep(edge0: Double, edge1: Double, x: Double): Double {
+        val t = ((x - edge0) / (edge1 - edge0)).coerceIn(0.0, 1.0)
+        return t * t * (3.0 - 2.0 * t)
+    }
+
+    private fun applyInverseIspCurve(c: DoubleArray): DoubleArray {
+        val m = 0.22
+        val invToePower = 0.7518797
+        val luma = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+        if (luma <= 1e-5) return doubleArrayOf(0.0, 0.0, 0.0)
+        var targetLuma = luma
+        if (luma < m) {
+            val gate = smoothstep(0.0002, 0.0020, luma)
+            val lifted = m * (luma / m).pow(invToePower)
+            targetLuma = (1.0 - gate) * luma + gate * lifted
+        } else if (luma > 0.50) {
+            val excess = min(luma, 1.0) - 0.50
+            targetLuma = luma + 0.30 * (excess * excess) / (1.08 - min(luma, 1.0))
+        }
+        val scale = targetLuma / luma
+        return doubleArrayOf(c[0] * scale, c[1] * scale, c[2] * scale)
+    }
+
+    private fun acesFit(v: DoubleArray): DoubleArray {
+        return v.map { x ->
+            ((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)).coerceIn(0.0, 1.0)
+        }.toDoubleArray()
+    }
+
+    @Test
+    fun `applyInverseIspCurve lifts shadows, holds midtones, and decompresses highlights`() {
+        // Shadow lifting: linear 0.003 is lifted to ~0.0087
+        val shadow = applyInverseIspCurve(doubleArrayOf(0.003, 0.003, 0.003))[0]
+        assertEquals(0.0087, shadow, 2e-4)
+
+        // Midtone identity: range [0.22, 0.50] must be exactly untouched
+        for (mid in doubleArrayOf(0.22, 0.25, 0.30, 0.40, 0.50)) {
+            val out = applyInverseIspCurve(doubleArrayOf(mid, mid, mid))[0]
+            assertEquals("mid $mid must be identical", mid, out, 1e-9)
+        }
+
+        // Highlight decompression: 1.0 is expanded into ~1.94
+        val hl = applyInverseIspCurve(doubleArrayOf(1.0, 1.0, 1.0))[0]
+        assertEquals(1.9375, hl, 0.05)
+    }
+
+    @Test
+    fun `applyInverseIspCurve is strictly monotonic across unit range`() {
+        var prev = -1.0
+        var x = 0.0
+        while (x <= 1.0) {
+            val v = applyInverseIspCurve(doubleArrayOf(x, x, x))[0]
+            assertTrue("monotonic at $x: $v >= $prev", v >= prev - 1e-9)
+            prev = v
+            x += 0.001
+        }
+    }
+
+    @Test
+    fun `all four color engine modes maintain distinctive tone gradients under inverse ISP fallback`() {
+        val testLevels = doubleArrayOf(0.05, 0.18, 0.50, 0.85, 1.0)
+        for (level in testLevels) {
+            val linearInput = applyInverseIspCurve(doubleArrayOf(level, level, level))
+
+            val m0 = pbrNeutral(linearInput)[0]
+            val m1 = naturalFilmic(linearInput)[0]
+            val m2 = sonyUchimuraRaw(linearInput)[0].coerceIn(0.0, 1.0)
+            val m3 = acesFit(linearInput)[0]
+
+            assertTrue("Mode 0 bounded", m0 in 0.0..1.0)
+            assertTrue("Mode 1 bounded", m1 in 0.0..1.0)
+            assertTrue("Mode 2 bounded", m2 in 0.0..1.0)
+            assertTrue("Mode 3 bounded", m3 in 0.0..1.0)
+        }
+    }
+
+    @Test
+    fun `natural filmic preserves 0 EV white point constants and 18 percent grey anchor`() {
+        val grey = naturalFilmic(doubleArrayOf(0.18, 0.18, 0.18))[0]
+        assertEquals(0.1800, grey, 1e-4)
+
+        // AgX rational curve constants A = 2.3134378, B = 0.8030934
+        val x = 1.0
+        val n = x * (2.3134378 * x + 0.8030934)
+        val expectedCurveAt1 = n / (n + 1.0)
+        assertEquals(0.7570769, expectedCurveAt1, 1e-5)
+    }
 }

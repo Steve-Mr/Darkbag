@@ -37,8 +37,8 @@ class CameraRuntimeStateHolder {
     @Volatile var isRawSupported: Boolean = false
     @Volatile var isOisSupported: Boolean = false
     @Volatile var isHdrOisEnabledPref: Boolean = true
-    /** Resolved 4-tier preview tone-map strategy for the active preview camera. */
-    @Volatile var previewToneMapStrategy: PreviewToneMapStrategy = PreviewToneMapStrategy.FAST_FALLBACK
+    /** Resolved 3-tier preview tone-map strategy for the active preview camera. */
+    @Volatile var previewToneMapStrategy: PreviewToneMapStrategy = PreviewToneMapStrategy.FAST_INVERSE_ISP
     @Volatile var tonemapMaxCurvePoints: Int = 0
     @Volatile var availableToneMapModes: IntArray? = null
     @Volatile var currentToneMapCameraId: String? = null
@@ -126,7 +126,7 @@ class CameraRuntimeStateHolder {
         isRawSupported: Boolean,
         isOisSupported: Boolean,
         isHdrOisEnabledPref: Boolean,
-        previewToneMapStrategy: PreviewToneMapStrategy = PreviewToneMapStrategy.FAST_FALLBACK,
+        previewToneMapStrategy: PreviewToneMapStrategy = PreviewToneMapStrategy.FAST_INVERSE_ISP,
         tonemapMaxCurvePoints: Int = 0,
         availableToneMapModes: IntArray? = null,
         currentToneMapCameraId: String? = null

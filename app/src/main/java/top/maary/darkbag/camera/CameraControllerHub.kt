@@ -238,6 +238,9 @@ class CameraControllerHub(
 
     override fun updateMotionPhotoEncoder() = motionPhotoController.updateEncoder()
 
+    override fun setRawMotionPhotoTargetEnabled(enabled: Boolean) =
+        streamController.setRawMotionPhotoTargetEnabled(enabled)
+
     override fun triggerAutoBurst() {
         val timing = StandardTimingTracker(
             shutterClick = System.currentTimeMillis(),

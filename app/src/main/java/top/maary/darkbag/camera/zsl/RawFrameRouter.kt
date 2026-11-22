@@ -76,6 +76,7 @@ class RawFrameRouter(
     private val captureGeneration = AtomicLong(0)
     @Volatile var droppedImages: Long = 0L
         private set
+    @Volatile var rawMotionTap: ((Image, TotalCaptureResult?) -> Unit)? = null
 
     private val listener = ImageReader.OnImageAvailableListener { r ->
         val currentMode = synchronized(lock) { state.mode }
@@ -88,6 +89,15 @@ class RawFrameRouter(
         if (image == null) {
             if (currentMode != RawRouterMode.IDLE) droppedImages++
             return@OnImageAvailableListener
+        }
+
+        val tap = rawMotionTap
+        if (image.format == ImageFormat.RAW_SENSOR && tap != null) {
+            try {
+                tap(image, resultLookup(image.timestamp))
+            } catch (e: Exception) {
+                Log.w(TAG, "rawMotionTap callback failed", e)
+            }
         }
 
         try {

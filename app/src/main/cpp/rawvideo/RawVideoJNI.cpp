@@ -11,6 +11,7 @@
 #include <android/native_window_jni.h>
 #include "RawVideoContainer.h"
 #include "RawVideoRecorder.h"
+#include "BayerProcessor.h"
 #include "RawVideoGLRenderer.h"
 #include "ColorMath.h"
 #include "../ColorPipe.h"
@@ -911,6 +912,93 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDestroyGLRenderer(
     if (renderer) {
         delete renderer;
     }
+}
+
+JNIEXPORT jint JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeSubsampleBayer4x4(
+        JNIEnv* env,
+        jobject /* thiz */,
+        jobject jSrcBuffer,
+        jint srcWidth,
+        jint srcHeight,
+        jint srcRowStride,
+        jobject jDstBuffer
+) {
+    if (!jSrcBuffer || !jDstBuffer || srcWidth < 8 || srcHeight < 8) return 0;
+
+    auto* srcBytes = static_cast<const uint8_t*>(env->GetDirectBufferAddress(jSrcBuffer));
+    auto* dstBytes = static_cast<uint8_t*>(env->GetDirectBufferAddress(jDstBuffer));
+    if (!srcBytes || !dstBytes) return 0;
+
+    uint32_t dstWidth = ((static_cast<uint32_t>(srcWidth) / 4) & ~1u);
+    uint32_t dstHeight = ((static_cast<uint32_t>(srcHeight) / 4) & ~1u);
+    const size_t requiredBytes = static_cast<size_t>(dstWidth) * dstHeight * sizeof(uint16_t);
+
+    jlong dstCapacity = env->GetDirectBufferCapacity(jDstBuffer);
+    if (dstCapacity < 0 || static_cast<size_t>(dstCapacity) < requiredBytes) {
+        LOGE("Destination buffer capacity %lld is insufficient for %zu bytes",
+             static_cast<long long>(dstCapacity), requiredBytes);
+        return 0;
+    }
+
+    BayerProcessor::bayer4x4SubsampleNEON(
+        srcBytes,
+        static_cast<uint32_t>(srcWidth),
+        static_cast<uint32_t>(srcHeight),
+        static_cast<uint32_t>(srcRowStride),
+        dstBytes
+    );
+
+    return (static_cast<jint>(dstWidth) << 16) | static_cast<jint>(dstHeight);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeComputeAdaptiveColorMatrix(
+        JNIEnv* env,
+        jobject /* thiz */,
+        jfloatArray jNeutralPoint,
+        jfloatArray jForwardMatrix1,
+        jfloatArray jForwardMatrix2,
+        jint illum1,
+        jint illum2,
+        jfloatArray jOutColMajor
+) {
+    if (!jOutColMajor || env->GetArrayLength(jOutColMajor) < 9) return JNI_FALSE;
+
+    float npVals[3] = {1.0f, 1.0f, 1.0f};
+    const float* npPtr = nullptr;
+    if (jNeutralPoint && env->GetArrayLength(jNeutralPoint) >= 3) {
+        env->GetFloatArrayRegion(jNeutralPoint, 0, 3, npVals);
+        npPtr = npVals;
+    }
+
+    float fm1Vals[9];
+    const float* fm1Ptr = nullptr;
+    if (jForwardMatrix1 && env->GetArrayLength(jForwardMatrix1) >= 9) {
+        env->GetFloatArrayRegion(jForwardMatrix1, 0, 9, fm1Vals);
+        fm1Ptr = fm1Vals;
+    }
+
+    float fm2Vals[9];
+    const float* fm2Ptr = nullptr;
+    if (jForwardMatrix2 && env->GetArrayLength(jForwardMatrix2) >= 9) {
+        env->GetFloatArrayRegion(jForwardMatrix2, 0, 9, fm2Vals);
+        fm2Ptr = fm2Vals;
+    }
+
+    float colMajor[9] = {1,0,0, 0,1,0, 0,0,1};
+    bool ok = darkbag::rawvideo::computeAdaptiveColorMatrix(
+        npPtr,
+        fm1Ptr,
+        fm2Ptr,
+        illum1,
+        illum2,
+        nullptr,
+        colMajor
+    );
+
+    env->SetFloatArrayRegion(jOutColMajor, 0, 9, colMajor);
+    return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 } // extern "C"
