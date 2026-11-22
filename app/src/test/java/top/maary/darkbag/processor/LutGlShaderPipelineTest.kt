@@ -70,13 +70,19 @@ class LutGlShaderPipelineTest {
     fun shaderSourcesContainExpectedGlsl300UniformsAndFunctions() {
         assertTrue(LutGlShaderPipeline.VERTEX_SHADER_SRC.contains("#version 300 es"))
         assertTrue(LutGlShaderPipeline.VERTEX_SHADER_SRC.contains("uTextureMatrix"))
+        assertTrue(LutGlShaderPipeline.PREVIEW_FRAGMENT_SHADER_SRC.contains("#version 300 es"))
+        assertTrue(LutGlShaderPipeline.PREVIEW_FRAGMENT_SHADER_SRC.contains("uniform sampler3D uLut;"))
+        assertTrue(LutGlShaderPipeline.PREVIEW_FRAGMENT_SHADER_SRC.contains("uniform int uFocusPeakingEnabled;"))
+        assertTrue(LutGlShaderPipeline.PREVIEW_FRAGMENT_SHADER_SRC.contains("uniform int uColorEngineMode;"))
+        assertTrue(LutGlShaderPipeline.PREVIEW_FRAGMENT_SHADER_SRC.contains("uniform mat3 uWbPreviewMatrix;"))
+        assertTrue(LutGlShaderPipeline.PREVIEW_FRAGMENT_SHADER_SRC.contains("applyLogCurve"))
+        assertTrue(LutGlShaderPipeline.PREVIEW_FRAGMENT_SHADER_SRC.contains("triangularDither"))
+        assertTrue(LutGlShaderPipeline.RAW_FRAGMENT_SHADER_SRC.contains("#version 300 es"))
+        assertTrue(LutGlShaderPipeline.RAW_FRAGMENT_SHADER_SRC.contains("uniform highp usampler2D uRawBayerTexture;"))
+        assertTrue(LutGlShaderPipeline.RAW_FRAGMENT_SHADER_SRC.contains("uniform ivec2 uRawImageSize;"))
+        assertTrue(LutGlShaderPipeline.RAW_FRAGMENT_SHADER_SRC.contains("applyLogCurve"))
+        assertTrue(LutGlShaderPipeline.RAW_FRAGMENT_SHADER_SRC.contains("triangularDither"))
         assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("#version 300 es"))
-        assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("uniform sampler3D uLut;"))
-        assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("uniform int uFocusPeakingEnabled;"))
-        assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("uniform int uColorEngineMode;"))
-        assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("uniform mat3 uWbPreviewMatrix;"))
-        assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("applyLogCurve"))
-        assertTrue(LutGlShaderPipeline.FRAGMENT_SHADER_SRC.contains("triangularDither"))
     }
 
     @Test
