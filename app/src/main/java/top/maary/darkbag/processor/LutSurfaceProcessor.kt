@@ -52,7 +52,7 @@ class LutSurfaceProcessor {
     private var inputHeight = 0
 
     private val transformMatrix = FloatArray(16)
-    private var currentColorEngineMode = 0
+    private var currentColorEngineMode = 2
     private var currentWbPreviewMatrix = LutGlShaderPipeline.IDENTITY_MATRIX_3X3.copyOf()
 
     @Volatile private var isFocusPeakingEnabled = false

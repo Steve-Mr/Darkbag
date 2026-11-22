@@ -145,6 +145,10 @@ class MultiCameraCaptureManager(
         get() = previewCtrl.previewRequestConfigProvider
         set(value) { previewCtrl.previewRequestConfigProvider = value }
 
+    var onPreviewDeviceChangedListener: ((String, CameraCharacteristics) -> Unit)?
+        get() = previewCtrl.onPreviewDeviceChangedListener
+        set(value) { previewCtrl.onPreviewDeviceChangedListener = value }
+
     val currentPrimaryLens: PhysicalLensInfo?
         get() = previewCtrl.currentPrimaryLens
 

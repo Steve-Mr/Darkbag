@@ -61,7 +61,7 @@ class ColorEngineMathTest {
         val safeScale = min(lumaScale, mappedPeak / peak)
         val scaled = c.map { it * safeScale }.toDoubleArray()
 
-        val compression = max(0.0, peak - mappedPeak)
+        val compression = if (peak > 0.22) max(0.0, peak - mappedPeak) else 0.0
         val desat = 1.0 - 1.0 / (0.20 * compression + 1.0)
         val outLuma = 0.2126 * scaled[0] + 0.7152 * scaled[1] + 0.0722 * scaled[2]
         val targetWhite = max(outLuma, mappedPeak)
@@ -113,6 +113,16 @@ class ColorEngineMathTest {
         assertEquals(raw[0], raw[1], 1e-9)
         assertEquals(raw[1], raw[2], 1e-9)
         assertEquals(0.16847, raw[0], 1e-3)
+    }
+
+    @Test
+    fun `uchimura toe region has zero desaturation and preserves RGB ratios`() {
+        // Peak = 0.10 <= 0.22 toe anchor: compression must be 0 so chroma ratios R:G:B stay exact.
+        val input = doubleArrayOf(0.10, 0.02, 0.01)
+        val raw = sonyUchimuraRaw(input)
+        assertEquals(input[0] / input[1], raw[0] / raw[1], 1e-9)
+        assertEquals(input[0] / input[2], raw[0] / raw[2], 1e-9)
+        assertEquals(input[1] / input[2], raw[1] / raw[2], 1e-9)
     }
 
     // ---------------------------------------------------------------- Mode 0: PBR Neutral
@@ -373,6 +383,9 @@ class ColorEngineMathTest {
             assertTrue("$name AgX curve A", src.contains("2.3134378"))
             assertTrue("$name AgX curve B", src.contains("0.8030934"))
             assertSonyCurveConstants(name, src)
+            assertTrue("$name PBR black floor", src.contains("0.003"))
+            assertTrue("$name PBR quadratic toe", src.contains("20.8333"))
+            assertTrue("$name PBR startCompression", Regex("""0\.8f?\s*-\s*kBlackOffset""").containsMatchIn(src))
             assertTrue("$name PBR desaturation", Regex("""desaturation\s*=\s*0\.15f?""").containsMatchIn(src))
             assertTrue("$name peak normalisation", Regex("""1\.0f?\s*/\s*peak""").containsMatchIn(src))
             assertTrue("$name shoulder gain factor", Regex("""gain\s*\*\s*0\.75""").containsMatchIn(src))
@@ -386,7 +399,10 @@ class ColorEngineMathTest {
             assertColumnsMatchRowMajor("$name outset", firstNumbers(src, "mat3 outset = mat3(", 9), outsetRowMajor)
         }
 
-        // Compression-driven desaturation must be identical in all three.
+        // Compression-driven desaturation and 0.22 toe anchor threshold must be identical in all three.
+        assertTrue(cpp.contains("peak > 0.22f"))
+        assertTrue(gpu.contains("peak > 0.22"))
+        assertTrue(preview.contains("peak > 0.22"))
         assertTrue(cpp.contains("0.20f * compression + 1.0f"))
         assertTrue(gpu.contains("0.20 * compression + 1.0"))
         assertTrue(preview.contains("0.20 * compression + 1.0"))

@@ -142,8 +142,8 @@ class CameraVideoController(
                     // 2. Lock Frame Duration
                     request.set(CaptureRequest.SENSOR_FRAME_DURATION, frameDurationNs)
 
-                    // 3. Apply manual exposure settings if active
-                    coordinator.applyManualSettingsToRequest(request)
+                    // 3. Apply manual exposure settings if active (and preview tone map for viewfinder surface)
+                    coordinator.applyManualSettingsToRequest(request, isPreviewStream = true)
 
                     // 4. Shutter speed safety clamp: in manual exposure mode, exposure time must NOT exceed frameDurationNs
                     if (env.runtimeState.isManualExposure) {
@@ -190,7 +190,7 @@ class CameraVideoController(
                     if (isMainLens) {
                         env.sessionArbiter.analysisImageReader?.surface?.let { request.addTarget(it) }
                     }
-                    coordinator.applyManualSettingsToRequest(request)
+                    coordinator.applyManualSettingsToRequest(request, isPreviewStream = true)
                     session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
                             coordinator.handleCaptureResult(result)

@@ -199,22 +199,32 @@ class CameraControllerHub(
         }
     }
 
-    override fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean) {
+    override fun applyManualSettingsToRequest(
+        request: CaptureRequest.Builder,
+        isHdrBurst: Boolean,
+        isPreviewStream: Boolean
+    ) {
         env.sessionArbiter.applyManualSettingsForActiveSession(
             applySingleCameraFull = {
-                streamController.applyManualSettingsToRequest(request, isHdrBurst)
+                streamController.applyManualSettingsToRequest(request, isHdrBurst, isPreviewStream)
             },
             applyFocusAndExposureOnly = {
-                streamController.applyFocusAndExposureSettingsToRequest(request, isHdrBurst)
+                streamController.applyFocusAndExposureSettingsToRequest(request, isHdrBurst, isPreviewStream)
             }
         )
     }
 
     override fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder) {
-        streamController.applyFocusAndExposureSettingsToRequest(builder, false)
-        // Multi-camera preview also feeds the same LUT processor, so it needs the 1B tone map
-        // policy too; without it that mode would keep the double tone curve.
-        streamController.applyPreviewToneMapPolicy(builder)
+        // Multi-camera preview also feeds the same LUT processor, so it needs the preview
+        // tone map policy too; without it that mode would keep the double tone curve.
+        streamController.applyFocusAndExposureSettingsToRequest(builder, isHdrBurst = false, isPreviewStream = true)
+    }
+
+    override fun updatePreviewToneMapPolicyForDevice(
+        deviceId: String,
+        chars: CameraCharacteristics
+    ) {
+        streamController.updateToneMapPolicyForCharacteristics(deviceId, chars)
     }
 
     override fun handleCaptureResult(result: TotalCaptureResult) =
@@ -504,7 +514,10 @@ class CameraControllerHub(
                 isRawSupported = snapshot.isRawSupported,
                 isOisSupported = snapshot.isOisSupported,
                 isHdrOisEnabledPref = snapshot.isHdrOisEnabledPref,
-                isPresetCurveToneMapSupported = snapshot.isPresetCurveToneMapSupported
+                previewToneMapStrategy = snapshot.previewToneMapStrategy,
+                tonemapMaxCurvePoints = snapshot.tonemapMaxCurvePoints,
+                availableToneMapModes = snapshot.availableToneMapModes,
+                currentToneMapCameraId = targetId
             )
 
             withContext(Dispatchers.Main) {

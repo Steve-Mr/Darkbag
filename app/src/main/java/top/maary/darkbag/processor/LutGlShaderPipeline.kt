@@ -412,8 +412,8 @@ internal class LutGlShaderPipeline {
                 float lumaScale = (luma > 1e-5) ? (mappedLuma / luma) : 1.0;
                 float peakScale = mappedPeak / peak;
                 vec3 outCol = c * min(lumaScale, peakScale);
-                // Compression-driven highlight desaturation, replacing the hard 0.85 ramp.
-                float compression = max(0.0, peak - mappedPeak);
+                // Compression-driven highlight desaturation above the 0.22 toe anchor.
+                float compression = (peak > 0.22) ? max(0.0, peak - mappedPeak) : 0.0;
                 float desat = 1.0 - 1.0 / (0.20 * compression + 1.0);
                 float outLuma = 0.2126 * outCol.r + 0.7152 * outCol.g + 0.0722 * outCol.b;
                 float targetWhite = max(outLuma, mappedPeak);

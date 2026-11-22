@@ -8,6 +8,7 @@ import android.util.Range
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import top.maary.darkbag.camera.session.PreviewToneMapStrategy
 import top.maary.darkbag.processor.HdrPlusRequestManager
 import top.maary.darkbag.processor.HdrPlusStreamingBurst
 import top.maary.darkbag.rawvideo.RawVideoSessionManager
@@ -36,8 +37,14 @@ class CameraRuntimeStateHolder {
     @Volatile var isRawSupported: Boolean = false
     @Volatile var isOisSupported: Boolean = false
     @Volatile var isHdrOisEnabledPref: Boolean = true
-    /** Device advertises TONEMAP_MODE_PRESET_CURVE; gates the preview 1B tone map bypass. */
-    @Volatile var isPresetCurveToneMapSupported: Boolean = false
+    /** Resolved 4-tier preview tone-map strategy for the active preview camera. */
+    @Volatile var previewToneMapStrategy: PreviewToneMapStrategy = PreviewToneMapStrategy.FAST_FALLBACK
+    @Volatile var tonemapMaxCurvePoints: Int = 0
+    @Volatile var availableToneMapModes: IntArray? = null
+    @Volatile var currentToneMapCameraId: String? = null
+    /** Derived compatibility flag: true when [previewToneMapStrategy] is [PreviewToneMapStrategy.PRESET_CURVE_SRGB]. */
+    val isPresetCurveToneMapSupported: Boolean
+        get() = previewToneMapStrategy == PreviewToneMapStrategy.PRESET_CURVE_SRGB
 
     // 3A Manual Control State
     @Volatile var isManualFocus: Boolean = false
@@ -119,7 +126,10 @@ class CameraRuntimeStateHolder {
         isRawSupported: Boolean,
         isOisSupported: Boolean,
         isHdrOisEnabledPref: Boolean,
-        isPresetCurveToneMapSupported: Boolean
+        previewToneMapStrategy: PreviewToneMapStrategy = PreviewToneMapStrategy.FAST_FALLBACK,
+        tonemapMaxCurvePoints: Int = 0,
+        availableToneMapModes: IntArray? = null,
+        currentToneMapCameraId: String? = null
     ) {
         this.isoRange = isoRange
         this.exposureTimeRange = exposureTimeRange
@@ -128,7 +138,10 @@ class CameraRuntimeStateHolder {
         this.isRawSupported = isRawSupported
         this.isOisSupported = isOisSupported
         this.isHdrOisEnabledPref = isHdrOisEnabledPref
-        this.isPresetCurveToneMapSupported = isPresetCurveToneMapSupported
+        this.previewToneMapStrategy = previewToneMapStrategy
+        this.tonemapMaxCurvePoints = tonemapMaxCurvePoints
+        this.availableToneMapModes = availableToneMapModes
+        this.currentToneMapCameraId = currentToneMapCameraId
         isoRange?.let { currentIso = currentIso.coerceIn(it.lower, it.upper) }
         exposureTimeRange?.let { currentExposureTime = currentExposureTime.coerceIn(it.lower, it.upper) }
     }

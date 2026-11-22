@@ -688,9 +688,8 @@ Vec3 apply_sony_uchimura(Vec3 c, float gain) {
     float safe_scale = std::min(luma_scale, peak_scale);
     Vec3 out = { c.r * safe_scale, c.g * safe_scale, c.b * safe_scale };
 
-    // Desaturate by how much the peak channel actually got compressed, replacing the old
-    // hard "mapped_luma > 0.85" ramp. Smooth and continuous across the shoulder entry.
-    float compression = std::max(0.0f, peak - mapped_peak);
+    // Desaturate by how much the peak channel actually got compressed above the 0.22 toe anchor.
+    float compression = (peak > 0.22f) ? std::max(0.0f, peak - mapped_peak) : 0.0f;
     float desat = 1.0f - 1.0f / (0.20f * compression + 1.0f);
     float out_luma = 0.2126f * out.r + 0.7152f * out.g + 0.0722f * out.b;
     float target_white = std::max(out_luma, mapped_peak);
@@ -1109,11 +1108,6 @@ bool process_and_save_image(
         return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
     };
     const float exp_gain = std::pow(2.0f, exposure);
-    // Align with GPU shader rawMax > 0.98 specification:
-    // Highlight desaturation protects against sensor highlight clipping/fringing in the raw white balance domain.
-    // It must remain independent of post-WB digital gain / exposure compensation to avoid erroneously desaturating midtones.
-    const float desat_threshold = 65535.0f * 0.95f;
-    const float theoretical_max = 65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f);
 
     struct LscWeight { int idx0, idx1; float w0, w1; };
     std::vector<LscWeight> lscX, lscY;
@@ -1188,22 +1182,6 @@ bool process_and_save_image(
             r *= wb[0];
             g *= wb[1];
             b *= wb[3];
-        }
-
-        // 2. Highlight Desaturation
-        // Multi-frame path only: this ramp is gain dependent and effectively inert
-        // at gain == 1, so the minimal path leaves highlight colour to the display
-        // transform (and to the point-wise neutralization applied after the clamp).
-        if (!faithfulHighlights) {
-            float max_rgb = std::max({r, g, b});
-            if (max_rgb > desat_threshold) {
-                float desat = std::clamp((max_rgb - desat_threshold) / std::max(1.0f, theoretical_max - desat_threshold), 0.0f, 1.0f);
-                desat = desat * desat * (3.0f - 2.0f * desat); // Smoothstep
-                float y_lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-                r = r * (1.0f - desat) + y_lum * desat;
-                g = g * (1.0f - desat) + y_lum * desat;
-                b = b * (1.0f - desat) + y_lum * desat;
-            }
         }
 
         r = std::min(r, 65535.0f);

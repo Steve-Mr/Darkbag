@@ -60,7 +60,7 @@ class CameraHardwareStreamController(
     @Volatile private var zslPreviewProfileEnabled = false
     @Volatile private var zslAeCompensationSteps = 0
     @Volatile private var zslFpsRange: Range<Int>? = null
-    @Volatile private var presetCurveLogged = false
+    @Volatile private var lastLoggedToneMapKey: String? = null
 
     data class CameraCharacteristicsSnapshot(
         val isoRange: android.util.Range<Int>?,
@@ -70,14 +70,13 @@ class CameraHardwareStreamController(
         val isRawSupported: Boolean,
         val isOisSupported: Boolean,
         val isHdrOisEnabledPref: Boolean,
-        /**
-         * True when the device advertises [CaptureRequest.TONEMAP_MODE_PRESET_CURVE], i.e. the preview
-         * stream can be switched to a standard sRGB OETF instead of the vendor S-curve
-         * (TONEMAP_MODE_FAST). Required by the Stage 0 viewfinder alignment (fix 1B); when false the
-         * pipeline falls back to the legacy FAST behaviour (fix 1A).
-         */
+        val previewToneMapStrategy: PreviewToneMapStrategy,
+        val tonemapMaxCurvePoints: Int,
+        val availableToneMapModes: IntArray?
+    ) {
         val isPresetCurveToneMapSupported: Boolean
-    )
+            get() = previewToneMapStrategy == PreviewToneMapStrategy.PRESET_CURVE_SRGB
+    }
 
     fun readCameraCharacteristics(targetId: String): CameraCharacteristicsSnapshot {
         val chars = CameraRepository.getCharacteristics(env.camera2Manager, targetId)
@@ -90,6 +89,12 @@ class CameraHardwareStreamController(
         env.runtimeState.calibrationIlluminant1 = (chars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21).toInt()
         env.runtimeState.calibrationIlluminant2 = (chars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2) ?: 17).toInt()
         val availableToneMapModes = chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
+        val tonemapMaxCurvePoints = chars.get(CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS) ?: 0
+        val previewToneMapStrategy = PreviewToneMapPolicy.resolvePreviewToneMapStrategy(
+            availableModes = availableToneMapModes,
+            maxCurvePoints = tonemapMaxCurvePoints
+        )
+        lastLoggedToneMapKey = null
         return CameraCharacteristicsSnapshot(
             isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE),
             exposureTimeRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE),
@@ -98,8 +103,27 @@ class CameraHardwareStreamController(
             isRawSupported = map?.getOutputFormats()?.contains(ImageFormat.RAW_SENSOR) == true,
             isOisSupported = availableOis != null && availableOis.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON),
             isHdrOisEnabledPref = SettingsRepository.getInstance(env.hostContext).current().hdrPlusOis,
-            isPresetCurveToneMapSupported = availableToneMapModes?.contains(CaptureRequest.TONEMAP_MODE_PRESET_CURVE) == true
+            previewToneMapStrategy = previewToneMapStrategy,
+            tonemapMaxCurvePoints = tonemapMaxCurvePoints,
+            availableToneMapModes = availableToneMapModes
         )
+    }
+
+    fun updateToneMapPolicyForCharacteristics(cameraId: String, chars: CameraCharacteristics) {
+        val availableToneMapModes = chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
+        val tonemapMaxCurvePoints = chars.get(CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS) ?: 0
+        val strategy = PreviewToneMapPolicy.resolvePreviewToneMapStrategy(
+            availableModes = availableToneMapModes,
+            maxCurvePoints = tonemapMaxCurvePoints
+        )
+        val state = env.runtimeState
+        if (state.currentToneMapCameraId != cameraId) {
+            lastLoggedToneMapKey = null
+        }
+        state.previewToneMapStrategy = strategy
+        state.tonemapMaxCurvePoints = tonemapMaxCurvePoints
+        state.availableToneMapModes = availableToneMapModes
+        state.currentToneMapCameraId = cameraId
     }
 
     fun getTargetOisMode(isHdrBurst: Boolean): Int {
@@ -121,7 +145,11 @@ class CameraHardwareStreamController(
         }
     }
 
-    fun applyFocusAndExposureSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean = false) {
+    fun applyFocusAndExposureSettingsToRequest(
+        request: CaptureRequest.Builder,
+        isHdrBurst: Boolean = false,
+        isPreviewStream: Boolean = false
+    ) {
         applyStabilizationToRequest(request, isHdrBurst)
 
         request.set(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_DISABLED)
@@ -169,44 +197,54 @@ class CameraHardwareStreamController(
                 request.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(MeteringRectangle(0, 0, 0, 0, 0)))
             }
         }
-    }
 
-    /**
-     * Stage 0 / fix 1B: preview-only tone map policy.
-     *
-     * The viewfinder path hands an already tone-curve-encoded stream to
-     * `LutGlShaderPipeline`, which then applies a ColorEngine on top — a second tone curve. When the
-     * device advertises [CaptureRequest.TONEMAP_MODE_PRESET_CURVE] we ask the ISP for the plain sRGB
-     * OETF instead of the vendor look curve, so the shader's `srgbToLinear` recovers a nearly linear
-     * signal and the preview matches the RAW ColorPipe render.
-     *
-     * Only valid on the preview repeating request: still captures keep [CaptureRequest.TONEMAP_MODE_FAST]
-     * because their JPEG never passes through the ColorEngine. Devices without the capability keep the
-     * legacy behaviour (fix 1A fallback).
-     */
-    fun applyPreviewToneMapPolicy(request: CaptureRequest.Builder) {
-        if (!env.runtimeState.isPresetCurveToneMapSupported) return
-        try {
-            request.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_PRESET_CURVE)
-            request.set(CaptureRequest.TONEMAP_PRESET_CURVE, CaptureRequest.TONEMAP_PRESET_CURVE_SRGB)
-            if (!presetCurveLogged) {
-                presetCurveLogged = true
-                Log.i(
-                    TAG,
-                    "Preview tone map = TONEMAP_PRESET_CURVE_SRGB (1B active, capability=true); " +
-                        "tone curve is now owned by the shader"
-                )
-            }
-        } catch (e: IllegalArgumentException) {
-            // Advertised but rejected at request time: restore the FAST default so the
-            // builder never ends up with PRESET_CURVE mode and no curve attached.
-            Log.w(TAG, "TONEMAP_PRESET_CURVE_SRGB rejected by device, keeping TONEMAP_MODE_FAST", e)
-            request.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST)
+        if (isPreviewStream) {
+            applyPreviewToneMapPolicy(request)
         }
     }
 
-    fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean = false) {
-        applyFocusAndExposureSettingsToRequest(request, isHdrBurst)
+    /**
+     * Preview-only 4-tier tone map policy:
+     * 1. [PreviewToneMapStrategy.PRESET_CURVE_SRGB] (`TONEMAP_MODE_PRESET_CURVE` + `SRGB`)
+     * 2. [PreviewToneMapStrategy.CONTRAST_CURVE_SRGB] (32-pt `t^2.2` sampled sRGB OETF `TonemapCurve`)
+     * 3. [PreviewToneMapStrategy.GAMMA_VALUE_22] (`TONEMAP_MODE_GAMMA_VALUE` + `2.2f`)
+     * 4. [PreviewToneMapStrategy.FAST_FALLBACK] (`TONEMAP_MODE_FAST`)
+     *
+     * Only applied when `isPreviewStream == true` (requests targeting a viewfinder/preview surface);
+     * still captures (`TEMPLATE_STILL_CAPTURE`) keep `TONEMAP_MODE_FAST`.
+     */
+    fun applyPreviewToneMapPolicy(request: CaptureRequest.Builder) {
+        val state = env.runtimeState
+        val requested = state.previewToneMapStrategy
+        val applied = PreviewToneMapPolicy.applyStrategyToRequest(
+            request = request,
+            strategy = requested,
+            availableModes = state.availableToneMapModes,
+            maxCurvePoints = state.tonemapMaxCurvePoints,
+            tag = TAG
+        )
+        if (applied != requested) {
+            state.previewToneMapStrategy = applied
+        }
+        val cameraId = state.currentToneMapCameraId ?: state.currentLens?.id ?: "unknown"
+        val logKey = "$cameraId:${applied.name}"
+        if (lastLoggedToneMapKey != logKey) {
+            lastLoggedToneMapKey = logKey
+            Log.i(
+                TAG,
+                "Preview tone map [camera=$cameraId] = $applied " +
+                    "(maxCurvePoints=${state.tonemapMaxCurvePoints}, " +
+                    "availableModes=${state.availableToneMapModes?.contentToString()})"
+            )
+        }
+    }
+
+    fun applyManualSettingsToRequest(
+        request: CaptureRequest.Builder,
+        isHdrBurst: Boolean = false,
+        isPreviewStream: Boolean = false
+    ) {
+        applyFocusAndExposureSettingsToRequest(request, isHdrBurst, isPreviewStream)
         env.sessionArbiter.applySingleCameraCropToRequest(request)
     }
 
@@ -256,8 +294,7 @@ class CameraHardwareStreamController(
                 if (shouldArmAnalysis) {
                     env.sessionArbiter.analysisImageReader?.surface?.let { request.addTarget(it) }
                 }
-                applyManualSettingsToRequest(request, isHdrBurst)
-                applyPreviewToneMapPolicy(request)
+                applyManualSettingsToRequest(request, isHdrBurst, isPreviewStream = true)
                 applyZslPreviewProfile(request)
 
                 session.setRepeatingRequest(request.build(), object : CameraCaptureSession.CaptureCallback() {
@@ -543,8 +580,7 @@ class CameraHardwareStreamController(
                                         env.sessionArbiter.analysisImageReader?.surface?.let { previewRequest.addTarget(it) }
                                     }
 
-                                    applyManualSettingsToRequest(previewRequest)
-                                    applyPreviewToneMapPolicy(previewRequest)
+                                    applyManualSettingsToRequest(previewRequest, isPreviewStream = true)
                                     applyZslPreviewProfile(previewRequest)
 
                                     session.setRepeatingRequest(previewRequest.build(), object : CameraCaptureSession.CaptureCallback() {
