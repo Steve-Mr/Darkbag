@@ -98,16 +98,6 @@ class DarkbagGalleryGridAdapter(
         isKeySelected = { key -> selectedItemKeys.contains(key) },
         getColumnCount = { columnCount },
         isWaterfallMode = { isWaterfallMode },
-        onToggleSingleSelection = { group -> toggleSingleSelection(group) },
-        onToggleLensSelection = { group, lens -> toggleLensSelection(group, lens) },
-        onEnterSelectionAndToggleSingle = { group ->
-            setSelectionMode(true)
-            toggleSingleSelection(group)
-        },
-        onEnterSelectionAndToggleLens = { group, lens ->
-            setSelectionMode(true)
-            toggleLensSelection(group, lens)
-        },
         onItemClick = { group, pos, lensTag -> onItemClick?.invoke(group, pos, lensTag) },
         onItemLongClick = { group, pos, lensTag -> onItemLongClick?.invoke(group, pos, lensTag) }
     )
@@ -249,6 +239,7 @@ class DarkbagGalleryGridAdapter(
     }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int, payloads: MutableList<Any>) {
+        var handled = false
         if (payloads.contains("SELECTION_CHANGED")) {
             val group = getItem(position)
             if (holder is SingleViewHolder) {
@@ -256,7 +247,7 @@ class DarkbagGalleryGridAdapter(
             } else if (holder is MultiCamViewHolder) {
                 itemBinder.bindMultiCamSelectionState(holder, group)
             }
-            return
+            handled = true
         }
         if (payloads.contains("COLUMN_COUNT_CHANGED")) {
             val group = getItem(position)
@@ -275,8 +266,9 @@ class DarkbagGalleryGridAdapter(
                         .into(holder.binding.thumbnailView)
                 }
             }
-            return
+            handled = true
         }
+        if (handled) return
         super.onBindViewHolder(holder, position, payloads)
     }
 

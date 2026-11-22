@@ -451,6 +451,8 @@ class ImageGroupBuilder(
             cinemaDngFrameCount = cinemaDngFrameCount,
             cinemaDngFrameUris = cinemaDngFrameUris.toList(),
             isMultiCamera = isMultiCamera,
+            multiJpgUris = sortedJpgs,
+            multiDngUris = sortedDngs,
             multiCameraLenses = lenses,
             isInProgress = isInProgress,
             isPartial = isPartial,

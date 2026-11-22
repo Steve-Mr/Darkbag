@@ -3,6 +3,7 @@ package top.maary.darkbag.fragments
 import android.app.Activity
 import android.content.res.Configuration
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -53,6 +54,9 @@ class DarkroomGalleryFragment : Fragment() {
     private lateinit var galleryAdapter: DarkbagGalleryGridAdapter
     private lateinit var batchDeletionCoordinator: GalleryBatchDeletionCoordinator
     private lateinit var batchActionHelper: GalleryBatchActionHelper
+    private var lastSubmittedItems: List<ImageGroup>? = null
+    private var isDeletingIndicatorVisible = false
+    private var isLoadingIndicatorVisible = false
 
     private val backPressedCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
@@ -66,14 +70,11 @@ class DarkroomGalleryFragment : Fragment() {
     }
 
     private val deleteLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        Log.d(TAG, "deleteLauncher resultCode=${result.resultCode}")
         if (result.resultCode != Activity.RESULT_OK) {
             context?.let { Toast.makeText(it, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show() }
-            hideGalleryDeletingIndicator()
-            if (_binding != null) {
-                binding.galleryRecyclerView.isEnabled = true
-                updateGallerySelectionUI(galleryViewModel.uiState.value)
-            }
         }
+        galleryViewModel.processIntent(DarkroomGalleryUserIntent.SetDeleting(false, 0))
         lifecycleScope.launch {
             repository.invalidateCache(clearStale = true)
             galleryViewModel.processIntent(DarkroomGalleryUserIntent.LoadImages(null))
@@ -83,9 +84,9 @@ class DarkroomGalleryFragment : Fragment() {
     private val importGalleryMediaLauncher = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         if (uris.isNotEmpty()) {
             lifecycleScope.launch {
-                showGalleryLoadingIndicator()
+                galleryViewModel.processIntent(DarkroomGalleryUserIntent.SetLoading(true))
                 val importedCount = batchActionHelper.inspectImportedDarkbagUris(requireContext(), uris)
-                hideGalleryLoadingIndicator()
+                galleryViewModel.processIntent(DarkroomGalleryUserIntent.SetLoading(false))
                 repository.invalidateCache(clearStale = true)
                 galleryViewModel.processIntent(DarkroomGalleryUserIntent.LoadImages(null))
                 Toast.makeText(requireContext(), getString(R.string.gallery_import_success, importedCount), Toast.LENGTH_SHORT).show()
@@ -115,44 +116,50 @@ class DarkroomGalleryFragment : Fragment() {
             scope = viewLifecycleOwner.lifecycleScope,
             launchDeleteRequest = { deleteLauncher.launch(it) },
             onBeforeDelete = { count ->
-                showGalleryDeletingIndicator(count)
-                if (_binding != null) {
-                    binding.galleryRecyclerView.isEnabled = false
-                    binding.galleryBottomBar.visibility = View.GONE
-                }
+                Log.d(TAG, "onBeforeDelete: count=$count")
+                galleryViewModel.processIntent(DarkroomGalleryUserIntent.SetDeleting(true, count))
             },
             onClearSelection = {
                 galleryViewModel.processIntent(DarkroomGalleryUserIntent.ClearSelection)
-                galleryAdapter.setSelectionMode(false)
+                galleryAdapter.syncSelection(emptySet(), false)
                 updateGallerySelectionUI(galleryViewModel.uiState.value)
             },
             onAfterDeleteComplete = {
-                hideGalleryDeletingIndicator()
-                if (_binding != null) {
-                    binding.galleryRecyclerView.isEnabled = true
-                    binding.galleryBottomBar.visibility = View.VISIBLE
-                }
+                Log.d(TAG, "onAfterDeleteComplete")
+                galleryViewModel.processIntent(DarkroomGalleryUserIntent.SetDeleting(false, 0))
                 repository.invalidateCache(clearStale = true)
                 galleryViewModel.processIntent(DarkroomGalleryUserIntent.LoadImages(null))
+            },
+            onDeletePromptFailed = {
+                context?.let { Toast.makeText(it, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show() }
             }
         )
+
+        (childFragmentManager.findFragmentByTag(DarkbagBatchDeleteSheet.TAG) as? DarkbagBatchDeleteSheet)?.let { existingSheet ->
+            if (existingSheet.onDeleteConfirmed == null) {
+                existingSheet.onDeleteConfirmed = { deleteMode ->
+                    val currentSelected = galleryViewModel.uiState.value.getSelectedItems()
+                    if (currentSelected.isNotEmpty()) {
+                        batchDeletionCoordinator.deleteBatchImages(currentSelected, deleteMode)
+                    }
+                }
+            }
+        }
 
         batchActionHelper = GalleryBatchActionHelper(
             contextProvider = { context },
             scope = viewLifecycleOwner.lifecycleScope,
             repository = repository,
             onStartWork = { count ->
-                showGalleryDeletingIndicator(count)
-                if (_binding != null) binding.galleryRecyclerView.isEnabled = false
+                galleryViewModel.processIntent(DarkroomGalleryUserIntent.SetDeleting(true, count))
             },
             onEndWork = {
-                hideGalleryDeletingIndicator()
-                if (_binding != null) binding.galleryRecyclerView.isEnabled = true
+                galleryViewModel.processIntent(DarkroomGalleryUserIntent.SetDeleting(false, 0))
             },
             onRefreshAfterSuccess = {
                 galleryViewModel.processIntent(DarkroomGalleryUserIntent.LoadImages(null))
                 galleryViewModel.processIntent(DarkroomGalleryUserIntent.ClearSelection)
-                galleryAdapter.setSelectionMode(false)
+                galleryAdapter.syncSelection(emptySet(), false)
                 updateGallerySelectionUI(galleryViewModel.uiState.value)
             }
         )
@@ -183,7 +190,24 @@ class DarkroomGalleryFragment : Fragment() {
             columnCount = currentLayout.columnCount
             isWaterfallMode = currentLayout.isWaterfallMode
             onItemClick = { group, pos, lensTag ->
-                if (galleryViewModel.uiState.value.isSelectionMode) {
+                val state = galleryViewModel.uiState.value
+                if (!state.isDeleting) {
+                    if (state.isSelectionMode) {
+                        if (lensTag != null) {
+                            val lens = group.multiCameraLenses.find { it.lensTag == lensTag }
+                            if (lens != null) {
+                                galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleLensSelection(group, lens))
+                            }
+                        } else {
+                            galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSingleSelection(group))
+                        }
+                    } else {
+                        navigateToViewer(group, pos, lensTag)
+                    }
+                }
+            }
+            onItemLongClick = { group, _, lensTag ->
+                if (!galleryViewModel.uiState.value.isDeleting) {
                     if (lensTag != null) {
                         val lens = group.multiCameraLenses.find { it.lensTag == lensTag }
                         if (lens != null) {
@@ -192,22 +216,7 @@ class DarkroomGalleryFragment : Fragment() {
                     } else {
                         galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSingleSelection(group))
                     }
-                } else {
-                    navigateToViewer(group, pos, lensTag)
                 }
-            }
-            onItemLongClick = { group, _, lensTag ->
-                if (lensTag != null) {
-                    val lens = group.multiCameraLenses.find { it.lensTag == lensTag }
-                    if (lens != null) {
-                        galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleLensSelection(group, lens))
-                    }
-                } else {
-                    galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSingleSelection(group))
-                }
-            }
-            onSelectionChanged = {
-                updateGallerySelectionUI(galleryViewModel.uiState.value)
             }
         }
 
@@ -245,7 +254,6 @@ class DarkroomGalleryFragment : Fragment() {
             galleryViewModel.processIntent(DarkroomGalleryUserIntent.ToggleSelectAll)
         }
 
-        binding.btnGalleryDockLayout.text = getString(R.string.gallery_layout_cols, currentLayout.columnCount)
         binding.btnGalleryDockLayout.setOnClickListener {
             cycleGalleryLayout()
         }
@@ -291,7 +299,13 @@ class DarkroomGalleryFragment : Fragment() {
         }
 
         binding.btnGalleryDockDelete.setOnClickListener {
-            val selected = galleryViewModel.uiState.value.getSelectedItems()
+            val state = galleryViewModel.uiState.value
+            if (!isAdded || isStateSaved || state.isDeleting) return@setOnClickListener
+            val selected = state.getSelectedItems()
+            Log.d(
+                TAG,
+                "btnGalleryDockDelete clicked: vmSelectedCount=${selected.size}, vmKeys=${state.selectedKeys}, adapterSelectedCount=${galleryAdapter.getSelectedCount()}"
+            )
             if (selected.isNotEmpty()) {
                 batchDeletionCoordinator.showBatchDeleteDialog(selected, childFragmentManager)
             }
@@ -303,6 +317,7 @@ class DarkroomGalleryFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
                     galleryViewModel.uiState.collect { state ->
+                        galleryAdapter.syncSelection(state.selectedKeys, state.isSelectionMode)
                         updateGallerySelectionUI(state)
                         if (state.isLoading) {
                             showGalleryLoadingIndicator()
@@ -315,12 +330,20 @@ class DarkroomGalleryFragment : Fragment() {
                             hideGalleryDeletingIndicator()
                         }
 
-                        val wasAtTop = !binding.galleryRecyclerView.canScrollVertically(-1)
-                        galleryAdapter.submitList(state.items) {
-                            if (_binding != null) {
-                                binding.tvGalleryHeaderSubtitle.text = getString(R.string.gallery_groups_count, state.items.size)
-                                if (wasAtTop && state.items.isNotEmpty()) {
-                                    binding.galleryRecyclerView.scrollToPosition(0)
+                        if (state.items !== lastSubmittedItems) {
+                            lastSubmittedItems = state.items
+                            val wasAtTop = !binding.galleryRecyclerView.canScrollVertically(-1)
+                            galleryAdapter.submitList(state.items) {
+                                if (_binding != null) {
+                                    val latestState = galleryViewModel.uiState.value
+                                    galleryAdapter.syncSelection(latestState.selectedKeys, latestState.isSelectionMode)
+                                    if (!latestState.isSelectionMode) {
+                                        binding.tvGalleryHeaderSubtitle.text =
+                                            getString(R.string.gallery_groups_count, latestState.items.size)
+                                    }
+                                    if (wasAtTop && latestState.items.isNotEmpty() && !latestState.isSelectionMode) {
+                                        binding.galleryRecyclerView.scrollToPosition(0)
+                                    }
                                 }
                             }
                         }
@@ -360,6 +383,7 @@ class DarkroomGalleryFragment : Fragment() {
     private fun updateGallerySelectionUI(state: DarkroomGalleryUiState) {
         if (!::galleryAdapter.isInitialized || _binding == null) return
         backPressedCallback.isEnabled = state.isSelectionMode
+        binding.galleryRecyclerView.isEnabled = !state.isDeleting
 
         if (state.isSelectionMode) {
             binding.galleryHeaderCard.setContainerRole(state.containerRole, animated = true)
@@ -371,7 +395,7 @@ class DarkroomGalleryFragment : Fragment() {
 
             binding.btnGalleryHeaderSelectAll.setText(if (state.isAllSelected) R.string.gallery_deselect_all else R.string.gallery_select_all)
 
-            binding.galleryBottomBar.visibility = View.VISIBLE
+            binding.galleryBottomBar.visibility = if (state.isDeleting) View.GONE else View.VISIBLE
             binding.galleryBottomBar.setContainerRole(state.containerRole, animated = true)
             binding.layoutGalleryNormalActions.visibility = View.GONE
             binding.layoutGallerySelectionActions.visibility = View.VISIBLE
@@ -400,7 +424,7 @@ class DarkroomGalleryFragment : Fragment() {
             binding.btnGalleryHeaderInfo.visibility = View.VISIBLE
             binding.btnGalleryHeaderSelectAll.visibility = View.GONE
 
-            binding.galleryBottomBar.visibility = View.VISIBLE
+            binding.galleryBottomBar.visibility = if (state.isDeleting) View.GONE else View.VISIBLE
             binding.galleryBottomBar.setContainerRole(state.containerRole, animated = true)
             binding.layoutGalleryNormalActions.visibility = View.VISIBLE
             binding.layoutGallerySelectionActions.visibility = View.GONE
@@ -483,6 +507,8 @@ class DarkroomGalleryFragment : Fragment() {
         } else {
             getString(R.string.gallery_deleting)
         }
+        if (isDeletingIndicatorVisible) return
+        isDeletingIndicatorVisible = true
         binding.galleryDeletingIndicator.apply {
             animate().cancel()
             visibility = View.VISIBLE
@@ -493,17 +519,23 @@ class DarkroomGalleryFragment : Fragment() {
     }
 
     private fun hideGalleryDeletingIndicator() {
-        if (_binding == null) return
+        if (_binding == null || !isDeletingIndicatorVisible) return
+        isDeletingIndicatorVisible = false
         binding.galleryDeletingIndicator.apply {
             animate().cancel()
             animate().alpha(0f).translationY(-40f).setDuration(200)
-                .withEndAction { visibility = View.GONE }
+                .withEndAction {
+                    if (_binding != null && !isDeletingIndicatorVisible) {
+                        visibility = View.GONE
+                    }
+                }
                 .start()
         }
     }
 
     private fun showGalleryLoadingIndicator() {
-        if (_binding == null) return
+        if (_binding == null || isLoadingIndicatorVisible) return
+        isLoadingIndicatorVisible = true
         binding.galleryLoadingIndicator.apply {
             animate().cancel()
             visibility = View.VISIBLE
@@ -515,12 +547,17 @@ class DarkroomGalleryFragment : Fragment() {
     }
 
     private fun hideGalleryLoadingIndicator() {
-        if (_binding == null) return
+        if (_binding == null || !isLoadingIndicatorVisible) return
+        isLoadingIndicatorVisible = false
         binding.galleryLoadingIndicator.apply {
             if (visibility == View.VISIBLE) {
                 animate().cancel()
                 animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(150)
-                    .withEndAction { visibility = View.GONE }
+                    .withEndAction {
+                        if (_binding != null && !isLoadingIndicatorVisible) {
+                            visibility = View.GONE
+                        }
+                    }
                     .start()
             }
         }
@@ -532,6 +569,13 @@ class DarkroomGalleryFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        lastSubmittedItems = null
+        isDeletingIndicatorVisible = false
+        isLoadingIndicatorVisible = false
         _binding = null
+    }
+
+    companion object {
+        private const val TAG = "DarkroomGalleryFragment"
     }
 }

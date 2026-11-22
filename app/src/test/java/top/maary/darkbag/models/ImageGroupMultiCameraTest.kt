@@ -6,6 +6,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import top.maary.darkbag.repository.ImageGroupBuilder
 import top.maary.darkbag.utils.ImageUtils
 
 @RunWith(RobolectricTestRunner::class)
@@ -131,5 +132,28 @@ class ImageGroupMultiCameraTest {
         assertEquals("3.0x", group.multiCameraLenses[2].lensTag)
         assertEquals(teleJpg, group.multiCameraLenses[2].jpgUri)
         assertEquals(teleDng, group.multiCameraLenses[2].dngUri)
+    }
+
+    @Test
+    fun testImageGroupBuilderPopulatesMultiCamUrisForDeletion() {
+        val ultraJpg = Uri.parse("content://media/external/images/media/101")
+        val ultraDng = Uri.parse("content://saf/DBAG_20260823_120000_MULTI_0.6x.dng")
+        val wideJpg = Uri.parse("content://media/external/images/media/102")
+        val wideDng = Uri.parse("content://saf/DBAG_20260823_120000_MULTI_1.0x.dng")
+
+        val builder = ImageGroupBuilder("20260823_120000").apply {
+            addMultiJpg(ultraJpg, "DBAG_20260823_120000_MULTI_0.6x.jpg", 1000L)
+            addMultiDng(ultraDng, "DBAG_20260823_120000_MULTI_0.6x.dng", 1000L)
+            addMultiJpg(wideJpg, "DBAG_20260823_120000_MULTI_1.0x.jpg", 1000L)
+            addMultiDng(wideDng, "DBAG_20260823_120000_MULTI_1.0x.dng", 1000L)
+        }
+        val group = builder.build()
+
+        assertTrue(group.isMultiCamera)
+        assertTrue(group.hasMasterRaw)
+        assertEquals(listOf(ultraJpg, wideJpg), group.multiJpgUris)
+        assertEquals(listOf(ultraDng, wideDng), group.multiDngUris)
+        assertTrue(group.allUris.containsAll(listOf(ultraJpg, ultraDng, wideJpg, wideDng)))
+        assertEquals(listOf(ultraDng, wideDng), group.allMasterRawUris)
     }
 }

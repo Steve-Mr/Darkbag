@@ -155,7 +155,7 @@ class DarkroomGalleryViewModel @JvmOverloads constructor(
                         }
                     }.toSet()
 
-                    val isSelection = cleanSelectedKeys.isNotEmpty() || state.isSelectionMode
+                    val isSelection = groups.isNotEmpty() && (cleanSelectedKeys.isNotEmpty() || state.isSelectionMode)
                     state.copy(
                         items = groups,
                         selectedKeys = cleanSelectedKeys,
@@ -232,10 +232,11 @@ class DarkroomGalleryViewModel @JvmOverloads constructor(
                         allKeys.add(group.baseName)
                     }
                 }
+                val hasItems = allKeys.isNotEmpty()
                 state.copy(
                     selectedKeys = allKeys,
-                    isSelectionMode = true,
-                    containerRole = BentoContainerRole.PRIMARY_CONTAINER
+                    isSelectionMode = hasItems,
+                    containerRole = if (hasItems) BentoContainerRole.PRIMARY_CONTAINER else BentoContainerRole.SURFACE_CONTAINER
                 )
             }
         }
