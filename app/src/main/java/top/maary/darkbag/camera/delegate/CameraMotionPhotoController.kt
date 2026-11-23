@@ -26,6 +26,8 @@ class CameraMotionPhotoController(
     private val coordinator: CameraCoordinatorHost
 ) {
     private var encoder: MotionPhotoEncoder? = null
+    private var currentEncoderWidth: Int = 0
+    private var currentEncoderHeight: Int = 0
     @Volatile private var pendingStillTimestampSlot: MotionPhotoStillTimestampSlot? = null
     var isEnabled = false
         private set
@@ -47,6 +49,34 @@ class CameraMotionPhotoController(
         )
     }
 
+    private fun resolveTargetEncoderSize(isRawMotion: Boolean, qualityMode: Int): Pair<Int, Int> {
+        if (!isRawMotion) return DEFAULT_ENCODER_WIDTH to DEFAULT_ENCODER_HEIGHT
+        val rawReader = env.sessionArbiter.rawImageReader ?: return DEFAULT_ENCODER_WIDTH to DEFAULT_ENCODER_HEIGHT
+        val rawW = rawReader.width
+        val rawH = rawReader.height
+        if (rawW <= 0 || rawH <= 0) return DEFAULT_ENCODER_WIDTH to DEFAULT_ENCODER_HEIGHT
+
+        val scaledW = when (qualityMode) {
+            2 -> rawW and 1.inv()
+            1 -> (rawW / 2) and 1.inv()
+            else -> (rawW / 4) and 1.inv()
+        }
+        val scaledH = when (qualityMode) {
+            2 -> rawH and 1.inv()
+            1 -> (rawH / 2) and 1.inv()
+            else -> (rawH / 4) and 1.inv()
+        }
+        // Keep portrait orientation (short edge = width, long edge = height) consistent with 1080x1440
+        val portraitW = minOf(scaledW, scaledH).coerceAtLeast(2)
+        val portraitH = maxOf(scaledW, scaledH).coerceAtLeast(2)
+        return portraitW to portraitH
+    }
+
+    private fun computeBitRate(width: Int, height: Int): Int {
+        val ratio = (width.toDouble() * height.toDouble()) / (DEFAULT_ENCODER_WIDTH.toDouble() * DEFAULT_ENCODER_HEIGHT.toDouble())
+        return (ratio * 10_000_000.0).toInt().coerceIn(6_000_000, 35_000_000)
+    }
+
     /** Re-reads preferences and starts/stops the encoder + LUT encoder surface accordingly. */
     fun updateEncoder() {
         if (!env.isHostAdded) return
@@ -62,22 +92,33 @@ class CameraMotionPhotoController(
 
         val qualityMode = snapshot.expRawMotionPhotoQuality
         val qualityEnum = top.maary.darkbag.motionphoto.RawMotionQuality.fromMode(qualityMode)
-        Log.i(TAG, "updateEncoder: motionPhotoEnabled=$isEnabled, isRawMotion=$isRawMotion, rawQualityMode=$qualityMode (${qualityEnum.name})")
+        val (targetWidth, targetHeight) = resolveTargetEncoderSize(isRawMotion, qualityMode)
+        Log.i(TAG, "updateEncoder: motionPhotoEnabled=$isEnabled, isRawMotion=$isRawMotion, rawQualityMode=$qualityMode (${qualityEnum.name}), targetSize=${targetWidth}x${targetHeight}")
 
         if (isEnabled && coordinator.effectiveCaptureMode.supportsMotionPhoto) {
             val current = encoder
-            if (current == null) {
+            val sizeChanged = current != null && (currentEncoderWidth != targetWidth || currentEncoderHeight != targetHeight)
+            if (sizeChanged) {
+                env.sessionArbiter.lutProcessor?.setEncoderSurface(null, 0, 0)
+                current?.stop()
+                encoder = null
+            }
+
+            val activeEncoder = encoder
+            if (activeEncoder == null) {
+                currentEncoderWidth = targetWidth
+                currentEncoderHeight = targetHeight
                 encoder = MotionPhotoEncoder(
-                    width = ENCODER_WIDTH,
-                    height = ENCODER_HEIGHT,
+                    width = targetWidth,
+                    height = targetHeight,
                     frameRate = 30,
-                    bitRate = 10_000_000,
+                    bitRate = computeBitRate(targetWidth, targetHeight),
                     isAudioEnabled = isAudioEnabled
                 ).apply { start() }
             } else {
-                current.updateAudioEnabled(isAudioEnabled)
+                activeEncoder.updateAudioEnabled(isAudioEnabled)
             }
-            env.sessionArbiter.lutProcessor?.setEncoderSurface(encoder?.surface, ENCODER_WIDTH, ENCODER_HEIGHT)
+            env.sessionArbiter.lutProcessor?.setEncoderSurface(encoder?.surface, targetWidth, targetHeight)
 
             if (isRawMotion) {
                 rawMotionRelay.start()
@@ -101,6 +142,8 @@ class CameraMotionPhotoController(
         env.sessionArbiter.lutProcessor?.setEncoderSurface(null, 0, 0)
         encoder?.stop()
         encoder = null
+        currentEncoderWidth = 0
+        currentEncoderHeight = 0
     }
 
     private fun stopRawMotion() {
@@ -184,7 +227,7 @@ class CameraMotionPhotoController(
 
     private companion object {
         private const val TAG = "CameraMotionPhotoCtrl"
-        const val ENCODER_WIDTH = 1080
-        const val ENCODER_HEIGHT = 1440
+        const val DEFAULT_ENCODER_WIDTH = 1080
+        const val DEFAULT_ENCODER_HEIGHT = 1440
     }
 }

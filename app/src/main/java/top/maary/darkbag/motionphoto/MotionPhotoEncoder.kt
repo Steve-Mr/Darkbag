@@ -25,7 +25,8 @@ class MotionPhotoEncoder(
 ) {
     companion object {
         private const val TAG = "MotionPhotoEncoder"
-        private const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_AVC
+        private const val MIME_TYPE_HEVC = MediaFormat.MIMETYPE_VIDEO_HEVC
+        private const val MIME_TYPE_AVC = MediaFormat.MIMETYPE_VIDEO_AVC
         private const val I_FRAME_INTERVAL = 1 // 1 second between keyframes
     }
 
@@ -48,31 +49,59 @@ class MotionPhotoEncoder(
     val isEncoding: Boolean
         get() = isRunning.get()
 
+    private fun createVideoFormat(mimeType: String): MediaFormat {
+        return MediaFormat.createVideoFormat(mimeType, width, height).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+            setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
+            setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
+            if (mimeType == MIME_TYPE_HEVC) {
+                setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.HEVCProfileMain)
+            } else {
+                setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileMain)
+            }
+            setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+            setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
+            setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+        }
+    }
+
+    private fun tryConfigureAndStartCodec(mimeType: String): MediaCodec {
+        val format = createVideoFormat(mimeType)
+        val codec = MediaCodec.createEncoderByType(mimeType)
+        try {
+            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            inputSurface = codec.createInputSurface()
+            codec.start()
+            return codec
+        } catch (e: Exception) {
+            try {
+                inputSurface?.release()
+            } catch (_: Exception) {}
+            inputSurface = null
+            try {
+                codec.release()
+            } catch (_: Exception) {}
+            throw e
+        }
+    }
+
     /**
-     * Initializes and starts the video encoder and optional audio recorder.
+     * Initializes and starts the video encoder (HEVC preferred, H.264 fallback) and optional audio recorder.
      */
     @Synchronized
     fun start() {
         if (isRunning.get()) return
 
         try {
-            val format = MediaFormat.createVideoFormat(MIME_TYPE, width, height).apply {
-                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
-                setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
-                // Use Main profile and Level 4 for 1080p resolution compatibility across players
-                setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileMain)
-                setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel4)
-                setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
-                setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
-                setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+            var activeMime = MIME_TYPE_HEVC
+            val codec = try {
+                tryConfigureAndStartCodec(MIME_TYPE_HEVC)
+            } catch (hevcError: Exception) {
+                Log.w(TAG, "HEVC encoder failed for ${width}x${height}, falling back to H.264", hevcError)
+                activeMime = MIME_TYPE_AVC
+                tryConfigureAndStartCodec(MIME_TYPE_AVC)
             }
-
-            val codec = MediaCodec.createEncoderByType(MIME_TYPE)
-            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            inputSurface = codec.createInputSurface()
-            codec.start()
 
             mediaCodec = codec
             mediaFormat = codec.outputFormat
@@ -91,7 +120,7 @@ class MotionPhotoEncoder(
                 startAudioRecorderInternal()
             }
 
-            Log.i(TAG, "MotionPhotoEncoder started: ${width}x${height} @ ${frameRate}fps, ${bitRate / 1_000_000}Mbps, audio=$isAudioEnabled")
+            Log.i(TAG, "MotionPhotoEncoder started ($activeMime): ${width}x${height} @ ${frameRate}fps, ${bitRate / 1_000_000}Mbps, audio=$isAudioEnabled")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start MotionPhotoEncoder", e)
             stop()
