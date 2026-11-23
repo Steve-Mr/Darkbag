@@ -1004,7 +1004,8 @@ bool process_and_save_image(
     int distortionMode,
     const float* distortionCoeffs,
     const float* intrinsicCalibration,
-    float focalLength
+    float focalLength,
+    float physicalZoomFactor
 ) {
     auto colorPipeStart = std::chrono::high_resolution_clock::now();
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d, distMode=%d",
@@ -1054,16 +1055,24 @@ bool process_and_save_image(
     struct LscWeight { int idx0, idx1; float w0, w1; };
     std::vector<LscWeight> lscX, lscY;
     if (hasLsc) {
+        const float effZoom = (zoomFactor > 1.001f) ? zoomFactor : 1.0f;
+        const float effPhys = (physicalZoomFactor > 1.001f) ? physicalZoomFactor : 1.0f;
+        const float lscScale = (effPhys > effZoom + 1e-4f) ? (effZoom / effPhys) : 1.0f;
+
         lscX.resize(width); lscY.resize(height);
         for(int x=0; x<width; x++) {
-            float fx = (width > 1) ? (float)x * (lensShadingCols - 1) / (float)(width - 1) : 0.0f;
+            float ux = (width > 1) ? ((float)x / (float)(width - 1)) : 0.0f;
+            float uxMapped = std::clamp(0.5f + (ux - 0.5f) * lscScale, 0.0f, 1.0f);
+            float fx = uxMapped * (lensShadingCols - 1);
             lscX[x].idx0 = std::clamp((int)std::floor(fx), 0, lensShadingCols - 1);
             lscX[x].idx1 = std::min(lscX[x].idx0 + 1, lensShadingCols - 1);
             lscX[x].w1 = fx - lscX[x].idx0;
             lscX[x].w0 = 1.0f - lscX[x].w1;
         }
         for(int y=0; y<height; y++) {
-            float fy = (height > 1) ? (float)y * (lensShadingRows - 1) / (float)(height - 1) : 0.0f;
+            float uy = (height > 1) ? ((float)y / (float)(height - 1)) : 0.0f;
+            float uyMapped = std::clamp(0.5f + (uy - 0.5f) * lscScale, 0.0f, 1.0f);
+            float fy = uyMapped * (lensShadingRows - 1);
             lscY[y].idx0 = std::clamp((int)std::floor(fy), 0, lensShadingRows - 1);
             lscY[y].idx1 = std::min(lscY[y].idx0 + 1, lensShadingRows - 1);
             lscY[y].w1 = fy - lscY[y].idx0;
@@ -1071,17 +1080,9 @@ bool process_and_save_image(
         }
     }
 
-    auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
+    auto process_linear_rgb = [&](float r, float g, float b, int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
-        
-        size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
-        size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
-        size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
-        
-        float r = static_cast<float>(planarData[r_idx]);
-        float g = static_cast<float>(planarData[g_idx]);
-        float b = static_cast<float>(planarData[b_idx]);
 
         // Lens Shading Correction in sensor linear space
         if (hasLsc) {
@@ -1297,10 +1298,74 @@ bool process_and_save_image(
         if (lut.size > 0) color = apply_lut(lut, color);
         return color;
     };
+
+    auto sample_planar_catmull_rom = [&](float sx, float sy, float& outR, float& outG, float& outB) {
+        const float px = std::clamp(sx, 0.0f, static_cast<float>(std::max(0, width - 1)));
+        const float py = std::clamp(sy, 0.0f, static_cast<float>(std::max(0, height - 1)));
+        const int ix = static_cast<int>(std::floor(px));
+        const int iy = static_cast<int>(std::floor(py));
+        const float fx = px - static_cast<float>(ix);
+        const float fy = py - static_cast<float>(iy);
+
+        auto cubicWeights = [](float t, float w[4]) {
+            const float t2 = t * t;
+            const float t3 = t2 * t;
+            w[0] = -0.5f * t + t2 - 0.5f * t3;
+            w[1] = 1.0f - 2.5f * t2 + 1.5f * t3;
+            w[2] = 0.5f * t + 2.0f * t2 - 1.5f * t3;
+            w[3] = -0.5f * t2 + 0.5f * t3;
+        };
+
+        float wx[4], wy[4];
+        cubicWeights(fx, wx);
+        cubicWeights(fy, wy);
+
+        int sxIdx[4];
+        for (int i = 0; i < 4; ++i) {
+            sxIdx[i] = std::clamp(ix + i - 1, 0, width - 1);
+        }
+
+        float sumR = 0.0f, sumG = 0.0f, sumB = 0.0f;
+        float minR = 65535.0f, maxR = 0.0f;
+        float minG = 65535.0f, maxG = 0.0f;
+        float minB = 65535.0f, maxB = 0.0f;
+
+        for (int j = 0; j < 4; ++j) {
+            const int cy = std::clamp(iy + j - 1, 0, height - 1);
+            const size_t rowOff = static_cast<size_t>(cy) * stride_y;
+            float rowR = 0.0f, rowG = 0.0f, rowB = 0.0f;
+            for (int i = 0; i < 4; ++i) {
+                const size_t baseOff = rowOff + static_cast<size_t>(sxIdx[i]) * stride_x;
+                const float rVal = static_cast<float>(planarData[baseOff + 0 * stride_c]);
+                const float gVal = static_cast<float>(planarData[baseOff + 1 * stride_c]);
+                const float bVal = static_cast<float>(planarData[baseOff + 2 * stride_c]);
+                rowR += wx[i] * rVal;
+                rowG += wx[i] * gVal;
+                rowB += wx[i] * bVal;
+                if ((i == 1 || i == 2) && (j == 1 || j == 2)) {
+                    minR = std::min(minR, rVal); maxR = std::max(maxR, rVal);
+                    minG = std::min(minG, gVal); maxG = std::max(maxG, gVal);
+                    minB = std::min(minB, bVal); maxB = std::max(maxB, bVal);
+                }
+            }
+            sumR += wy[j] * rowR;
+            sumG += wy[j] * rowG;
+            sumB += wy[j] * rowB;
+        }
+        outR = std::clamp(sumR, minR, maxR);
+        outG = std::clamp(sumG, minG, maxG);
+        outB = std::clamp(sumB, minB, maxB);
+    };
+
     int cropW = (int)(width / zoomFactor);
     int cropH = (int)(height / zoomFactor);
     int cropX = (width - cropW) / 2;
     int cropY = (height - cropH) / 2;
+    const float cropW_f = static_cast<float>(width) / zoomFactor;
+    const float cropH_f = static_cast<float>(height) / zoomFactor;
+    const float cropX_f = (static_cast<float>(width) - cropW_f) * 0.5f;
+    const float cropY_f = (static_cast<float>(height) - cropH_f) * 0.5f;
+    const bool useCubicLinearResample = (zoomFactor > 1.001f || distortionMode == 1);
 
     int finalW_zoomed = swapDims ? (cropH / downsampleFactor) : (cropW / downsampleFactor);
     int finalH_zoomed = swapDims ? (cropW / downsampleFactor) : (cropH / downsampleFactor);
@@ -1326,21 +1391,66 @@ bool process_and_save_image(
         distK3 = distortionCoeffs[2];
     }
 
-    auto map_backward_coords = [&](int inX, int inY, int& outX, int& outY) {
+    auto map_backward_coords_f = [&](float inX, float inY, float& outX, float& outY) {
         if (distortionMode == 1 && distFocalPx > 1.0f) {
-            float dx = static_cast<float>(inX) - distCx;
-            float dy = static_cast<float>(inY) - distCy;
+            float dx = inX - distCx;
+            float dy = inY - distCy;
             float ru = std::sqrt(dx * dx + dy * dy) / distFocalPx;
             if (ru > 0.001f) {
                 float ru2 = ru * ru;
                 float radial = 1.0f + distK1 * ru2 + distK2 * ru2 * ru2 + distK3 * ru2 * ru2 * ru2;
-                outX = std::clamp(static_cast<int>(std::round(distCx + dx * radial)), 0, width - 1);
-                outY = std::clamp(static_cast<int>(std::round(distCy + dy * radial)), 0, height - 1);
+                outX = std::clamp(distCx + dx * radial, 0.0f, static_cast<float>(width - 1));
+                outY = std::clamp(distCy + dy * radial, 0.0f, static_cast<float>(height - 1));
                 return;
             }
         }
-        outX = std::clamp(inX, 0, width - 1);
-        outY = std::clamp(inY, 0, height - 1);
+        outX = std::clamp(inX, 0.0f, static_cast<float>(width - 1));
+        outY = std::clamp(inY, 0.0f, static_cast<float>(height - 1));
+    };
+
+    auto eval_output_pixel = [&](int px, int py, int targetW, int targetH, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
+        int opx = mirror ? (targetW - 1 - px) : px;
+        float sampleX_f, sampleY_f;
+
+        if (useCubicLinearResample) {
+            float fx = ((float)opx + 0.5f) / (float)targetW * (swapDims ? cropH_f : cropW_f) - 0.5f;
+            float fy = ((float)py + 0.5f) / (float)targetH * (swapDims ? cropW_f : cropH_f) - 0.5f;
+            float csx, csy;
+            if (orientation == 90) { csx = fy; csy = (cropH_f - 1.0f) - fx; }
+            else if (orientation == 180) { csx = (cropW_f - 1.0f) - fx; csy = (cropH_f - 1.0f) - fy; }
+            else if (orientation == 270) { csx = (cropW_f - 1.0f) - fy; csy = fx; }
+            else { csx = fx; csy = fy; }
+
+            map_backward_coords_f(cropX_f + csx, cropY_f + csy, sampleX_f, sampleY_f);
+            float linR, linG, linB;
+            sample_planar_catmull_rom(sampleX_f, sampleY_f, linR, linG, linB);
+            return process_linear_rgb(
+                linR, linG, linB,
+                static_cast<int>(std::round(sampleX_f)),
+                static_cast<int>(std::round(sampleY_f)),
+                stageA, stageB, stageC
+            );
+        }
+
+        float fx = (float)opx / (float)targetW * (swapDims ? cropH : cropW);
+        float fy = (float)py / (float)targetH * (swapDims ? cropW : cropH);
+        int sx, sy;
+        if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
+        else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
+        else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
+        else { sx = (int)fx; sy = (int)fy; }
+
+        int sampleX = std::clamp(cropX + sx, 0, width - 1);
+        int sampleY = std::clamp(cropY + sy, 0, height - 1);
+        size_t r_idx = (size_t)sampleY * stride_y + (size_t)sampleX * stride_x + 0 * stride_c;
+        size_t g_idx = (size_t)sampleY * stride_y + (size_t)sampleX * stride_x + 1 * stride_c;
+        size_t b_idx = (size_t)sampleY * stride_y + (size_t)sampleX * stride_x + 2 * stride_c;
+        return process_linear_rgb(
+            static_cast<float>(planarData[r_idx]),
+            static_cast<float>(planarData[g_idx]),
+            static_cast<float>(planarData[b_idx]),
+            sampleX, sampleY, stageA, stageB, stageC
+        );
     };
 
     if (enableStageDebug) {
@@ -1360,22 +1470,7 @@ bool process_and_save_image(
         #pragma omp parallel for
         for (int py = 0; py < renderH; py++) {
             for (int px = 0; px < renderW; px++) {
-                int sx, sy;
-                int opx = mirror ? (renderW - 1 - px) : px;
-
-                // Map back to source pixels using the actual render dimensions
-                // This is safer than using downsampleFactor directly if dimensions mismatch
-                float fx = (float)opx / renderW * (swapDims ? cropH : cropW);
-                float fy = (float)py / renderH * (swapDims ? cropW : cropH);
-
-                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
-                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
-                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
-                else { sx = (int)fx; sy = (int)fy; }
-
-                int sampleX, sampleY;
-                map_backward_coords(cropX + sx, cropY + sy, sampleX, sampleY);
-                Vec3 color = process_pixel(sampleX, sampleY, nullptr, nullptr, nullptr);
+                Vec3 color = eval_output_pixel(px, py, renderW, renderH, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * renderW + px) * 3;
                 float r8_f = color.r * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 0);
                 float g8_f = color.g * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 1);
@@ -1407,24 +1502,11 @@ bool process_and_save_image(
         #pragma omp parallel for
         for (int py = 0; py < finalH_zoomed; py++) {
             for (int px = 0; px < finalW_zoomed; px++) {
-                int sx, sy;
-                int opx = mirror ? (finalW_zoomed - 1 - px) : px;
-
-                float fx = (float)opx / finalW_zoomed * (swapDims ? cropH : cropW);
-                float fy = (float)py / finalH_zoomed * (swapDims ? cropW : cropH);
-
-                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
-                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
-                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
-                else { sx = (int)fx; sy = (int)fy; }
-
-                int sampleX, sampleY;
-                map_backward_coords(cropX + sx, cropY + sy, sampleX, sampleY);
                 Vec3 stageA{}, stageB{}, stageC{};
-                Vec3 color = process_pixel(sampleX, sampleY,
-                                           enableStageDebug ? &stageA : nullptr,
-                                           enableStageDebug ? &stageB : nullptr,
-                                           enableStageDebug ? &stageC : nullptr);
+                Vec3 color = eval_output_pixel(px, py, finalW_zoomed, finalH_zoomed,
+                                               enableStageDebug ? &stageA : nullptr,
+                                               enableStageDebug ? &stageB : nullptr,
+                                               enableStageDebug ? &stageC : nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
                 float r8_f = color.r * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 0);
                 float g8_f = color.g * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 1);
@@ -1465,24 +1547,11 @@ bool process_and_save_image(
         #pragma omp parallel for
         for (int py = 0; py < finalH_zoomed; py++) {
             for (int px = 0; px < finalW_zoomed; px++) {
-                int sx, sy;
-                int opx = mirror ? (finalW_zoomed - 1 - px) : px;
-
-                float fx = (float)opx / finalW_zoomed * (swapDims ? cropH : cropW);
-                float fy = (float)py / finalH_zoomed * (swapDims ? cropW : cropH);
-
-                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
-                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
-                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
-                else { sx = (int)fx; sy = (int)fy; }
-
-                int sampleX, sampleY;
-                map_backward_coords(cropX + sx, cropY + sy, sampleX, sampleY);
                 Vec3 stageA{}, stageB{}, stageC{};
-                Vec3 color = process_pixel(sampleX, sampleY,
-                                           enableStageDebug ? &stageA : nullptr,
-                                           enableStageDebug ? &stageB : nullptr,
-                                           enableStageDebug ? &stageC : nullptr);
+                Vec3 color = eval_output_pixel(px, py, finalW_zoomed, finalH_zoomed,
+                                               enableStageDebug ? &stageA : nullptr,
+                                               enableStageDebug ? &stageB : nullptr,
+                                               enableStageDebug ? &stageC : nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
                 processedImage[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
                 processedImage[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));

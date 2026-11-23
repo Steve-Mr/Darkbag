@@ -126,7 +126,8 @@ bool process_and_save_image(
     int distortionMode = 0,
     const float* distortionCoeffs = nullptr,
     const float* intrinsicCalibration = nullptr,
-    float focalLength = 0.0f
+    float focalLength = 0.0f,
+    float physicalZoomFactor = 1.0f
 );
 
 bool write_dng(

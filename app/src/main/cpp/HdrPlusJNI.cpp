@@ -796,7 +796,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                                                 exposure, contrast, saturation, highlights, shadows, whites, blacks,
                                                 jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd,
                                                 &measuredColorPipe, &measuredJpegEncode,
-                                                (int)distortionMode, dist_coeffs_ptr, intrinsic_ptr, (float)focalLength);
+                                                (int)distortionMode, dist_coeffs_ptr, intrinsic_ptr, (float)focalLength,
+                                                physicalZoom);
             } else {
                 LOGE("CPU ColorPipe fallback failed: no RGB buffer available");
                 saveOk = false;
