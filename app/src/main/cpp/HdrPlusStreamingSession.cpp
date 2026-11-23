@@ -411,8 +411,10 @@ int HdrPlusStreamingSession::finish(
         if (sabreOk) {
             if (m_zoomFactor > 1.05f) {
                 outSharedResult->isZoomCropped = true;
+                outSharedResult->zoomFactor = m_zoomFactor;
             } else {
                 outSharedResult->isZoomCropped = false;
+                outSharedResult->zoomFactor = 1.0f;
             }
             outSharedResult->isWhiteBalanceApplied = false;
             if (!outSharedResult->bayerBuf.empty()) {
@@ -428,6 +430,7 @@ int HdrPlusStreamingSession::finish(
         LOGW("HdrPlusStreamingSession: Sabre resolve failed or unviable, executing bulletproof fallback to RCD (Invariant 1 & 3 per SABRE_FULL_FIDELITY_SPEC.md)");
         outSharedResult->releaseGpuResources();
         outSharedResult->isZoomCropped = false;
+        outSharedResult->zoomFactor = 1.0f;
     }
 
     // Allocate bayerBuf for standard spatial merge / RCD paths (Sabre bypassed this to save 24MB)

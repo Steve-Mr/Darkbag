@@ -33,8 +33,12 @@ data class CaptureTaskSpec(
     val hfMetadata: HalfFrameManager.Metadata? = null,
     val motionPhotoMp4Path: String? = null,
     val motionPhotoStillPtsUs: Long = 0L,
-    val sink: top.maary.darkbag.pipeline.sink.CaptureSink? = null
+    val sink: top.maary.darkbag.pipeline.sink.CaptureSink? = null,
+    val isOutputZoomBaked: Boolean = false
 ) {
+    val persistedZoomFactor: Float
+        get() = if (isOutputZoomBaked) 1.0f else zoomFactor
+
     fun getEffectiveSink(): top.maary.darkbag.pipeline.sink.CaptureSink =
         sink ?: top.maary.darkbag.pipeline.sink.CaptureSinkFactory.createDefaultSink(this)
 }

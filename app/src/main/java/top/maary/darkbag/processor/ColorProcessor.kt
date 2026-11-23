@@ -128,6 +128,18 @@ object ColorProcessor {
     external fun allocateDirectBuffer(capacity: Long): ByteBuffer?
     external fun freeDirectBuffer(buffer: ByteBuffer)
     external fun freeSharedRawMemory(tempRawPath: String)
+    private external fun nativeIsSharedRawZoomCropped(tempRawPath: String): Boolean
+
+    fun isSharedRawZoomCropped(tempRawKey: String): Boolean =
+        if (tempRawKey.isNotEmpty()) {
+            try {
+                nativeIsSharedRawZoomCropped(tempRawKey)
+            } catch (_: UnsatisfiedLinkError) {
+                false
+            }
+        } else {
+            false
+        }
 
     external fun copyBayerWithStride(
         srcBuffer: ByteBuffer,

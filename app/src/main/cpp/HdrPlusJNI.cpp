@@ -632,6 +632,75 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         auto dngStart = std::chrono::high_resolution_clock::now();
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
         bool isBayer = (rawOutputType == 0);
+        const size_t numPixels = static_cast<size_t>(width) * height;
+        const float activeWl = (whiteLevel > 0) ? static_cast<float>(whiteLevel) : 1023.0f;
+
+        const float effectiveCropZoom = (sharedResult->zoomFactor > 1.01f) ? sharedResult->zoomFactor : zoomFactor;
+        const bool isCroppedSabre = (sharedResult->isZoomCropped && effectiveCropZoom > 1.01f);
+
+        // Resample lens shading map to the centered digital crop ROI when Sabre already cropped the frame,
+        // and suppress full-frame lens distortion opcodes whose calibration no longer matches cropped pixel coordinates.
+        std::vector<float> croppedLscVec;
+        const float* effectiveLscPtr = lens_shading_ptr;
+        if (isCroppedSabre && lens_shading_ptr && lensShadingRows > 1 && lensShadingCols > 1) {
+            const size_t lscPlane = static_cast<size_t>(lensShadingRows) * lensShadingCols;
+            croppedLscVec.resize(4 * lscPlane);
+            for (int r = 0; r < lensShadingRows; ++r) {
+                const float v = static_cast<float>(r) / static_cast<float>(lensShadingRows - 1);
+                const float sv = std::clamp(0.5f + (v - 0.5f) / effectiveCropZoom, 0.0f, 1.0f);
+                const float fy = sv * static_cast<float>(lensShadingRows - 1);
+                const int y0 = std::clamp(static_cast<int>(std::floor(fy)), 0, lensShadingRows - 1);
+                const int y1 = std::min(y0 + 1, lensShadingRows - 1);
+                const float wy = fy - static_cast<float>(y0);
+                for (int c = 0; c < lensShadingCols; ++c) {
+                    const float u = static_cast<float>(c) / static_cast<float>(lensShadingCols - 1);
+                    const float su = std::clamp(0.5f + (u - 0.5f) / effectiveCropZoom, 0.0f, 1.0f);
+                    const float fx = su * static_cast<float>(lensShadingCols - 1);
+                    const int x0 = std::clamp(static_cast<int>(std::floor(fx)), 0, lensShadingCols - 1);
+                    const int x1 = std::min(x0 + 1, lensShadingCols - 1);
+                    const float wx = fx - static_cast<float>(x0);
+                    for (int ch = 0; ch < 4; ++ch) {
+                        const float* plane = lens_shading_ptr + static_cast<size_t>(ch) * lscPlane;
+                        const float v00 = plane[y0 * lensShadingCols + x0];
+                        const float v10 = plane[y0 * lensShadingCols + x1];
+                        const float v01 = plane[y1 * lensShadingCols + x0];
+                        const float v11 = plane[y1 * lensShadingCols + x1];
+                        croppedLscVec[static_cast<size_t>(ch) * lscPlane + r * lensShadingCols + c] =
+                            (v00 * (1.0f - wx) + v10 * wx) * (1.0f - wy) +
+                            (v01 * (1.0f - wx) + v11 * wx) * wy;
+                    }
+                }
+            }
+            effectiveLscPtr = croppedLscVec.data();
+        }
+        const int effectiveDistortionMode = isCroppedSabre ? 0 : static_cast<int>(distortionMode);
+        const float* effectiveDistCoeffs = isCroppedSabre ? nullptr : dist_coeffs_ptr;
+
+        std::vector<uint16_t> localRgbReadback;
+        std::vector<uint16_t> synthesizedBayer;
+        std::vector<uint16_t> lscBakedLinearRgb;
+
+        const std::vector<uint16_t>* srcRgbPtr = nullptr;
+        auto acquireSourceRgb = [&]() -> const std::vector<uint16_t>* {
+            if (srcRgbPtr) return srcRgbPtr;
+            if (!sharedResult->rgbBuf.empty()) {
+                srcRgbPtr = &sharedResult->rgbBuf;
+                return srcRgbPtr;
+            }
+            if (sharedResult->gpuRgbTexture != 0) {
+                LOGD("Lazy readback of GPU unified texture %u for DNG export (%dx%d)",
+                     sharedResult->gpuRgbTexture, width, height);
+                localRgbReadback.resize(numPixels * 3);
+                if (darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                        sharedResult->gpuRgbTexture, width, height, localRgbReadback.data())) {
+                    srcRgbPtr = &localRgbReadback;
+                    return srcRgbPtr;
+                }
+                LOGE("GPU readback failed for DNG export");
+                localRgbReadback.clear();
+            }
+            return nullptr;
+        };
 
         const uint16_t* dngRawData = nullptr;
         int dngStrideX = 1;
@@ -645,51 +714,91 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                 dngStrideX = 1;
                 dngStrideY = width;
                 dngStrideC = 0;
-                effectiveWhiteLevel = (whiteLevel > 0) ? whiteLevel : 1023;
+                effectiveWhiteLevel = static_cast<int>(activeWl);
             } else {
-                // Fallback to rgbBuf if bayerBuf is not present
-                if (sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
-                    LOGD("Lazy readback of GPU unified texture %u for Bayer fallback DNG export (%dx%d)",
-                         sharedResult->gpuRgbTexture, width, height);
-                    sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
-                    bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
-                        sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
-                    );
-                    if (!okRb) {
-                        LOGE("GPU readback failed for Bayer fallback DNG export");
-                        sharedResult->rgbBuf.clear();
+                const std::vector<uint16_t>* rgbSrc = acquireSourceRgb();
+                if (!rgbSrc || rgbSrc->size() < numPixels * 3) {
+                    LOGE("doDngExport: missing RGB buffer for Sabre Bayer DNG synthesis");
+                    return false;
+                }
+                synthesizedBayer.resize(numPixels);
+                const float inv65535 = 1.0f / 65535.0f;
+                #pragma omp parallel for schedule(static)
+                for (int y = 0; y < height; ++y) {
+                    for (int x = 0; x < width; ++x) {
+                        const size_t idx = static_cast<size_t>(y) * width + x;
+                        const int px = x & 1;
+                        const int py = y & 1;
+                        int c = 1; // 0=R, 1=Gr, 2=Gb, 3=B
+                        switch (cfaPattern) {
+                            case 0: c = (py == 0) ? ((px == 0) ? 0 : 1) : ((px == 0) ? 2 : 3); break;
+                            case 1: c = (py == 0) ? ((px == 0) ? 1 : 0) : ((px == 0) ? 3 : 2); break;
+                            case 2: c = (py == 0) ? ((px == 0) ? 2 : 3) : ((px == 0) ? 0 : 1); break;
+                            case 3:
+                            default: c = (py == 0) ? ((px == 0) ? 3 : 2) : ((px == 0) ? 1 : 0); break;
+                        }
+                        const size_t chPlane = (c == 0) ? 0 : ((c == 3) ? (2 * numPixels) : numPixels);
+                        const float normVal = static_cast<float>((*rgbSrc)[chPlane + idx]) * inv65535;
+                        const float bl = has_bl ? bl_pattern[c] : 64.0f;
+                        const float rawVal = normVal * (activeWl - bl) + bl;
+                        synthesizedBayer[idx] = static_cast<uint16_t>(std::clamp(rawVal + 0.5f, 0.0f, activeWl));
                     }
                 }
-                dngRawData = sharedResult->rgbBuf.data();
+                dngRawData = synthesizedBayer.data();
                 dngStrideX = 1;
                 dngStrideY = width;
-                dngStrideC = width * height;
-                isBayer = false;
-                effectiveWhiteLevel = kMax16BitValue;
+                dngStrideC = 0;
+                effectiveWhiteLevel = static_cast<int>(activeWl);
             }
         } else {
             // Linear DNG requested (rawOutputType != 0)
-            if (sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
-                LOGD("Lazy readback of GPU unified texture %u for Linear DNG export (%dx%d)",
-                     sharedResult->gpuRgbTexture, width, height);
-                sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
-                bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
-                    sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
-                );
-                if (!okRb) {
-                    LOGE("GPU readback failed for Linear DNG export");
-                    sharedResult->rgbBuf.clear();
-                }
+            const std::vector<uint16_t>* rgbSrc = acquireSourceRgb();
+            if (!rgbSrc || rgbSrc->size() < numPixels * 3) {
+                LOGE("doDngExport: missing raw data for Linear DNG export after readback");
+                return false;
             }
-            dngRawData = sharedResult->rgbBuf.data();
+            if (isCroppedSabre && effectiveLscPtr && lensShadingRows > 1 && lensShadingCols > 1) {
+                // Bake cropped LSC into a local buffer without mutating sharedResult->rgbBuf
+                lscBakedLinearRgb.resize(numPixels * 3);
+                const size_t lscPlane = static_cast<size_t>(lensShadingRows) * lensShadingCols;
+                #pragma omp parallel for schedule(static)
+                for (int y = 0; y < height; ++y) {
+                    const float fy = (height > 1) ? static_cast<float>(y) * (lensShadingRows - 1) / static_cast<float>(height - 1) : 0.0f;
+                    const int y0 = std::clamp(static_cast<int>(std::floor(fy)), 0, lensShadingRows - 1);
+                    const int y1 = std::min(y0 + 1, lensShadingRows - 1);
+                    const float wy = fy - static_cast<float>(y0);
+                    for (int x = 0; x < width; ++x) {
+                        const float fx = (width > 1) ? static_cast<float>(x) * (lensShadingCols - 1) / static_cast<float>(width - 1) : 0.0f;
+                        const int x0 = std::clamp(static_cast<int>(std::floor(fx)), 0, lensShadingCols - 1);
+                        const int x1 = std::min(x0 + 1, lensShadingCols - 1);
+                        const float wx = fx - static_cast<float>(x0);
+                        auto sampleLsc = [&](int ch) {
+                            const float* p = effectiveLscPtr + static_cast<size_t>(ch) * lscPlane;
+                            return (p[y0 * lensShadingCols + x0] * (1.0f - wx) + p[y0 * lensShadingCols + x1] * wx) * (1.0f - wy) +
+                                   (p[y1 * lensShadingCols + x0] * (1.0f - wx) + p[y1 * lensShadingCols + x1] * wx) * wy;
+                        };
+                        const float gR = sampleLsc(0);
+                        const float gG = 0.5f * (sampleLsc(1) + sampleLsc(2));
+                        const float gB = sampleLsc(3);
+                        const size_t idx = static_cast<size_t>(y) * width + x;
+                        lscBakedLinearRgb[idx] = static_cast<uint16_t>(std::clamp(static_cast<float>((*rgbSrc)[idx]) * gR + 0.5f, 0.0f, 65535.0f));
+                        lscBakedLinearRgb[numPixels + idx] = static_cast<uint16_t>(std::clamp(static_cast<float>((*rgbSrc)[numPixels + idx]) * gG + 0.5f, 0.0f, 65535.0f));
+                        lscBakedLinearRgb[2 * numPixels + idx] = static_cast<uint16_t>(std::clamp(static_cast<float>((*rgbSrc)[2 * numPixels + idx]) * gB + 0.5f, 0.0f, 65535.0f));
+                    }
+                }
+                dngRawData = lscBakedLinearRgb.data();
+                effectiveLscPtr = nullptr;
+            } else {
+                dngRawData = rgbSrc->data();
+            }
             dngStrideX = 1;
             dngStrideY = width;
             dngStrideC = width * height;
             effectiveWhiteLevel = kMax16BitValue;
         }
 
-        if (!dngRawData || (isBayer ? sharedResult->bayerBuf.empty() : sharedResult->rgbBuf.empty())) {
-            LOGE("doDngExport: missing raw data for DNG export after readback (isBayer=%d)", isBayer ? 1 : 0);
+        if (!dngRawData) {
+            LOGE("doDngExport: missing raw data for DNG export (isBayer=%d)", isBayer ? 1 : 0);
             return false;
         }
 
@@ -701,8 +810,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
             cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr,
             outDngFd, (int)dngCompressionMode,
             isBayer, (int)cfaPattern, has_bl ? bl_pattern : nullptr,
-            noise_ptr, active_area_ptr, lens_shading_ptr, lensShadingRows, lensShadingCols,
-            (int)distortionMode, dist_coeffs_ptr, intrinsic_ptr, (float)focalLength
+            noise_ptr, active_area_ptr, effectiveLscPtr, lensShadingRows, lensShadingCols,
+            effectiveDistortionMode, effectiveDistCoeffs, intrinsic_ptr, (float)focalLength
         );
         dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
         return ok;
@@ -722,6 +831,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         auto jpgStart = std::chrono::high_resolution_clock::now();
         float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
         float physicalZoom = zoomFactor;
+        const int jpgDistortionMode = (sharedResult && sharedResult->isZoomCropped) ? 0 : static_cast<int>(distortionMode);
+        const float* jpgDistCoeffs = (sharedResult && sharedResult->isZoomCropped) ? nullptr : dist_coeffs_ptr;
         const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : wbVec.data();
         int64_t measuredColorPipe = 0;
         int64_t measuredJpegEncode = 0;
@@ -745,7 +856,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                     &measuredColorPipe, &measuredJpegEncode,
                     lens_shading_ptr, lensShadingRows, lensShadingCols,
                     physicalZoom,
-                    (int)distortionMode, dist_coeffs_ptr, intrinsic_ptr, (float)focalLength
+                    jpgDistortionMode, jpgDistCoeffs, intrinsic_ptr, (float)focalLength
                 );
             } else if (sharedResult && !sharedResult->rgbBuf.empty()) {
                 gpuAttemptSuccess = darkbag::gpu::GpuColorPipeEngine::instance().processAndSaveImage(
@@ -763,7 +874,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                     &measuredColorPipe, &measuredJpegEncode,
                     lens_shading_ptr, lensShadingRows, lensShadingCols,
                     physicalZoom,
-                    (int)distortionMode, dist_coeffs_ptr, intrinsic_ptr, (float)focalLength
+                    jpgDistortionMode, jpgDistCoeffs, intrinsic_ptr, (float)focalLength
                 );
             }
             if (gpuAttemptSuccess) {
@@ -796,7 +907,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                                                 exposure, contrast, saturation, highlights, shadows, whites, blacks,
                                                 jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd,
                                                 &measuredColorPipe, &measuredJpegEncode,
-                                                (int)distortionMode, dist_coeffs_ptr, intrinsic_ptr, (float)focalLength,
+                                                jpgDistortionMode, jpgDistCoeffs, intrinsic_ptr, (float)focalLength,
                                                 physicalZoom);
             } else {
                 LOGE("CPU ColorPipe fallback failed: no RGB buffer available");
@@ -1898,6 +2009,25 @@ extern "C" JNIEXPORT void JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_nativeClearSabreTexturePool(JNIEnv* /* env */, jobject /* this */) {
     LOGD("nativeClearSabreTexturePool: clearing Sabre intermediate texture pool");
     darkbag::sabre::GpuSabreEngine::clearTexturePool();
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeIsSharedRawZoomCropped(
+    JNIEnv* env, jobject /* this */, jstring tempRawPath
+) {
+    if (!tempRawPath) return JNI_FALSE;
+    const char* key = env->GetStringUTFChars(tempRawPath, nullptr);
+    if (!key) return JNI_FALSE;
+    bool cropped = false;
+    {
+        std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
+        auto it = g_sharedMemoryMap.find(key);
+        if (it != g_sharedMemoryMap.end() && it->second) {
+            cropped = it->second->isZoomCropped;
+        }
+    }
+    env->ReleaseStringUTFChars(tempRawPath, key);
+    return cropped ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL

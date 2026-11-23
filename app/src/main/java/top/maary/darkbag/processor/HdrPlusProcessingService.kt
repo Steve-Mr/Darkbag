@@ -201,7 +201,19 @@ class HdrPlusProcessingService : LifecycleService() {
                     app.applicationScope.launch(ColorProcessor.exportProcessingDispatcher) {
                         exportSemaphore.acquire()
                         var exportSuccessful = false
-                        val spec = req.toSpec()
+                        val rawSpec = req.toSpec()
+                        val outputZoomBaked = ColorProcessor.isSharedRawZoomCropped(req.requestId)
+                        val spec = if (outputZoomBaked) {
+                            val adjustedEditConfig = rawSpec.renderRecipe.editConfig?.let {
+                                if (it.zoomFactor > 1.05f) it.copy(zoomFactor = 1.0f) else it
+                            }
+                            rawSpec.copy(
+                                isOutputZoomBaked = true,
+                                renderRecipe = rawSpec.renderRecipe.copy(editConfig = adjustedEditConfig)
+                            )
+                        } else {
+                            rawSpec
+                        }
                         val sink = spec.getEffectiveSink()
                         try {
                             val targets = sink.prepareTargets(applicationContext, spec)
