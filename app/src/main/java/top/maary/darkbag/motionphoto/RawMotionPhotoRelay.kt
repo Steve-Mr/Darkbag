@@ -8,6 +8,7 @@ import android.media.Image
 import android.os.SystemClock
 import android.util.Log
 import top.maary.darkbag.processor.LutSurfaceProcessor
+import top.maary.darkbag.processor.RawMotionFrame
 import top.maary.darkbag.processor.SensorCalibrationHelper
 import top.maary.darkbag.rawvideo.RawVideoNative
 import top.maary.darkbag.repository.PreferenceKeys
@@ -70,6 +71,7 @@ class RawMotionPhotoRelay(
     companion object {
         private const val TAG = "RawMotionPhotoRelay"
         const val INITIAL_BUFFER_CAPACITY = 1024 * 768 * 2
+        const val OVERSIZED_BUFFER_THRESHOLD_BYTES = 8 * 1024 * 1024
         const val MIN_FRAME_INTERVAL_NS = 33_000_000L // Cap live stream at ~30 fps
 
         fun parseQualityMode(quality: String?): Int = RawMotionQuality.fromLegacy(quality).mode
@@ -112,10 +114,11 @@ class RawMotionPhotoRelay(
     )
     private val bufferIndex = AtomicInteger(0)
     private val isRunning = AtomicBoolean(false)
-    private var lastSensorTimestampNs = 0L
+    @Volatile private var lastSensorTimestampNs = 0L
     private var lastLoggedQualityMode = -1
     private var lastLoggedWidth = 0
     private var lastLoggedHeight = 0
+    @Volatile private var loggedNativeClamp = false
 
     private val cachedCcm = FloatArray(9) { if (it % 4 == 0) 1.0f else 0.0f }
     private val cachedWbGains = floatArrayOf(2.0f, 1.0f, 1.6f)
@@ -127,21 +130,34 @@ class RawMotionPhotoRelay(
     fun start() {
         isRunning.set(true)
         lastSensorTimestampNs = 0L
+        loggedNativeClamp = false
     }
 
     fun stop() {
         isRunning.set(false)
+        loggedNativeClamp = false
+        synchronized(bufferLock) {
+            if (buffers[0].capacity() > OVERSIZED_BUFFER_THRESHOLD_BYTES) {
+                buffers = arrayOf(
+                    ByteBuffer.allocateDirect(INITIAL_BUFFER_CAPACITY),
+                    ByteBuffer.allocateDirect(INITIAL_BUFFER_CAPACITY)
+                )
+            }
+        }
     }
 
-    private fun ensureBufferCapacity(requiredBytes: Int) {
+    private fun ensureAndAcquireBuffer(requiredBytes: Int): ByteBuffer? {
         synchronized(bufferLock) {
+            if (!isRunning.get()) return null
             if (buffers[0].capacity() < requiredBytes) {
-                val newCap = maxOf(requiredBytes, buffers[0].capacity() * 2)
+                val newCap = maxOf(requiredBytes, INITIAL_BUFFER_CAPACITY)
                 buffers = arrayOf(
                     ByteBuffer.allocateDirect(newCap),
                     ByteBuffer.allocateDirect(newCap)
                 )
             }
+            val idx = bufferIndex.getAndIncrement() and 1
+            return buffers[idx]
         }
     }
 
@@ -149,7 +165,8 @@ class RawMotionPhotoRelay(
         if (!isRunning.get()) return
 
         // Throttle to <= 30 fps using the camera sensor timestamp
-        if (image.timestamp - lastSensorTimestampNs < MIN_FRAME_INTERVAL_NS) {
+        val prevTs = lastSensorTimestampNs
+        if (prevTs != 0L && image.timestamp - prevTs < MIN_FRAME_INTERVAL_NS) {
             return
         }
 
@@ -177,20 +194,22 @@ class RawMotionPhotoRelay(
         val srcHeight = image.height
         val rowStride = plane.rowStride
 
-        val qualityMode = qualityModeProvider()
+        val requestedMode = qualityModeProvider()
+        val qualityMode = RawMotionQuality.resolveEffectiveMode(requestedMode, srcWidth, srcHeight)
+        if (qualityMode != requestedMode && !loggedNativeClamp) {
+            loggedNativeClamp = true
+            Log.w(
+                TAG,
+                "Sensor ${srcWidth}x${srcHeight} exceeds ${RawMotionQuality.MAX_NATIVE_RAW_PIXELS} pixels; clamping Native RAW Motion mode to 2x2 Binning"
+            )
+        }
 
-        val expectedDstWidth = when (qualityMode) {
-            2 -> srcWidth and 1.inv()
-            1 -> (srcWidth / 2) and 1.inv()
-            else -> (srcWidth / 4) and 1.inv()
-        }
-        val expectedDstHeight = when (qualityMode) {
-            2 -> srcHeight and 1.inv()
-            1 -> (srcHeight / 2) and 1.inv()
-            else -> (srcHeight / 4) and 1.inv()
-        }
+        val (expectedDstWidth, expectedDstHeight) = RawMotionQuality.computeScaledDimensions(
+            srcWidth = srcWidth,
+            srcHeight = srcHeight,
+            effectiveMode = qualityMode
+        )
         val requiredBytes = expectedDstWidth * expectedDstHeight * 2
-        ensureBufferCapacity(requiredBytes)
 
         if (lastLoggedQualityMode != qualityMode || lastLoggedWidth != expectedDstWidth || lastLoggedHeight != expectedDstHeight) {
             lastLoggedQualityMode = qualityMode
@@ -267,9 +286,8 @@ class RawMotionPhotoRelay(
         val lscRows = lscTriple.second
         val lscCols = lscTriple.third
 
-        // Pick next buffer in double-buffer rotation
-        val idx = bufferIndex.getAndIncrement() and 1
-        val dstBuffer = synchronized(bufferLock) { buffers[idx] }
+        // Atomically verify running state + buffer capacity and pick next buffer in double-buffer rotation
+        val dstBuffer = ensureAndAcquireBuffer(requiredBytes) ?: return
         dstBuffer.clear()
 
         srcBuffer.position(0)
@@ -287,39 +305,45 @@ class RawMotionPhotoRelay(
         dstBuffer.position(0)
         dstBuffer.limit(dstWidth * dstHeight * 2)
 
+        val sensorOrientation = chars?.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+
         lastSensorTimestampNs = image.timestamp
 
-        val activeConsumer = frameConsumer ?: { buf, w, h, cfa, bl, wl, wb, ccm, ts, lsc, lr, lc ->
+        val consumer = frameConsumer
+        if (consumer != null) {
+            consumer(
+                dstBuffer,
+                dstWidth,
+                dstHeight,
+                cfaPattern,
+                blackLevel,
+                whiteLevel,
+                wbGains,
+                activeCcm,
+                monotonicTs,
+                lscMap,
+                lscRows,
+                lscCols
+            )
+        } else {
             processor?.submitRawMotionFrame(
-                bayerBuffer = buf,
-                width = w,
-                height = h,
-                cfaPattern = cfa,
-                blackLevel = bl,
-                whiteLevel = wl,
-                wbGains = wb,
-                dngCcm = ccm,
-                timestampNs = ts,
-                lensShadingMap = lsc,
-                lensShadingRows = lr,
-                lensShadingCols = lc
+                RawMotionFrame(
+                    bayerBuffer = dstBuffer,
+                    width = dstWidth,
+                    height = dstHeight,
+                    cfaPattern = cfaPattern,
+                    blackLevel = blackLevel,
+                    whiteLevel = whiteLevel,
+                    wbGains = wbGains,
+                    dngCcm = activeCcm,
+                    timestampNs = monotonicTs,
+                    sensorOrientationDegrees = sensorOrientation,
+                    lensShadingMap = lscMap,
+                    lensShadingRows = lscRows,
+                    lensShadingCols = lscCols
+                )
             )
         }
-
-        activeConsumer(
-            dstBuffer,
-            dstWidth,
-            dstHeight,
-            cfaPattern,
-            blackLevel,
-            whiteLevel,
-            wbGains,
-            activeCcm,
-            monotonicTs,
-            lscMap,
-            lscRows,
-            lscCols
-        )
     }
 
     private fun colorSpaceTransformToFloatArray(cst: ColorSpaceTransform): FloatArray {

@@ -167,16 +167,9 @@ internal class LutGlShaderPipeline {
     fun drawRawFrame(
         targetWidth: Int,
         targetHeight: Int,
-        rawWidth: Int,
-        rawHeight: Int,
+        frame: RawMotionFrame,
         rawBayerTextureId: Int,
         rawLscTextureId: Int = 0,
-        hasLsc: Boolean = false,
-        cfaPattern: Int,
-        blackLevel: FloatArray,
-        whiteLevel: Float,
-        wbGains: FloatArray,
-        dngCcm: FloatArray,
         currentLutSize: Int,
         currentLogType: Int,
         currentGamutMatrix: FloatArray,
@@ -187,10 +180,17 @@ internal class LutGlShaderPipeline {
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glUseProgram(rawProgram)
 
-        val (scaleX, scaleY) = computeAspectScale(targetWidth, targetHeight, rawWidth, rawHeight, IDENTITY_MATRIX_4X4)
+        val rawTransform = buildRawTransformMatrix(frame.sensorOrientationDegrees)
+        val (scaleX, scaleY) = computeAspectScale(
+            targetWidth = targetWidth,
+            targetHeight = targetHeight,
+            inputWidth = frame.width,
+            inputHeight = frame.height,
+            transformMatrix = rawTransform
+        )
         if (rawScaleLoc >= 0) GLES30.glUniform2f(rawScaleLoc, scaleX, scaleY)
 
-        if (rawTextureMatrixLoc >= 0) GLES30.glUniformMatrix4fv(rawTextureMatrixLoc, 1, false, IDENTITY_MATRIX_4X4, 0)
+        if (rawTextureMatrixLoc >= 0) GLES30.glUniformMatrix4fv(rawTextureMatrixLoc, 1, false, rawTransform, 0)
 
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, rawBayerTextureId)
@@ -201,28 +201,34 @@ internal class LutGlShaderPipeline {
         GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, activeLutTex)
         if (rawLutLoc >= 0) GLES30.glUniform1i(rawLutLoc, 1)
 
+        val hasLsc = rawLscTextureId != 0 &&
+            frame.lensShadingMap != null &&
+            frame.lensShadingRows > 1 &&
+            frame.lensShadingCols > 1
         GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, if (hasLsc) rawLscTextureId else 0)
         if (rawLscLoc >= 0) GLES30.glUniform1i(rawLscLoc, 2)
         if (rawHasLscLoc >= 0) GLES30.glUniform1i(rawHasLscLoc, if (hasLsc) 1 else 0)
 
-        if (rawImageSizeLoc >= 0) GLES30.glUniform2i(rawImageSizeLoc, rawWidth, rawHeight)
-        if (rawCfaPatternLoc >= 0) GLES30.glUniform1i(rawCfaPatternLoc, cfaPattern)
+        if (rawImageSizeLoc >= 0) GLES30.glUniform2i(rawImageSizeLoc, frame.width, frame.height)
+        if (rawCfaPatternLoc >= 0) GLES30.glUniform1i(rawCfaPatternLoc, frame.cfaPattern)
         if (rawBlackLevelLoc >= 0) {
-            val bl0 = if (blackLevel.isNotEmpty()) blackLevel[0] else 64f
-            val bl1 = if (blackLevel.size > 1) blackLevel[1] else bl0
-            val bl2 = if (blackLevel.size > 2) blackLevel[2] else bl0
-            val bl3 = if (blackLevel.size > 3) blackLevel[3] else bl1
+            val bl = frame.blackLevel
+            val bl0 = if (bl.isNotEmpty()) bl[0] else 64f
+            val bl1 = if (bl.size > 1) bl[1] else bl0
+            val bl2 = if (bl.size > 2) bl[2] else bl0
+            val bl3 = if (bl.size > 3) bl[3] else bl1
             GLES30.glUniform4f(rawBlackLevelLoc, bl0, bl1, bl2, bl3)
         }
-        if (rawWhiteLevelLoc >= 0) GLES30.glUniform1f(rawWhiteLevelLoc, whiteLevel)
+        if (rawWhiteLevelLoc >= 0) GLES30.glUniform1f(rawWhiteLevelLoc, frame.whiteLevel)
         if (rawWbGainsLoc >= 0) {
-            val gR = if (wbGains.isNotEmpty()) wbGains[0] else 1f
-            val gG = if (wbGains.size > 1) wbGains[1] else 1f
-            val gB = if (wbGains.size > 2) wbGains[2] else 1f
+            val wb = frame.wbGains
+            val gR = if (wb.isNotEmpty()) wb[0] else 1f
+            val gG = if (wb.size > 1) wb[1] else 1f
+            val gB = if (wb.size > 2) wb[2] else 1f
             GLES30.glUniform3f(rawWbGainsLoc, gR, gG, gB)
         }
-        if (rawCcmLoc >= 0) GLES30.glUniformMatrix3fv(rawCcmLoc, 1, false, dngCcm, 0)
+        if (rawCcmLoc >= 0) GLES30.glUniformMatrix3fv(rawCcmLoc, 1, false, frame.dngCcm, 0)
 
         if (rawGamutMatrixLoc >= 0) GLES30.glUniformMatrix3fv(rawGamutMatrixLoc, 1, false, currentGamutMatrix, 0)
         if (rawLogTypeLoc >= 0) GLES30.glUniform1i(rawLogTypeLoc, currentLogType)
@@ -450,6 +456,41 @@ internal class LutGlShaderPipeline {
                 else -> M_XYZ_to_Rec709_D65
             }
             return multiply3x3ToColMajor(targetM, M_sRGB_D65_to_XYZ)
+        }
+
+        /**
+         * Builds a column-major 4x4 texture transform mapping GL quad texcoords `(u, v)`
+         * (with `v = 1` at screen top) to sensor-space `(tx, ty)` (with `ty = 0` at row 0)
+         * rotated clockwise by [sensorOrientationDegrees] so landscape sensor buffers render upright.
+         */
+        internal fun buildRawTransformMatrix(sensorOrientationDegrees: Int): FloatArray {
+            val normalized = ((sensorOrientationDegrees % 360) + 360) % 360
+            return when (normalized) {
+                90 -> floatArrayOf(
+                    0f, -1f, 0f, 0f,
+                    -1f, 0f, 0f, 0f,
+                    0f, 0f, 1f, 0f,
+                    1f, 1f, 0f, 1f
+                )
+                180 -> floatArrayOf(
+                    -1f, 0f, 0f, 0f,
+                    0f, 1f, 0f, 0f,
+                    0f, 0f, 1f, 0f,
+                    1f, 0f, 0f, 1f
+                )
+                270 -> floatArrayOf(
+                    0f, 1f, 0f, 0f,
+                    1f, 0f, 0f, 0f,
+                    0f, 0f, 1f, 0f,
+                    0f, 0f, 0f, 1f
+                )
+                else -> floatArrayOf(
+                    1f, 0f, 0f, 0f,
+                    0f, -1f, 0f, 0f,
+                    0f, 0f, 1f, 0f,
+                    0f, 1f, 0f, 1f
+                )
+            }
         }
 
         internal fun computeAspectScale(

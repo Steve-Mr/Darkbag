@@ -200,4 +200,48 @@ class BayerProcessorUnitTest {
         assertTrue("4K crop should reduce queue footprint by > 1.4x", reductionRatio4k > 1.4)
         assertEquals(4.0, reductionRatio2kOpenGate, 1e-6)
     }
+
+    @Test
+    fun testBayer4x4FullBlockAveragingUsesAllFourQuadrantsWithoutChannelMixing() {
+        // Construct an 8x8 RGGB Bayer block where each 4x4 quadrant has distinct constant per-channel values
+        val srcWidth = 8
+        val srcHeight = 8
+        val src = IntArray(srcWidth * srcHeight)
+        for (y in 0 until srcHeight) {
+            for (x in 0 until srcWidth) {
+                val quadWeight = when {
+                    y < 4 && x < 4 -> 100
+                    y < 4 && x >= 4 -> 200
+                    y >= 4 && x < 4 -> 300
+                    else -> 400
+                }
+                val channelOffset = ((y and 1) * 2 + (x and 1)) * 10 // 0=R, 10=Gr, 20=Gb, 30=B
+                src[y * srcWidth + x] = quadWeight + channelOffset
+            }
+        }
+
+        fun avg4x4Phase(rowOffsets: IntArray, colStart: Int): Int {
+            var sum = 0
+            for (ry in rowOffsets) {
+                for (dx in 0..6 step 2) {
+                    sum += src[ry * srcWidth + colStart + dx]
+                }
+            }
+            return (sum + 8) shr 4
+        }
+
+        val evenRows = intArrayOf(0, 2, 4, 6)
+        val oddRows = intArrayOf(1, 3, 5, 7)
+
+        val rAvg = avg4x4Phase(evenRows, 0)
+        val grAvg = avg4x4Phase(evenRows, 1)
+        val gbAvg = avg4x4Phase(oddRows, 0)
+        val bAvg = avg4x4Phase(oddRows, 1)
+
+        // Average of {100, 200, 300, 400} = 250; plus exact channel offsets 0, 10, 20, 30
+        assertEquals(250, rAvg)
+        assertEquals(260, grAvg)
+        assertEquals(270, gbAvg)
+        assertEquals(280, bAvg)
+    }
 }

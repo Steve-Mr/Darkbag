@@ -166,6 +166,7 @@ class CameraControllerHub(
         env.runtimeState.isSwitchingLens = false
         fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(150L)?.start()
         zslCaptureController.onSessionConfigured()
+        motionPhotoController.updateEncoder()
     }
 
     override fun triggerTapToFocus(x: Float, y: Float) =
@@ -345,6 +346,7 @@ class CameraControllerHub(
         overlayController.updateHalfFrameUI()
         cameraUiContainerBinding?.modeSwitchButton?.let { modeController.updateModeSwitchIcon(it) }
         applyUIVisibility()
+        motionPhotoController.updateEncoder()
         if (previousMode != activeMode) {
             bindCameraUseCases()
         }

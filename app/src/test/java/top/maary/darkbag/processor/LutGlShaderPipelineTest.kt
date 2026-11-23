@@ -143,4 +143,48 @@ class LutGlShaderPipelineTest {
         val luma = 0.2126f * r + 0.7152f * g + 0.0722f * b
         assertEquals(1.0f, luma, 0.03f)
     }
+
+    @Test
+    fun buildRawTransformMatrix_rotatesSensorCoordsAndAvoidsPortraitCrop() {
+        fun transformUv(m: FloatArray, u: Float, v: Float): Pair<Float, Float> {
+            val tx = m[0] * u + m[4] * v + m[12]
+            val ty = m[1] * u + m[5] * v + m[13]
+            return tx to ty
+        }
+
+        // 0 deg: screen top-left (u=0,v=1) -> sensor top-left (0,0); screen bottom-left (0,0) -> sensor bottom-left (0,1)
+        val m0 = LutGlShaderPipeline.buildRawTransformMatrix(0)
+        assertEquals(0f to 0f, transformUv(m0, 0f, 1f))
+        assertEquals(1f to 0f, transformUv(m0, 1f, 1f))
+        assertEquals(0f to 1f, transformUv(m0, 0f, 0f))
+        assertEquals(1f to 1f, transformUv(m0, 1f, 0f))
+
+        // 90 deg CW: screen top-left (0,1) -> sensor bottom-left (0,1); top-right (1,1) -> sensor top-left (0,0)
+        val m90 = LutGlShaderPipeline.buildRawTransformMatrix(90)
+        assertEquals(0f to 1f, transformUv(m90, 0f, 1f))
+        assertEquals(0f to 0f, transformUv(m90, 1f, 1f))
+        assertEquals(1f to 1f, transformUv(m90, 0f, 0f))
+        assertEquals(1f to 0f, transformUv(m90, 1f, 0f))
+
+        // 180 deg: screen top-left (0,1) -> sensor bottom-right (1,1)
+        val m180 = LutGlShaderPipeline.buildRawTransformMatrix(180)
+        assertEquals(1f to 1f, transformUv(m180, 0f, 1f))
+        assertEquals(0f to 0f, transformUv(m180, 1f, 0f))
+
+        // 270 deg: screen top-left (0,1) -> sensor top-right (1,0); top-right (1,1) -> sensor bottom-right (1,1)
+        val m270 = LutGlShaderPipeline.buildRawTransformMatrix(270)
+        assertEquals(1f to 0f, transformUv(m270, 0f, 1f))
+        assertEquals(1f to 1f, transformUv(m270, 1f, 1f))
+        assertEquals(0f to 0f, transformUv(m270, 0f, 0f))
+        assertEquals(0f to 1f, transformUv(m270, 1f, 0f))
+
+        // Landscape 4:3 RAW (1024x768) rotated 90/270 into portrait 3:4 encoder (768x1024) has zero crop (1f, 1f)
+        val scale90 = LutGlShaderPipeline.computeAspectScale(768, 1024, 1024, 768, m90)
+        assertEquals(1f, scale90.first, 1e-4f)
+        assertEquals(1f, scale90.second, 1e-4f)
+
+        val scale270 = LutGlShaderPipeline.computeAspectScale(768, 1024, 1024, 768, m270)
+        assertEquals(1f, scale270.first, 1e-4f)
+        assertEquals(1f, scale270.second, 1e-4f)
+    }
 }

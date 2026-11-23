@@ -34,9 +34,41 @@ enum class RawMotionQuality(
 
     companion object {
         const val DEFAULT_MODE = 1 // 2x2 Binning
+        const val MAX_NATIVE_RAW_PIXELS = 16_000_000L
 
         fun fromMode(mode: Int): RawMotionQuality =
             entries.find { it.mode == mode } ?: BINNING_2X2
+
+        /**
+         * Clamps Native 1x1 RAW motion mode to 2x2 Binning on ultra-high-res sensors (> 16MP)
+         * to prevent excessive direct buffer and GL texture allocations (~288 MiB on 50MP).
+         */
+        fun resolveEffectiveMode(requestedMode: Int, srcWidth: Int, srcHeight: Int): Int {
+            val canonical = fromMode(requestedMode).mode
+            if (canonical == NATIVE.mode &&
+                srcWidth > 0 &&
+                srcHeight > 0 &&
+                srcWidth.toLong() * srcHeight.toLong() > MAX_NATIVE_RAW_PIXELS
+            ) {
+                return BINNING_2X2.mode
+            }
+            return canonical
+        }
+
+        /** Computes even-aligned RAW Bayer dimensions for [effectiveMode]. */
+        fun computeScaledDimensions(srcWidth: Int, srcHeight: Int, effectiveMode: Int): Pair<Int, Int> {
+            val w = when (effectiveMode) {
+                NATIVE.mode -> srcWidth and 1.inv()
+                BINNING_2X2.mode -> (srcWidth / 2) and 1.inv()
+                else -> (srcWidth / 4) and 1.inv()
+            }
+            val h = when (effectiveMode) {
+                NATIVE.mode -> srcHeight and 1.inv()
+                BINNING_2X2.mode -> (srcHeight / 2) and 1.inv()
+                else -> (srcHeight / 4) and 1.inv()
+            }
+            return w to h
+        }
 
         /**
          * Backward compatibility decoder: gracefully parses legacy stored strings, numeric strings,

@@ -99,6 +99,13 @@ class LutSurfaceProcessor {
 
     fun setRawMotionEnabled(enabled: Boolean) {
         rawMotionEnabled = enabled
+        if (!enabled) {
+            handler.post {
+                if (!rawMotionEnabled) {
+                    lastRawFrameNs = 0L
+                }
+            }
+        }
     }
 
     fun updateColorEngineMode(engineMode: Int) {
@@ -378,50 +385,31 @@ class LutSurfaceProcessor {
         }
     }
 
-    fun submitRawMotionFrame(
-        bayerBuffer: ByteBuffer,
-        width: Int,
-        height: Int,
-        cfaPattern: Int,
-        blackLevel: FloatArray,
-        whiteLevel: Float,
-        wbGains: FloatArray,
-        dngCcm: FloatArray,
-        timestampNs: Long,
-        lensShadingMap: FloatArray? = null,
-        lensShadingRows: Int = 0,
-        lensShadingCols: Int = 0
-    ) {
+    fun submitRawMotionFrame(frame: RawMotionFrame) {
         if (!rawMotionEnabled) return
         handler.post {
             if (!rawMotionEnabled) return@post
             if (isEncoderActive && encoderEglSurface != EGL14.EGL_NO_SURFACE && encoderWidth > 0 && encoderHeight > 0) {
-                uploadRawBayerTexture(bayerBuffer, width, height)
-                val hasLsc = lensShadingMap != null && lensShadingRows > 1 && lensShadingCols > 1
-                if (hasLsc) {
-                    uploadLscTexture(lensShadingMap!!, lensShadingRows, lensShadingCols)
-                }
                 EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
+                uploadRawBayerTexture(frame.bayerBuffer, frame.width, frame.height)
+                val lscMap = frame.lensShadingMap
+                val hasLsc = lscMap != null && frame.lensShadingRows > 1 && frame.lensShadingCols > 1
+                if (hasLsc) {
+                    uploadLscTexture(lscMap!!, frame.lensShadingRows, frame.lensShadingCols)
+                }
                 shaderPipeline.setPreviewGain(previewGain)
                 shaderPipeline.drawRawFrame(
                     targetWidth = encoderWidth,
                     targetHeight = encoderHeight,
-                    rawWidth = width,
-                    rawHeight = height,
+                    frame = frame,
                     rawBayerTextureId = rawBayerTextureId,
                     rawLscTextureId = if (hasLsc) rawLscTextureId else 0,
-                    hasLsc = hasLsc,
-                    cfaPattern = cfaPattern,
-                    blackLevel = blackLevel,
-                    whiteLevel = whiteLevel,
-                    wbGains = wbGains,
-                    dngCcm = dngCcm,
                     currentLutSize = currentLutSize,
                     currentLogType = currentLogType,
                     currentGamutMatrix = currentGamutMatrix,
                     currentColorEngineMode = currentColorEngineMode
                 )
-                EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, timestampNs)
+                EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, frame.timestampNs)
                 EGL14.eglSwapBuffers(eglDisplay, encoderEglSurface)
                 lastRawFrameNs = System.nanoTime()
 
@@ -531,6 +519,7 @@ class LutSurfaceProcessor {
         encoderEglSurface = EGL14.EGL_NO_SURFACE
         isEncoderActive = false
         rawMotionEnabled = false
+        lastRawFrameNs = 0L
     }
 
     companion object {

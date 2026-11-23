@@ -927,9 +927,24 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeProcessRawMotionBayer(
 ) {
     if (!jSrcBuffer || !jDstBuffer || srcWidth < 8 || srcHeight < 8) return 0;
 
+    const size_t minRowBytes = static_cast<size_t>(srcWidth) * sizeof(uint16_t);
+    if (srcRowStride < 0 || static_cast<size_t>(srcRowStride) < minRowBytes) {
+        LOGE("Invalid srcRowStride %d for srcWidth %d", srcRowStride, srcWidth);
+        return 0;
+    }
+
     auto* srcBytes = static_cast<const uint8_t*>(env->GetDirectBufferAddress(jSrcBuffer));
     auto* dstBytes = static_cast<uint8_t*>(env->GetDirectBufferAddress(jDstBuffer));
     if (!srcBytes || !dstBytes) return 0;
+
+    const size_t requiredSrcBytes =
+        static_cast<size_t>(srcHeight - 1) * static_cast<size_t>(srcRowStride) + minRowBytes;
+    jlong srcCapacity = env->GetDirectBufferCapacity(jSrcBuffer);
+    if (srcCapacity < 0 || static_cast<size_t>(srcCapacity) < requiredSrcBytes) {
+        LOGE("Source buffer capacity %lld is insufficient for %zu bytes",
+             static_cast<long long>(srcCapacity), requiredSrcBytes);
+        return 0;
+    }
 
     uint32_t dstWidth = 0;
     uint32_t dstHeight = 0;
@@ -944,6 +959,7 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeProcessRawMotionBayer(
         dstWidth = ((static_cast<uint32_t>(srcWidth) / 4) & ~1u);
         dstHeight = ((static_cast<uint32_t>(srcHeight) / 4) & ~1u);
     }
+    if (dstWidth == 0 || dstHeight == 0) return 0;
 
     const size_t requiredBytes = static_cast<size_t>(dstWidth) * dstHeight * sizeof(uint16_t);
 
@@ -955,10 +971,12 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeProcessRawMotionBayer(
     }
 
     if (qualityMode == 1) {
+        // bayer2x2BinningNEON outputs srcW/2 x srcH/2; pass even-aligned dstWidth*2 x dstHeight*2
+        // to match requiredBytes and prevent odd-row stride or OOB writes when dim % 4 >= 2.
         BayerProcessor::bayer2x2BinningNEON(
             srcBytes,
-            static_cast<uint32_t>(srcWidth),
-            static_cast<uint32_t>(srcHeight),
+            dstWidth * 2,
+            dstHeight * 2,
             static_cast<uint32_t>(srcRowStride),
             dstBytes
         );

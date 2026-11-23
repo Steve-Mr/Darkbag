@@ -44,6 +44,22 @@ class RawMotionPhotoRelayTest {
     }
 
     @Test
+    fun `firstFrameWithSmallTimestampIsNotDropped`() {
+        var dispatched = 0
+        val relay = RawMotionPhotoRelay(
+            lutSurfaceProcessorProvider = { null },
+            characteristicsProvider = { null },
+            nativeSubsampler = { _, w, h, _, _ -> ((w / 4) shl 16) or (h / 4) },
+            frameConsumer = { _, _, _, _, _, _, _, _, _ -> dispatched++ }
+        )
+        relay.start()
+        val buf = ByteBuffer.allocateDirect(1008 * 756 * 2)
+        // Timestamp 10ms (< 33ms) on first frame must still be processed
+        relay.onRawFrame(FakeRawImage(1008, 756, 10_000_000L, buf), null)
+        assertEquals(1, dispatched)
+    }
+
+    @Test
     fun `doubleBufferRotatesBetweenTwoDistinctBuffers`() {
         val capturedBuffers = mutableListOf<ByteBuffer>()
         val relay = RawMotionPhotoRelay(
@@ -208,5 +224,39 @@ class RawMotionPhotoRelayTest {
         assertEquals(1, RawMotionPhotoRelay.parseQualityMode("2x2 合并"))
         assertEquals(1, RawMotionPhotoRelay.parseQualityMode(null))
         assertEquals(1, RawMotionPhotoRelay.parseQualityMode(""))
+    }
+
+    @Test
+    fun `nativeModeClampsTo2x2On50MpSensorAndReclaimsOversizedBuffersOnStop`() {
+        val capturedModes = mutableListOf<Int>()
+        var quality = top.maary.darkbag.repository.PreferenceKeys.RAW_MOTION_QUALITY_NATIVE
+        val relay = RawMotionPhotoRelay(
+            lutSurfaceProcessorProvider = { null },
+            characteristicsProvider = { null },
+            qualityModeProvider = { quality },
+            nativeProcessor = { _, w, h, _, _, mode ->
+                capturedModes.add(mode)
+                when (mode) {
+                    2 -> (w shl 16) or h
+                    1 -> ((w / 2) shl 16) or (h / 2)
+                    else -> ((w / 4) shl 16) or (h / 4)
+                }
+            },
+            frameConsumer = { _, _, _, _, _, _, _, _, _, _, _, _ -> }
+        )
+
+        relay.start()
+        val smallBuf = ByteBuffer.allocateDirect(1024)
+
+        // 50MP sensor (8192x6144) in Native mode must clamp to 2x2 Binning (mode 1)
+        relay.onRawFrame(FakeRawImage(8192, 6144, 1_000_000_000L, smallBuf), null)
+        assertEquals(listOf(RawMotionQuality.BINNING_2X2.mode), capturedModes)
+        val expected2x2Bytes = 4096 * 3072 * 2
+        assertEquals(expected2x2Bytes, relay.currentBufferCapacity)
+        assertTrue(relay.currentBufferCapacity > RawMotionPhotoRelay.OVERSIZED_BUFFER_THRESHOLD_BYTES)
+
+        // Stopping relay reclaims oversized (>8MB) direct buffers back to INITIAL_BUFFER_CAPACITY
+        relay.stop()
+        assertEquals(RawMotionPhotoRelay.INITIAL_BUFFER_CAPACITY, relay.currentBufferCapacity)
     }
 }

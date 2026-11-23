@@ -52,7 +52,8 @@ public:
     }
 
     /**
-     * Fast 4x4 Bayer Subsampling/Binning for live RAW Motion Photo pre-roll encoding.
+     * Full 4x4 Bayer Binning (8x8 source block -> 2x2 output quad) for live RAW Motion Photo encoding.
+     * Averages all 16 same-phase pixels per CFA channel within each 8x8 block: (sum + 8) >> 4.
      * Output dimensions: dstWidth = ((srcWidth / 4) & ~1u), dstHeight = ((srcHeight / 4) & ~1u).
      * Preserves CFA pattern without cross-channel mixing (never mixes Gr and Gb).
      */
