@@ -191,8 +191,12 @@ class SettingsViewModel @JvmOverloads constructor(
         settingsRepository.setExpRawMotionPhoto(enabled)
     }
 
-    fun updateExpRawMotionPhotoQuality(quality: String) {
-        settingsRepository.setExpRawMotionPhotoQuality(quality)
+    fun updateExpRawMotionPhotoQuality(mode: Int) {
+        settingsRepository.setExpRawMotionPhotoQuality(mode)
+    }
+
+    fun updateExpRawMotionPhotoQuality(quality: top.maary.darkbag.motionphoto.RawMotionQuality) {
+        settingsRepository.setExpRawMotionPhotoQuality(quality.mode)
     }
 
     fun updateZslAdaptive(enabled: Boolean) {

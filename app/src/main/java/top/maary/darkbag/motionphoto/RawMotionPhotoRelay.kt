@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class RawMotionPhotoRelay(
     private val lutSurfaceProcessorProvider: () -> LutSurfaceProcessor?,
     private val characteristicsProvider: () -> CameraCharacteristics?,
-    private val qualityModeProvider: () -> String = { PreferenceKeys.DEFAULT_EXP_RAW_MOTION_PHOTO_QUALITY },
+    private val qualityModeProvider: () -> Int = { RawMotionQuality.DEFAULT_MODE },
     private val nativeProcessor: (src: ByteBuffer, w: Int, h: Int, stride: Int, dst: ByteBuffer, mode: Int) -> Int = { src, w, h, stride, dst, mode ->
         RawVideoNative.nativeProcessRawMotionBayer(src, w, h, stride, dst, mode)
     },
@@ -59,7 +59,7 @@ class RawMotionPhotoRelay(
     ) : this(
         lutSurfaceProcessorProvider = lutSurfaceProcessorProvider,
         characteristicsProvider = characteristicsProvider,
-        qualityModeProvider = { PreferenceKeys.DEFAULT_EXP_RAW_MOTION_PHOTO_QUALITY },
+        qualityModeProvider = { RawMotionQuality.DEFAULT_MODE },
         nativeProcessor = { src, w, h, stride, dst, _ -> nativeSubsampler(src, w, h, stride, dst) },
         frameConsumer = if (frameConsumer != null) {
             { b, w, h, cfa, bl, wl, wb, ccm, ts, _, _, _ ->
@@ -72,14 +72,37 @@ class RawMotionPhotoRelay(
         const val INITIAL_BUFFER_CAPACITY = 1024 * 768 * 2
         const val MIN_FRAME_INTERVAL_NS = 33_000_000L // Cap live stream at ~30 fps
 
-        fun parseQualityMode(quality: String?): Int {
-            if (quality.isNullOrBlank()) return 1
-            return when {
-                quality.contains("Native", ignoreCase = true) || quality.contains("全像素") || quality == "2" -> 2
-                quality.contains("4x4", ignoreCase = true) || quality.contains("抽样") || quality == "0" -> 0
-                else -> 1 // 2x2 Binning (default)
-            }
-        }
+        fun parseQualityMode(quality: String?): Int = RawMotionQuality.fromLegacy(quality).mode
+
+        /** Factory method for legacy String quality providers */
+        fun createWithLegacyQuality(
+            lutSurfaceProcessorProvider: () -> LutSurfaceProcessor?,
+            characteristicsProvider: () -> CameraCharacteristics?,
+            stringQualityProvider: () -> String,
+            nativeProcessor: (src: ByteBuffer, w: Int, h: Int, stride: Int, dst: ByteBuffer, mode: Int) -> Int = { src, w, h, stride, dst, mode ->
+                RawVideoNative.nativeProcessRawMotionBayer(src, w, h, stride, dst, mode)
+            },
+            frameConsumer: ((
+                bayerBuffer: ByteBuffer,
+                width: Int,
+                height: Int,
+                cfaPattern: Int,
+                blackLevel: FloatArray,
+                whiteLevel: Float,
+                wbGains: FloatArray,
+                dngCcm: FloatArray,
+                timestampNs: Long,
+                lensShadingMap: FloatArray?,
+                lensShadingRows: Int,
+                lensShadingCols: Int
+            ) -> Unit)? = null
+        ): RawMotionPhotoRelay = RawMotionPhotoRelay(
+            lutSurfaceProcessorProvider = lutSurfaceProcessorProvider,
+            characteristicsProvider = characteristicsProvider,
+            qualityModeProvider = { RawMotionQuality.fromLegacy(stringQualityProvider()).mode },
+            nativeProcessor = nativeProcessor,
+            frameConsumer = frameConsumer
+        )
     }
 
     private val bufferLock = Any()
@@ -154,8 +177,7 @@ class RawMotionPhotoRelay(
         val srcHeight = image.height
         val rowStride = plane.rowStride
 
-        val quality = qualityModeProvider()
-        val qualityMode = parseQualityMode(quality)
+        val qualityMode = qualityModeProvider()
 
         val expectedDstWidth = when (qualityMode) {
             2 -> srcWidth and 1.inv()
@@ -174,12 +196,8 @@ class RawMotionPhotoRelay(
             lastLoggedQualityMode = qualityMode
             lastLoggedWidth = expectedDstWidth
             lastLoggedHeight = expectedDstHeight
-            val modeName = when (qualityMode) {
-                2 -> "Native 1x1"
-                0 -> "4x4 Subsample"
-                else -> "2x2 Binning"
-            }
-            Log.i(TAG, "RAW Motion Photo stream active: qualityPreference='$quality', mode=$qualityMode ($modeName), dims=${expectedDstWidth}x${expectedDstHeight}")
+            val qualityEnum = RawMotionQuality.fromMode(qualityMode)
+            Log.i(TAG, "RAW Motion Photo stream active: mode=$qualityMode (${qualityEnum.name}), dims=${expectedDstWidth}x${expectedDstHeight}")
         }
 
         // White level

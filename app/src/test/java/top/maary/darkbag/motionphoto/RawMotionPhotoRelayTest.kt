@@ -155,15 +155,39 @@ class RawMotionPhotoRelayTest {
         capturedQuality = top.maary.darkbag.repository.PreferenceKeys.RAW_MOTION_QUALITY_NATIVE
         relay.onRawFrame(FakeRawImage(1008, 756, 1_100_000_000L, buf), null)
         assertEquals(listOf(1, 0, 2), capturedModes)
+    }
 
-        // 4. Legacy and localized variations
+    @Test
+    fun `stringQualityProviderOverloadHandlesLegacyVariations`() {
+        val capturedModes = mutableListOf<Int>()
+        var capturedQuality = "Native (Max Quality)"
+        val relay = RawMotionPhotoRelay.createWithLegacyQuality(
+            lutSurfaceProcessorProvider = { null },
+            characteristicsProvider = { null },
+            stringQualityProvider = { capturedQuality },
+            nativeProcessor = { _, w, h, _, _, mode ->
+                capturedModes.add(mode)
+                when (mode) {
+                    2 -> (w shl 16) or h
+                    1 -> ((w / 2) shl 16) or (h / 2)
+                    else -> ((w / 4) shl 16) or (h / 4)
+                }
+            },
+            frameConsumer = { _, _, _, _, _, _, _, _, _, _, _, _ -> }
+        )
+
+        relay.start()
+        val buf = ByteBuffer.allocateDirect(1008 * 756 * 2)
+
+        // Native legacy string
         capturedQuality = "Native (Max Quality)"
-        relay.onRawFrame(FakeRawImage(1008, 756, 1_150_000_000L, buf), null)
-        assertEquals(listOf(1, 0, 2, 2), capturedModes)
+        relay.onRawFrame(FakeRawImage(1008, 756, 1_000_000_000L, buf), null)
+        assertEquals(listOf(2), capturedModes)
 
+        // Chinese 4x4 subsample string
         capturedQuality = "4x4 抽样"
-        relay.onRawFrame(FakeRawImage(1008, 756, 1_200_000_000L, buf), null)
-        assertEquals(listOf(1, 0, 2, 2, 0), capturedModes)
+        relay.onRawFrame(FakeRawImage(1008, 756, 1_050_000_000L, buf), null)
+        assertEquals(listOf(2, 0), capturedModes)
     }
 
     @Test

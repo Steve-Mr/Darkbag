@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.fragment.app.FragmentManager
 import top.maary.darkbag.R
+import top.maary.darkbag.motionphoto.RawMotionQuality
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.ui.BentoSelectionBottomSheet
 import top.maary.darkbag.ui.RawVideoSettingsBottomSheet
@@ -347,29 +348,18 @@ class SettingsSheetDispatcher(
     }
 
     fun showExpRawMotionQualitySheet() {
-        val currentQuality = viewModel.preferences.value.expRawMotionPhotoQuality
-        val selectedIndex = when {
-            currentQuality.contains("Native", ignoreCase = true) || currentQuality.contains("全像素") -> 2
-            currentQuality.contains("4x4", ignoreCase = true) || currentQuality.contains("抽样") -> 1
-            else -> 0
-        }
+        val items = RawMotionQuality.entries
+        val currentMode = viewModel.preferences.value.expRawMotionPhotoQuality
+        val selectedIndex = items.indexOfFirst { it.mode == currentMode }.coerceAtLeast(0)
         BentoSelectionBottomSheet.show(
             fragmentManager = fragmentManager,
-            title = context.getString(R.string.settings_exp_raw_motion_quality_title),
-            options = listOf(
-                context.getString(R.string.raw_motion_quality_2x2),
-                context.getString(R.string.raw_motion_quality_4x4),
-                context.getString(R.string.raw_motion_quality_native)
-            ),
-            descriptions = listOf(
-                context.getString(R.string.raw_motion_quality_2x2_desc),
-                context.getString(R.string.raw_motion_quality_4x4_desc),
-                context.getString(R.string.raw_motion_quality_native_desc)
-            ),
+            title = context.getString(top.maary.darkbag.R.string.settings_exp_raw_motion_quality_title),
+            options = items.map { it.getTitle(context) },
+            descriptions = items.map { it.getDescription(context) },
             selectedIndex = selectedIndex,
             badge = "RAW"
         ) { which ->
-            viewModel.updateExpRawMotionPhotoQuality(PreferenceKeys.RAW_MOTION_QUALITY_OPTIONS[which])
+            viewModel.updateExpRawMotionPhotoQuality(items[which].mode)
         }
     }
 }

@@ -10,6 +10,7 @@ import com.google.android.material.shape.ShapeAppearanceModel
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentSettingsBinding
 import top.maary.darkbag.modes.CaptureMode
+import top.maary.darkbag.motionphoto.RawMotionQuality
 import top.maary.darkbag.repository.DarkbagPreferences
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.ui.CameraBentoDeckView
@@ -293,17 +294,10 @@ class SettingsBentoDelegate(
         )
 
         // 16. RAW Motion Photo Quality
-        val qualityLabel = when {
-            state.expRawMotionPhotoQuality.contains("Native", ignoreCase = true) || state.expRawMotionPhotoQuality.contains("全像素") ->
-                context.getString(R.string.raw_motion_quality_native)
-            state.expRawMotionPhotoQuality.contains("4x4", ignoreCase = true) || state.expRawMotionPhotoQuality.contains("抽样") ->
-                context.getString(R.string.raw_motion_quality_4x4)
-            else ->
-                context.getString(R.string.raw_motion_quality_2x2)
-        }
+        val quality = RawMotionQuality.fromMode(state.expRawMotionPhotoQuality)
         binding.btnMenuRawMotionQuality.text = CameraBentoDeckView.formatProTelemetry(
             label = context.getString(R.string.settings_exp_raw_motion_quality_title),
-            value = qualityLabel,
+            value = quality.getTitle(context),
             isTabActive = false,
             isValueManual = true,
             context = context

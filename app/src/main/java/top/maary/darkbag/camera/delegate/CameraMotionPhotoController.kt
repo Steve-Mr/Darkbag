@@ -60,8 +60,9 @@ class CameraMotionPhotoController(
         val isRawMotion = isEnabled && snapshot.expRawMotionPhoto &&
             coordinator.effectiveCaptureMode.supportsMotionPhoto && env.runtimeState.isRawSupported
 
-        val currentQuality = snapshot.expRawMotionPhotoQuality
-        Log.i(TAG, "updateEncoder: motionPhotoEnabled=$isEnabled, isRawMotion=$isRawMotion, rawQuality='$currentQuality' (mode=${RawMotionPhotoRelay.parseQualityMode(currentQuality)})")
+        val qualityMode = snapshot.expRawMotionPhotoQuality
+        val qualityEnum = top.maary.darkbag.motionphoto.RawMotionQuality.fromMode(qualityMode)
+        Log.i(TAG, "updateEncoder: motionPhotoEnabled=$isEnabled, isRawMotion=$isRawMotion, rawQualityMode=$qualityMode (${qualityEnum.name})")
 
         if (isEnabled && coordinator.effectiveCaptureMode.supportsMotionPhoto) {
             val current = encoder
