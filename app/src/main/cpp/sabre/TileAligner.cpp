@@ -62,6 +62,40 @@ static float computeWeightedMedian(const float* vals, const float* weights, int 
     return vals[idx[count - 1]];
 }
 
+template <typename T>
+static inline std::pair<float, float> computeNeighborhoodMedian3x3(
+    const T* flowX,
+    const T* flowY,
+    int tx,
+    int ty,
+    int tilesX,
+    int tilesY
+) {
+    float nbrX[9];
+    float nbrY[9];
+    float weights[9];
+    int count = 0;
+
+    for (int ddy = -1; ddy <= 1; ++ddy) {
+        const int ny = ty + ddy;
+        if (ny < 0 || ny >= tilesY) continue;
+        for (int ddx = -1; ddx <= 1; ++ddx) {
+            const int nx = tx + ddx;
+            if (nx < 0 || nx >= tilesX) continue;
+            const int nIdx = ny * tilesX + nx;
+            nbrX[count] = static_cast<float>(flowX[nIdx]);
+            nbrY[count] = static_cast<float>(flowY[nIdx]);
+            weights[count] = (ddx == 0 && ddy == 0) ? 2.0f : ((ddx == 0 || ddy == 0) ? 2.0f : 1.0f);
+            count++;
+        }
+    }
+
+    return {
+        computeWeightedMedian(nbrX, weights, count),
+        computeWeightedMedian(nbrY, weights, count)
+    };
+}
+
 static void fillPadding(std::vector<uint16_t>& image, int width, int height, int pad, int stride) {
     if (image.empty() || width <= 0 || height <= 0) return;
 
@@ -92,41 +126,6 @@ static void fillPadding(std::vector<uint16_t>& image, int width, int height, int
     for (int p = 0; p < pad; ++p) {
         std::memcpy(image.data() + (pad + height + p) * stride, lastRow, stride * sizeof(uint16_t));
     }
-}
-
-static inline uint32_t computeSAD4x4(const uint16_t* ref, const uint16_t* alt, int stride) {
-#if defined(__aarch64__)
-    uint16x4_t r0 = vld1_u16(ref);
-    uint16x4_t a0 = vld1_u16(alt);
-    uint16x4_t d0 = vabd_u16(r0, a0);
-
-    uint16x4_t r1 = vld1_u16(ref + stride);
-    uint16x4_t a1 = vld1_u16(alt + stride);
-    uint16x4_t d1 = vabd_u16(r1, a1);
-
-    uint16x4_t r2 = vld1_u16(ref + 2 * stride);
-    uint16x4_t a2 = vld1_u16(alt + 2 * stride);
-    uint16x4_t d2 = vabd_u16(r2, a2);
-
-    uint16x4_t r3 = vld1_u16(ref + 3 * stride);
-    uint16x4_t a3 = vld1_u16(alt + 3 * stride);
-    uint16x4_t d3 = vabd_u16(r3, a3);
-
-    uint32x4_t sum32 = vaddl_u16(d0, d1);
-    sum32 = vaddw_u16(sum32, d2);
-    sum32 = vaddw_u16(sum32, d3);
-    return vaddvq_u32(sum32);
-#else
-    uint32_t sad = 0;
-    for (int y = 0; y < 4; ++y) {
-        const uint16_t* rRow = ref + y * stride;
-        const uint16_t* aRow = alt + y * stride;
-        for (int x = 0; x < 4; ++x) {
-            sad += std::abs(static_cast<int32_t>(rRow[x]) - static_cast<int32_t>(aRow[x]));
-        }
-    }
-    return sad;
-#endif
 }
 
 static inline uint32_t computeSAD8x8(const uint16_t* ref, const uint16_t* alt, int stride) {
@@ -182,18 +181,115 @@ static inline uint32_t computeSAD16x16(const uint16_t* ref, const uint16_t* alt,
 #endif
 }
 
+static inline void catmullRomWeights(float t, float w[4]) {
+    const float t2 = t * t;
+    const float t3 = t2 * t;
+    w[0] = -0.5f * t + t2 - 0.5f * t3;
+    w[1] = 1.0f - 2.5f * t2 + 1.5f * t3;
+    w[2] = 0.5f * t + 2.0f * t2 - 1.5f * t3;
+    w[3] = -0.5f * t2 + 0.5f * t3;
+}
+
+// Separable 4x4 Catmull-Rom interpolation on the same-phase green Bayer lattice (step = 2 sensor px).
+static inline float sampleSamePhaseGreenCubic(
+    const uint16_t* bayer,
+    int width,
+    int height,
+    float ax,
+    float ay,
+    int px,
+    int py
+) {
+    const int maxKx = std::max(0, (width - 1 - px) >> 1);
+    const int maxKy = std::max(0, (height - 1 - py) >> 1);
+
+    const float lx = std::clamp((ax - static_cast<float>(px)) * 0.5f, 0.0f, static_cast<float>(maxKx));
+    const float ly = std::clamp((ay - static_cast<float>(py)) * 0.5f, 0.0f, static_cast<float>(maxKy));
+
+    const int ix = static_cast<int>(std::floor(lx));
+    const int iy = static_cast<int>(std::floor(ly));
+    const float fx = lx - static_cast<float>(ix);
+    const float fy = ly - static_cast<float>(iy);
+
+    float wx[4];
+    float wy[4];
+    catmullRomWeights(fx, wx);
+    catmullRomWeights(fy, wy);
+
+    int sx[4];
+    for (int j = 0; j < 4; ++j) {
+        const int kx = std::clamp(ix + j - 1, 0, maxKx);
+        sx[j] = px + (kx << 1);
+    }
+
+    float sum = 0.0f;
+    for (int i = 0; i < 4; ++i) {
+        const int ky = std::clamp(iy + i - 1, 0, maxKy);
+        const uint16_t* row = bayer + static_cast<size_t>(py + (ky << 1)) * width;
+        const float rowInterp =
+            wx[0] * static_cast<float>(row[sx[0]]) +
+            wx[1] * static_cast<float>(row[sx[1]]) +
+            wx[2] * static_cast<float>(row[sx[2]]) +
+            wx[3] * static_cast<float>(row[sx[3]]);
+        sum += wy[i] * rowInterp;
+    }
+    return sum;
+}
+
 TileAligner::TileAligner() = default;
 TileAligner::~TileAligner() = default;
 
-void TileAligner::allocateBuffers(int width, int height) {
-    if (m_width == width && m_height == height) {
+void TileAligner::allocateBuffers(int width, int height, float zoomFactor) {
+    float clampedZoom = std::max(1.0f, zoomFactor);
+    if (m_width == width && m_height == height && std::abs(m_zoomFactor - clampedZoom) < 1e-4f) {
         return;
     }
     m_width = width;
     m_height = height;
+    m_zoomFactor = clampedZoom;
 
-    m_lvl0Width = width / 2;
-    m_lvl0Height = height / 2;
+    if (m_zoomFactor <= 1.05f) {
+        m_roiXStart = 0;
+        m_roiYStart = 0;
+        m_roiWidth = width & ~1;
+        m_roiHeight = height & ~1;
+        m_tileSizeLvl0 = 16;
+        m_tileStepSensor = 32;
+    } else {
+        m_tileSizeLvl0 = (m_zoomFactor >= 1.35f) ? 8 : 16;
+        m_tileStepSensor = m_tileSizeLvl0 * 2;
+
+        const float cropW = static_cast<float>(width) / m_zoomFactor;
+        const float cropH = static_cast<float>(height) / m_zoomFactor;
+        const float cropX0 = (static_cast<float>(width) - cropW) * 0.5f;
+        const float cropY0 = (static_cast<float>(height) - cropH) * 0.5f;
+
+        constexpr int kMarginPx = 64;
+        const int x0 = std::max(0, static_cast<int>(std::floor(cropX0)) - kMarginPx);
+        const int y0 = std::max(0, static_cast<int>(std::floor(cropY0)) - kMarginPx);
+        const int x1 = std::min(width, static_cast<int>(std::ceil(cropX0 + cropW)) + kMarginPx);
+        const int y1 = std::min(height, static_cast<int>(std::ceil(cropY0 + cropH)) + kMarginPx);
+
+        m_roiXStart = x0 & ~1;
+        m_roiYStart = y0 & ~1;
+        if (width - m_roiXStart < 32) {
+            m_roiXStart = std::max(0, (width - 32) & ~1);
+        }
+        if (height - m_roiYStart < 32) {
+            m_roiYStart = std::max(0, (height - 32) & ~1);
+        }
+
+        const int rawW = x1 - m_roiXStart;
+        const int rawH = y1 - m_roiYStart;
+        const int maxW = (width - m_roiXStart) & ~15;
+        const int maxH = (height - m_roiYStart) & ~15;
+
+        m_roiWidth = std::clamp((rawW + 15) & ~15, std::min(32, maxW), maxW);
+        m_roiHeight = std::clamp((rawH + 15) & ~15, std::min(32, maxH), maxH);
+    }
+
+    m_lvl0Width = m_roiWidth / 2;
+    m_lvl0Height = m_roiHeight / 2;
     m_stride0 = m_lvl0Width + 2 * PAD;
     size_t size0 = static_cast<size_t>(m_lvl0Height + 2 * PAD) * m_stride0;
 
@@ -207,9 +303,11 @@ void TileAligner::allocateBuffers(int width, int height) {
     m_stride2 = m_lvl2Width + 2 * PAD;
     size_t size2 = static_cast<size_t>(m_lvl2Height + 2 * PAD) * m_stride2;
 
-    m_tilesX = m_lvl0Width / 16;
-    m_tilesY = m_lvl0Height / 16;
+    m_tilesX = std::max(1, m_lvl0Width / m_tileSizeLvl0);
+    m_tilesY = std::max(1, m_lvl0Height / m_tileSizeLvl0);
     size_t totalTiles = static_cast<size_t>(m_tilesX) * m_tilesY;
+
+    m_refRoiBayer.resize(static_cast<size_t>(m_roiWidth) * m_roiHeight);
 
     m_refLvl0.resize(size0);
     m_refLvl1.resize(size1);
@@ -233,12 +331,13 @@ void TileAligner::buildPyramid(
 ) {
     const int numThreads = getOptimalThreadCount();
 
-    // 1. Level 0: Bayer Quad fast grayscale downsampling L = (R + 2G + B) / 4
+    // 1. Level 0: Bayer Quad fast grayscale downsampling L = (R + 2G + B) / 4 over ROI
+    // Sample with full sensor stride m_width starting at even-aligned (m_roiXStart, m_roiYStart)
     #pragma omp parallel for num_threads(numThreads) schedule(static)
     for (int y = 0; y < m_lvl0Height; ++y) {
-        int by = y * 2;
-        const uint16_t* row0 = bayer + by * m_width;
-        const uint16_t* row1 = bayer + (by + 1) * m_width;
+        int by = m_roiYStart + y * 2;
+        const uint16_t* row0 = bayer + static_cast<size_t>(by) * m_width + m_roiXStart;
+        const uint16_t* row1 = bayer + static_cast<size_t>(by + 1) * m_width + m_roiXStart;
         uint16_t* dst = lvl0.data() + (y + PAD) * m_stride0 + PAD;
 
         for (int x = 0; x < m_lvl0Width; ++x) {
@@ -305,19 +404,154 @@ void TileAligner::buildPyramid(
     fillPadding(lvl2, m_lvl2Width, m_lvl2Height, PAD, m_stride2);
 }
 
-void TileAligner::setReferenceFrame(const uint16_t* refBayer, int width, int height, int cfaPattern) {
+void TileAligner::setReferenceFrame(const uint16_t* refBayer, int width, int height, int cfaPattern, float zoomFactor) {
     if (!refBayer || width < 32 || height < 32) {
         LOGE("TileAligner::setReferenceFrame: invalid parameters (%p, %dx%d)", refBayer, width, height);
         return;
     }
 
     m_cfaPattern = cfaPattern;
-    allocateBuffers(width, height);
+    allocateBuffers(width, height, zoomFactor);
+
+    for (int y = 0; y < m_roiHeight; ++y) {
+        const uint16_t* srcRow = refBayer + static_cast<size_t>(m_roiYStart + y) * m_width + m_roiXStart;
+        uint16_t* dstRow = m_refRoiBayer.data() + static_cast<size_t>(y) * m_roiWidth;
+        std::memcpy(dstRow, srcRow, static_cast<size_t>(m_roiWidth) * sizeof(uint16_t));
+    }
+
     buildPyramid(refBayer, m_refLvl0, m_refLvl1, m_refLvl2);
     m_hasRefFrame = true;
 
-    LOGD("TileAligner: reference frame set (%dx%d, cfa=%d, tiles=%dx%d)",
-         m_width, m_height, m_cfaPattern, m_tilesX, m_tilesY);
+    LOGD("TileAligner: reference frame set (%dx%d, zoom=%.2fx, roi=%dx%d@(%d,%d), step=%dpx, cfa=%d, tiles=%dx%d)",
+         m_width, m_height, m_zoomFactor, m_roiWidth, m_roiHeight, m_roiXStart, m_roiYStart,
+         m_tileStepSensor, m_cfaPattern, m_tilesX, m_tilesY);
+}
+
+void TileAligner::refineFlowSubpixelGreen(
+    const uint16_t* altBayer,
+    std::vector<float>& flowX,
+    std::vector<float>& flowY
+) {
+    const int totalTiles = m_tilesX * m_tilesY;
+    const int numThreads = getOptimalThreadCount();
+    const bool greenMatchesParity = (m_cfaPattern == 1 || m_cfaPattern == 2);
+    // Use overlapping margin in dense mode (16px step) for higher gradient SNR matching L0 16x16 window
+    const int winPad = (m_tileStepSensor <= 16) ? 4 : 0;
+
+    #pragma omp parallel for num_threads(numThreads) schedule(guided)
+    for (int tileIdx = 0; tileIdx < totalTiles; ++tileIdx) {
+        const int tx = tileIdx % m_tilesX;
+        const int ty = tileIdx / m_tilesX;
+
+        const int xStart = std::max(2, tx * m_tileStepSensor - winPad);
+        const int xEnd = std::min(m_roiWidth - 2, (tx + 1) * m_tileStepSensor + winPad);
+        const int yStart = std::max(2, ty * m_tileStepSensor - winPad);
+        const int yEnd = std::min(m_roiHeight - 2, (ty + 1) * m_tileStepSensor + winPad);
+
+        const float initDx = flowX[tileIdx];
+        const float initDy = flowY[tileIdx];
+        float curDx = initDx;
+        float curDy = initDy;
+        double initErr = 0.0;
+        int initCount = 0;
+
+        for (int iter = 0; iter < 5; ++iter) {
+            double h00 = 0.0;
+            double h01 = 0.0;
+            double h11 = 0.0;
+            double bx = 0.0;
+            double by = 0.0;
+            double errSum = 0.0;
+            int sampleCount = 0;
+
+            for (int ry = yStart; ry < yEnd; ++ry) {
+                const int py = (m_roiYStart + ry) & 1;
+                const int startPx = greenMatchesParity ? (ry & 1) : ((ry & 1) ^ 1);
+                int rx = xStart + ((xStart & 1) != startPx ? 1 : 0);
+                const int px = (m_roiXStart + rx) & 1;
+
+                const uint16_t* rowC = m_refRoiBayer.data() + static_cast<size_t>(ry) * m_roiWidth;
+                const uint16_t* rowU = m_refRoiBayer.data() + static_cast<size_t>(ry - 2) * m_roiWidth;
+                const uint16_t* rowD = m_refRoiBayer.data() + static_cast<size_t>(ry + 2) * m_roiWidth;
+
+                for (; rx < xEnd; rx += 2) {
+                    const float refVal = static_cast<float>(rowC[rx]);
+                    const float gx = (static_cast<float>(rowC[rx + 2]) - static_cast<float>(rowC[rx - 2])) * 0.25f;
+                    const float gy = (static_cast<float>(rowD[rx]) - static_cast<float>(rowU[rx])) * 0.25f;
+
+                    const float ax = static_cast<float>(m_roiXStart + rx) + curDx;
+                    const float ay = static_cast<float>(m_roiYStart + ry) + curDy;
+                    const float altVal = sampleSamePhaseGreenCubic(altBayer, m_width, m_height, ax, ay, px, py);
+
+                    const float r = altVal - refVal;
+                    errSum += static_cast<double>(r) * r;
+                    h00 += static_cast<double>(gx) * gx;
+                    h11 += static_cast<double>(gy) * gy;
+                    h01 += static_cast<double>(gx) * gy;
+                    bx += static_cast<double>(gx) * r;
+                    by += static_cast<double>(gy) * r;
+                    sampleCount++;
+                }
+            }
+
+            if (iter == 0) {
+                initErr = errSum;
+                initCount = sampleCount;
+            }
+
+            const double traceH = h00 + h11;
+            if (sampleCount < 8 || traceH < 4.0 * static_cast<double>(sampleCount)) {
+                break;
+            }
+
+            const double lambda = 2.5 * static_cast<double>(sampleCount) + 0.01 * traceH;
+            const double a00 = h00 + lambda;
+            const double a11 = h11 + lambda;
+            const double det = a00 * a11 - h01 * h01;
+            if (det <= 1e-3) {
+                break;
+            }
+
+            const float stepX = std::clamp(static_cast<float>(-((a11 * bx - h01 * by) / det)), -0.75f, 0.75f);
+            const float stepY = std::clamp(static_cast<float>(-((a00 * by - h01 * bx) / det)), -0.75f, 0.75f);
+
+            const float nextDx = std::clamp(curDx + stepX, initDx - 1.5f, initDx + 1.5f);
+            const float nextDy = std::clamp(curDy + stepY, initDy - 1.5f, initDy + 1.5f);
+            const float appliedX = nextDx - curDx;
+            const float appliedY = nextDy - curDy;
+            curDx = nextDx;
+            curDy = nextDy;
+
+            if (appliedX * appliedX + appliedY * appliedY < 1e-4f) {
+                break;
+            }
+        }
+
+        if (initCount >= 8 && (curDx != initDx || curDy != initDy)) {
+            double refinedErr = 0.0;
+            for (int ry = yStart; ry < yEnd; ++ry) {
+                const int py = (m_roiYStart + ry) & 1;
+                const int startPx = greenMatchesParity ? (ry & 1) : ((ry & 1) ^ 1);
+                int rx = xStart + ((xStart & 1) != startPx ? 1 : 0);
+                const int px = (m_roiXStart + rx) & 1;
+
+                const uint16_t* rowC = m_refRoiBayer.data() + static_cast<size_t>(ry) * m_roiWidth;
+                for (; rx < xEnd; rx += 2) {
+                    const float refVal = static_cast<float>(rowC[rx]);
+                    const float ax = static_cast<float>(m_roiXStart + rx) + curDx;
+                    const float ay = static_cast<float>(m_roiYStart + ry) + curDy;
+                    const float altVal = sampleSamePhaseGreenCubic(altBayer, m_width, m_height, ax, ay, px, py);
+                    const float r = altVal - refVal;
+                    refinedErr += static_cast<double>(r) * r;
+                }
+            }
+
+            if (refinedErr < initErr) {
+                flowX[tileIdx] = curDx;
+                flowY[tileIdx] = curDy;
+            }
+        }
+    }
 }
 
 bool TileAligner::alignFrame(
@@ -333,7 +567,7 @@ bool TileAligner::alignFrame(
         return false;
     }
 
-    // 1. Build alternate frame pyramid (reusing preallocated buffers)
+    // 1. Build alternate frame pyramid (reusing preallocated ROI buffers)
     buildPyramid(altBayer, m_altLvl0, m_altLvl1, m_altLvl2);
 
     int totalTiles = m_tilesX * m_tilesY;
@@ -343,27 +577,29 @@ bool TileAligner::alignFrame(
     outFlowHeight = m_tilesY;
 
     const int numThreads = getOptimalThreadCount();
+    const bool isDenseMode = (m_tileSizeLvl0 == 8);
+    const int l2Radius = isDenseMode ? 5 : 4;
 
-    // 2. Level 2 Coarse Tile Matching (4x4 tiles, search range [-4, +4])
+    // 2. Level 2 Coarse Tile Matching (8x8 centered SAD window prevents small-aperture cluster jumps)
     #pragma omp parallel for num_threads(numThreads) schedule(guided)
     for (int tileIdx = 0; tileIdx < totalTiles; ++tileIdx) {
         int tx = tileIdx % m_tilesX;
         int ty = tileIdx / m_tilesX;
-        int refX = tx * 4;
-        int refY = ty * 4;
+        int refX = isDenseMode ? (tx * 2 - 3) : (tx * 4 - 2);
+        int refY = isDenseMode ? (ty * 2 - 3) : (ty * 4 - 2);
         const uint16_t* refPtr = m_refLvl2.data() + (refY + PAD) * m_stride2 + (refX + PAD);
 
         // Evaluate (0, 0) first to prefer zero displacement on ties
         const uint16_t* altPtr0 = m_altLvl2.data() + (refY + PAD) * m_stride2 + (refX + PAD);
-        uint32_t minSAD = computeSAD4x4(refPtr, altPtr0, m_stride2);
+        uint32_t minSAD = computeSAD8x8(refPtr, altPtr0, m_stride2);
         int bestDx = 0;
         int bestDy = 0;
 
-        for (int dy = -4; dy <= 4; ++dy) {
-            for (int dx = -4; dx <= 4; ++dx) {
+        for (int dy = -l2Radius; dy <= l2Radius; ++dy) {
+            for (int dx = -l2Radius; dx <= l2Radius; ++dx) {
                 if (dx == 0 && dy == 0) continue;
                 const uint16_t* altPtr = m_altLvl2.data() + (refY + dy + PAD) * m_stride2 + (refX + dx + PAD);
-                uint32_t sad = computeSAD4x4(refPtr, altPtr, m_stride2);
+                uint32_t sad = computeSAD8x8(refPtr, altPtr, m_stride2);
                 if (sad < minSAD) {
                     minSAD = sad;
                     bestDx = dx;
@@ -376,59 +612,74 @@ bool TileAligner::alignFrame(
         m_flowLvl2Y[tileIdx] = static_cast<int16_t>(bestDy);
     }
 
-    // 3. Level 1 Refinement (8x8 tiles, neighborhood [-1, +1] around predicted 2 * L2)
+    // 3. Level 1 Refinement (8x8 SAD window, overlapping when dense, evaluating self & 3x3 median L2 candidates)
     #pragma omp parallel for num_threads(numThreads) schedule(guided)
     for (int tileIdx = 0; tileIdx < totalTiles; ++tileIdx) {
         int tx = tileIdx % m_tilesX;
         int ty = tileIdx / m_tilesX;
-        int refX = tx * 8;
-        int refY = ty * 8;
+        int refX = isDenseMode ? (tx * 4 - 2) : (tx * 8);
+        int refY = isDenseMode ? (ty * 4 - 2) : (ty * 8);
         const uint16_t* refPtr = m_refLvl1.data() + (refY + PAD) * m_stride1 + (refX + PAD);
 
-        int cx = 2 * m_flowLvl2X[tileIdx];
-        int cy = 2 * m_flowLvl2Y[tileIdx];
+        const int selfL2X = m_flowLvl2X[tileIdx];
+        const int selfL2Y = m_flowLvl2Y[tileIdx];
+        auto [medL2Xf, medL2Yf] = computeNeighborhoodMedian3x3(
+            m_flowLvl2X.data(), m_flowLvl2Y.data(), tx, ty, m_tilesX, m_tilesY
+        );
+        const int medL2X = static_cast<int>(std::lround(medL2Xf));
+        const int medL2Y = static_cast<int>(std::lround(medL2Yf));
 
-        // Evaluate prediction center first
-        const uint16_t* altPtrC = m_altLvl1.data() + (refY + cy + PAD) * m_stride1 + (refX + cx + PAD);
-        uint32_t minSAD = computeSAD8x8(refPtr, altPtrC, m_stride1);
-        int bestDx = cx;
-        int bestDy = cy;
+        uint32_t minSAD = UINT32_MAX;
+        int bestDx = 2 * selfL2X;
+        int bestDy = 2 * selfL2Y;
 
-        for (int ddy = -1; ddy <= 1; ++ddy) {
-            for (int ddx = -1; ddx <= 1; ++ddx) {
-                if (ddx == 0 && ddy == 0) continue;
-                int dx = cx + ddx;
-                int dy = cy + ddy;
-                const uint16_t* altPtr = m_altLvl1.data() + (refY + dy + PAD) * m_stride1 + (refX + dx + PAD);
-                uint32_t sad = computeSAD8x8(refPtr, altPtr, m_stride1);
-                if (sad < minSAD) {
-                    minSAD = sad;
-                    bestDx = dx;
-                    bestDy = dy;
+        auto searchAroundL2 = [&](int l2x, int l2y) {
+            const int cx = 2 * l2x;
+            const int cy = 2 * l2y;
+            for (int ddy = -1; ddy <= 1; ++ddy) {
+                for (int ddx = -1; ddx <= 1; ++ddx) {
+                    const int dx = cx + ddx;
+                    const int dy = cy + ddy;
+                    const uint16_t* altPtr = m_altLvl1.data() + (refY + dy + PAD) * m_stride1 + (refX + dx + PAD);
+                    const uint32_t sad = computeSAD8x8(refPtr, altPtr, m_stride1);
+                    if (sad < minSAD) {
+                        minSAD = sad;
+                        bestDx = dx;
+                        bestDy = dy;
+                    }
                 }
             }
+        };
+
+        searchAroundL2(selfL2X, selfL2Y);
+        if (medL2X != selfL2X || medL2Y != selfL2Y) {
+            searchAroundL2(medL2X, medL2Y);
         }
 
         m_flowLvl1X[tileIdx] = static_cast<int16_t>(bestDx);
         m_flowLvl1Y[tileIdx] = static_cast<int16_t>(bestDy);
     }
 
-    // 4. Level 0 Fine Search (16x16 tiles, neighborhood [-1, +1] around predicted 2 * L1) & Subpixel Parabolic Fit
+    // 4. Level 0 Fine Search (16x16 SAD window, overlapping when dense, [-1, +1] around 2 * L1) & Subpixel Parabolic Fit
     #pragma omp parallel for num_threads(numThreads) schedule(guided)
     for (int tileIdx = 0; tileIdx < totalTiles; ++tileIdx) {
         int tx = tileIdx % m_tilesX;
         int ty = tileIdx / m_tilesX;
-        int refX = tx * 16;
-        int refY = ty * 16;
+        int refX = isDenseMode ? (tx * 8 - 4) : (tx * 16);
+        int refY = isDenseMode ? (ty * 8 - 4) : (ty * 16);
         const uint16_t* refPtr = m_refLvl0.data() + (refY + PAD) * m_stride0 + (refX + PAD);
 
         int cx = 2 * m_flowLvl1X[tileIdx];
         int cy = 2 * m_flowLvl1Y[tileIdx];
 
+        auto evalSad0 = [&](int dx, int dy) -> uint32_t {
+            const uint16_t* altPtr = m_altLvl0.data() + (refY + dy + PAD) * m_stride0 + (refX + dx + PAD);
+            return computeSAD16x16(refPtr, altPtr, m_stride0);
+        };
+
         uint32_t gridSAD[3][3];
         // Evaluate prediction center (ddx=0, ddy=0) first
-        const uint16_t* altPtrC = m_altLvl0.data() + (refY + cy + PAD) * m_stride0 + (refX + cx + PAD);
-        gridSAD[1][1] = computeSAD16x16(refPtr, altPtrC, m_stride0);
+        gridSAD[1][1] = evalSad0(cx, cy);
         uint32_t minSAD = gridSAD[1][1];
         int bestDdx = 0;
         int bestDdy = 0;
@@ -438,8 +689,7 @@ bool TileAligner::alignFrame(
                 if (ddx == 0 && ddy == 0) continue;
                 int dx = cx + ddx;
                 int dy = cy + ddy;
-                const uint16_t* altPtr = m_altLvl0.data() + (refY + dy + PAD) * m_stride0 + (refX + dx + PAD);
-                uint32_t sad = computeSAD16x16(refPtr, altPtr, m_stride0);
+                uint32_t sad = evalSad0(dx, dy);
                 gridSAD[ddy + 1][ddx + 1] = sad;
                 if (sad < minSAD) {
                     minSAD = sad;
@@ -459,8 +709,7 @@ bool TileAligner::alignFrame(
             if (relX >= -1 && relX <= 1 && relY >= -1 && relY <= 1) {
                 return static_cast<float>(gridSAD[relY + 1][relX + 1]);
             }
-            const uint16_t* altPtr = m_altLvl0.data() + (refY + dy + PAD) * m_stride0 + (refX + dx + PAD);
-            return static_cast<float>(computeSAD16x16(refPtr, altPtr, m_stride0));
+            return static_cast<float>(evalSad0(dx, dy));
         };
 
         float sad00 = static_cast<float>(minSAD);
@@ -485,6 +734,11 @@ bool TileAligner::alignFrame(
         outFlowY[tileIdx] = dySensor;
     }
 
+    // 4.5 Same-phase green-channel Gauss-Newton subpixel refinement for digital zoom crops
+    if (m_zoomFactor > 1.05f) {
+        refineFlowSubpixelGreen(altBayer, outFlowX, outFlowY);
+    }
+
     // 5. Spatial Flow Field Regularization (3x3 weighted median filter & outlier clamping)
     // Prevents flow field tearing on periodic text and screen structures
     std::vector<float> rawFlowX = outFlowX;
@@ -495,28 +749,9 @@ bool TileAligner::alignFrame(
         int tx = tileIdx % m_tilesX;
         int ty = tileIdx / m_tilesX;
 
-        float nbrX[9];
-        float nbrY[9];
-        float weights[9];
-        int count = 0;
-
-        for (int ddy = -1; ddy <= 1; ++ddy) {
-            int ny = ty + ddy;
-            if (ny < 0 || ny >= m_tilesY) continue;
-            for (int ddx = -1; ddx <= 1; ++ddx) {
-                int nx = tx + ddx;
-                if (nx < 0 || nx >= m_tilesX) continue;
-                int nIdx = ny * m_tilesX + nx;
-                nbrX[count] = rawFlowX[nIdx];
-                nbrY[count] = rawFlowY[nIdx];
-                // Spatial weighting: center=2, cardinal=2, diagonal=1
-                weights[count] = (ddx == 0 && ddy == 0) ? 2.0f : ((ddx == 0 || ddy == 0) ? 2.0f : 1.0f);
-                count++;
-            }
-        }
-
-        float medX = computeWeightedMedian(nbrX, weights, count);
-        float medY = computeWeightedMedian(nbrY, weights, count);
+        auto [medX, medY] = computeNeighborhoodMedian3x3(
+            rawFlowX.data(), rawFlowY.data(), tx, ty, m_tilesX, m_tilesY
+        );
 
         float curX = rawFlowX[tileIdx];
         float curY = rawFlowY[tileIdx];
