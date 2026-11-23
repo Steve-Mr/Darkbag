@@ -382,8 +382,10 @@ void main() {
         vec2 lscTc = vLscTexCoord;
         if (uDistortionMode != 0) {
             lscTc = sampleTc;
-            if (uPhysicalZoomFactor > 1.001) {
-                lscTc = (lscTc - 0.5) / uPhysicalZoomFactor + 0.5;
+            float effZoom = (uZoomFactor > 1.001) ? uZoomFactor : 1.0;
+            float effPhys = (uPhysicalZoomFactor > 1.001) ? uPhysicalZoomFactor : 1.0;
+            if (effPhys > effZoom + 0.001) {
+                lscTc = (lscTc - 0.5) * (effZoom / effPhys) + 0.5;
             }
         }
         vec4 lscGain = texture(uTexLsc, lscTc);

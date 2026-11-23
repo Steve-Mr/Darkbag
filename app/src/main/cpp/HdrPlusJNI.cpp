@@ -739,7 +739,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                         }
                         const size_t chPlane = (c == 0) ? 0 : ((c == 3) ? (2 * numPixels) : numPixels);
                         const float normVal = static_cast<float>((*rgbSrc)[chPlane + idx]) * inv65535;
-                        const float bl = has_bl ? bl_pattern[c] : 64.0f;
+                        const float bl = has_bl ? bl_pattern[py * 2 + px] : 64.0f;
                         const float rawVal = normVal * (activeWl - bl) + bl;
                         synthesizedBayer[idx] = static_cast<uint16_t>(std::clamp(rawVal + 0.5f, 0.0f, activeWl));
                     }
@@ -887,21 +887,25 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         }
 
         if (!gpuAttemptSuccess) {
-            // Lazy readback of GPU texture if rgbBuf is empty for CPU ColorPipe fallback
-            if (sharedResult && sharedResult->rgbBuf.empty() && sharedResult->gpuRgbTexture != 0) {
+            // Read back GPU texture into a thread-local buffer without mutating sharedResult->rgbBuf
+            // while concurrent doDngExport may read sharedResult.
+            std::vector<uint16_t> localJpgReadback;
+            const std::vector<uint16_t>* jpgRgbSrc = nullptr;
+            if (sharedResult && !sharedResult->rgbBuf.empty()) {
+                jpgRgbSrc = &sharedResult->rgbBuf;
+            } else if (sharedResult && sharedResult->gpuRgbTexture != 0) {
                 LOGW("Lazy readback of GPU unified texture %u for CPU ColorPipe fallback (%dx%d)",
                      sharedResult->gpuRgbTexture, width, height);
-                sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
-                bool okRb = darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
-                    sharedResult->gpuRgbTexture, width, height, sharedResult->rgbBuf.data()
-                );
-                if (!okRb) {
+                localJpgReadback.resize(static_cast<size_t>(width) * height * 3);
+                if (darkbag::gpu::GpuRcdComputeEngine::instance().readbackRgbTextureToCpu(
+                        sharedResult->gpuRgbTexture, width, height, localJpgReadback.data())) {
+                    jpgRgbSrc = &localJpgReadback;
+                } else {
                     LOGE("GPU readback failed for CPU ColorPipe fallback");
-                    sharedResult->rgbBuf.clear();
                 }
             }
-            if (sharedResult && !sharedResult->rgbBuf.empty()) {
-                saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height,
+            if (jpgRgbSrc && !jpgRgbSrc->empty()) {
+                saveOk = process_and_save_image(jpgRgbSrc->data(), 1, width, width*height,
                                                 lens_shading_ptr, lensShadingRows, lensShadingCols,
                                                 width, height, digitalGain, targetLog, lut,
                                                 exposure, contrast, saturation, highlights, shadows, whites, blacks,
