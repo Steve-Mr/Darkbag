@@ -78,11 +78,10 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
     // m_accumVal and m_accumWeight are lazily allocated on first CPU frame push to save ~200MB upfront heap
 
     // Initialize Sabre Super-Resolution Engine only if eligible
-    // Architectural Invariant 3 (Strategy isolation per SABRE_FULL_FIDELITY_SPEC.md):
-    // - Mode 0 (Auto): zoom >= 1.25x activates Sabre; zoom < 1.25x activates Spatial + RCD (NEVER CHANGED).
-    // - Mode 2 (Only Sabre): enables Sabre across ALL zoom levels (including 1x wide angle per Section 2.4 / Phase 3).
-    // Invariant 4: GPU Sabre executes headless compute with zero UI thread blocking.
-    const bool isSabreEligible = (m_fusionMode == 2) || (m_fusionMode == 0 && m_zoomFactor >= 1.25f);
+    // - Mode 0 (Auto): zoom > 1.05x activates Sabre (covering 28mm ~1.17x, 35mm ~1.46x, and 2.0x crops);
+    //   zoom <= 1.05x activates Spatial + RCD.
+    // - Mode 2 (Only Sabre): enables Sabre across ALL zoom levels (including 1x wide angle).
+    const bool isSabreEligible = (m_fusionMode == 2) || (m_fusionMode == 0 && m_zoomFactor > 1.05f);
     if (isSabreEligible) {
         darkbag::sabre::SabreConfig sabreCfg;
         sabreCfg.width = m_width;
@@ -215,7 +214,7 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
         }
 
         if (m_tileAligner) {
-            m_tileAligner->setReferenceFrame(rawData, m_width, m_height, m_cfaPattern);
+            m_tileAligner->setReferenceFrame(rawData, m_width, m_height, m_cfaPattern, m_zoomFactor);
         }
 
         if (m_gpuSabreEngine) {
@@ -274,10 +273,14 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
         int fw = alignOk ? m_flowWidth : 0;
         int fh = alignOk ? m_flowHeight : 0;
 
+        const int flowOrigX = alignOk ? m_tileAligner->roiXStart() : 0;
+        const int flowOrigY = alignOk ? m_tileAligner->roiYStart() : 0;
+        const int flowStep = alignOk ? m_tileAligner->tileStepSensor() : 0;
+
         if (m_gpuSabreEngine) {
-            m_gpuSabreEngine->accumulateFrame(rawData, fx, fy, fw, fh);
+            m_gpuSabreEngine->accumulateFrame(rawData, fx, fy, fw, fh, flowOrigX, flowOrigY, flowStep);
         } else if (m_sabreEngine) {
-            m_sabreEngine->accumulateFrame(rawData, fx, fy, fw, fh);
+            m_sabreEngine->accumulateFrame(rawData, fx, fy, fw, fh, flowOrigX, flowOrigY, flowStep);
         }
     } else {
         if (m_gpuSabreEngine) {
@@ -333,14 +336,14 @@ int HdrPlusStreamingSession::finish(
     const size_t numPixels = static_cast<size_t>(m_width) * m_height;
     outSharedResult->noiseProfile = m_noiseProfile;
 
-    // Determine effective fusion mode (Invariant 3 & SABRE_FULL_FIDELITY_SPEC.md Section 3.1):
-    // 0: Auto (Spatial+RCD for zoom < 1.25x, Sabre for zoom >= 1.25x) - NEVER CHANGED
+    // Determine effective fusion mode:
+    // 0: Auto (Spatial+RCD for zoom <= 1.05x, Sabre for zoom > 1.05x covering 28mm/35mm/2.0x crops)
     // 1: Spatial + RCD
     // 2: Sabre (Super-Resolution for zoom > 1.05x, Multi-Frame Demosaic for zoom <= 1.05x)
     // 3: Classic Wiener
     int effectiveMode = m_fusionMode;
     if (effectiveMode == 0) {
-        effectiveMode = (m_zoomFactor >= 1.25f) ? 2 : 1;
+        effectiveMode = (m_zoomFactor > 1.05f) ? 2 : 1;
     }
 
     // Fallback Check 1: If Sabre mode requested but only 1 frame was pushed,

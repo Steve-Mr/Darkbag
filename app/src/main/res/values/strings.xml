@@ -305,7 +305,7 @@
 
     <!-- HDR+ Fusion Engine -->
     <string name="pref_hdr_fusion_mode_title">HDR+ Fusion Engine</string>
-    <string name="pref_hdr_fusion_mode_helper">Auto: Spatial+RCD at 1.0x, Sabre on zoom (≥1.25x)</string>
+    <string name="pref_hdr_fusion_mode_helper">Auto: Spatial+RCD at 1.0x, Sabre above 1.05x</string>
     <string name="hdr_fusion_auto">Auto (Spatial / Sabre Zoom)</string>
     <string name="hdr_fusion_spatial">Spatial Merge + RCD</string>
     <string name="hdr_fusion_sabre">Sabre (Super-Resolution)</string>
@@ -417,7 +417,7 @@
     <string name="pref_fusion_spatial">Spatial + RCD</string>
     <string name="pref_fusion_classic">Classic (Wiener)</string>
     <string name="pref_fusion_auto">Auto (Sabre Zoom)</string>
-    <string name="pref_fusion_auto_desc">Adaptive spatial merge or Sabre super-resolution</string>
+    <string name="pref_fusion_auto_desc">Spatial merge at 1x, Sabre super-res on digital crops</string>
     <string name="pref_fusion_spatial_desc">High detail spatial alignment with RCD demosaicing</string>
     <string name="pref_fusion_sabre_desc">Super-resolution &amp; optical subpixel alignment</string>
     <string name="pref_fusion_classic_desc">Traditional Wiener filter HDR+ multi-frame blending</string>

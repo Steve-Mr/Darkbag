@@ -132,7 +132,7 @@ data class StandardTimingTracker(
             1 -> "Spatial+RCD"
             2 -> if (zoomFactor > 1.05f) "Sabre SR" else "Sabre 1x(Demosaic)"
             3 -> "Classic Wiener"
-            else -> if (zoomFactor >= 1.25f) "Auto(Sabre)" else "Auto(RCD)"
+            else -> if (zoomFactor > 1.05f) "Auto(Sabre)" else "Auto(RCD)"
         }
         envParts.add("Mode: $fusionModeStr")
         val envLine = if (envParts.isNotEmpty()) "📷 环境: ${envParts.joinToString(" | ")}\n" else ""

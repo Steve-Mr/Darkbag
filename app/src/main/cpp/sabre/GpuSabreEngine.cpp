@@ -529,6 +529,10 @@ bool GpuSabreEngine::computeStructureTensor() {
     glUniform1i(glGetUniformLocation(s_programStructureTensor, "uQuadHeight"), quadHeight_);
     glUniform1i(glGetUniformLocation(s_programStructureTensor, "uCfaPattern"), static_cast<int>(config_.cfa));
     glUniform1f(glGetUniformLocation(s_programStructureTensor, "uZoomFactor"), config_.zoomFactor);
+    const float wl = std::max(1.0f, static_cast<float>(config_.whiteLevel));
+    const float dnNoiseS = config_.noiseModelS * wl;
+    const float dnNoiseO = config_.noiseModelO * (wl * wl);
+    glUniform2f(glGetUniformLocation(s_programStructureTensor, "uNoiseModel"), dnNoiseS, dnNoiseO);
 
     GLuint numGroupsX = (quadWidth_ + 15) / 16;
     GLuint numGroupsY = (quadHeight_ + 15) / 16;
@@ -580,7 +584,10 @@ bool GpuSabreEngine::accumulateFrame(
     const float* flowX,
     const float* flowY,
     int flowWidth,
-    int flowHeight
+    int flowHeight,
+    int flowOriginX,
+    int flowOriginY,
+    int flowTileStep
 ) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!sessionActive_ || !altBayer) {
@@ -595,7 +602,10 @@ bool GpuSabreEngine::accumulateFrame(
         return false;
     }
 
-    return accumulateFrameLocked(altBayer, flowX, flowY, flowWidth, flowHeight, /*isRef=*/false);
+    return accumulateFrameLocked(
+        altBayer, flowX, flowY, flowWidth, flowHeight, /*isRef=*/false,
+        flowOriginX, flowOriginY, flowTileStep
+    );
 }
 
 void GpuSabreEngine::updateFlowTexture(const float* flowX, const float* flowY, int flowWidth, int flowHeight) {
@@ -632,7 +642,10 @@ bool GpuSabreEngine::accumulateFrameLocked(
     const float* flowY,
     int flowWidth,
     int flowHeight,
-    bool isRef
+    bool isRef,
+    int flowOriginX,
+    int flowOriginY,
+    int flowTileStep
 ) {
     // 1. Upload candidate Bayer data to candBayerTex_
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -697,6 +710,9 @@ bool GpuSabreEngine::accumulateFrameLocked(
     glUniform1i(glGetUniformLocation(s_programAccumulate, "uHasFlow"), hasFlow ? 1 : 0);
     glUniform1i(glGetUniformLocation(s_programAccumulate, "uFlowWidth"), flowWidth);
     glUniform1i(glGetUniformLocation(s_programAccumulate, "uFlowHeight"), flowHeight);
+    glUniform2f(glGetUniformLocation(s_programAccumulate, "uFlowOrigin"),
+                static_cast<float>(flowOriginX), static_cast<float>(flowOriginY));
+    glUniform1f(glGetUniformLocation(s_programAccumulate, "uFlowTileStep"), static_cast<float>(flowTileStep));
 
     GLuint numGroupsX = (width_ + 15) / 16;
     GLuint numGroupsY = (height_ + 15) / 16;
@@ -786,6 +802,8 @@ bool GpuSabreEngine::resolve(
     glUniform1f(glGetUniformLocation(s_programResolve, "uWhiteLevel"), wl);
     glUniform4f(glGetUniformLocation(s_programResolve, "uBlackLevel"), bl_r, bl_g, bl_b, 0.0f);
     glUniform1f(glGetUniformLocation(s_programResolve, "uZoomFactor"), config_.zoomFactor);
+    glUniform1f(glGetUniformLocation(s_programResolve, "uCropXStart"), cropXStart_);
+    glUniform1f(glGetUniformLocation(s_programResolve, "uCropYStart"), cropYStart_);
 
     glDispatchCompute(numGroupsX, numGroupsY, 1);
 
@@ -822,6 +840,7 @@ bool GpuSabreEngine::resolve(
     const float coringThreshold = (config_.coringThreshold > 0.0f) ? config_.coringThreshold : 2.0f;
     glUniform1f(glGetUniformLocation(s_programMtf, "uSharpenStrength"), sharpenStrength);
     glUniform1f(glGetUniformLocation(s_programMtf, "uCoringThreshold"), coringThreshold);
+    glUniform1f(glGetUniformLocation(s_programMtf, "uZoomFactor"), config_.zoomFactor);
 
     glDispatchCompute(numGroupsX, numGroupsY, 1);
 

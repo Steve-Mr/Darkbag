@@ -30,6 +30,7 @@ uniform int uQuadWidth;
 uniform int uQuadHeight;
 uniform int uCfaPattern; // 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR
 uniform float uZoomFactor;
+uniform vec2 uNoiseModel; // x = dnNoiseS (shot slope in DN), y = dnNoiseO (read variance in DN^2)
 
 float getGreenQuad(ivec2 qcoord) {
     ivec2 qc = clamp(qcoord, ivec2(0), ivec2(uQuadWidth - 1, uQuadHeight - 1));
@@ -53,20 +54,34 @@ float getGreenQuad(ivec2 qcoord) {
     return 0.5 * (float(g0) + float(g1));
 }
 
+vec2 computeQuadGradient(ivec2 qcoord) {
+    float gx = 0.5 * (getGreenQuad(qcoord + ivec2(1, 0)) - getGreenQuad(qcoord - ivec2(1, 0)));
+    float gy = 0.5 * (getGreenQuad(qcoord + ivec2(0, 1)) - getGreenQuad(qcoord - ivec2(0, 1)));
+    return vec2(gx, gy);
+}
+
 void main() {
     ivec2 qcoord = ivec2(gl_GlobalInvocationID.xy);
     if (qcoord.x >= uQuadWidth || qcoord.y >= uQuadHeight) {
         return;
     }
 
-    // Central difference gradient in quad coordinates
-    float gx = 0.5 * (getGreenQuad(qcoord + ivec2(1, 0)) - getGreenQuad(qcoord - ivec2(1, 0)));
-    float gy = 0.5 * (getGreenQuad(qcoord + ivec2(0, 1)) - getGreenQuad(qcoord - ivec2(0, 1)));
-
-    // Structure tensor components J = [J_xx, J_yy, J_xy]
-    float jxx = gx * gx;
-    float jyy = gy * gy;
-    float jxy = gx * gy;
+    // 3x3 [1, 2, 1]/4 Gaussian-integrated Structure Tensor J = [J_xx, J_yy, J_xy]
+    // Integrating over 3x3 eliminates the rank-1 outer product degeneracy (lambda2 == 0 everywhere).
+    float jxx = 0.0;
+    float jyy = 0.0;
+    float jxy = 0.0;
+    for (int dy = -1; dy <= 1; ++dy) {
+        float wy = (dy == 0) ? 2.0 : 1.0;
+        for (int dx = -1; dx <= 1; ++dx) {
+            float wx = (dx == 0) ? 2.0 : 1.0;
+            float w = (wx * wy) * 0.0625;
+            vec2 g = computeQuadGradient(qcoord + ivec2(dx, dy));
+            jxx += w * g.x * g.x;
+            jyy += w * g.y * g.y;
+            jxy += w * g.x * g.y;
+        }
+    }
 
     // Eigenvalue decomposition
     float trace = jxx + jyy;
@@ -92,18 +107,23 @@ void main() {
     float e2x = -e1y;
     float e2y = e1x;
 
+    // DN-scaled SNR gating prevents flat-region sensor noise from creating false anisotropy
+    float lumaC = getGreenQuad(qcoord);
+    float sigmaSq = max(1e-6, uNoiseModel.x * max(lumaC, 0.0) + uNoiseModel.y);
+    float snrGate = trace / (trace + 4.0 * sigmaSq);
+
     // Coherence in [0, 1]
     float s1 = sqrt(max(0.0, lambda1));
     float s2 = sqrt(max(0.0, lambda2));
-    float coherence = clamp((s1 - s2) / (s1 + s2 + 1e-5), 0.0, 1.0);
+    float rawCoherence = (s1 - s2) / (s1 + s2 + 1e-5);
+    float coherence = clamp(rawCoherence * snrGate, 0.0, 1.0);
 
     // Dynamic kernel radii adaptation:
-    // For 1x focal length (zoom <= 1.05x): compact sigma0 = 0.68, sharpened edge orientation
-    // For zoom > 1.05x: smoothly interpolate sigma0 up to 0.85 matching super-resolution requirements
+    // Compact steering scale as zoom increases preserves subpixel SR acuity while filling R/B holes via Pass 2 radius >= 1.6.
     float zoomT = smoothstep(1.05, 2.0, uZoomFactor);
-    float sigma0 = mix(0.68, 0.85, zoomT);
-    float kTan = mix(2.0, 1.8, zoomT);
-    float kNorm = mix(1.2, 0.8, zoomT);
+    float sigma0 = mix(0.58, 0.50, zoomT);
+    float kTan = mix(1.8, 1.6, zoomT);
+    float kNorm = mix(0.9, 0.65, zoomT);
 
     float sigma_tangent = sigma0 * (1.0 + kTan * coherence);  // Elongate along edge
     float sigma_normal  = sigma0 / (1.0 + kNorm * coherence); // Narrow across edge
@@ -151,6 +171,8 @@ uniform int uIsFirstFrame;
 uniform int uHasFlow;
 uniform int uFlowWidth;
 uniform int uFlowHeight;
+uniform vec2 uFlowOrigin;
+uniform float uFlowTileStep;
 
 int getBayerChannel(int x, int y, int cfa) {
     int px = x & 1;
@@ -183,12 +205,16 @@ void main() {
     float sx0 = float(X) / uZoomFactor + uCropXStart;
     float sy0 = float(Y) / uZoomFactor + uCropYStart;
 
-    // Optical flow lookup (dx, dy) with bilinear interpolation across neighboring tile centers
+    // Optical flow lookup (dx, dy) with ROI-mapped bilinear interpolation across neighboring tile centers
     float dx = 0.0;
     float dy = 0.0;
     if (uIsRef == 0 && uHasFlow != 0) {
-        float fx = (sx0 / float(uSensorWidth)) * float(uFlowWidth) - 0.5;
-        float fy = (sy0 / float(uSensorHeight)) * float(uFlowHeight) - 0.5;
+        float fx = (uFlowTileStep > 0.0)
+            ? ((sx0 - uFlowOrigin.x) / uFlowTileStep - 0.5)
+            : ((sx0 / float(uSensorWidth)) * float(uFlowWidth) - 0.5);
+        float fy = (uFlowTileStep > 0.0)
+            ? ((sy0 - uFlowOrigin.y) / uFlowTileStep - 0.5)
+            : ((sy0 / float(uSensorHeight)) * float(uFlowHeight) - 0.5);
         float fx_c = clamp(fx, 0.0, float(max(0, uFlowWidth - 1)));
         float fy_c = clamp(fy, 0.0, float(max(0, uFlowHeight - 1)));
         int x0 = int(floor(fx_c));
@@ -210,8 +236,8 @@ void main() {
     float cand_center_x = sx0 + dx;
     float cand_center_y = sy0 + dy;
 
-    // Kernel radius
-    float kernelRadius = max(1.5, uZoomFactor * 1.25);
+    // Kernel radius guarantees sensor radius >= 1.6 (> sqrt(2)) across all zoom levels to avoid R/B holes
+    float kernelRadius = max(1.6, uZoomFactor * 1.6);
     float kernelRadiusSq = kernelRadius * kernelRadius;
     float r_sensor = kernelRadius / uZoomFactor;
 
@@ -220,10 +246,20 @@ void main() {
     int cy_min = max(0, int(floor(cand_center_y - r_sensor)));
     int cy_max = min(uSensorHeight - 1, int(ceil(cand_center_y + r_sensor)));
 
-    // Steering covariance Omega at quad location
-    int qx = clamp(int(sx0 * 0.5), 0, uQuadWidth - 1);
-    int qy = clamp(int(sy0 * 0.5), 0, uQuadHeight - 1);
-    vec4 cov = imageLoad(uCovImg, ivec2(qx, qy));
+    // Bilinear interpolation of positive-definite steering covariance Omega in quad space
+    float qxf = clamp(sx0 * 0.5 - 0.25, 0.0, float(max(0, uQuadWidth - 1)));
+    float qyf = clamp(sy0 * 0.5 - 0.25, 0.0, float(max(0, uQuadHeight - 1)));
+    int qx0 = int(floor(qxf));
+    int qy0 = int(floor(qyf));
+    int qx1 = min(qx0 + 1, max(0, uQuadWidth - 1));
+    int qy1 = min(qy0 + 1, max(0, uQuadHeight - 1));
+    float qwx = qxf - float(qx0);
+    float qwy = qyf - float(qy0);
+    vec4 cov00 = imageLoad(uCovImg, ivec2(qx0, qy0));
+    vec4 cov10 = imageLoad(uCovImg, ivec2(qx1, qy0));
+    vec4 cov01 = imageLoad(uCovImg, ivec2(qx0, qy1));
+    vec4 cov11 = imageLoad(uCovImg, ivec2(qx1, qy1));
+    vec4 cov = mix(mix(cov00, cov10, qwx), mix(cov01, cov11, qwx), qwy);
     float oxx = cov.x;
     float oyy = cov.y;
     float oxy = cov.z;
@@ -299,9 +335,29 @@ void main() {
                 float var_spatial = (count > 0) ? (sumSqDiff / float(count)) : 0.0;
 
                 const float eps = 1e-4;
-                float var_noise = max(0.0, uNoiseModel.x * mean_ref + uNoiseModel.y);
-                float var_total = 0.15 * var_spatial + max(var_noise, 16.0) + eps;
-                float diffVal = candVal - mean_ref;
+                int maxKx = max(0, (uSensorWidth - 1 - px) >> 1);
+                int maxKy = max(0, (uSensorHeight - 1 - py) >> 1);
+                float lkX = clamp((sx - float(px)) * 0.5, 0.0, float(maxKx));
+                float lkY = clamp((sy - float(py)) * 0.5, 0.0, float(maxKy));
+                int kx0 = int(floor(lkX));
+                int ky0 = int(floor(lkY));
+                int kx1 = min(kx0 + 1, maxKx);
+                int ky1 = min(ky0 + 1, maxKy);
+                float kfx = lkX - float(kx0);
+                float kfy = lkY - float(ky0);
+                int sx0_r = px + (kx0 << 1);
+                int sx1_r = px + (kx1 << 1);
+                int sy0_r = py + (ky0 << 1);
+                int sy1_r = py + (ky1 << 1);
+                float r00 = float(texelFetch(uRefBayer, ivec2(sx0_r, sy0_r), 0).r);
+                float r10 = float(texelFetch(uRefBayer, ivec2(sx1_r, sy0_r), 0).r);
+                float r01 = float(texelFetch(uRefBayer, ivec2(sx0_r, sy1_r), 0).r);
+                float r11 = float(texelFetch(uRefBayer, ivec2(sx1_r, sy1_r), 0).r);
+                float refPred = mix(mix(r00, r10, kfx), mix(r01, r11, kfx), kfy);
+
+                float var_noise = max(0.0, uNoiseModel.x * max(refPred, 0.0) + uNoiseModel.y);
+                float var_total = 0.75 * var_spatial + max(var_noise, 16.0) + eps;
+                float diffVal = candVal - refPred;
                 float distSq = (diffVal * diffVal) / var_total;
 
                 w_motion = exp(-max(0.0, distSq - 2.5) * 0.75);
@@ -361,6 +417,8 @@ uniform int uCfaPattern; // 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR
 uniform float uWhiteLevel;
 uniform vec4 uBlackLevel; // r, g, b, 0.0
 uniform float uZoomFactor;
+uniform float uCropXStart;
+uniform float uCropYStart;
 
 int getBayerChannel(int x, int y, int cfa) {
     int px = x & 1;
@@ -504,6 +562,27 @@ vec3 computeRcdPrior(ivec2 coord) {
     return vec3(priorR, priorG, priorB);
 }
 
+vec3 sampleZoomedRcdPrior(ivec2 coord) {
+    if (uZoomFactor <= 1.05) {
+        return computeRcdPrior(coord);
+    }
+    float sx = float(coord.x) / uZoomFactor + uCropXStart;
+    float sy = float(coord.y) / uZoomFactor + uCropYStart;
+    float sx_c = clamp(sx, 0.0, float(max(0, uWidth - 1)));
+    float sy_c = clamp(sy, 0.0, float(max(0, uHeight - 1)));
+    int x0 = int(floor(sx_c));
+    int y0 = int(floor(sy_c));
+    int x1 = min(x0 + 1, max(0, uWidth - 1));
+    int y1 = min(y0 + 1, max(0, uHeight - 1));
+    float wx = sx_c - float(x0);
+    float wy = sy_c - float(y0);
+    vec3 p00 = computeRcdPrior(ivec2(x0, y0));
+    vec3 p10 = computeRcdPrior(ivec2(x1, y0));
+    vec3 p01 = computeRcdPrior(ivec2(x0, y1));
+    vec3 p11 = computeRcdPrior(ivec2(x1, y1));
+    return mix(mix(p00, p10, wx), mix(p01, p11, wx), wy);
+}
+
 void main() {
     ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
     if (coord.x >= uWidth || coord.y >= uHeight) {
@@ -530,23 +609,26 @@ void main() {
     float gOut = normG;
     float bOut = normB;
 
-    // Single-frame RCD (Ratio-preserving / Color-difference) reference prior regularizer:
-    // When multi-frame weights are abundant (w >= 1.0), 100% Sabre physical full-color demosaicing is used.
-    // When multi-frame weights are sparse (w < 1.0) and at 1x focal length (uZoomFactor <= 1.05), RCD prior smoothly regularizes the result.
-    // At digital zoom (> 1.05x), output coordinate space is cropped and does not align with uRefBayer; RCD prior is bypassed.
-    if (uZoomFactor <= 1.05 && (wr < 1.0 || wg < 1.0 || wb < 1.0)) {
-        vec3 rcdPrior = computeRcdPrior(coord);
+    // Continuous zoom-mapped RCD prior + green-guided chroma difference fusion for sparse weights across all zoom levels.
+    if (wr < 1.0 || wg < 1.0 || wb < 1.0) {
+        vec3 rcdPrior = sampleZoomedRcdPrior(coord);
         rcdPrior.r = clamp(rcdPrior.r, bl_r, wl);
         rcdPrior.g = clamp(rcdPrior.g, bl_g, wl);
         rcdPrior.b = clamp(rcdPrior.b, bl_b, wl);
+
+        float greenTrust = clamp((wg - 0.1) / 0.5, 0.0, 1.0);
+        float chromaPriorR = clamp(normG + (rcdPrior.r - rcdPrior.g), bl_r, wl);
+        float chromaPriorB = clamp(normG + (rcdPrior.b - rcdPrior.g), bl_b, wl);
+        float effPriorR = mix(rcdPrior.r, chromaPriorR, greenTrust);
+        float effPriorB = mix(rcdPrior.b, chromaPriorB, greenTrust);
 
         float confR = clamp(wr, 0.0, 1.0);
         float confG = clamp(wg, 0.0, 1.0);
         float confB = clamp(wb, 0.0, 1.0);
 
-        rOut = mix(rcdPrior.r, rOut, confR);
+        rOut = mix(effPriorR, rOut, confR);
         gOut = mix(rcdPrior.g, gOut, confG);
-        bOut = mix(rcdPrior.b, bOut, confB);
+        bOut = mix(effPriorB, bOut, confB);
     }
 
     // Black level subtraction and normalization to [0.0, 1.0]
@@ -577,6 +659,7 @@ uniform int uHeight;
 uniform vec2 uNoiseModel; // x = normalized S (shot noise slope), y = normalized O (read noise floor)
 uniform float uSharpenStrength; // default 1.25
 uniform float uCoringThreshold; // default 2.0
+uniform float uZoomFactor;
 
 const vec3 kRec709 = vec3(0.2126, 0.7152, 0.0722);
 
@@ -590,42 +673,51 @@ void main() {
     vec3 centerRgb = centerPixel.rgb;
     float Y = dot(centerRgb, kRec709);
 
-    float yBlur = 0.0;
+    float yBlurFine = 0.0;
+    float yBlurMid = 0.0;
     float yMin = Y;
     float yMax = Y;
 
-    // 3x3 local Gaussian blur filter ([1, 2, 1] / 4 separable filter, normalized by 16.0)
+    // Multi-scale Gaussian blur filters ([1, 2, 1]/4 fine 3x3 and dilated 5x5)
     for (int dy = -1; dy <= 1; ++dy) {
         float wy = (dy == 0) ? 2.0 : 1.0;
         for (int dx = -1; dx <= 1; ++dx) {
             float wx = (dx == 0) ? 2.0 : 1.0;
-            float w = (wx * wy) * 0.0625; // (wx * wy) / 16.0
+            float w = (wx * wy) * 0.0625;
 
-            ivec2 nc = clamp(coord + ivec2(dx, dy), ivec2(0), ivec2(uWidth - 1, uHeight - 1));
-            vec3 rgb = imageLoad(uInRgbImg, nc).rgb;
-            float yVal = dot(rgb, kRec709);
+            ivec2 ncFine = clamp(coord + ivec2(dx, dy), ivec2(0), ivec2(uWidth - 1, uHeight - 1));
+            float yFine = dot(imageLoad(uInRgbImg, ncFine).rgb, kRec709);
+            yBlurFine += w * yFine;
+            yMin = min(yMin, yFine);
+            yMax = max(yMax, yFine);
 
-            yBlur += w * yVal;
-            yMin = min(yMin, yVal);
-            yMax = max(yMax, yVal);
+            ivec2 ncMid = clamp(coord + ivec2(dx * 2, dy * 2), ivec2(0), ivec2(uWidth - 1, uHeight - 1));
+            float yMid = dot(imageLoad(uInRgbImg, ncMid).rgb, kRec709);
+            yBlurMid += w * yMid;
         }
     }
 
-    // High-frequency detail Delta Y = Y - Y_blur
-    float deltaY = Y - yBlur;
+    // Zoom-aware multi-scale MTF restoration
+    float zoomT = smoothstep(1.05, 2.0, uZoomFactor);
+    float deltaYFine = Y - yBlurFine;
+    float deltaYMid = Y - yBlurMid;
+    float deltaY = mix(deltaYFine, 0.65 * deltaYFine + 0.35 * deltaYMid, zoomT);
 
     // Physical noise standard deviation: sigma = sqrt(max(10^-7, S * Y + O))
     float sigma = sqrt(max(1e-7, uNoiseModel.x * Y + uNoiseModel.y));
 
-    // Continuous noise coring: Delta Y_cored = sign(Delta Y) * max(0.0, |Delta Y| - uCoringThreshold * sigma)
-    float deltaYCored = sign(deltaY) * max(0.0, abs(deltaY) - uCoringThreshold * sigma);
+    float effStrength = uSharpenStrength * mix(1.0, 1.25, zoomT);
+    float effCoring = uCoringThreshold * mix(1.0, 1.20, zoomT);
+
+    // Continuous noise coring: Delta Y_cored = sign(Delta Y) * max(0.0, |Delta Y| - effCoring * sigma)
+    float deltaYCored = sign(deltaY) * max(0.0, abs(deltaY) - effCoring * sigma);
 
     // Wiener regularization damping: gain = Delta Y^2 / (Delta Y^2 + sigma^2 + 10^-6)
     float deltaYSq = deltaY * deltaY;
     float gain = deltaYSq / (deltaYSq + sigma * sigma + 1e-6);
 
-    // Clamped luminance boost Delta Y_final = uSharpenStrength * gain * Delta Y_cored
-    float deltaYFinal = uSharpenStrength * gain * deltaYCored;
+    // Clamped luminance boost Delta Y_final = effStrength * gain * Delta Y_cored
+    float deltaYFinal = effStrength * gain * deltaYCored;
 
     // Clamp Y_new to [Y_min - haloMargin, Y_max + haloMargin] of 3x3 neighborhood to prevent halos while preserving fine 1px features
     float localRange = yMax - yMin;

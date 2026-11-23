@@ -41,7 +41,10 @@ public:
         const float* flowX = nullptr,
         const float* flowY = nullptr,
         int flowWidth = 0,
-        int flowHeight = 0
+        int flowHeight = 0,
+        int flowOriginX = 0,
+        int flowOriginY = 0,
+        int flowTileStep = 0
     );
 
     // Resolve accumulated samples into normalized linear RGB texture (GL_RGBA16F).
@@ -89,7 +92,10 @@ private:
         const float* flowY,
         int flowWidth,
         int flowHeight,
-        bool isRef
+        bool isRef,
+        int flowOriginX = 0,
+        int flowOriginY = 0,
+        int flowTileStep = 0
     );
 
     void updateFlowTexture(const float* flowX, const float* flowY, int flowWidth, int flowHeight);

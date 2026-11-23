@@ -55,7 +55,10 @@ public:
         const float* flowX = nullptr,
         const float* flowY = nullptr,
         int flowWidth = 0,
-        int flowHeight = 0
+        int flowHeight = 0,
+        int flowOriginX = 0,
+        int flowOriginY = 0,
+        int flowTileStep = 0
     );
 
     // Resolve accumulated subpixel samples directly into linear RGB (width * height * 3).
@@ -63,6 +66,11 @@ public:
     bool resolve(uint16_t* outRgb, uint16_t* outBayer = nullptr);
 
     int framesAccumulated() const { return m_framesAccumulated; }
+    int quadWidth() const { return m_quadWidth; }
+    int quadHeight() const { return m_quadHeight; }
+    const std::vector<float>& covXX() const { return m_covXX; }
+    const std::vector<float>& covYY() const { return m_covYY; }
+    const std::vector<float>& covXY() const { return m_covXY; }
 
 private:
     SabreConfig m_config;
