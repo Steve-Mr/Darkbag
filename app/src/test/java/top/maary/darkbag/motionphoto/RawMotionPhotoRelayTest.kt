@@ -155,5 +155,34 @@ class RawMotionPhotoRelayTest {
         capturedQuality = top.maary.darkbag.repository.PreferenceKeys.RAW_MOTION_QUALITY_NATIVE
         relay.onRawFrame(FakeRawImage(1008, 756, 1_100_000_000L, buf), null)
         assertEquals(listOf(1, 0, 2), capturedModes)
+
+        // 4. Legacy and localized variations
+        capturedQuality = "Native (Max Quality)"
+        relay.onRawFrame(FakeRawImage(1008, 756, 1_150_000_000L, buf), null)
+        assertEquals(listOf(1, 0, 2, 2), capturedModes)
+
+        capturedQuality = "4x4 抽样"
+        relay.onRawFrame(FakeRawImage(1008, 756, 1_200_000_000L, buf), null)
+        assertEquals(listOf(1, 0, 2, 2, 0), capturedModes)
+    }
+
+    @Test
+    fun `parseQualityModeHandlesAllVariations`() {
+        assertEquals(2, RawMotionPhotoRelay.parseQualityMode("Native"))
+        assertEquals(2, RawMotionPhotoRelay.parseQualityMode("Native (Max Quality)"))
+        assertEquals(2, RawMotionPhotoRelay.parseQualityMode("Native Resolution"))
+        assertEquals(2, RawMotionPhotoRelay.parseQualityMode("原生全像素"))
+        assertEquals(2, RawMotionPhotoRelay.parseQualityMode("2"))
+
+        assertEquals(0, RawMotionPhotoRelay.parseQualityMode("4x4 Subsample"))
+        assertEquals(0, RawMotionPhotoRelay.parseQualityMode("4x4 Subsample (Fast)"))
+        assertEquals(0, RawMotionPhotoRelay.parseQualityMode("4x4 抽样"))
+        assertEquals(0, RawMotionPhotoRelay.parseQualityMode("0"))
+
+        assertEquals(1, RawMotionPhotoRelay.parseQualityMode("2x2 Binning"))
+        assertEquals(1, RawMotionPhotoRelay.parseQualityMode("2x2 Binning (Balanced)"))
+        assertEquals(1, RawMotionPhotoRelay.parseQualityMode("2x2 合并"))
+        assertEquals(1, RawMotionPhotoRelay.parseQualityMode(null))
+        assertEquals(1, RawMotionPhotoRelay.parseQualityMode(""))
     }
 }

@@ -294,9 +294,9 @@ class SettingsBentoDelegate(
 
         // 16. RAW Motion Photo Quality
         val qualityLabel = when {
-            state.expRawMotionPhotoQuality.contains("Native", ignoreCase = true) ->
+            state.expRawMotionPhotoQuality.contains("Native", ignoreCase = true) || state.expRawMotionPhotoQuality.contains("全像素") ->
                 context.getString(R.string.raw_motion_quality_native)
-            state.expRawMotionPhotoQuality.contains("4x4", ignoreCase = true) ->
+            state.expRawMotionPhotoQuality.contains("4x4", ignoreCase = true) || state.expRawMotionPhotoQuality.contains("抽样") ->
                 context.getString(R.string.raw_motion_quality_4x4)
             else ->
                 context.getString(R.string.raw_motion_quality_2x2)

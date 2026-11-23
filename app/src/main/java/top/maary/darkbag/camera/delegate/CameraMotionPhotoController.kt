@@ -3,6 +3,7 @@ package top.maary.darkbag.camera.delegate
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.SystemClock
+import android.util.Log
 import android.view.View
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CompletableDeferred
@@ -58,6 +59,9 @@ class CameraMotionPhotoController(
 
         val isRawMotion = isEnabled && snapshot.expRawMotionPhoto &&
             coordinator.effectiveCaptureMode.supportsMotionPhoto && env.runtimeState.isRawSupported
+
+        val currentQuality = snapshot.expRawMotionPhotoQuality
+        Log.i(TAG, "updateEncoder: motionPhotoEnabled=$isEnabled, isRawMotion=$isRawMotion, rawQuality='$currentQuality' (mode=${RawMotionPhotoRelay.parseQualityMode(currentQuality)})")
 
         if (isEnabled && coordinator.effectiveCaptureMode.supportsMotionPhoto) {
             val current = encoder
@@ -178,6 +182,7 @@ class CameraMotionPhotoController(
     }
 
     private companion object {
+        private const val TAG = "CameraMotionPhotoCtrl"
         const val ENCODER_WIDTH = 1080
         const val ENCODER_HEIGHT = 1440
     }

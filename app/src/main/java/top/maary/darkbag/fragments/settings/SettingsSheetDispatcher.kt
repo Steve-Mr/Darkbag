@@ -349,8 +349,8 @@ class SettingsSheetDispatcher(
     fun showExpRawMotionQualitySheet() {
         val currentQuality = viewModel.preferences.value.expRawMotionPhotoQuality
         val selectedIndex = when {
-            currentQuality.contains("Native", ignoreCase = true) -> 2
-            currentQuality.contains("4x4", ignoreCase = true) -> 1
+            currentQuality.contains("Native", ignoreCase = true) || currentQuality.contains("全像素") -> 2
+            currentQuality.contains("4x4", ignoreCase = true) || currentQuality.contains("抽样") -> 1
             else -> 0
         }
         BentoSelectionBottomSheet.show(

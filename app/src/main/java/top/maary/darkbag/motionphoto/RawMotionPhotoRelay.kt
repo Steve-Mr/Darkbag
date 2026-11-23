@@ -6,6 +6,7 @@ import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.ColorSpaceTransform
 import android.media.Image
 import android.os.SystemClock
+import android.util.Log
 import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.processor.SensorCalibrationHelper
 import top.maary.darkbag.rawvideo.RawVideoNative
@@ -70,6 +71,15 @@ class RawMotionPhotoRelay(
         private const val TAG = "RawMotionPhotoRelay"
         const val INITIAL_BUFFER_CAPACITY = 1024 * 768 * 2
         const val MIN_FRAME_INTERVAL_NS = 33_000_000L // Cap live stream at ~30 fps
+
+        fun parseQualityMode(quality: String?): Int {
+            if (quality.isNullOrBlank()) return 1
+            return when {
+                quality.contains("Native", ignoreCase = true) || quality.contains("全像素") || quality == "2" -> 2
+                quality.contains("4x4", ignoreCase = true) || quality.contains("抽样") || quality == "0" -> 0
+                else -> 1 // 2x2 Binning (default)
+            }
+        }
     }
 
     private val bufferLock = Any()
@@ -80,6 +90,9 @@ class RawMotionPhotoRelay(
     private val bufferIndex = AtomicInteger(0)
     private val isRunning = AtomicBoolean(false)
     private var lastSensorTimestampNs = 0L
+    private var lastLoggedQualityMode = -1
+    private var lastLoggedWidth = 0
+    private var lastLoggedHeight = 0
 
     private val cachedCcm = FloatArray(9) { if (it % 4 == 0) 1.0f else 0.0f }
     private val cachedWbGains = floatArrayOf(2.0f, 1.0f, 1.6f)
@@ -142,11 +155,7 @@ class RawMotionPhotoRelay(
         val rowStride = plane.rowStride
 
         val quality = qualityModeProvider()
-        val qualityMode = when (quality) {
-            PreferenceKeys.RAW_MOTION_QUALITY_NATIVE -> 2
-            PreferenceKeys.RAW_MOTION_QUALITY_4X4 -> 0
-            else -> 1 // 2x2 Binning (default)
-        }
+        val qualityMode = parseQualityMode(quality)
 
         val expectedDstWidth = when (qualityMode) {
             2 -> srcWidth and 1.inv()
@@ -160,6 +169,18 @@ class RawMotionPhotoRelay(
         }
         val requiredBytes = expectedDstWidth * expectedDstHeight * 2
         ensureBufferCapacity(requiredBytes)
+
+        if (lastLoggedQualityMode != qualityMode || lastLoggedWidth != expectedDstWidth || lastLoggedHeight != expectedDstHeight) {
+            lastLoggedQualityMode = qualityMode
+            lastLoggedWidth = expectedDstWidth
+            lastLoggedHeight = expectedDstHeight
+            val modeName = when (qualityMode) {
+                2 -> "Native 1x1"
+                0 -> "4x4 Subsample"
+                else -> "2x2 Binning"
+            }
+            Log.i(TAG, "RAW Motion Photo stream active: qualityPreference='$quality', mode=$qualityMode ($modeName), dims=${expectedDstWidth}x${expectedDstHeight}")
+        }
 
         // White level
         val whiteLevel = chars?.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL)?.toFloat() ?: 1023f

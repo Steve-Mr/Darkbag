@@ -521,6 +521,7 @@
     <string name="pref_cache_category">缓存与存储管理</string>
     <string name="pref_force_60fps">强制 60fps 取景</string>
     <string name="pref_exp_multicam_color_harmonization_title">多摄色彩一致性</string>
+    <string name="pref_exp_raw_motion_photo_tray_title">RAW 传感器动态照片</string>
     <string name="pref_exp_raw_motion_photo">RAW 传感器动态照片</string>
     <string name="pref_exp_raw_motion_photo_summary">动态照片直接从 RAW 传感器流处理，跳过 ISP 预览</string>
     <string name="settings_exp_raw_motion_quality_title">RAW 动态照片画质</string>
