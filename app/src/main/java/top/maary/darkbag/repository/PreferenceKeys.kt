@@ -94,6 +94,7 @@ object PreferenceKeys {
     const val KEY_EXP_FOCUS_PEAKING = "exp_focus_peaking"
     const val KEY_EXP_MULTICAM_COLOR_HARMONIZATION = "exp_multicam_color_harmonization"
     const val KEY_EXP_RAW_MOTION_PHOTO = "exp_raw_motion_photo"
+    const val KEY_EXP_RAW_MOTION_PHOTO_QUALITY = "exp_raw_motion_photo_quality"
     const val KEY_FOCUS_PEAKING_ACTIVE = "pref_focus_peaking_active"
     const val KEY_COLOR_ENGINE_MODE = "color_engine_mode"
     const val KEY_WB_STRATEGY = "wb_strategy"
@@ -191,6 +192,7 @@ object PreferenceKeys {
     val EXP_FOCUS_PEAKING = booleanPreferencesKey(KEY_EXP_FOCUS_PEAKING)
     val EXP_MULTICAM_COLOR_HARMONIZATION = booleanPreferencesKey(KEY_EXP_MULTICAM_COLOR_HARMONIZATION)
     val EXP_RAW_MOTION_PHOTO = booleanPreferencesKey(KEY_EXP_RAW_MOTION_PHOTO)
+    val EXP_RAW_MOTION_PHOTO_QUALITY = stringPreferencesKey(KEY_EXP_RAW_MOTION_PHOTO_QUALITY)
     val FOCUS_PEAKING_ACTIVE = booleanPreferencesKey(KEY_FOCUS_PEAKING_ACTIVE)
     val COLOR_ENGINE_MODE = intPreferencesKey(KEY_COLOR_ENGINE_MODE)
     val WB_STRATEGY = intPreferencesKey(KEY_WB_STRATEGY)
@@ -281,6 +283,16 @@ object PreferenceKeys {
         SHUTTER_LONG_PRESS_MP4,
         SHUTTER_LONG_PRESS_RAW_VIDEO,
         SHUTTER_LONG_PRESS_DISABLED
+    )
+
+    const val RAW_MOTION_QUALITY_2X2 = "2x2 Binning"
+    const val RAW_MOTION_QUALITY_4X4 = "4x4 Subsample"
+    const val RAW_MOTION_QUALITY_NATIVE = "Native"
+    const val DEFAULT_EXP_RAW_MOTION_PHOTO_QUALITY = RAW_MOTION_QUALITY_2X2
+    val RAW_MOTION_QUALITY_OPTIONS = listOf(
+        RAW_MOTION_QUALITY_2X2,
+        RAW_MOTION_QUALITY_4X4,
+        RAW_MOTION_QUALITY_NATIVE
     )
 
     val RAW_VIDEO_FPS_OPTIONS = listOf("24", "30", "60")

@@ -1849,6 +1849,27 @@
                                 app:bentoSwitchBadge="RAW"
                                 app:bentoSwitchBadgeStyle="tertiary" />
 
+                            <!-- layout_exp_raw_motion_options: Expandable container for RAW Motion options -->
+                            <LinearLayout
+                                android:id="@+id/layout_exp_raw_motion_options"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:visibility="gone"
+                                android:layout_marginBottom="8dp">
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btn_menu_raw_motion_quality"
+                                    style="@style/Widget.Darkbag.BentoTile.Button"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="52dp"
+                                    app:backgroundTint="?attr/colorSurface"
+                                    android:textColor="?attr/colorOnSurface"
+                                    app:strokeWidth="0dp"
+                                    app:cornerRadius="14dp"
+                                    tools:text="RAW MOTION QUALITY&#10;2x2 Binning" />
+                            </LinearLayout>
+
                             <!-- btn_open_lens_calibration -->
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btn_open_lens_calibration"

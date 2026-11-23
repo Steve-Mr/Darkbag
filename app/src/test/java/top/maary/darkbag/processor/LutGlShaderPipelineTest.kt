@@ -79,6 +79,8 @@ class LutGlShaderPipelineTest {
         assertTrue(LutGlShaderPipeline.PREVIEW_FRAGMENT_SHADER_SRC.contains("triangularDither"))
         assertTrue(LutGlShaderPipeline.RAW_FRAGMENT_SHADER_SRC.contains("#version 300 es"))
         assertTrue(LutGlShaderPipeline.RAW_FRAGMENT_SHADER_SRC.contains("uniform highp usampler2D uRawBayerTexture;"))
+        assertTrue(LutGlShaderPipeline.RAW_FRAGMENT_SHADER_SRC.contains("uniform sampler2D uTexLsc;"))
+        assertTrue(LutGlShaderPipeline.RAW_FRAGMENT_SHADER_SRC.contains("uniform int uHasLsc;"))
         assertTrue(LutGlShaderPipeline.RAW_FRAGMENT_SHADER_SRC.contains("uniform ivec2 uRawImageSize;"))
         assertTrue(LutGlShaderPipeline.RAW_FRAGMENT_SHADER_SRC.contains("applyLogCurve"))
         assertTrue(LutGlShaderPipeline.RAW_FRAGMENT_SHADER_SRC.contains("triangularDither"))

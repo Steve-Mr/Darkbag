@@ -198,6 +198,15 @@ object RawVideoNative {
         saturation: Float
     ): Boolean
 
+    external fun nativeProcessRawMotionBayer(
+        srcBuffer: ByteBuffer,
+        srcWidth: Int,
+        srcHeight: Int,
+        srcRowStride: Int,
+        dstBuffer: ByteBuffer,
+        qualityMode: Int
+    ): Int
+
     external fun nativeSubsampleBayer4x4(
         srcBuffer: ByteBuffer,
         srcWidth: Int,

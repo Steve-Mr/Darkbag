@@ -118,4 +118,42 @@ class RawMotionPhotoRelayTest {
         relay.onRawFrame(FakeRawImage(1008, 756, 1_100_000_000L, buf), null)
         assertEquals(1, dispatched)
     }
+
+    @Test
+    fun `qualityModeSelectsCorrectDimensionsAndModes`() {
+        val capturedModes = mutableListOf<Int>()
+        var capturedQuality = top.maary.darkbag.repository.PreferenceKeys.RAW_MOTION_QUALITY_2X2
+        val relay = RawMotionPhotoRelay(
+            lutSurfaceProcessorProvider = { null },
+            characteristicsProvider = { null },
+            qualityModeProvider = { capturedQuality },
+            nativeProcessor = { _, w, h, _, _, mode ->
+                capturedModes.add(mode)
+                when (mode) {
+                    2 -> (w shl 16) or h
+                    1 -> ((w / 2) shl 16) or (h / 2)
+                    else -> ((w / 4) shl 16) or (h / 4)
+                }
+            },
+            frameConsumer = { _, _, _, _, _, _, _, _, _, _, _, _ -> }
+        )
+
+        relay.start()
+        val buf = ByteBuffer.allocateDirect(1008 * 756 * 2)
+
+        // 1. 2x2 Binning -> mode 1
+        capturedQuality = top.maary.darkbag.repository.PreferenceKeys.RAW_MOTION_QUALITY_2X2
+        relay.onRawFrame(FakeRawImage(1008, 756, 1_000_000_000L, buf), null)
+        assertEquals(listOf(1), capturedModes)
+
+        // 2. 4x4 Subsample -> mode 0
+        capturedQuality = top.maary.darkbag.repository.PreferenceKeys.RAW_MOTION_QUALITY_4X4
+        relay.onRawFrame(FakeRawImage(1008, 756, 1_050_000_000L, buf), null)
+        assertEquals(listOf(1, 0), capturedModes)
+
+        // 3. Native -> mode 2
+        capturedQuality = top.maary.darkbag.repository.PreferenceKeys.RAW_MOTION_QUALITY_NATIVE
+        relay.onRawFrame(FakeRawImage(1008, 756, 1_100_000_000L, buf), null)
+        assertEquals(listOf(1, 0, 2), capturedModes)
+    }
 }

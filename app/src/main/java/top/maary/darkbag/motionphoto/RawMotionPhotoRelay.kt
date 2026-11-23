@@ -7,7 +7,9 @@ import android.hardware.camera2.params.ColorSpaceTransform
 import android.media.Image
 import android.os.SystemClock
 import top.maary.darkbag.processor.LutSurfaceProcessor
+import top.maary.darkbag.processor.SensorCalibrationHelper
 import top.maary.darkbag.rawvideo.RawVideoNative
+import top.maary.darkbag.repository.PreferenceKeys
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -19,8 +21,9 @@ import java.util.concurrent.atomic.AtomicInteger
 class RawMotionPhotoRelay(
     private val lutSurfaceProcessorProvider: () -> LutSurfaceProcessor?,
     private val characteristicsProvider: () -> CameraCharacteristics?,
-    private val nativeSubsampler: (src: ByteBuffer, w: Int, h: Int, stride: Int, dst: ByteBuffer) -> Int = { src, w, h, stride, dst ->
-        RawVideoNative.nativeSubsampleBayer4x4(src, w, h, stride, dst)
+    private val qualityModeProvider: () -> String = { PreferenceKeys.DEFAULT_EXP_RAW_MOTION_PHOTO_QUALITY },
+    private val nativeProcessor: (src: ByteBuffer, w: Int, h: Int, stride: Int, dst: ByteBuffer, mode: Int) -> Int = { src, w, h, stride, dst, mode ->
+        RawVideoNative.nativeProcessRawMotionBayer(src, w, h, stride, dst, mode)
     },
     private val frameConsumer: ((
         bayerBuffer: ByteBuffer,
@@ -31,9 +34,38 @@ class RawMotionPhotoRelay(
         whiteLevel: Float,
         wbGains: FloatArray,
         dngCcm: FloatArray,
-        timestampNs: Long
+        timestampNs: Long,
+        lensShadingMap: FloatArray?,
+        lensShadingRows: Int,
+        lensShadingCols: Int
     ) -> Unit)? = null
 ) {
+    constructor(
+        lutSurfaceProcessorProvider: () -> LutSurfaceProcessor?,
+        characteristicsProvider: () -> CameraCharacteristics?,
+        nativeSubsampler: (src: ByteBuffer, w: Int, h: Int, stride: Int, dst: ByteBuffer) -> Int,
+        frameConsumer: ((
+            bayerBuffer: ByteBuffer,
+            width: Int,
+            height: Int,
+            cfaPattern: Int,
+            blackLevel: FloatArray,
+            whiteLevel: Float,
+            wbGains: FloatArray,
+            dngCcm: FloatArray,
+            timestampNs: Long
+        ) -> Unit)? = null
+    ) : this(
+        lutSurfaceProcessorProvider = lutSurfaceProcessorProvider,
+        characteristicsProvider = characteristicsProvider,
+        qualityModeProvider = { PreferenceKeys.DEFAULT_EXP_RAW_MOTION_PHOTO_QUALITY },
+        nativeProcessor = { src, w, h, stride, dst, _ -> nativeSubsampler(src, w, h, stride, dst) },
+        frameConsumer = if (frameConsumer != null) {
+            { b, w, h, cfa, bl, wl, wb, ccm, ts, _, _, _ ->
+                frameConsumer(b, w, h, cfa, bl, wl, wb, ccm, ts)
+            }
+        } else null
+    )
     companion object {
         private const val TAG = "RawMotionPhotoRelay"
         const val INITIAL_BUFFER_CAPACITY = 1024 * 768 * 2
@@ -109,8 +141,23 @@ class RawMotionPhotoRelay(
         val srcHeight = image.height
         val rowStride = plane.rowStride
 
-        val expectedDstWidth = ((srcWidth / 4) and 1.inv())
-        val expectedDstHeight = ((srcHeight / 4) and 1.inv())
+        val quality = qualityModeProvider()
+        val qualityMode = when (quality) {
+            PreferenceKeys.RAW_MOTION_QUALITY_NATIVE -> 2
+            PreferenceKeys.RAW_MOTION_QUALITY_4X4 -> 0
+            else -> 1 // 2x2 Binning (default)
+        }
+
+        val expectedDstWidth = when (qualityMode) {
+            2 -> srcWidth and 1.inv()
+            1 -> (srcWidth / 2) and 1.inv()
+            else -> (srcWidth / 4) and 1.inv()
+        }
+        val expectedDstHeight = when (qualityMode) {
+            2 -> srcHeight and 1.inv()
+            1 -> (srcHeight / 2) and 1.inv()
+            else -> (srcHeight / 4) and 1.inv()
+        }
         val requiredBytes = expectedDstWidth * expectedDstHeight * 2
         ensureBufferCapacity(requiredBytes)
 
@@ -175,6 +222,12 @@ class RawMotionPhotoRelay(
         }
         val activeCcm = if (ccmOk) dngCcm else cachedCcm
 
+        // Lens Shading Map (LSC)
+        val lscTriple = SensorCalibrationHelper.extractLensShading(result)
+        val lscMap = lscTriple.first
+        val lscRows = lscTriple.second
+        val lscCols = lscTriple.third
+
         // Pick next buffer in double-buffer rotation
         val idx = bufferIndex.getAndIncrement() and 1
         val dstBuffer = synchronized(bufferLock) { buffers[idx] }
@@ -182,7 +235,7 @@ class RawMotionPhotoRelay(
 
         srcBuffer.position(0)
         val packedDims = try {
-            nativeSubsampler(srcBuffer, srcWidth, srcHeight, rowStride, dstBuffer)
+            nativeProcessor(srcBuffer, srcWidth, srcHeight, rowStride, dstBuffer, qualityMode)
         } catch (_: UnsatisfiedLinkError) {
             0
         }
@@ -197,8 +250,21 @@ class RawMotionPhotoRelay(
 
         lastSensorTimestampNs = image.timestamp
 
-        val activeConsumer = frameConsumer ?: { buf, w, h, cfa, bl, wl, wb, ccm, ts ->
-            processor?.submitRawMotionFrame(buf, w, h, cfa, bl, wl, wb, ccm, ts)
+        val activeConsumer = frameConsumer ?: { buf, w, h, cfa, bl, wl, wb, ccm, ts, lsc, lr, lc ->
+            processor?.submitRawMotionFrame(
+                bayerBuffer = buf,
+                width = w,
+                height = h,
+                cfaPattern = cfa,
+                blackLevel = bl,
+                whiteLevel = wl,
+                wbGains = wb,
+                dngCcm = ccm,
+                timestampNs = ts,
+                lensShadingMap = lsc,
+                lensShadingRows = lr,
+                lensShadingCols = lc
+            )
         }
 
         activeConsumer(
@@ -210,7 +276,10 @@ class RawMotionPhotoRelay(
             whiteLevel,
             wbGains,
             activeCcm,
-            monotonicTs
+            monotonicTs,
+            lscMap,
+            lscRows,
+            lscCols
         )
     }
 

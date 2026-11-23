@@ -57,6 +57,8 @@ internal class LutGlShaderPipeline {
     private var rawWhiteLevelLoc = -1
     private var rawWbGainsLoc = -1
     private var rawCcmLoc = -1
+    private var rawLscLoc = -1
+    private var rawHasLscLoc = -1
     private var rawPosHandle = -1
     private var rawTexHandle = -1
 
@@ -168,6 +170,8 @@ internal class LutGlShaderPipeline {
         rawWidth: Int,
         rawHeight: Int,
         rawBayerTextureId: Int,
+        rawLscTextureId: Int = 0,
+        hasLsc: Boolean = false,
         cfaPattern: Int,
         blackLevel: FloatArray,
         whiteLevel: Float,
@@ -196,6 +200,11 @@ internal class LutGlShaderPipeline {
         val activeLutTex = if (currentLutSize > 0 && lutTextureId != 0) lutTextureId else dummyLutTextureId
         GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, activeLutTex)
         if (rawLutLoc >= 0) GLES30.glUniform1i(rawLutLoc, 1)
+
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, if (hasLsc) rawLscTextureId else 0)
+        if (rawLscLoc >= 0) GLES30.glUniform1i(rawLscLoc, 2)
+        if (rawHasLscLoc >= 0) GLES30.glUniform1i(rawHasLscLoc, if (hasLsc) 1 else 0)
 
         if (rawImageSizeLoc >= 0) GLES30.glUniform2i(rawImageSizeLoc, rawWidth, rawHeight)
         if (rawCfaPatternLoc >= 0) GLES30.glUniform1i(rawCfaPatternLoc, cfaPattern)
@@ -334,6 +343,8 @@ internal class LutGlShaderPipeline {
         rawWhiteLevelLoc = GLES30.glGetUniformLocation(rawProgram, "uRawWhiteLevel")
         rawWbGainsLoc = GLES30.glGetUniformLocation(rawProgram, "uRawWbGains")
         rawCcmLoc = GLES30.glGetUniformLocation(rawProgram, "uRawCcm")
+        rawLscLoc = GLES30.glGetUniformLocation(rawProgram, "uTexLsc")
+        rawHasLscLoc = GLES30.glGetUniformLocation(rawProgram, "uHasLsc")
 
         rawPosHandle = GLES30.glGetAttribLocation(rawProgram, "aPosition")
         rawTexHandle = GLES30.glGetAttribLocation(rawProgram, "aTexCoord")
@@ -341,6 +352,7 @@ internal class LutGlShaderPipeline {
         GLES30.glUseProgram(rawProgram)
         if (rawBayerTextureLoc >= 0) GLES30.glUniform1i(rawBayerTextureLoc, 0)
         if (rawLutLoc >= 0) GLES30.glUniform1i(rawLutLoc, 1)
+        if (rawLscLoc >= 0) GLES30.glUniform1i(rawLscLoc, 2)
         GLES30.glUseProgram(0)
     }
 
@@ -684,6 +696,8 @@ internal class LutGlShaderPipeline {
 
             uniform highp usampler2D uRawBayerTexture;
             uniform sampler3D uLut;
+            uniform sampler2D uTexLsc;
+            uniform int uHasLsc;
             uniform ivec2 uRawImageSize;
             uniform int uRawCfaPattern;
             uniform vec4 uRawBlackLevel;
@@ -730,6 +744,13 @@ internal class LutGlShaderPipeline {
                     b = clamp((float(p00) - blB) / max(1.0, uRawWhiteLevel - blB), 0.0, 1.0);
                     g = clamp(((float(p01) - blGr) / max(1.0, uRawWhiteLevel - blGr) + (float(p10) - blGb) / max(1.0, uRawWhiteLevel - blGb)) * 0.5, 0.0, 1.0);
                     r = clamp((float(p11) - blR) / max(1.0, uRawWhiteLevel - blR), 0.0, 1.0);
+                }
+
+                if (uHasLsc != 0) {
+                    vec4 lscGain = texture(uTexLsc, vTexCoord);
+                    r *= lscGain.r;
+                    g *= lscGain.g;
+                    b *= lscGain.b;
                 }
 
                 vec3 wbColor = vec3(r, g, b) * uRawWbGains * uPreviewGain;

@@ -56,6 +56,7 @@ data class DarkbagPreferences(
     val expFocusPeaking: Boolean = false,
     val expMultiCamColorHarmonization: Boolean = true,
     val expRawMotionPhoto: Boolean = false,
+    val expRawMotionPhotoQuality: String = PreferenceKeys.DEFAULT_EXP_RAW_MOTION_PHOTO_QUALITY,
     val focusPeakingActive: Boolean = true,
     val colorEngineMode: Int = 2,
     val wbStrategy: Int = PreferenceKeys.WB_STRATEGY_AMBIENCE,

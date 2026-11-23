@@ -291,6 +291,23 @@ class SettingsBentoDelegate(
             isValueManual = true,
             context = context
         )
+
+        // 16. RAW Motion Photo Quality
+        val qualityLabel = when {
+            state.expRawMotionPhotoQuality.contains("Native", ignoreCase = true) ->
+                context.getString(R.string.raw_motion_quality_native)
+            state.expRawMotionPhotoQuality.contains("4x4", ignoreCase = true) ->
+                context.getString(R.string.raw_motion_quality_4x4)
+            else ->
+                context.getString(R.string.raw_motion_quality_2x2)
+        }
+        binding.btnMenuRawMotionQuality.text = CameraBentoDeckView.formatProTelemetry(
+            label = context.getString(R.string.settings_exp_raw_motion_quality_title),
+            value = qualityLabel,
+            isTabActive = false,
+            isValueManual = true,
+            context = context
+        )
     }
 
     private fun renderSwitchesAndCheckboxes(binding: FragmentSettingsBinding, state: DarkbagPreferences) {
@@ -340,6 +357,7 @@ class SettingsBentoDelegate(
         updateMultiCameraCardStyling(binding, mcEnabled, animated = false)
 
         // Storage visibility & paths
+        binding.layoutExpRawMotionOptions.visibility = if (state.expRawMotionPhoto) View.VISIBLE else View.GONE
         binding.layoutJpgStorage.visibility = if (state.saveJpg) View.VISIBLE else View.GONE
         binding.layoutRawStorage.visibility = if (state.saveRaw) View.VISIBLE else View.GONE
         binding.btnMenuDngCompression.visibility = if (state.saveRaw) View.VISIBLE else View.GONE

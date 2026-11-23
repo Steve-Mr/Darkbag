@@ -345,4 +345,31 @@ class SettingsSheetDispatcher(
             viewModel.updateMultiCameraDualPair(pairKeys[which])
         }
     }
+
+    fun showExpRawMotionQualitySheet() {
+        val currentQuality = viewModel.preferences.value.expRawMotionPhotoQuality
+        val selectedIndex = when {
+            currentQuality.contains("Native", ignoreCase = true) -> 2
+            currentQuality.contains("4x4", ignoreCase = true) -> 1
+            else -> 0
+        }
+        BentoSelectionBottomSheet.show(
+            fragmentManager = fragmentManager,
+            title = context.getString(R.string.settings_exp_raw_motion_quality_title),
+            options = listOf(
+                context.getString(R.string.raw_motion_quality_2x2),
+                context.getString(R.string.raw_motion_quality_4x4),
+                context.getString(R.string.raw_motion_quality_native)
+            ),
+            descriptions = listOf(
+                context.getString(R.string.raw_motion_quality_2x2_desc),
+                context.getString(R.string.raw_motion_quality_4x4_desc),
+                context.getString(R.string.raw_motion_quality_native_desc)
+            ),
+            selectedIndex = selectedIndex,
+            badge = "RAW"
+        ) { which ->
+            viewModel.updateExpRawMotionPhotoQuality(PreferenceKeys.RAW_MOTION_QUALITY_OPTIONS[which])
+        }
+    }
 }

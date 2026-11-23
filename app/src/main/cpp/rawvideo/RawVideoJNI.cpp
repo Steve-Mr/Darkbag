@@ -915,14 +915,15 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDestroyGLRenderer(
 }
 
 JNIEXPORT jint JNICALL
-Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeSubsampleBayer4x4(
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeProcessRawMotionBayer(
         JNIEnv* env,
         jobject /* thiz */,
         jobject jSrcBuffer,
         jint srcWidth,
         jint srcHeight,
         jint srcRowStride,
-        jobject jDstBuffer
+        jobject jDstBuffer,
+        jint qualityMode
 ) {
     if (!jSrcBuffer || !jDstBuffer || srcWidth < 8 || srcHeight < 8) return 0;
 
@@ -930,26 +931,77 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeSubsampleBayer4x4(
     auto* dstBytes = static_cast<uint8_t*>(env->GetDirectBufferAddress(jDstBuffer));
     if (!srcBytes || !dstBytes) return 0;
 
-    uint32_t dstWidth = ((static_cast<uint32_t>(srcWidth) / 4) & ~1u);
-    uint32_t dstHeight = ((static_cast<uint32_t>(srcHeight) / 4) & ~1u);
+    uint32_t dstWidth = 0;
+    uint32_t dstHeight = 0;
+
+    if (qualityMode == 1) { // 2x2 Binning
+        dstWidth = ((static_cast<uint32_t>(srcWidth) / 2) & ~1u);
+        dstHeight = ((static_cast<uint32_t>(srcHeight) / 2) & ~1u);
+    } else if (qualityMode == 2) { // Native 1x1
+        dstWidth = (static_cast<uint32_t>(srcWidth) & ~1u);
+        dstHeight = (static_cast<uint32_t>(srcHeight) & ~1u);
+    } else { // 0: 4x4 Subsample
+        dstWidth = ((static_cast<uint32_t>(srcWidth) / 4) & ~1u);
+        dstHeight = ((static_cast<uint32_t>(srcHeight) / 4) & ~1u);
+    }
+
     const size_t requiredBytes = static_cast<size_t>(dstWidth) * dstHeight * sizeof(uint16_t);
 
     jlong dstCapacity = env->GetDirectBufferCapacity(jDstBuffer);
     if (dstCapacity < 0 || static_cast<size_t>(dstCapacity) < requiredBytes) {
-        LOGE("Destination buffer capacity %lld is insufficient for %zu bytes",
-             static_cast<long long>(dstCapacity), requiredBytes);
+        LOGE("Destination buffer capacity %lld is insufficient for %zu bytes (mode %d)",
+             static_cast<long long>(dstCapacity), requiredBytes, qualityMode);
         return 0;
     }
 
-    BayerProcessor::bayer4x4SubsampleNEON(
-        srcBytes,
-        static_cast<uint32_t>(srcWidth),
-        static_cast<uint32_t>(srcHeight),
-        static_cast<uint32_t>(srcRowStride),
-        dstBytes
-    );
+    if (qualityMode == 1) {
+        BayerProcessor::bayer2x2BinningNEON(
+            srcBytes,
+            static_cast<uint32_t>(srcWidth),
+            static_cast<uint32_t>(srcHeight),
+            static_cast<uint32_t>(srcRowStride),
+            dstBytes
+        );
+    } else if (qualityMode == 2) {
+        if (static_cast<uint32_t>(srcRowStride) == dstWidth * sizeof(uint16_t)) {
+            std::memcpy(dstBytes, srcBytes, requiredBytes);
+        } else {
+            const size_t rowBytes = dstWidth * sizeof(uint16_t);
+            #if defined(_OPENMP)
+            #pragma omp parallel for schedule(static)
+            #endif
+            for (uint32_t y = 0; y < dstHeight; ++y) {
+                std::memcpy(dstBytes + y * rowBytes,
+                            srcBytes + y * static_cast<size_t>(srcRowStride),
+                            rowBytes);
+            }
+        }
+    } else {
+        BayerProcessor::bayer4x4SubsampleNEON(
+            srcBytes,
+            static_cast<uint32_t>(srcWidth),
+            static_cast<uint32_t>(srcHeight),
+            static_cast<uint32_t>(srcRowStride),
+            dstBytes
+        );
+    }
 
     return (static_cast<jint>(dstWidth) << 16) | static_cast<jint>(dstHeight);
+}
+
+JNIEXPORT jint JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeSubsampleBayer4x4(
+        JNIEnv* env,
+        jobject thiz,
+        jobject jSrcBuffer,
+        jint srcWidth,
+        jint srcHeight,
+        jint srcRowStride,
+        jobject jDstBuffer
+) {
+    return Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeProcessRawMotionBayer(
+        env, thiz, jSrcBuffer, srcWidth, srcHeight, srcRowStride, jDstBuffer, 0
+    );
 }
 
 JNIEXPORT jboolean JNICALL

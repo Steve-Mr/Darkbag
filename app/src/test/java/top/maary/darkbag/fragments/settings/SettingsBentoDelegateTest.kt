@@ -271,4 +271,25 @@ class SettingsBentoDelegateTest {
         assertFalse(binding.switchZslLazyRing.isEnabled)
         assertTrue(binding.tvZslStatus.text.contains(themedContext.getString(R.string.zsl_status_unavailable)))
     }
+
+    @Test
+    fun testExpRawMotionPhotoOptionsVisibilityAndQualityTelemetry() {
+        val prefsDisabled = DarkbagPreferences(
+            expRawMotionPhoto = false,
+            expRawMotionPhotoQuality = PreferenceKeys.RAW_MOTION_QUALITY_NATIVE
+        )
+        delegate.renderPreferences(binding, prefsDisabled)
+        assertEquals(android.view.View.GONE, binding.layoutExpRawMotionOptions.visibility)
+        assertFalse(binding.switchExpRawMotionPhoto.isChecked)
+        assertTrue(binding.btnMenuRawMotionQuality.text.contains("Native"))
+
+        val prefsEnabled = DarkbagPreferences(
+            expRawMotionPhoto = true,
+            expRawMotionPhotoQuality = PreferenceKeys.RAW_MOTION_QUALITY_2X2
+        )
+        delegate.renderPreferences(binding, prefsEnabled)
+        assertEquals(android.view.View.VISIBLE, binding.layoutExpRawMotionOptions.visibility)
+        assertTrue(binding.switchExpRawMotionPhoto.isChecked)
+        assertTrue(binding.btnMenuRawMotionQuality.text.contains("2x2 Binning"))
+    }
 }

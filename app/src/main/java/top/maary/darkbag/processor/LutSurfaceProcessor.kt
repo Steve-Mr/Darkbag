@@ -11,6 +11,8 @@ import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.FloatBuffer
 
 /**
  * EGL lifecycle, background GL thread, and dual-surface (Viewfinder + MediaCodec Encoder)
@@ -66,6 +68,11 @@ class LutSurfaceProcessor {
     private var rawBayerTextureId = 0
     private var currentRawTexWidth = 0
     private var currentRawTexHeight = 0
+
+    private var rawLscTextureId = 0
+    private var currentLscCols = 0
+    private var currentLscRows = 0
+    private var lscFloatBuffer: FloatBuffer? = null
 
     init {
         thread.start()
@@ -305,6 +312,72 @@ class LutSurfaceProcessor {
         }
     }
 
+    private fun uploadLscTexture(lscMap: FloatArray, rows: Int, cols: Int) {
+        val planeSize = rows * cols
+        if (lscMap.size < 4 * planeSize) return
+
+        val numFloats = planeSize * 4
+        var buf = lscFloatBuffer
+        if (buf == null || buf.capacity() < numFloats) {
+            buf = ByteBuffer.allocateDirect(numFloats * 4)
+                .order(ByteOrder.nativeOrder())
+                .asFloatBuffer()
+            lscFloatBuffer = buf
+        }
+        buf.clear()
+
+        // lscMap is channel-major: idx(ch, row, col) = ch * rows * cols + row * cols + col
+        // RGBA: R: ch 0, G: 0.5 * (ch 1 + ch 2), B: ch 3, A: 1.0f
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                val gridIdx = r * cols + c
+                val rGain = lscMap[0 * planeSize + gridIdx]
+                val gGain = 0.5f * (lscMap[1 * planeSize + gridIdx] + lscMap[2 * planeSize + gridIdx])
+                val bGain = lscMap[3 * planeSize + gridIdx]
+                buf.put(rGain)
+                buf.put(gGain)
+                buf.put(bGain)
+                buf.put(1.0f)
+            }
+        }
+        buf.position(0)
+
+        if (rawLscTextureId == 0) {
+            val texs = IntArray(1)
+            GLES30.glGenTextures(1, texs, 0)
+            rawLscTextureId = texs[0]
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, rawLscTextureId)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexImage2D(
+                GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F,
+                cols, rows, 0,
+                GLES30.GL_RGBA, GLES30.GL_FLOAT, buf
+            )
+            currentLscCols = cols
+            currentLscRows = rows
+        } else {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, rawLscTextureId)
+            if (currentLscCols != cols || currentLscRows != rows) {
+                GLES30.glTexImage2D(
+                    GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F,
+                    cols, rows, 0,
+                    GLES30.GL_RGBA, GLES30.GL_FLOAT, buf
+                )
+                currentLscCols = cols
+                currentLscRows = rows
+            } else {
+                GLES30.glTexSubImage2D(
+                    GLES30.GL_TEXTURE_2D, 0, 0, 0,
+                    cols, rows,
+                    GLES30.GL_RGBA, GLES30.GL_FLOAT, buf
+                )
+            }
+        }
+    }
+
     fun submitRawMotionFrame(
         bayerBuffer: ByteBuffer,
         width: Int,
@@ -314,13 +387,20 @@ class LutSurfaceProcessor {
         whiteLevel: Float,
         wbGains: FloatArray,
         dngCcm: FloatArray,
-        timestampNs: Long
+        timestampNs: Long,
+        lensShadingMap: FloatArray? = null,
+        lensShadingRows: Int = 0,
+        lensShadingCols: Int = 0
     ) {
         if (!rawMotionEnabled) return
         handler.post {
             if (!rawMotionEnabled) return@post
             if (isEncoderActive && encoderEglSurface != EGL14.EGL_NO_SURFACE && encoderWidth > 0 && encoderHeight > 0) {
                 uploadRawBayerTexture(bayerBuffer, width, height)
+                val hasLsc = lensShadingMap != null && lensShadingRows > 1 && lensShadingCols > 1
+                if (hasLsc) {
+                    uploadLscTexture(lensShadingMap!!, lensShadingRows, lensShadingCols)
+                }
                 EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
                 shaderPipeline.setPreviewGain(previewGain)
                 shaderPipeline.drawRawFrame(
@@ -329,6 +409,8 @@ class LutSurfaceProcessor {
                     rawWidth = width,
                     rawHeight = height,
                     rawBayerTextureId = rawBayerTextureId,
+                    rawLscTextureId = if (hasLsc) rawLscTextureId else 0,
+                    hasLsc = hasLsc,
                     cfaPattern = cfaPattern,
                     blackLevel = blackLevel,
                     whiteLevel = whiteLevel,
@@ -425,6 +507,13 @@ class LutSurfaceProcessor {
         }
         currentRawTexWidth = 0
         currentRawTexHeight = 0
+
+        if (rawLscTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(rawLscTextureId), 0)
+            rawLscTextureId = 0
+        }
+        currentLscCols = 0
+        currentLscRows = 0
 
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
             EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)

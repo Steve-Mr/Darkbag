@@ -280,6 +280,7 @@ class SettingsFragment : Fragment() {
         binding.btnMenuDngFormat.setOnClickListener { sheetDispatcher.showDngFormatSheet() }
         binding.btnMenuMultiCameraCount.setOnClickListener { sheetDispatcher.showMultiCameraCountSheet() }
         binding.btnMenuMultiCameraDualPair.setOnClickListener { sheetDispatcher.showMultiCameraDualPairSheet() }
+        binding.btnMenuRawMotionQuality.setOnClickListener { sheetDispatcher.showExpRawMotionQualitySheet() }
     }
 
     private fun setupStartupSettings() {

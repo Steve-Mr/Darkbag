@@ -41,7 +41,8 @@ class CameraMotionPhotoController(
                 if (cameraId != null) {
                     top.maary.darkbag.utils.CameraRepository.getCharacteristics(env.camera2Manager, cameraId)
                 } else null
-            }
+            },
+            qualityModeProvider = { settingsRepository.current().expRawMotionPhotoQuality }
         )
     }
 
