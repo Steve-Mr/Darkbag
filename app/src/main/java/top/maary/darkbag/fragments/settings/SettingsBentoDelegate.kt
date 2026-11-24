@@ -354,10 +354,12 @@ class SettingsBentoDelegate(
         binding.layoutExpRawMotionOptions.visibility = if (state.expRawMotionPhoto) View.VISIBLE else View.GONE
         binding.layoutJpgStorage.visibility = if (state.saveJpg) View.VISIBLE else View.GONE
         binding.layoutRawStorage.visibility = if (state.saveRaw) View.VISIBLE else View.GONE
+        binding.rowDngEncoding.visibility = if (state.saveRaw) View.VISIBLE else View.GONE
         binding.btnMenuDngCompression.visibility = if (state.saveRaw) View.VISIBLE else View.GONE
         binding.btnMenuDngFormat.visibility = if (state.saveRaw) View.VISIBLE else View.GONE
-        binding.tvJpgPath.text = state.jpgStorageUriName ?: "Default (Pictures/Darkbag)"
-        binding.tvRawPath.text = state.rawStorageUriName ?: "Default (Pictures/Darkbag)"
+        val defaultPath = context.getString(R.string.pref_storage_default_path)
+        binding.tvJpgPath.text = state.jpgStorageUriName ?: defaultPath
+        binding.tvRawPath.text = state.rawStorageUriName ?: defaultPath
 
         // Format card constraints & styling
         val isLut = (state.targetLog != "None") || (state.activeLut != "None")
@@ -570,20 +572,19 @@ class SettingsBentoDelegate(
     }
 
     fun updateMultiCameraCardStyling(binding: FragmentSettingsBinding, enabled: Boolean, animated: Boolean = true) {
-        val colorSecondary = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondary, Color.GRAY)
         val colorOnSecondaryContainer = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSecondaryContainer, Color.BLACK)
         val colorOnSurfaceVariant = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY)
 
         if (enabled) {
-            binding.cardTrayAdvMulticam.setContainerRole(BentoContainerRole.SECONDARY_CONTAINER, animated)
-            binding.txtTitleAdvMulticam.setTextColor(colorOnSecondaryContainer)
+            binding.cardTrayExpMulticam.setContainerRole(BentoContainerRole.SECONDARY_CONTAINER, animated)
+            binding.txtTitleExpMulticam.setTextColor(colorOnSecondaryContainer)
             binding.tvMultiCameraStatus.setTextColor(colorOnSecondaryContainer)
         } else {
-            binding.cardTrayAdvMulticam.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated)
-            binding.txtTitleAdvMulticam.setTextColor(colorOnSurfaceVariant)
+            binding.cardTrayExpMulticam.setContainerRole(BentoContainerRole.SURFACE_CONTAINER_HIGH, animated)
+            binding.txtTitleExpMulticam.setTextColor(colorOnSurfaceVariant)
             binding.tvMultiCameraStatus.setTextColor(colorOnSurfaceVariant)
         }
-        binding.cardTrayAdvMulticam.strokeWidth = 0
+        binding.cardTrayExpMulticam.strokeWidth = 0
     }
 
     fun updateStartupCards(binding: FragmentSettingsBinding, defaultStartup: String, enableCamera: Boolean, enablePlayground: Boolean) {

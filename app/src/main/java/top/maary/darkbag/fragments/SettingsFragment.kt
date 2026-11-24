@@ -9,6 +9,7 @@ import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -57,7 +58,7 @@ class SettingsFragment : Fragment() {
     private lateinit var bentoDelegate: SettingsBentoDelegate
     private lateinit var sheetDispatcher: SettingsSheetDispatcher
 
-    private var isAdvancedExpanded = false
+    private val expandedSectionIds = mutableSetOf<Int>()
     private var aboutClickCount = 0
     private var zslToggleGuard = false
 
@@ -134,7 +135,7 @@ class SettingsFragment : Fragment() {
 
         setupToolbar()
         setupAboutSection()
-        setupAdvancedSection()
+        setupCollapsibleSections()
         setupMenus()
         setupStartupSettings()
         setupCheckboxes()
@@ -194,12 +195,60 @@ class SettingsFragment : Fragment() {
         }
     }
 
-    private fun setupAdvancedSection() {
-        binding.headerAdvancedToggle.setOnClickListener {
-            isAdvancedExpanded = !isAdvancedExpanded
-            binding.containerAdvancedContent.visibility = if (isAdvancedExpanded) View.VISIBLE else View.GONE
-            binding.ivAdvancedArrow.animate()
-                .rotation(if (isAdvancedExpanded) 180f else 0f)
+    private fun setupCollapsibleSections() {
+        bindCollapsibleSection(
+            header = binding.headerViewfinderToggle,
+            content = binding.containerViewfinderContent,
+            arrow = binding.ivViewfinderArrow,
+            sectionId = R.id.header_viewfinder_toggle
+        )
+        bindCollapsibleSection(
+            header = binding.headerComputeToggle,
+            content = binding.containerComputeContent,
+            arrow = binding.ivComputeArrow,
+            sectionId = R.id.header_compute_toggle
+        )
+        bindCollapsibleSection(
+            header = binding.headerVideoToggle,
+            content = binding.containerVideoContent,
+            arrow = binding.ivVideoArrow,
+            sectionId = R.id.header_video_toggle
+        )
+        bindCollapsibleSection(
+            header = binding.headerColorEngineToggle,
+            content = binding.containerColorEngineContent,
+            arrow = binding.ivColorEngineArrow,
+            sectionId = R.id.header_color_engine_toggle
+        )
+        bindCollapsibleSection(
+            header = binding.headerOutputStorageToggle,
+            content = binding.containerOutputStorageContent,
+            arrow = binding.ivOutputStorageArrow,
+            sectionId = R.id.header_output_storage_toggle
+        )
+    }
+
+    private fun bindCollapsibleSection(
+        header: View,
+        content: View,
+        arrow: ImageView,
+        sectionId: Int
+    ) {
+        val isInitiallyExpanded = expandedSectionIds.contains(sectionId)
+        content.visibility = if (isInitiallyExpanded) View.VISIBLE else View.GONE
+        arrow.rotation = if (isInitiallyExpanded) 180f else 0f
+
+        header.setOnClickListener {
+            val isNowExpanded = if (expandedSectionIds.contains(sectionId)) {
+                expandedSectionIds.remove(sectionId)
+                false
+            } else {
+                expandedSectionIds.add(sectionId)
+                true
+            }
+            content.visibility = if (isNowExpanded) View.VISIBLE else View.GONE
+            arrow.animate()
+                .rotation(if (isNowExpanded) 180f else 0f)
                 .setDuration(200)
                 .start()
         }

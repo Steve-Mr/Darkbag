@@ -655,4 +655,29 @@
     <string name="wb_preset_daylight">日光</string>
     <string name="wb_preset_cloudy">多云</string>
     <string name="wb_preset_shade">阴影</string>
+
+    <!-- 设置页六模块重组 -->
+    <string name="settings_section_app_interface">应用与界面</string>
+    <string name="settings_section_capture_optics">拍摄与光学</string>
+    <string name="settings_section_output_storage">输出与存储</string>
+    <string name="settings_badge_storage">输出</string>
+    <string name="settings_adv_hdr_sub">融合算法、连拍帧数、欠曝与防抖</string>
+    <string name="settings_adv_video_sub">长按快门与 RAW 视频规格</string>
+    <string name="settings_adv_viewfinder_sub">操控层级、底栏定制与查看器</string>
+    <string name="settings_adv_color_engine_title">色彩引擎</string>
+    <string name="settings_adv_color_engine_sub">色调映射曲线引擎</string>
+    <string name="settings_adv_storage_sub">DNG 编码与自定义存储目录</string>
+    <string name="pref_storage_default_path">默认 · Pictures/Darkbag</string>
+
+    <!-- 初次设置向导升级 -->
+    <string name="onboarding_perm_playground_only_hint">已关闭相机模块，纯暗房模式无需相机与麦克风权限。</string>
+    <string name="onboarding_section_storage">拍摄存储位置</string>
+    <string name="onboarding_badge_storage">存储</string>
+    <string name="onboarding_storage_hint">默认保存至 Pictures/Darkbag。点击选择自定义目录，长按可恢复默认。</string>
+    <string name="onboarding_recipe_log_none">不使用</string>
+    <string name="onboarding_recipe_none_hint">当前不使用 Log / LUT，将默认使用内置色彩引擎直出。</string>
+    <string name="onboarding_live_preview_diff_hint">提示：取景框实时预览基于预览流近似渲染，与最终冲印成片在动态范围与色彩细节上可能存在差异。</string>
+    <string name="onboarding_tier_custom_short">自由定制</string>
+    <string name="onboarding_tier_custom_desc">自由开关取景器各功能磁贴，打造专属操控布局。</string>
+    <string name="onboarding_btn_customize_deck">自定义取景器控件</string>
 </resources>

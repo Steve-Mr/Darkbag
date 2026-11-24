@@ -205,7 +205,7 @@ class SettingsBentoDelegateTest {
         )
         delegate.renderPreferences(binding, mcEnabledPrefs)
         assertEquals(android.view.View.VISIBLE, binding.layoutMultiCameraOptions.visibility)
-        assertEquals(BentoContainerRole.SECONDARY_CONTAINER, binding.cardTrayAdvMulticam.containerRole)
+        assertEquals(BentoContainerRole.SECONDARY_CONTAINER, binding.cardTrayExpMulticam.containerRole)
         // On non-native multi-camera devices/environment, bypass switch stays visible
         assertEquals(android.view.View.VISIBLE, binding.switchMultiCameraForceEnable.visibility)
 
@@ -215,7 +215,7 @@ class SettingsBentoDelegateTest {
         )
         delegate.renderPreferences(binding, mcDisabledPrefs)
         assertEquals(android.view.View.GONE, binding.layoutMultiCameraOptions.visibility)
-        assertEquals(BentoContainerRole.SURFACE_CONTAINER_HIGH, binding.cardTrayAdvMulticam.containerRole)
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER_HIGH, binding.cardTrayExpMulticam.containerRole)
         // Force enable switch stays visible even when multiCameraModeEnabled is false, so user can unlock it
         assertEquals(android.view.View.VISIBLE, binding.switchMultiCameraForceEnable.visibility)
     }

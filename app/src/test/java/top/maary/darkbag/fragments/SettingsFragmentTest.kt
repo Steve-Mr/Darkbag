@@ -233,14 +233,31 @@ class SettingsFragmentTest {
         val inflater = android.view.LayoutInflater.from(themedContext)
         val binding = top.maary.darkbag.databinding.FragmentSettingsBinding.inflate(inflater)
 
-        org.junit.Assert.assertNotNull(binding.cardAdvancedContainer)
-        org.junit.Assert.assertNotNull(binding.headerAdvancedToggle)
-        org.junit.Assert.assertNotNull(binding.ivAdvancedArrow)
-        org.junit.Assert.assertNotNull(binding.containerAdvancedContent)
-        org.junit.Assert.assertNotNull(binding.btnCloseExperimental)
-        org.junit.Assert.assertNotNull(binding.cardStartupCamera)
-        org.junit.Assert.assertNotNull(binding.cardStartupPlayground)
-        org.junit.Assert.assertNotNull(binding.sectionDebug)
+        // 6 top-level domain module trays
+        assertNotNull(binding.cardTrayStartup)
+        assertNotNull(binding.cardTrayCapture)
+        assertNotNull(binding.cardTrayColor)
+        assertNotNull(binding.cardTrayHalfFrame)
+        assertNotNull(binding.cardTrayOutput)
+        assertNotNull(binding.cardTrayAbout)
+        assertNotNull(binding.sectionDebug)
+
+        // All 5 embedded drawers start collapsed (View.GONE)
+        assertEquals(android.view.View.GONE, binding.containerViewfinderContent.visibility)
+        assertEquals(android.view.View.GONE, binding.containerComputeContent.visibility)
+        assertEquals(android.view.View.GONE, binding.containerVideoContent.visibility)
+        assertEquals(android.view.View.GONE, binding.containerColorEngineContent.visibility)
+        assertEquals(android.view.View.GONE, binding.containerOutputStorageContent.visibility)
+
+        // Multi-camera moved into Experimental Lab (sectionDebug) alongside color harmonization
+        assertNotNull(binding.sectionDebug.findViewById(R.id.card_tray_exp_multicam))
+        assertNotNull(binding.cardTrayExpMulticam.findViewById(R.id.switch_exp_multicam_color_harmonization))
+        assertNotNull(binding.sectionDebug.findViewById(R.id.card_tray_exp_raw_motion))
+        assertNotNull(binding.cardTrayAbout.findViewById(R.id.btn_replay_onboarding))
+
+        assertNotNull(binding.btnCloseExperimental)
+        assertNotNull(binding.cardStartupCamera)
+        assertNotNull(binding.cardStartupPlayground)
     }
 
     @Test
@@ -279,11 +296,23 @@ class SettingsFragmentTest {
         org.junit.Assert.assertNotNull(binding.btnManageLuts)
         org.junit.Assert.assertNotNull(binding.switchLivePreview)
 
-        // Section 3: Advanced Settings (Collapsible Bento)
-        org.junit.Assert.assertNotNull(binding.cardAdvancedContainer)
-        org.junit.Assert.assertNotNull(binding.headerAdvancedToggle)
-        org.junit.Assert.assertNotNull(binding.ivAdvancedArrow)
-        org.junit.Assert.assertNotNull(binding.containerAdvancedContent)
+        // Embedded Collapsible Drawers across the 6 Modules
+        assertNotNull(binding.headerViewfinderToggle)
+        assertNotNull(binding.ivViewfinderArrow)
+        assertNotNull(binding.containerViewfinderContent)
+        assertNotNull(binding.headerComputeToggle)
+        assertNotNull(binding.ivComputeArrow)
+        assertNotNull(binding.containerComputeContent)
+        assertNotNull(binding.headerVideoToggle)
+        assertNotNull(binding.ivVideoArrow)
+        assertNotNull(binding.containerVideoContent)
+        assertNotNull(binding.headerColorEngineToggle)
+        assertNotNull(binding.ivColorEngineArrow)
+        assertNotNull(binding.containerColorEngineContent)
+        assertNotNull(binding.headerOutputStorageToggle)
+        assertNotNull(binding.ivOutputStorageArrow)
+        assertNotNull(binding.containerOutputStorageContent)
+        assertNotNull(binding.rowDngEncoding)
 
         // Sub-Matrix A: HDR+ & Compute Pipeline
         org.junit.Assert.assertNotNull(binding.btnMenuHdrFusionMode)
