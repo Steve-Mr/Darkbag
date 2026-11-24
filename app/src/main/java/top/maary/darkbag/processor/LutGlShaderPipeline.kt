@@ -732,12 +732,13 @@ internal class LutGlShaderPipeline {
         internal val RAW_FRAGMENT_SHADER_SRC = """
             #version 300 es
             precision highp float;
+            precision highp sampler2D;
             precision highp usampler2D;
             precision highp sampler3D;
 
             uniform highp usampler2D uRawBayerTexture;
             uniform sampler3D uLut;
-            uniform sampler2D uTexLsc;
+            uniform highp sampler2D uTexLsc;
             uniform int uHasLsc;
             uniform ivec2 uRawImageSize;
             uniform int uRawCfaPattern;
@@ -756,35 +757,61 @@ internal class LutGlShaderPipeline {
 
             $COMMON_SHADER_MATH
 
+            float fetchBayerNorm(ivec2 pos, float bl) {
+                uint v = texelFetch(uRawBayerTexture, pos, 0).r;
+                return clamp((float(v) - bl) / max(1.0, uRawWhiteLevel - bl), 0.0, 1.0);
+            }
+
             void main() {
-                ivec2 coord = ivec2(vTexCoord * vec2(uRawImageSize));
-                coord = clamp(coord, ivec2(0), uRawImageSize - 2);
-                coord = coord & ~1;
+                ivec2 p = clamp(ivec2(vTexCoord * vec2(uRawImageSize)), ivec2(0), uRawImageSize - 1);
+                int xL = (p.x > 0) ? (p.x - 1) : min(1, uRawImageSize.x - 1);
+                int xR = (p.x + 1 < uRawImageSize.x) ? (p.x + 1) : max(0, uRawImageSize.x - 2);
+                int yT = (p.y > 0) ? (p.y - 1) : min(1, uRawImageSize.y - 1);
+                int yB = (p.y + 1 < uRawImageSize.y) ? (p.y + 1) : max(0, uRawImageSize.y - 2);
 
-                uint p00 = texelFetch(uRawBayerTexture, coord, 0).r;
-                uint p01 = texelFetch(uRawBayerTexture, coord + ivec2(1, 0), 0).r;
-                uint p10 = texelFetch(uRawBayerTexture, coord + ivec2(0, 1), 0).r;
-                uint p11 = texelFetch(uRawBayerTexture, coord + ivec2(1, 1), 0).r;
-
-                float r = 0.0, g = 0.0, b = 0.0;
                 float blR = uRawBlackLevel.r, blGr = uRawBlackLevel.g, blGb = uRawBlackLevel.b, blB = uRawBlackLevel.a;
 
-                if (uRawCfaPattern == 0) { // RGGB
-                    r = clamp((float(p00) - blR) / max(1.0, uRawWhiteLevel - blR), 0.0, 1.0);
-                    g = clamp(((float(p01) - blGr) / max(1.0, uRawWhiteLevel - blGr) + (float(p10) - blGb) / max(1.0, uRawWhiteLevel - blGb)) * 0.5, 0.0, 1.0);
-                    b = clamp((float(p11) - blB) / max(1.0, uRawWhiteLevel - blB), 0.0, 1.0);
-                } else if (uRawCfaPattern == 1) { // GRBG
-                    g = clamp(((float(p00) - blGr) / max(1.0, uRawWhiteLevel - blGr) + (float(p11) - blGb) / max(1.0, uRawWhiteLevel - blGb)) * 0.5, 0.0, 1.0);
-                    r = clamp((float(p01) - blR) / max(1.0, uRawWhiteLevel - blR), 0.0, 1.0);
-                    b = clamp((float(p10) - blB) / max(1.0, uRawWhiteLevel - blB), 0.0, 1.0);
-                } else if (uRawCfaPattern == 2) { // GBRG
-                    g = clamp(((float(p00) - blGb) / max(1.0, uRawWhiteLevel - blGb) + (float(p11) - blGr) / max(1.0, uRawWhiteLevel - blGr)) * 0.5, 0.0, 1.0);
-                    b = clamp((float(p01) - blB) / max(1.0, uRawWhiteLevel - blB), 0.0, 1.0);
-                    r = clamp((float(p10) - blR) / max(1.0, uRawWhiteLevel - blR), 0.0, 1.0);
-                } else { // 3: BGGR
-                    b = clamp((float(p00) - blB) / max(1.0, uRawWhiteLevel - blB), 0.0, 1.0);
-                    g = clamp(((float(p01) - blGr) / max(1.0, uRawWhiteLevel - blGr) + (float(p10) - blGb) / max(1.0, uRawWhiteLevel - blGb)) * 0.5, 0.0, 1.0);
-                    r = clamp((float(p11) - blR) / max(1.0, uRawWhiteLevel - blR), 0.0, 1.0);
+                int sx = (uRawCfaPattern == 1 || uRawCfaPattern == 3) ? (1 - (p.x & 1)) : (p.x & 1);
+                int sy = (uRawCfaPattern == 2 || uRawCfaPattern == 3) ? (1 - (p.y & 1)) : (p.y & 1);
+                int site = (sy << 1) | sx;
+
+                float r = 0.0, g = 0.0, b = 0.0;
+                if (site == 0) { // R
+                    r = fetchBayerNorm(p, blR);
+                    g = 0.25 * (
+                        fetchBayerNorm(ivec2(xL, p.y), blGr) +
+                        fetchBayerNorm(ivec2(xR, p.y), blGr) +
+                        fetchBayerNorm(ivec2(p.x, yT), blGb) +
+                        fetchBayerNorm(ivec2(p.x, yB), blGb)
+                    );
+                    b = 0.25 * (
+                        fetchBayerNorm(ivec2(xL, yT), blB) +
+                        fetchBayerNorm(ivec2(xR, yT), blB) +
+                        fetchBayerNorm(ivec2(xL, yB), blB) +
+                        fetchBayerNorm(ivec2(xR, yB), blB)
+                    );
+                } else if (site == 1) { // Gr
+                    g = fetchBayerNorm(p, blGr);
+                    r = 0.5 * (fetchBayerNorm(ivec2(xL, p.y), blR) + fetchBayerNorm(ivec2(xR, p.y), blR));
+                    b = 0.5 * (fetchBayerNorm(ivec2(p.x, yT), blB) + fetchBayerNorm(ivec2(p.x, yB), blB));
+                } else if (site == 2) { // Gb
+                    g = fetchBayerNorm(p, blGb);
+                    b = 0.5 * (fetchBayerNorm(ivec2(xL, p.y), blB) + fetchBayerNorm(ivec2(xR, p.y), blB));
+                    r = 0.5 * (fetchBayerNorm(ivec2(p.x, yT), blR) + fetchBayerNorm(ivec2(p.x, yB), blR));
+                } else { // 3: B
+                    b = fetchBayerNorm(p, blB);
+                    g = 0.25 * (
+                        fetchBayerNorm(ivec2(xL, p.y), blGb) +
+                        fetchBayerNorm(ivec2(xR, p.y), blGb) +
+                        fetchBayerNorm(ivec2(p.x, yT), blGr) +
+                        fetchBayerNorm(ivec2(p.x, yB), blGr)
+                    );
+                    r = 0.25 * (
+                        fetchBayerNorm(ivec2(xL, yT), blR) +
+                        fetchBayerNorm(ivec2(xR, yT), blR) +
+                        fetchBayerNorm(ivec2(xL, yB), blR) +
+                        fetchBayerNorm(ivec2(xR, yB), blR)
+                    );
                 }
 
                 if (uHasLsc != 0) {

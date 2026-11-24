@@ -11,10 +11,19 @@ import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.processor.RawMotionFrame
 import top.maary.darkbag.processor.SensorCalibrationHelper
 import top.maary.darkbag.rawvideo.RawVideoNative
-import top.maary.darkbag.repository.PreferenceKeys
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * Cohesive white-balance strategy & manual override descriptor for RAW Motion Photo rendering.
+ */
+data class RawMotionWbConfig(
+    val wbMode: Int = 0,
+    val wbTempOffset: Float = 0f,
+    val wbTintOffset: Float = 0f,
+    val wbManualTempK: Float = 5500f
+)
 
 /**
  * Feeds live subsampled RAW_SENSOR frames from the camera repeating stream to [LutSurfaceProcessor]
@@ -24,6 +33,7 @@ class RawMotionPhotoRelay(
     private val lutSurfaceProcessorProvider: () -> LutSurfaceProcessor?,
     private val characteristicsProvider: () -> CameraCharacteristics?,
     private val qualityModeProvider: () -> Int = { RawMotionQuality.DEFAULT_MODE },
+    private val wbConfigProvider: () -> RawMotionWbConfig = { RawMotionWbConfig() },
     private val nativeProcessor: (src: ByteBuffer, w: Int, h: Int, stride: Int, dst: ByteBuffer, mode: Int) -> Int = { src, w, h, stride, dst, mode ->
         RawVideoNative.nativeProcessRawMotionBayer(src, w, h, stride, dst, mode)
     },
@@ -74,7 +84,116 @@ class RawMotionPhotoRelay(
         const val OVERSIZED_BUFFER_THRESHOLD_BYTES = 8 * 1024 * 1024
         const val MIN_FRAME_INTERVAL_NS = 33_000_000L // Cap live stream at ~30 fps
 
+        private val DEFAULT_WB_GAINS = floatArrayOf(2.0f, 1.0f, 1.6f)
+        private val DEFAULT_NEUTRAL_POINT = floatArrayOf(0.5f, 1.0f, 1.0f / 1.6f)
+        private val DEFAULT_BLACK_LEVEL = floatArrayOf(64f, 64f, 64f, 64f)
+        private val IDENTITY_CCM = floatArrayOf(
+            1f, 0f, 0f,
+            0f, 1f, 0f,
+            0f, 0f, 1f
+        )
+
         fun parseQualityMode(quality: String?): Int = RawMotionQuality.fromLegacy(quality).mode
+
+        /**
+         * Extracts canonical [wbGains (R,G=1,B), neutralPoint (nR,1,nB)] from [result] when it
+         * explicitly contains `SENSOR_NEUTRAL_COLOR_POINT` or `COLOR_CORRECTION_GAINS`.
+         * Returns `null` if neither key is present so the relay can preserve its last valid cache.
+         */
+        internal fun extractCanonicalWbFromResult(result: CaptureResult?): Pair<FloatArray, FloatArray>? {
+            if (result == null) return null
+            val np = result.get(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
+            val neutralArray = if (np != null && np.size >= 3 &&
+                np[0].numerator > 0 && np[0].denominator > 0 &&
+                np[1].numerator > 0 && np[1].denominator > 0 &&
+                np[2].numerator > 0 && np[2].denominator > 0
+            ) {
+                floatArrayOf(
+                    np[0].numerator.toFloat() / np[0].denominator.toFloat(),
+                    np[1].numerator.toFloat() / np[1].denominator.toFloat(),
+                    np[2].numerator.toFloat() / np[2].denominator.toFloat()
+                )
+            } else null
+
+            val cg = result.get(CaptureResult.COLOR_CORRECTION_GAINS)
+            val gainsArray = if (cg != null &&
+                cg.red.isFinite() && cg.red > 1e-4f &&
+                cg.blue.isFinite() && cg.blue > 1e-4f &&
+                ((cg.greenEven.isFinite() && cg.greenEven > 1e-4f) ||
+                    (cg.greenOdd.isFinite() && cg.greenOdd > 1e-4f))
+            ) {
+                floatArrayOf(cg.red, cg.greenEven, cg.greenOdd, cg.blue)
+            } else null
+
+            if (neutralArray == null && gainsArray == null) return null
+            val (canonWb, canonNeutral) = SensorCalibrationHelper.resolveCanonicalWbAndNeutral(neutralArray, gainsArray)
+            return Pair(floatArrayOf(canonWb[0], 1.0f, canonWb[3]), canonNeutral)
+        }
+
+        /**
+         * Maps 2x2 CFA grid black levels `[TL(0,0), TR(1,0), BL(0,1), BR(1,1)]`
+         * into `[R, Gr, Gb, B]` order expected by `LutGlShaderPipeline`.
+         */
+        internal fun mapBlackLevelToRgbg(gridBl: FloatArray, cfaPattern: Int): FloatArray {
+            if (gridBl.size < 4) return DEFAULT_BLACK_LEVEL.copyOf()
+            val g0 = gridBl[0]
+            val g1 = gridBl[1]
+            val g2 = gridBl[2]
+            val g3 = gridBl[3]
+            return when (cfaPattern) {
+                0 -> floatArrayOf(g0, g1, g2, g3) // RGGB: (0,0)=R, (1,0)=Gr, (0,1)=Gb, (1,1)=B
+                1 -> floatArrayOf(g1, g0, g3, g2) // GRBG: (0,0)=Gr, (1,0)=R, (0,1)=B, (1,1)=Gb
+                2 -> floatArrayOf(g2, g3, g0, g1) // GBRG: (0,0)=Gb, (1,0)=B, (0,1)=R, (1,1)=Gr
+                3 -> floatArrayOf(g3, g2, g1, g0) // BGGR: (0,0)=B, (1,0)=Gb, (0,1)=Gr, (1,1)=R
+                else -> floatArrayOf(g0, g1, g2, g3)
+            }
+        }
+
+        /**
+         * Computes the adaptive sensor-to-sRGB render CCM in OpenGL column-major order,
+         * matching `ColorPipe` / `SensorCalibrationHelper` (including `ColorMatrix1/2` Robertson
+         * CCT estimation and `wbConfig` strategy/manual override).
+         */
+        internal fun computeRenderCcmColMajor(
+            fm1: FloatArray?,
+            fm2: FloatArray?,
+            cm1: FloatArray?,
+            cm2: FloatArray?,
+            illum1: Int,
+            illum2: Int,
+            neutralPoint: FloatArray,
+            wbGains: FloatArray,
+            wbConfig: RawMotionWbConfig = RawMotionWbConfig()
+        ): FloatArray {
+            val wb4 = floatArrayOf(
+                wbGains.getOrElse(0) { 1f },
+                1f,
+                1f,
+                wbGains.getOrElse(2) { 1f }
+            )
+            val rowMajor = SensorCalibrationHelper.computeRenderCcm(
+                forwardMatrix1 = fm1,
+                forwardMatrix2 = fm2,
+                calibrationIlluminant1 = illum1,
+                calibrationIlluminant2 = illum2,
+                neutralColorPoint = neutralPoint,
+                wb = wb4,
+                colorMatrix1 = cm1,
+                colorMatrix2 = cm2,
+                wbMode = wbConfig.wbMode,
+                wbTempOffset = wbConfig.wbTempOffset,
+                wbTintOffset = wbConfig.wbTintOffset,
+                wbManualTempK = wbConfig.wbManualTempK
+            ) ?: return IDENTITY_CCM.copyOf()
+
+            val colMajor = FloatArray(9)
+            for (r in 0 until 3) {
+                for (c in 0 until 3) {
+                    colMajor[c * 3 + r] = rowMajor[r * 3 + c]
+                }
+            }
+            return colMajor
+        }
 
         /** Factory method for legacy String quality providers */
         fun createWithLegacyQuality(
@@ -120,22 +239,37 @@ class RawMotionPhotoRelay(
     private var lastLoggedHeight = 0
     @Volatile private var loggedNativeClamp = false
 
-    private val cachedCcm = FloatArray(9) { if (it % 4 == 0) 1.0f else 0.0f }
-    private val cachedWbGains = floatArrayOf(2.0f, 1.0f, 1.6f)
-    private val cachedBlackLevel = floatArrayOf(64f, 64f, 64f, 64f)
+    private class CachedLsc(val map: FloatArray, val rows: Int, val cols: Int)
+
+    @Volatile private var cachedWbGains: FloatArray? = null
+    @Volatile private var cachedNeutralPoint: FloatArray? = null
+    @Volatile private var cachedDynBlackLevel: FloatArray? = null
+    @Volatile private var cachedLsc: CachedLsc? = null
 
     val currentBufferCapacity: Int
         get() = synchronized(bufferLock) { buffers[0].capacity() }
 
+    private fun resetCalibrationCache() {
+        cachedWbGains = null
+        cachedNeutralPoint = null
+        cachedDynBlackLevel = null
+        cachedLsc = null
+    }
+
     fun start() {
         isRunning.set(true)
         lastSensorTimestampNs = 0L
+        lastLoggedQualityMode = -1
+        lastLoggedWidth = 0
+        lastLoggedHeight = 0
         loggedNativeClamp = false
+        resetCalibrationCache()
     }
 
     fun stop() {
         isRunning.set(false)
         loggedNativeClamp = false
+        resetCalibrationCache()
         synchronized(bufferLock) {
             if (buffers[0].capacity() > OVERSIZED_BUFFER_THRESHOLD_BYTES) {
                 buffers = arrayOf(
@@ -225,66 +359,72 @@ class RawMotionPhotoRelay(
         // CFA pattern
         val cfaPattern = chars?.get(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
 
-        // Black level (R, Gr, Gb, B)
+        // Black level (mapped from 2x2 CFA grid order to [R, Gr, Gb, B])
         val dynBl = result?.get(CaptureResult.SENSOR_DYNAMIC_BLACK_LEVEL)
-        val blackLevel = if (dynBl != null && dynBl.size >= 4) {
-            floatArrayOf(dynBl[0], dynBl[1], dynBl[2], dynBl[3])
+        val rawGridBl = if (dynBl != null && dynBl.size >= 4) {
+            floatArrayOf(dynBl[0], dynBl[1], dynBl[2], dynBl[3]).also { cachedDynBlackLevel = it }
         } else {
-            val pat = chars?.get(CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
-            if (pat != null) {
-                floatArrayOf(
-                    pat.getOffsetForIndex(0, 0).toFloat(),
-                    pat.getOffsetForIndex(1, 0).toFloat(),
-                    pat.getOffsetForIndex(0, 1).toFloat(),
-                    pat.getOffsetForIndex(1, 1).toFloat()
-                )
+            cachedDynBlackLevel ?: run {
+                val pat = chars?.get(CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
+                if (pat != null) {
+                    floatArrayOf(
+                        pat.getOffsetForIndex(0, 0).toFloat(),
+                        pat.getOffsetForIndex(1, 0).toFloat(),
+                        pat.getOffsetForIndex(0, 1).toFloat(),
+                        pat.getOffsetForIndex(1, 1).toFloat()
+                    )
+                } else {
+                    DEFAULT_BLACK_LEVEL
+                }
+            }
+        }
+        val blackLevel = mapBlackLevelToRgbg(rawGridBl, cfaPattern)
+
+        // WB gains & neutral point (Priority 1: SENSOR_NEUTRAL_COLOR_POINT, Priority 2: COLOR_CORRECTION_GAINS, else cached)
+        val extractedWb = extractCanonicalWbFromResult(result)
+        val (wbGains, neutralPoint) = if (extractedWb != null) {
+            cachedWbGains = extractedWb.first
+            cachedNeutralPoint = extractedWb.second
+            extractedWb
+        } else {
+            val prevWb = cachedWbGains
+            val prevNp = cachedNeutralPoint
+            if (prevWb != null && prevNp != null) {
+                prevWb to prevNp
             } else {
-                cachedBlackLevel
+                DEFAULT_WB_GAINS.copyOf() to DEFAULT_NEUTRAL_POINT.copyOf()
             }
         }
 
-        // WB gains & neutral point
-        val colorGains = result?.get(CaptureResult.COLOR_CORRECTION_GAINS)
-        val wbGains = if (colorGains != null && colorGains.red > 1e-4f && colorGains.blue > 1e-4f) {
-            val gAvg = 0.5f * (colorGains.greenEven + colorGains.greenOdd)
-            val effG = if (gAvg > 1e-4f) gAvg else 1.0f
-            floatArrayOf(colorGains.red / effG, 1.0f, colorGains.blue / effG)
-        } else {
-            cachedWbGains
-        }
-
-        val neutralPoint = floatArrayOf(
-            1.0f / maxOf(0.1f, wbGains[0]),
-            1.0f,
-            1.0f / maxOf(0.1f, wbGains[2])
-        )
-
-        // DNG CCM from ForwardMatrix1 / ForwardMatrix2
+        // DNG CCM from ForwardMatrix1/2 & ColorMatrix1/2 with Robertson CCT + WB strategy
         val fm1 = chars?.get(CameraCharacteristics.SENSOR_FORWARD_MATRIX1)?.let { colorSpaceTransformToFloatArray(it) }
         val fm2 = chars?.get(CameraCharacteristics.SENSOR_FORWARD_MATRIX2)?.let { colorSpaceTransformToFloatArray(it) }
+        val cm1 = chars?.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)?.let { colorSpaceTransformToFloatArray(it) }
+        val cm2 = chars?.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM2)?.let { colorSpaceTransformToFloatArray(it) }
         val illum1 = chars?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1)?.toInt() ?: 21
         val illum2 = chars?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2)?.toInt() ?: 17
+        val activeCcm = computeRenderCcmColMajor(
+            fm1 = fm1,
+            fm2 = fm2,
+            cm1 = cm1,
+            cm2 = cm2,
+            illum1 = illum1,
+            illum2 = illum2,
+            neutralPoint = neutralPoint,
+            wbGains = wbGains,
+            wbConfig = wbConfigProvider()
+        )
 
-        val dngCcm = FloatArray(9)
-        val ccmOk = try {
-            RawVideoNative.nativeComputeAdaptiveColorMatrix(
-                neutralPoint = neutralPoint,
-                forwardMatrix1 = fm1,
-                forwardMatrix2 = fm2,
-                calibIllum1 = illum1,
-                calibIllum2 = illum2,
-                outColMajor = dngCcm
-            )
-        } catch (_: UnsatisfiedLinkError) {
-            false
+        // Lens Shading Map (LSC), falling back to last valid frame LSC if result arrived late
+        val lscTriple = if (result != null) SensorCalibrationHelper.extractLensShading(result) else Triple(null, 0, 0)
+        val lscSnapshot = if (lscTriple.first != null && lscTriple.second > 1 && lscTriple.third > 1) {
+            CachedLsc(lscTriple.first!!, lscTriple.second, lscTriple.third).also { cachedLsc = it }
+        } else {
+            cachedLsc
         }
-        val activeCcm = if (ccmOk) dngCcm else cachedCcm
-
-        // Lens Shading Map (LSC)
-        val lscTriple = SensorCalibrationHelper.extractLensShading(result)
-        val lscMap = lscTriple.first
-        val lscRows = lscTriple.second
-        val lscCols = lscTriple.third
+        val lscMap = lscSnapshot?.map
+        val lscRows = lscSnapshot?.rows ?: 0
+        val lscCols = lscSnapshot?.cols ?: 0
 
         // Atomically verify running state + buffer capacity and pick next buffer in double-buffer rotation
         val dstBuffer = ensureAndAcquireBuffer(requiredBytes) ?: return

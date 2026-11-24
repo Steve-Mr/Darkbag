@@ -30,6 +30,7 @@ class LutSurfaceProcessor {
     private var eglDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext = EGL14.EGL_NO_CONTEXT
     private var eglSurface = EGL14.EGL_NO_SURFACE
+    private var pbufferSurface = EGL14.EGL_NO_SURFACE
     private var eglConfig: EGLConfig? = null
 
     private var inputSurfaceTexture: SurfaceTexture? = null
@@ -116,6 +117,7 @@ class LutSurfaceProcessor {
 
     fun getInputSurface(w: Int, h: Int, onSurfaceReady: (Surface) -> Unit) {
         handler.post {
+            if (!ensureContextCurrent()) return@post
             inputWidth = w
             inputHeight = h
 
@@ -148,10 +150,10 @@ class LutSurfaceProcessor {
         handler.post {
             inputSurfaceTexture?.release()
             inputSurfaceTexture = null
-            if (inputTextureId != 0) {
+            if (inputTextureId != 0 && ensureContextCurrent()) {
                 GLES30.glDeleteTextures(1, intArrayOf(inputTextureId), 0)
-                inputTextureId = 0
             }
+            inputTextureId = 0
         }
     }
 
@@ -212,7 +214,7 @@ class LutSurfaceProcessor {
         handler.post {
             currentLogType = logType
             currentGamutMatrix = LutGlShaderPipeline.getGamutMatrix(logType)
-            if (lutData != null && size > 0) {
+            if (lutData != null && size > 0 && ensureContextCurrent()) {
                 currentLutSize = size
                 shaderPipeline.uploadLutTexture(lutData, size)
             } else {
@@ -241,6 +243,7 @@ class LutSurfaceProcessor {
 
         val attribs = intArrayOf(
             EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+            EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT or EGL14.EGL_PBUFFER_BIT,
             EGL14.EGL_RED_SIZE, 8,
             EGL14.EGL_GREEN_SIZE, 8,
             EGL14.EGL_BLUE_SIZE, 8,
@@ -249,17 +252,46 @@ class LutSurfaceProcessor {
         )
         val configs = arrayOfNulls<EGLConfig>(1)
         val numConfigs = IntArray(1)
-        EGL14.eglChooseConfig(eglDisplay, attribs, 0, configs, 0, 1, numConfigs, 0)
+        if (!EGL14.eglChooseConfig(eglDisplay, attribs, 0, configs, 0, 1, numConfigs, 0) ||
+            numConfigs[0] <= 0 || configs[0] == null
+        ) {
+            Log.e("LutProcessor", "eglChooseConfig failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+            return
+        }
         eglConfig = configs[0]
 
         val ctxAttribs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 3, EGL14.EGL_NONE)
         eglContext = EGL14.eglCreateContext(eglDisplay, eglConfig, EGL14.EGL_NO_CONTEXT, ctxAttribs, 0)
+        if (eglContext == null || eglContext == EGL14.EGL_NO_CONTEXT) {
+            Log.e("LutProcessor", "eglCreateContext failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+            eglContext = EGL14.EGL_NO_CONTEXT
+            return
+        }
 
         val surfAttribs = intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE)
-        eglSurface = EGL14.eglCreatePbufferSurface(eglDisplay, eglConfig, surfAttribs, 0)
-        EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+        pbufferSurface = EGL14.eglCreatePbufferSurface(eglDisplay, eglConfig, surfAttribs, 0)
+        if (pbufferSurface == null || pbufferSurface == EGL14.EGL_NO_SURFACE) {
+            Log.e("LutProcessor", "eglCreatePbufferSurface failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+            pbufferSurface = EGL14.EGL_NO_SURFACE
+            return
+        }
+        if (!EGL14.eglMakeCurrent(eglDisplay, pbufferSurface, pbufferSurface, eglContext)) {
+            Log.e("LutProcessor", "eglMakeCurrent(pbuffer) failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+            return
+        }
 
         shaderPipeline.initProgramAndDummyLut()
+    }
+
+    private fun ensureContextCurrent(): Boolean {
+        if (eglDisplay == EGL14.EGL_NO_DISPLAY || eglContext == EGL14.EGL_NO_CONTEXT) return false
+        if (EGL14.eglGetCurrentContext() == eglContext) return true
+        val target = when {
+            eglSurface != EGL14.EGL_NO_SURFACE -> eglSurface
+            pbufferSurface != EGL14.EGL_NO_SURFACE -> pbufferSurface
+            else -> return false
+        }
+        return EGL14.eglMakeCurrent(eglDisplay, target, target, eglContext)
     }
 
     private fun createEglSurface(surface: Surface) {
@@ -267,6 +299,7 @@ class LutSurfaceProcessor {
         if (eglSurface != EGL14.EGL_NO_SURFACE) {
             EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
             EGL14.eglDestroySurface(eglDisplay, eglSurface)
+            eglSurface = EGL14.EGL_NO_SURFACE
         }
 
         val surfaceAttribs = intArrayOf(EGL14.EGL_NONE)
@@ -274,6 +307,10 @@ class LutSurfaceProcessor {
         if (eglSurface == null || eglSurface == EGL14.EGL_NO_SURFACE) {
             val error = EGL14.eglGetError()
             Log.e("LutProcessor", "eglCreateWindowSurface failed: $error")
+            eglSurface = EGL14.EGL_NO_SURFACE
+            if (pbufferSurface != EGL14.EGL_NO_SURFACE) {
+                EGL14.eglMakeCurrent(eglDisplay, pbufferSurface, pbufferSurface, eglContext)
+            }
             return
         }
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
@@ -284,6 +321,9 @@ class LutSurfaceProcessor {
             EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
             EGL14.eglDestroySurface(eglDisplay, eglSurface)
             eglSurface = EGL14.EGL_NO_SURFACE
+        }
+        if (eglDisplay != EGL14.EGL_NO_DISPLAY && eglContext != EGL14.EGL_NO_CONTEXT && pbufferSurface != EGL14.EGL_NO_SURFACE) {
+            EGL14.eglMakeCurrent(eglDisplay, pbufferSurface, pbufferSurface, eglContext)
         }
     }
 
@@ -390,7 +430,17 @@ class LutSurfaceProcessor {
         handler.post {
             if (!rawMotionEnabled) return@post
             if (isEncoderActive && encoderEglSurface != EGL14.EGL_NO_SURFACE && encoderWidth > 0 && encoderHeight > 0) {
-                EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
+                if (!EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)) {
+                    val restore = when {
+                        eglSurface != EGL14.EGL_NO_SURFACE -> eglSurface
+                        pbufferSurface != EGL14.EGL_NO_SURFACE -> pbufferSurface
+                        else -> EGL14.EGL_NO_SURFACE
+                    }
+                    if (restore != EGL14.EGL_NO_SURFACE) {
+                        EGL14.eglMakeCurrent(eglDisplay, restore, restore, eglContext)
+                    }
+                    return@post
+                }
                 uploadRawBayerTexture(frame.bayerBuffer, frame.width, frame.height)
                 val lscMap = frame.lensShadingMap
                 val hasLsc = lscMap != null && frame.lensShadingRows > 1 && frame.lensShadingCols > 1
@@ -413,8 +463,13 @@ class LutSurfaceProcessor {
                 EGL14.eglSwapBuffers(eglDisplay, encoderEglSurface)
                 lastRawFrameNs = System.nanoTime()
 
-                if (eglSurface != EGL14.EGL_NO_SURFACE) {
-                    EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+                val restoreSurface = when {
+                    eglSurface != EGL14.EGL_NO_SURFACE -> eglSurface
+                    pbufferSurface != EGL14.EGL_NO_SURFACE -> pbufferSurface
+                    else -> EGL14.EGL_NO_SURFACE
+                }
+                if (restoreSurface != EGL14.EGL_NO_SURFACE) {
+                    EGL14.eglMakeCurrent(eglDisplay, restoreSurface, restoreSurface, eglContext)
                 }
             }
         }
@@ -510,12 +565,14 @@ class LutSurfaceProcessor {
                 encoderEglSurface = EGL14.EGL_NO_SURFACE
             }
             if (eglSurface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(eglDisplay, eglSurface)
+            if (pbufferSurface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(eglDisplay, pbufferSurface)
             if (eglContext != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(eglDisplay, eglContext)
             EGL14.eglTerminate(eglDisplay)
         }
         eglDisplay = EGL14.EGL_NO_DISPLAY
         eglContext = EGL14.EGL_NO_CONTEXT
         eglSurface = EGL14.EGL_NO_SURFACE
+        pbufferSurface = EGL14.EGL_NO_SURFACE
         encoderEglSurface = EGL14.EGL_NO_SURFACE
         isEncoderActive = false
         rawMotionEnabled = false

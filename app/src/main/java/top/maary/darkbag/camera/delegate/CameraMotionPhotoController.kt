@@ -17,6 +17,7 @@ import top.maary.darkbag.motionphoto.MotionPhotoStillTimestampSlot
 import top.maary.darkbag.motionphoto.MotionPhotoTimebase
 import top.maary.darkbag.motionphoto.RawMotionPhotoRelay
 import top.maary.darkbag.motionphoto.RawMotionQuality
+import top.maary.darkbag.motionphoto.RawMotionWbConfig
 import top.maary.darkbag.repository.SettingsRepository
 import top.maary.darkbag.ui.CameraBentoDeckView
 import java.io.File
@@ -90,7 +91,15 @@ class CameraMotionPhotoController(
         RawMotionPhotoRelay(
             lutSurfaceProcessorProvider = { env.sessionArbiter.lutProcessor },
             characteristicsProvider = { resolveActiveCameraCharacteristics() },
-            qualityModeProvider = { settingsRepository.current().expRawMotionPhotoQuality }
+            qualityModeProvider = { settingsRepository.current().expRawMotionPhotoQuality },
+            wbConfigProvider = {
+                val prefs = settingsRepository.current()
+                val isManual = env.runtimeState.isManualWb
+                RawMotionWbConfig(
+                    wbMode = if (isManual) 2 else prefs.wbStrategy,
+                    wbManualTempK = env.runtimeState.manualWbTempK.toFloat()
+                )
+            }
         )
     }
 
@@ -142,12 +151,15 @@ class CameraMotionPhotoController(
             sensorOrientationDegrees = sensorOrientation
         )
         val supportedCandidates = selectSupportedCandidates(candidates, ENCODER_FPS, sizeSupportChecker)
+        val (requestedW, requestedH) = candidates.first()
         val (preferredW, preferredH) = supportedCandidates.first()
+        val fallbackNote = if (preferredW != requestedW || preferredH != requestedH) " (fallback)" else ""
 
         Log.i(
             TAG,
             "updateEncoder: motionPhotoEnabled=$isEnabled, isRawMotion=$isRawMotion, " +
-                "rawQualityMode=$qualityMode (${qualityEnum.name}), targetSize=${preferredW}x${preferredH}, " +
+                "rawQualityMode=$qualityMode (${qualityEnum.name}), " +
+                "requestedSize=${requestedW}x${requestedH}, targetSize=${preferredW}x${preferredH}$fallbackNote, " +
                 "candidates=$supportedCandidates"
         )
 
@@ -365,13 +377,34 @@ class CameraMotionPhotoController(
                 else -> listOf(RawMotionQuality.SUBSAMPLE_4X4.mode)
             }
             val swapAxes = ((sensorOrientationDegrees % 180) + 180) % 180 == 90
-            val candidates = tiers.map { tier ->
+            val tierCandidates = tiers.map { tier ->
                 val (scaledW, scaledH) = RawMotionQuality.computeScaledDimensions(rawWidth, rawHeight, tier)
                 val outW = (if (swapAxes) scaledH else scaledW).coerceAtLeast(2) and 1.inv()
                 val outH = (if (swapAxes) scaledW else scaledH).coerceAtLeast(2) and 1.inv()
                 outW.coerceAtLeast(2) to outH.coerceAtLeast(2)
             }
-            return (candidates + (DEFAULT_ENCODER_WIDTH to DEFAULT_ENCODER_HEIGHT)).distinct()
+            val top = tierCandidates.first()
+            val topArea = top.first.toLong() * top.second.toLong()
+            val nextTierArea = tierCandidates.getOrNull(1)?.let { it.first.toLong() * it.second.toLong() } ?: 0L
+            val defaultArea = DEFAULT_ENCODER_WIDTH.toLong() * DEFAULT_ENCODER_HEIGHT.toLong()
+
+            val intermediates = if (minOf(top.first, top.second) > 2160 || topArea > 8_847_360L) {
+                listOf(2160, 1920).mapNotNull { shortEdge ->
+                    val (w, h) = if (top.first <= top.second) {
+                        val alignedH = ((shortEdge.toDouble() * top.second / top.first).toInt() and 15.inv()).coerceAtLeast(2)
+                        shortEdge to alignedH
+                    } else {
+                        val alignedW = ((shortEdge.toDouble() * top.first / top.second).toInt() and 15.inv()).coerceAtLeast(2)
+                        alignedW to shortEdge
+                    }
+                    val area = w.toLong() * h.toLong()
+                    if (area < topArea && area > nextTierArea && area > defaultArea) w to h else null
+                }
+            } else {
+                emptyList()
+            }
+
+            return (listOf(top) + intermediates + tierCandidates.drop(1) + (DEFAULT_ENCODER_WIDTH to DEFAULT_ENCODER_HEIGHT)).distinct()
         }
 
         /**

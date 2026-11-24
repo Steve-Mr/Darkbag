@@ -122,7 +122,7 @@ class CameraMotionPhotoControllerTest {
             )
         )
         assertEquals(
-            listOf(3072 to 4096, 1536 to 2048, 768 to 1024, 1080 to 1440),
+            listOf(3072 to 4096, 2160 to 2880, 1920 to 2560, 1536 to 2048, 768 to 1024, 1080 to 1440),
             CameraMotionPhotoController.buildCandidateEncoderSizes(
                 isRawMotion = true,
                 rawWidth = 4096,
@@ -134,7 +134,7 @@ class CameraMotionPhotoControllerTest {
 
         // 50MP sensor clamps Native -> 2x2
         assertEquals(
-            listOf(3072 to 4096, 1536 to 2048, 1080 to 1440),
+            listOf(3072 to 4096, 2160 to 2880, 1920 to 2560, 1536 to 2048, 1080 to 1440),
             CameraMotionPhotoController.buildCandidateEncoderSizes(
                 isRawMotion = true,
                 rawWidth = 8192,
@@ -236,9 +236,12 @@ class CameraMotionPhotoControllerTest {
         repo.setExpRawMotionPhoto(true)
         repo.setExpRawMotionPhotoQuality(RawMotionQuality.NATIVE.mode)
 
-        // Native (3072x4096) fails start() -> falls back cleanly to 1536x2048
+        // Native (3072x4096) & 4K intermediates (>1536) fail start() -> falls back cleanly to 1536x2048
         controller.updateEncoder()
-        assertEquals(listOf(3072 to 4096, 1536 to 2048), attemptedSizes)
+        assertEquals(
+            listOf(3072 to 4096, 2160 to 2880, 1920 to 2560, 1536 to 2048),
+            attemptedSizes
+        )
         assertEquals(1536 to 2048, controller.activeEncoderSize)
         assertEquals(1, created.count { it.isEncoding })
 

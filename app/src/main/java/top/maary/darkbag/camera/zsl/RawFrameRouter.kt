@@ -77,6 +77,10 @@ class RawFrameRouter(
     @Volatile var droppedImages: Long = 0L
         private set
     @Volatile var rawMotionTap: ((Image, TotalCaptureResult?) -> Unit)? = null
+    @Volatile private var latestCaptureResult: TotalCaptureResult? = null
+
+    internal fun resolveMotionTapResult(timestampNs: Long): TotalCaptureResult? =
+        resultLookup(timestampNs) ?: latestCaptureResult
 
     private val listener = ImageReader.OnImageAvailableListener { r ->
         val currentMode = synchronized(lock) { state.mode }
@@ -94,7 +98,8 @@ class RawFrameRouter(
         val tap = rawMotionTap
         if (image.format == ImageFormat.RAW_SENSOR && tap != null) {
             try {
-                tap(image, resultLookup(image.timestamp))
+                val tapResult = resolveMotionTapResult(image.timestamp)
+                tap(image, tapResult)
             } catch (e: Exception) {
                 Log.w(TAG, "rawMotionTap callback failed", e)
             }
@@ -139,6 +144,7 @@ class RawFrameRouter(
     }
 
     fun onCaptureResult(result: TotalCaptureResult) {
+        latestCaptureResult = result
         val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP) ?: return
         synchronized(lock) { ring }?.attachResult(timestamp, result)
     }
@@ -258,6 +264,7 @@ class RawFrameRouter(
     }
 
     fun close() {
+        latestCaptureResult = null
         val latch = CountDownLatch(1)
         handler.post {
             synchronized(lock) {
