@@ -63,6 +63,12 @@ class LutSurfaceProcessor {
     @Volatile private var previewGain = 1.0f
     @Volatile private var previewInputDomain = 0
 
+    private val frameGainLock = Any()
+    private val frameGains = object : LinkedHashMap<Long, Float>(65, 0.75f, false) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Float>?): Boolean =
+            size > 64
+    }
+
     @Volatile private var rawMotionEnabled = false
     @Volatile private var lastRawFrameNs = 0L
 
@@ -89,7 +95,29 @@ class LutSurfaceProcessor {
 
     /** Viewfinder-only gain used to compensate HDR+ ZSL underexposure. */
     fun setPreviewGain(gain: Float) {
-        previewGain = gain.coerceIn(1.0f, 4.0f)
+        previewGain = gain.coerceIn(1.0f, 8.0f)
+    }
+
+    fun registerFrameGain(timestampNs: Long, gain: Float) {
+        if (timestampNs == 0L) return
+        synchronized(frameGainLock) {
+            frameGains[timestampNs] = gain.coerceIn(1.0f, 8.0f)
+        }
+    }
+
+    fun clearFrameGains() {
+        synchronized(frameGainLock) {
+            frameGains.clear()
+        }
+    }
+
+    internal fun resolvePreviewGainForTimestamp(timestampNs: Long): Float {
+        if (timestampNs != 0L) {
+            synchronized(frameGainLock) {
+                frameGains[timestampNs]?.let { return it }
+            }
+        }
+        return previewGain
     }
 
     fun setPreviewInputDomain(domain: Int) {
@@ -447,7 +475,7 @@ class LutSurfaceProcessor {
                 if (hasLsc) {
                     uploadLscTexture(lscMap!!, frame.lensShadingRows, frame.lensShadingCols)
                 }
-                shaderPipeline.setPreviewGain(previewGain)
+                shaderPipeline.setPreviewGain(frame.digitalGain)
                 shaderPipeline.drawRawFrame(
                     targetWidth = encoderWidth,
                     targetHeight = encoderHeight,
@@ -480,8 +508,10 @@ class LutSurfaceProcessor {
 
         inputSurfaceTexture?.updateTexImage()
         inputSurfaceTexture?.getTransformMatrix(transformMatrix)
+        val frameTs = inputSurfaceTexture?.timestamp ?: 0L
+        val activeGain = resolvePreviewGainForTimestamp(frameTs)
 
-        shaderPipeline.setPreviewGain(previewGain)
+        shaderPipeline.setPreviewGain(activeGain)
         shaderPipeline.drawFrame(
             targetWidth = width,
             targetHeight = height,
@@ -505,7 +535,7 @@ class LutSurfaceProcessor {
             EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
             // Match the viewfinder gain: HDR+ ZSL physically underexposes the sensor, so a
             // 1.0 encoder gain would record a dark Motion Photo. Focus peaking stays off.
-            shaderPipeline.setPreviewGain(previewGain)
+            shaderPipeline.setPreviewGain(activeGain)
             shaderPipeline.drawFrame(
                 targetWidth = encoderWidth,
                 targetHeight = encoderHeight,
@@ -527,7 +557,7 @@ class LutSurfaceProcessor {
 
             // Rebind Viewfinder display surface
             EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
-            shaderPipeline.setPreviewGain(previewGain)
+            shaderPipeline.setPreviewGain(activeGain)
         }
     }
 
@@ -577,6 +607,8 @@ class LutSurfaceProcessor {
         isEncoderActive = false
         rawMotionEnabled = false
         lastRawFrameNs = 0L
+        previewGain = 1.0f
+        clearFrameGains()
     }
 
     companion object {

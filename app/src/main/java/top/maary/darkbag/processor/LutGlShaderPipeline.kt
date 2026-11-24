@@ -82,7 +82,7 @@ internal class LutGlShaderPipeline {
     }
 
     fun setPreviewGain(gain: Float) {
-        previewGain = gain.coerceIn(1.0f, 4.0f)
+        previewGain = gain.coerceIn(1.0f, 8.0f)
     }
 
     fun uploadLutTexture(lutData: FloatArray, size: Int) {

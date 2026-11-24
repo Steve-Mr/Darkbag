@@ -51,6 +51,7 @@ class CameraSessionArbiter(
     var analysisImageReader: ImageReader? = null
     var lutProcessor: LutSurfaceProcessor? = null
     val sceneMotionMonitor = SceneMotionMonitor()
+    val previewGainSynchronizer = PreviewGainSynchronizer()
     @Volatile var rawFrameRouter: RawFrameRouter? = null
     private var zslRawThread: HandlerThread? = null
 
@@ -307,6 +308,9 @@ class CameraSessionArbiter(
             analysisImageReader?.close()
             analysisImageReader = null
             camera2PreviewSurface = null
+            previewGainSynchronizer.reset()
+            lutProcessor?.clearFrameGains()
+            lutProcessor?.setPreviewGain(1.0f)
             lutProcessor?.releaseInputSurface()
             sceneMotionMonitor.reset()
         }

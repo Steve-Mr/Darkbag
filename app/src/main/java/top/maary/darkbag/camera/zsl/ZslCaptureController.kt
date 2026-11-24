@@ -157,7 +157,7 @@ class ZslCaptureController(
         timing.zslPreRollFrames = seed.preRollCount; timing.zslPostRollFrames = seed.remainingCount
 
         val isHybrid = seed.remainingCount > 0
-        if (isHybrid) { supervisor.disarm("hybrid_burst", profile, resetPreviewGain = false); profile = ZslProfile.OFF }
+        if (isHybrid) { supervisor.disarm("hybrid_burst", profile, resetPreviewGain = true); profile = ZslProfile.OFF }
 
         val started = try {
             pipeline.triggerHdrPlusBurstCamera2(sink, isFrame1Trigger, hfMetadata, timing, seed)
@@ -169,7 +169,6 @@ class ZslCaptureController(
             env.lifecycleScope.launch(Dispatchers.Main) { ui.showZslCaptureFeedback() }
             if (!isHybrid) supervisor.publishDebug(armed = true, reason = "", activeProfile = profile)
         } else {
-            if (isHybrid) env.sessionArbiter.lutProcessor?.setPreviewGain(1.0f)
             timing.zslFallbackReason = "burst_start_failed"; timing.zslRoute = ""
             timing.zslPreRollFrames = 0; timing.zslPostRollFrames = 0
         }

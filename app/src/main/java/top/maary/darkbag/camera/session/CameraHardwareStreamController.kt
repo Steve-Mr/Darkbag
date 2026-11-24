@@ -286,6 +286,39 @@ class CameraHardwareStreamController(
         if (changed) updateCamera2RepeatingRequest()
     }
 
+    /**
+     * Atomically updates ZSL RAW target, AE compensation profile, FPS range, and schedules
+     * a smooth [PreviewGainSynchronizer] AE transition with a single repeating request update.
+     */
+    fun updateZslStreamConfig(
+        rawTargetEnabled: Boolean,
+        previewProfileEnabled: Boolean,
+        aeCompensationSteps: Int = 0,
+        fpsRange: Range<Int>? = null,
+        targetPreviewGain: Float? = null
+    ) {
+        val changed = zslRawTargetEnabled != rawTargetEnabled ||
+            zslPreviewProfileEnabled != previewProfileEnabled ||
+            zslAeCompensationSteps != aeCompensationSteps ||
+            zslFpsRange != fpsRange
+        zslRawTargetEnabled = rawTargetEnabled
+        zslPreviewProfileEnabled = previewProfileEnabled
+        zslAeCompensationSteps = aeCompensationSteps
+        zslFpsRange = fpsRange
+
+        if (targetPreviewGain != null) {
+            val expectedEv = if (env.runtimeState.isManualExposure) {
+                0
+            } else {
+                val raw = env.runtimeState.currentEvIndex + if (previewProfileEnabled) aeCompensationSteps else 0
+                env.runtimeState.evRange?.let { raw.coerceIn(it.lower, it.upper) } ?: raw
+            }
+            env.sessionArbiter.previewGainSynchronizer.beginAeTransition(targetPreviewGain, expectedEv)
+        }
+
+        if (changed) updateCamera2RepeatingRequest()
+    }
+
     private fun applyZslPreviewProfile(request: CaptureRequest.Builder) {
         if (!zslPreviewProfileEnabled || env.runtimeState.isManualExposure) return
         val rawEv = env.runtimeState.currentEvIndex + zslAeCompensationSteps
@@ -294,34 +327,50 @@ class CameraHardwareStreamController(
         zslFpsRange?.let { request.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
     }
 
+    fun configureSingleCameraPreviewRequest(
+        request: CaptureRequest.Builder,
+        previewSurface: Surface,
+        isHdrBurst: Boolean = false,
+        includeRawTarget: Boolean = true
+    ) {
+        request.addTarget(previewSurface)
+        if (includeRawTarget &&
+            (zslRawTargetEnabled || rawMotionPhotoTargetEnabled) &&
+            env.runtimeState.isRawSupported &&
+            !env.runtimeState.isBurstActive
+        ) {
+            env.sessionArbiter.rawImageReader?.surface?.takeIf { it.isValid }?.let { request.addTarget(it) }
+        }
+        val shouldArmAnalysis = env.runtimeState.isManualExposure || env.isHdrPlusEnabled || env.settings.current().zslEnabled
+        if (shouldArmAnalysis) {
+            env.sessionArbiter.analysisImageReader?.surface?.takeIf { it.isValid }?.let { request.addTarget(it) }
+        }
+        applyManualSettingsToRequest(request, isHdrBurst, isPreviewStream = true)
+        applyZslPreviewProfile(request)
+    }
+
+    fun applyCamera2RepeatingRequestSync(isHdrBurst: Boolean = false) {
+        val handler = env.sessionArbiter.sessionController.backgroundHandler ?: return
+        val session = env.sessionArbiter.sessionController.captureSession ?: return
+        val device = env.sessionArbiter.sessionController.cameraDevice ?: return
+        val surface = env.sessionArbiter.camera2PreviewSurface ?: return
+        try {
+            val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+            configureSingleCameraPreviewRequest(request, surface, isHdrBurst)
+
+            session.setRepeatingRequest(request.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                    handleCaptureResult(result)
+                }
+            }, handler)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update Camera2 repeating request", e)
+        }
+    }
+
     fun updateCamera2RepeatingRequest(isHdrBurst: Boolean = false) {
         val handler = env.sessionArbiter.sessionController.backgroundHandler ?: return
-        handler.post {
-            val session = env.sessionArbiter.sessionController.captureSession ?: return@post
-            val device = env.sessionArbiter.sessionController.cameraDevice ?: return@post
-            val surface = env.sessionArbiter.camera2PreviewSurface ?: return@post
-            try {
-                val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                request.addTarget(surface)
-                if ((zslRawTargetEnabled || rawMotionPhotoTargetEnabled) && env.runtimeState.isRawSupported) {
-                    env.sessionArbiter.rawImageReader?.surface?.let { request.addTarget(it) }
-                }
-                val shouldArmAnalysis = env.runtimeState.isManualExposure || env.isHdrPlusEnabled || env.settings.current().zslEnabled
-                if (shouldArmAnalysis) {
-                    env.sessionArbiter.analysisImageReader?.surface?.let { request.addTarget(it) }
-                }
-                applyManualSettingsToRequest(request, isHdrBurst, isPreviewStream = true)
-                applyZslPreviewProfile(request)
-
-                session.setRepeatingRequest(request.build(), object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                        handleCaptureResult(result)
-                    }
-                }, handler)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to update Camera2 repeating request", e)
-            }
-        }
+        handler.post { applyCamera2RepeatingRequestSync(isHdrBurst) }
     }
 
     fun handleCaptureResult(result: TotalCaptureResult) {
@@ -342,6 +391,21 @@ class CameraHardwareStreamController(
         if (resIso != null) env.runtimeState.liveIso = resIso
         if (resTime != null) env.runtimeState.liveExposureTime = resTime
         if (resFocus != null) env.runtimeState.liveFocusDistance = resFocus
+
+        val aeComp = result.get(CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION)
+        val aeState = result.get(CaptureResult.CONTROL_AE_STATE)
+        val resolvedGain = env.sessionArbiter.previewGainSynchronizer.onRepeatingCaptureResult(
+            timestampNs = timestamp ?: 0L,
+            iso = resIso,
+            exposureTimeNs = resTime,
+            aeCompSteps = aeComp,
+            aeState = aeState
+        )
+        if (timestamp != null) {
+            env.sessionArbiter.lutProcessor?.registerFrameGain(timestamp, resolvedGain)
+        }
+        env.sessionArbiter.lutProcessor?.setPreviewGain(resolvedGain)
+
         env.sessionArbiter.rawFrameRouter?.onCaptureResult(result)
         val resGains = result.get(CaptureResult.COLOR_CORRECTION_GAINS)
         if (resGains != null) {
@@ -497,6 +561,9 @@ class CameraHardwareStreamController(
 
         Log.d(TAG, "Creating Camera2 Capture Session for device: ${device.id}")
         env.sessionArbiter.sceneMotionMonitor.reset()
+        env.sessionArbiter.previewGainSynchronizer.reset()
+        env.sessionArbiter.lutProcessor?.clearFrameGains()
+        env.sessionArbiter.lutProcessor?.setPreviewGain(1.0f)
 
         val chars = CameraRepository.getCharacteristics(env.camera2Manager, device.id)
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
@@ -586,18 +653,9 @@ class CameraHardwareStreamController(
                             handler.post {
                                 try {
                                     val previewRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                                    surface?.let { previewRequest.addTarget(it) }
-                                    if ((zslRawTargetEnabled || rawMotionPhotoTargetEnabled) && env.runtimeState.isRawSupported) {
-                                        env.sessionArbiter.rawImageReader?.surface?.let { previewRequest.addTarget(it) }
+                                    if (surface != null) {
+                                        configureSingleCameraPreviewRequest(previewRequest, surface)
                                     }
-
-                                    val shouldArmAnalysis = env.runtimeState.isManualExposure || env.isHdrPlusEnabled || env.settings.current().zslEnabled
-                                    if (shouldArmAnalysis) {
-                                        env.sessionArbiter.analysisImageReader?.surface?.let { previewRequest.addTarget(it) }
-                                    }
-
-                                    applyManualSettingsToRequest(previewRequest, isPreviewStream = true)
-                                    applyZslPreviewProfile(previewRequest)
 
                                     session.setRepeatingRequest(previewRequest.build(), object : CameraCaptureSession.CaptureCallback() {
                                         override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {

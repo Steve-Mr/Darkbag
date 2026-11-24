@@ -3,9 +3,11 @@ package top.maary.darkbag.camera
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
+import android.os.Build
 import android.os.SystemClock
 import android.net.Uri
 import android.util.Log
+import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
 import kotlinx.coroutines.CancellationException
@@ -197,6 +199,33 @@ class CameraControllerHub(
         zslCaptureController.onCaptureStateChanged()
         env.sessionArbiter.updateActivePreviewRepeatingRequest {
             streamController.updateCamera2RepeatingRequest()
+        }
+    }
+
+    override fun applyCameraControlsSyncOnCameraThread() {
+        zslCaptureController.onCaptureStateChanged()
+        env.sessionArbiter.updateActivePreviewRepeatingRequest {
+            streamController.applyCamera2RepeatingRequestSync()
+        }
+    }
+
+    override fun configureActivePreviewTriggerRequest(
+        request: CaptureRequest.Builder,
+        previewSurface: Surface
+    ) {
+        val useMultiCam = (modeController.isMultiCameraActive || env.sessionArbiter.isMultiCameraMode) &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+        if (useMultiCam) {
+            request.addTarget(previewSurface)
+            applyPreviewFocusAndExposureSettings(request)
+            env.sessionArbiter.applyPreviewZoomAndCropToRequest(request)
+        } else {
+            streamController.configureSingleCameraPreviewRequest(
+                request = request,
+                previewSurface = previewSurface,
+                isHdrBurst = false,
+                includeRawTarget = !env.runtimeState.isBurstActive
+            )
         }
     }
 

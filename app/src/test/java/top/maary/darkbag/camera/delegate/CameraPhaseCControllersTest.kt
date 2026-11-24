@@ -436,6 +436,54 @@ class CameraPhaseCControllersTest {
     }
 
     @Test
+    fun testStreamController_updateZslStreamConfigAndHandleCaptureResultSyncGain() {
+        val gateway = FakeCameraGateway()
+        val streamController = CameraHardwareStreamController(gateway, gateway, gateway)
+        gateway.runtimeState.evRange = Range(-6, 6)
+        gateway.runtimeState.currentEvIndex = 0
+        gateway.runtimeState.isRawSupported = true
+
+        // Baseline steady-state frame at 0 EV (ISO 100, 10ms)
+        val baseResult = org.robolectric.shadows.ShadowTotalCaptureResult.newTotalCaptureResult()
+        org.robolectric.Shadows.shadowOf(baseResult).set(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP, 1_000L)
+        org.robolectric.Shadows.shadowOf(baseResult).set(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY, 100)
+        org.robolectric.Shadows.shadowOf(baseResult).set(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME, 10_000_000L)
+        org.robolectric.Shadows.shadowOf(baseResult).set(android.hardware.camera2.CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION, 0)
+        streamController.handleCaptureResult(baseResult)
+        assertEquals(1.0f, gateway.sessionArbiter.previewGainSynchronizer.currentEffectiveGain, 1e-4f)
+
+        // Arm ZSL HDR+ (-1 EV -> target 2.0f)
+        streamController.updateZslStreamConfig(
+            rawTargetEnabled = true,
+            previewProfileEnabled = true,
+            aeCompensationSteps = -3,
+            fpsRange = Range(15, 30),
+            targetPreviewGain = 2.0f
+        )
+        assertEquals(2.0f, gateway.sessionArbiter.previewGainSynchronizer.currentSteadyTargetGain, 1e-4f)
+        // Must not jump before hardware AE compensation arrives
+        assertEquals(1.0f, gateway.sessionArbiter.previewGainSynchronizer.currentEffectiveGain, 1e-4f)
+
+        // In-flight frame still at aeComp = 0 -> gain stays 1.0f
+        val staleResult = org.robolectric.shadows.ShadowTotalCaptureResult.newTotalCaptureResult()
+        org.robolectric.Shadows.shadowOf(staleResult).set(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP, 2_000L)
+        org.robolectric.Shadows.shadowOf(staleResult).set(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY, 100)
+        org.robolectric.Shadows.shadowOf(staleResult).set(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME, 10_000_000L)
+        org.robolectric.Shadows.shadowOf(staleResult).set(android.hardware.camera2.CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION, 0)
+        streamController.handleCaptureResult(staleResult)
+        assertEquals(1.0f, gateway.sessionArbiter.previewGainSynchronizer.resolveGainForTimestamp(2_000L), 1e-4f)
+
+        // Converged frame at aeComp = -3 (ISO 100, 5ms) -> gain becomes 2.0f
+        val hdrResult = org.robolectric.shadows.ShadowTotalCaptureResult.newTotalCaptureResult()
+        org.robolectric.Shadows.shadowOf(hdrResult).set(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP, 3_000L)
+        org.robolectric.Shadows.shadowOf(hdrResult).set(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY, 100)
+        org.robolectric.Shadows.shadowOf(hdrResult).set(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME, 5_000_000L)
+        org.robolectric.Shadows.shadowOf(hdrResult).set(android.hardware.camera2.CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION, -3)
+        streamController.handleCaptureResult(hdrResult)
+        assertEquals(2.0f, gateway.sessionArbiter.previewGainSynchronizer.resolveGainForTimestamp(3_000L), 1e-4f)
+    }
+
+    @Test
     fun testMultiCamera_lensSwitchClearsFocusLock_andManualConfigCarriesMeteringRegions() {
         val gateway = FakeCameraGateway()
         val overlayController = CameraOverlayController(gateway, gateway, gateway)

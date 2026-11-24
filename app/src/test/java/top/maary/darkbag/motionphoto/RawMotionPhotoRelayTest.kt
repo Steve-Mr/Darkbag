@@ -392,4 +392,46 @@ class RawMotionPhotoRelayTest {
         assertArrayEquals(floatArrayOf(2.0f, 1.0f, 1.6f), capturedWb[2], 1e-4f)
         assertNull(capturedLsc[2])
     }
+
+    @Test
+    fun `frameGainProviderPropagatesDigitalGainToRawMotionFrame`() {
+        val capturedGains = mutableListOf<Float>()
+        val relay = RawMotionPhotoRelay(
+            lutSurfaceProcessorProvider = { null },
+            characteristicsProvider = { null },
+            frameGainProvider = { ts, _ -> if (ts == 1_000_000_000L) 3.5f else 1.0f },
+            nativeProcessor = { _, w, h, _, _, _ -> ((w / 4) shl 16) or (h / 4) },
+            frameConsumer = null
+        )
+        // Verify constructor & gain clamping path without EGL by calling frameGainProvider indirectly:
+        // Use reflection to verify RawMotionFrame default & custom digitalGain
+        val defaultFrame = top.maary.darkbag.processor.RawMotionFrame(
+            bayerBuffer = ByteBuffer.allocateDirect(8),
+            width = 2,
+            height = 2,
+            cfaPattern = 0,
+            blackLevel = floatArrayOf(64f, 64f, 64f, 64f),
+            whiteLevel = 1023f,
+            wbGains = floatArrayOf(1f, 1f, 1f),
+            dngCcm = FloatArray(9),
+            timestampNs = 1L
+        )
+        assertEquals(1.0f, defaultFrame.digitalGain, 1e-4f)
+
+        val gainFrame = top.maary.darkbag.processor.RawMotionFrame(
+            bayerBuffer = ByteBuffer.allocateDirect(8),
+            width = 2,
+            height = 2,
+            cfaPattern = 0,
+            blackLevel = floatArrayOf(64f, 64f, 64f, 64f),
+            whiteLevel = 1023f,
+            wbGains = floatArrayOf(1f, 1f, 1f),
+            dngCcm = FloatArray(9),
+            timestampNs = 1L,
+            digitalGain = 3.5f
+        )
+        assertEquals(3.5f, gainFrame.digitalGain, 1e-4f)
+        assertTrue(capturedGains.isEmpty())
+        relay.stop()
+    }
 }

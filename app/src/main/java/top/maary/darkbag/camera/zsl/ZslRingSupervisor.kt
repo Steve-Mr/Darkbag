@@ -67,9 +67,13 @@ class ZslRingSupervisor(
         StreamingBufferPool.setRetentionLimit(0)
         HdrPlusBurst.setPoolLimit(0)
 
-        stream.setZslPreviewProfile(enabled = profile == ZslProfile.HDR_PLUS, aeCompensationSteps = evSteps, fpsRange = if (profile == ZslProfile.HDR_PLUS) fpsRange else null)
-        stream.setZslRawTargetEnabled(true)
-        env.sessionArbiter.lutProcessor?.setPreviewGain(digitalGain)
+        stream.updateZslStreamConfig(
+            rawTargetEnabled = true,
+            previewProfileEnabled = profile == ZslProfile.HDR_PLUS,
+            aeCompensationSteps = evSteps,
+            fpsRange = if (profile == ZslProfile.HDR_PLUS) fpsRange else null,
+            targetPreviewGain = digitalGain
+        )
 
         cameraHandler?.removeCallbacks(armProbeRunnable)
         if (!rearm) cameraHandler?.postDelayed(armProbeRunnable, ARM_PROBE_MS)
@@ -90,9 +94,13 @@ class ZslRingSupervisor(
         ring = null; activeConfig = null; armedProfile = ZslProfile.OFF; activeEvSteps = 0; hdrDigitalGain = 1.0f
 
         if (activeProfile != ZslProfile.OFF) {
-            stream.setZslRawTargetEnabled(false)
-            stream.setZslPreviewProfile(false)
-            if (resetPreviewGain) env.sessionArbiter.lutProcessor?.setPreviewGain(1.0f)
+            stream.updateZslStreamConfig(
+                rawTargetEnabled = false,
+                previewProfileEnabled = false,
+                aeCompensationSteps = 0,
+                fpsRange = null,
+                targetPreviewGain = if (resetPreviewGain) 1.0f else null
+            )
         }
         restorePoolLimits()
         Log.i(TAG, "ZSL disarm: $reason")

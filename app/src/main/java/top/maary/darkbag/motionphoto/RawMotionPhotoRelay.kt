@@ -34,6 +34,7 @@ class RawMotionPhotoRelay(
     private val characteristicsProvider: () -> CameraCharacteristics?,
     private val qualityModeProvider: () -> Int = { RawMotionQuality.DEFAULT_MODE },
     private val wbConfigProvider: () -> RawMotionWbConfig = { RawMotionWbConfig() },
+    private val frameGainProvider: (sensorTimestampNs: Long, result: TotalCaptureResult?) -> Float = { _, _ -> 1.0f },
     private val nativeProcessor: (src: ByteBuffer, w: Int, h: Int, stride: Int, dst: ByteBuffer, mode: Int) -> Int = { src, w, h, stride, dst, mode ->
         RawVideoNative.nativeProcessRawMotionBayer(src, w, h, stride, dst, mode)
     },
@@ -466,6 +467,7 @@ class RawMotionPhotoRelay(
                 lscCols
             )
         } else {
+            val digitalGain = frameGainProvider(image.timestamp, result).coerceIn(1.0f, 8.0f)
             processor?.submitRawMotionFrame(
                 RawMotionFrame(
                     bayerBuffer = dstBuffer,
@@ -480,7 +482,8 @@ class RawMotionPhotoRelay(
                     sensorOrientationDegrees = sensorOrientation,
                     lensShadingMap = lscMap,
                     lensShadingRows = lscRows,
-                    lensShadingCols = lscCols
+                    lensShadingCols = lscCols,
+                    digitalGain = digitalGain
                 )
             )
         }

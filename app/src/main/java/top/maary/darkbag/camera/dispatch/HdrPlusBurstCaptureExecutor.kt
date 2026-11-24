@@ -87,12 +87,6 @@ internal class HdrPlusBurstCaptureExecutor(
         val burstLensId = capturedLens?.id ?: "0"
         val currentZoom = specAssembler.resolveEffectiveZoom(capturedLens, null)
         var watchdog: Job? = null
-        val appliedForwardPreviewGain = AtomicBoolean(false)
-        fun restoreForwardPreviewGain() {
-            if (appliedForwardPreviewGain.compareAndSet(true, false)) {
-                env.sessionArbiter.lutProcessor?.setPreviewGain(1.0f)
-            }
-        }
 
         var seedEnqueued = 0
         try {
@@ -225,7 +219,6 @@ internal class HdrPlusBurstCaptureExecutor(
                 onBurstComplete = { burstResult -> onStreamingBurstComplete(burstResult, burstContext) },
                 onBurstFailed = { error ->
                     Log.e(TAG, "Streaming burst failed in workerJob", error)
-                    restoreForwardPreviewGain()
                     if (isTaskStarted.compareAndSet(true, false)) HdrPlusRequestManager.onTaskFinished()
                     if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
                     onNotifySinkFailure(appContext, sink, hfMetadata, error, currentZoom, burstLensId, captureStartTime)
@@ -260,7 +253,6 @@ internal class HdrPlusBurstCaptureExecutor(
                 if (!framesComplete.compareAndSet(false, true)) return
                 watchdog?.cancel()
                 router?.endCapture()
-                restoreForwardPreviewGain()
                 timing?.captureCallback = System.currentTimeMillis()
                 timing?.recordShutterReady()
                 env.lifecycleScope.launch(Dispatchers.Main) {
@@ -359,8 +351,7 @@ internal class HdrPlusBurstCaptureExecutor(
                 )
                 watchdog = launchBurstWatchdog(
                     appContext, sink, isFrame1Trigger, hfMetadata, captureStartTime,
-                    currentZoom, burstLensId, burstSize, framesCaptured, isTaskStarted, burstHelper,
-                    onRestorePreviewGain = ::restoreForwardPreviewGain
+                    currentZoom, burstLensId, burstSize, framesCaptured, isTaskStarted, burstHelper
                 )
                 router = env.sessionArbiter.rawFrameRouter
                 if (router != null) {
@@ -372,10 +363,13 @@ internal class HdrPlusBurstCaptureExecutor(
                         r.acquireNextImage()?.let(::handleIncomingImage)
                     }, handler)
                 }
-                if (!env.runtimeState.isManualExposure && burstGain > 1.01f) {
-                    env.sessionArbiter.lutProcessor?.setPreviewGain(burstGain)
-                    appliedForwardPreviewGain.set(true)
-                }
+                val burstPreviewGain = env.sessionArbiter.previewGainSynchronizer.computeBurstPreviewGain(
+                    curIso = curIso,
+                    curExposureTimeNs = curTime,
+                    burstIso = burstIso,
+                    burstExposureTimeNs = burstTime,
+                    isManualExposure = env.runtimeState.isManualExposure
+                )
                 session.captureBurst(burstRequests, object : CameraCaptureSession.CaptureCallback() {
                     override fun onCaptureStarted(
                         session: CameraCaptureSession,
@@ -383,6 +377,10 @@ internal class HdrPlusBurstCaptureExecutor(
                         timestamp: Long,
                         frameNumber: Long
                     ) {
+                        if (burstPreviewGain > 1.01f) {
+                            env.sessionArbiter.previewGainSynchronizer.registerBurstFrame(timestamp, burstPreviewGain)
+                            env.sessionArbiter.lutProcessor?.registerFrameGain(timestamp, burstPreviewGain)
+                        }
                         env.sessionArbiter.rawFrameRouter?.onCaptureStarted(timestamp)
                     }
 
@@ -391,6 +389,7 @@ internal class HdrPlusBurstCaptureExecutor(
                         request: CaptureRequest,
                         result: TotalCaptureResult
                     ) {
+                        env.sessionArbiter.rawFrameRouter?.onCaptureResult(result)
                         onRecordCaptureResult(result)
                     }
                 }, handler)
@@ -404,7 +403,6 @@ internal class HdrPlusBurstCaptureExecutor(
             if (seed == null || seed.remainingCount > 0) {
                 env.sessionArbiter.rawFrameRouter?.endCapture()
             }
-            restoreForwardPreviewGain()
             if (isTaskStarted.compareAndSet(true, false)) HdrPlusRequestManager.onTaskFinished()
             if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
             onNotifySinkFailure(appContext, sink, hfMetadata, e, currentZoom, burstLensId, captureStartTime)
@@ -431,15 +429,13 @@ internal class HdrPlusBurstCaptureExecutor(
         burstSize: Int,
         framesCaptured: AtomicInteger,
         isTaskStarted: AtomicBoolean,
-        burstHelper: HdrPlusStreamingBurst,
-        onRestorePreviewGain: () -> Unit = {}
+        burstHelper: HdrPlusStreamingBurst
     ): Job = env.lifecycleScope.launch(Dispatchers.Main) {
         delay(8000)
         val capturedCount = framesCaptured.get()
         if (env.runtimeState.isBurstActive && capturedCount < burstSize) {
             Log.e(TAG, "Burst capture timed out! Captured $capturedCount/$burstSize frames.")
             env.sessionArbiter.rawFrameRouter?.endCapture()
-            onRestorePreviewGain()
             env.runtimeState.isBurstActive = false
             ui.resetBurstUi()
             if (capturedCount > 0) {
