@@ -73,6 +73,7 @@ internal class MultiCameraPreviewController(
     var onSessionFailedListener: ((String) -> Unit)? = null
     var onPreviewCaptureResultListener: ((TotalCaptureResult) -> Unit)? = null
     var previewRequestConfigProvider: ((CaptureRequest.Builder) -> Unit)? = null
+    var onPreviewDeviceChangedListener: ((String, CameraCharacteristics) -> Unit)? = null
 
     private val previewCaptureCallback = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(
@@ -261,6 +262,7 @@ internal class MultiCameraPreviewController(
             val surface = previewSurface ?: return@post
             try {
                 val chars = CameraRepository.getCharacteristics(cameraManager, dev.id)
+                onPreviewDeviceChangedListener?.invoke(dev.id, chars)
                 val builder = buildPreviewRequest(dev, surface, chars, resolveActivePreviewLens())
                 session.setRepeatingRequest(builder.build(), previewCaptureCallback, handler)
             } catch (e: Exception) {
@@ -302,6 +304,7 @@ internal class MultiCameraPreviewController(
         val updateAction = Runnable {
             try {
                 val chars = CameraRepository.getCharacteristics(cameraManager, dev.id)
+                onPreviewDeviceChangedListener?.invoke(dev.id, chars)
                 val requestBuilder = buildPreviewRequest(dev, surface, chars, lens)
                 session.setRepeatingRequest(requestBuilder.build(), previewCaptureCallback, handler)
                 triggerFast3AWarmup(dev, session, surface, lens)
@@ -335,6 +338,7 @@ internal class MultiCameraPreviewController(
             }
             val prim = currentPrimaryLens
             val chars = CameraRepository.getCharacteristics(cameraManager, device.id)
+            onPreviewDeviceChangedListener?.invoke(device.id, chars)
             val requestBuilder = buildPreviewRequest(device, targetPreviewSurface, chars, prim)
             session.setRepeatingRequest(requestBuilder.build(), previewCaptureCallback, cameraHandler)
             triggerFast3AWarmup(device, session, targetPreviewSurface, prim)
@@ -396,6 +400,7 @@ internal class MultiCameraPreviewController(
                 addTarget(targetPreviewSurface)
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                previewRequestConfigProvider?.invoke(this)
                 set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
                 set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
                 val isNativeLogical = currentLogicalInfo?.isLogicalMultiCamera == true &&

@@ -95,7 +95,7 @@ class CameraFocusMeteringController(
                     if (!state.isManualFocus) {
                         val cancelRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                         cancelRequest.addTarget(surface)
-                        coordinator.applyManualSettingsToRequest(cancelRequest)
+                        coordinator.applyManualSettingsToRequest(cancelRequest, isPreviewStream = true)
                         arbiter.applyPreviewZoomAndCropToRequest(cancelRequest)
                         cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
                         session.capture(cancelRequest.build(), null, handler)
@@ -176,7 +176,7 @@ class CameraFocusMeteringController(
                 // 2. Submit cancel request cleanly and suspend until processed by HAL
                 val cancelRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                 cancelRequest.addTarget(surface)
-                coordinator.applyManualSettingsToRequest(cancelRequest)
+                coordinator.applyManualSettingsToRequest(cancelRequest, isPreviewStream = true)
                 arbiter.applyPreviewZoomAndCropToRequest(cancelRequest)
                 cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
 
@@ -218,7 +218,7 @@ class CameraFocusMeteringController(
                 // 4. Submit trigger request (CONTROL_AF_TRIGGER_START)
                 val triggerRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                 triggerRequest.addTarget(surface)
-                coordinator.applyManualSettingsToRequest(triggerRequest)
+                coordinator.applyManualSettingsToRequest(triggerRequest, isPreviewStream = true)
                 arbiter.applyPreviewZoomAndCropToRequest(triggerRequest)
                 triggerRequest.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(region))
                 if (!state.isManualExposure && aeRegionsSupported) {

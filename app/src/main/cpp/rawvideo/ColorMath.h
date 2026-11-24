@@ -21,7 +21,7 @@ namespace rawvideo {
  * @param outRowMajor    Output buffer for 3x3 row-major matrix (for CPU software rendering), or nullptr.
  * @param outColMajor    Output buffer for 3x3 col-major matrix (for OpenGL glUniformMatrix3fv), or nullptr.
  */
-inline void computeAdaptiveColorMatrix(
+inline bool computeAdaptiveColorMatrix(
     const float* neutralPoint,
     const float* fm1,
     const float* fm2,
@@ -41,7 +41,7 @@ inline void computeAdaptiveColorMatrix(
         outColMajor[6] = 0.0f; outColMajor[7] = 0.0f; outColMajor[8] = 1.0f;
     }
 
-    if (!fm1 && !fm2) return;
+    if (!fm1 && !fm2) return false;
 
     float compRowMajor[9] = {1,0,0, 0,1,0, 0,0,1};
     bool ok = darkbag::color::compute_render_ccm(
@@ -66,6 +66,7 @@ inline void computeAdaptiveColorMatrix(
             }
         }
     }
+    return ok;
 }
 
 } // namespace rawvideo

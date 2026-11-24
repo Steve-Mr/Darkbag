@@ -52,6 +52,30 @@ public:
     }
 
     /**
+     * Full 4x4 Bayer Binning (8x8 source block -> 2x2 output quad) for live RAW Motion Photo encoding.
+     * Averages all 16 same-phase pixels per CFA channel within each 8x8 block: (sum + 8) >> 4.
+     * Output dimensions: dstWidth = ((srcWidth / 4) & ~1u), dstHeight = ((srcHeight / 4) & ~1u).
+     * Preserves CFA pattern without cross-channel mixing (never mixes Gr and Gb).
+     */
+    static void bayer4x4SubsampleNEON(
+        const uint8_t* srcBytes,
+        uint32_t srcWidth,
+        uint32_t srcHeight,
+        uint32_t srcRowStrideBytes,
+        uint16_t* dst
+    );
+
+    static void bayer4x4SubsampleNEON(
+        const uint8_t* srcBytes,
+        uint32_t srcWidth,
+        uint32_t srcHeight,
+        uint32_t srcRowStrideBytes,
+        uint8_t* dstBytes
+    ) {
+        bayer4x4SubsampleNEON(srcBytes, srcWidth, srcHeight, srcRowStrideBytes, reinterpret_cast<uint16_t*>(dstBytes));
+    }
+
+    /**
      * Stride-aware center window crop for 16-bit Bayer data.
      * Offsets strictly aligned to even coordinates to preserve CFA phase:
      *   startX = ((srcWidth - dstWidth) / 2) & ~1u;

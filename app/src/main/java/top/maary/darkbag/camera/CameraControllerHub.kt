@@ -166,6 +166,7 @@ class CameraControllerHub(
         env.runtimeState.isSwitchingLens = false
         fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(150L)?.start()
         zslCaptureController.onSessionConfigured()
+        motionPhotoController.updateEncoder()
     }
 
     override fun triggerTapToFocus(x: Float, y: Float) =
@@ -199,19 +200,33 @@ class CameraControllerHub(
         }
     }
 
-    override fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean) {
+    override fun applyManualSettingsToRequest(
+        request: CaptureRequest.Builder,
+        isHdrBurst: Boolean,
+        isPreviewStream: Boolean
+    ) {
         env.sessionArbiter.applyManualSettingsForActiveSession(
             applySingleCameraFull = {
-                streamController.applyManualSettingsToRequest(request, isHdrBurst)
+                streamController.applyManualSettingsToRequest(request, isHdrBurst, isPreviewStream)
             },
             applyFocusAndExposureOnly = {
-                streamController.applyFocusAndExposureSettingsToRequest(request, isHdrBurst)
+                streamController.applyFocusAndExposureSettingsToRequest(request, isHdrBurst, isPreviewStream)
             }
         )
     }
 
-    override fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder) =
-        streamController.applyFocusAndExposureSettingsToRequest(builder, false)
+    override fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder) {
+        // Multi-camera preview also feeds the same LUT processor, so it needs the preview
+        // tone map policy too; without it that mode would keep the double tone curve.
+        streamController.applyFocusAndExposureSettingsToRequest(builder, isHdrBurst = false, isPreviewStream = true)
+    }
+
+    override fun updatePreviewToneMapPolicyForDevice(
+        deviceId: String,
+        chars: CameraCharacteristics
+    ) {
+        streamController.updateToneMapPolicyForCharacteristics(deviceId, chars)
+    }
 
     override fun handleCaptureResult(result: TotalCaptureResult) =
         streamController.handleCaptureResult(result)
@@ -223,6 +238,9 @@ class CameraControllerHub(
     }
 
     override fun updateMotionPhotoEncoder() = motionPhotoController.updateEncoder()
+
+    override fun setRawMotionPhotoTargetEnabled(enabled: Boolean) =
+        streamController.setRawMotionPhotoTargetEnabled(enabled)
 
     override fun triggerAutoBurst() {
         val timing = StandardTimingTracker(
@@ -328,6 +346,7 @@ class CameraControllerHub(
         overlayController.updateHalfFrameUI()
         cameraUiContainerBinding?.modeSwitchButton?.let { modeController.updateModeSwitchIcon(it) }
         applyUIVisibility()
+        motionPhotoController.updateEncoder()
         if (previousMode != activeMode) {
             bindCameraUseCases()
         }
@@ -499,7 +518,11 @@ class CameraControllerHub(
                 evRange = snapshot.evRange,
                 isRawSupported = snapshot.isRawSupported,
                 isOisSupported = snapshot.isOisSupported,
-                isHdrOisEnabledPref = snapshot.isHdrOisEnabledPref
+                isHdrOisEnabledPref = snapshot.isHdrOisEnabledPref,
+                previewToneMapStrategy = snapshot.previewToneMapStrategy,
+                tonemapMaxCurvePoints = snapshot.tonemapMaxCurvePoints,
+                availableToneMapModes = snapshot.availableToneMapModes,
+                currentToneMapCameraId = targetId
             )
 
             withContext(Dispatchers.Main) {

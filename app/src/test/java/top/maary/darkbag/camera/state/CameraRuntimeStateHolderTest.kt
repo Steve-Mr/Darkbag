@@ -72,7 +72,8 @@ class CameraRuntimeStateHolderTest {
             evRange = Range(-6, 6),
             isRawSupported = true,
             isOisSupported = true,
-            isHdrOisEnabledPref = false
+            isHdrOisEnabledPref = false,
+            previewToneMapStrategy = top.maary.darkbag.camera.session.PreviewToneMapStrategy.FAST_INVERSE_ISP
         )
 
         assertEquals(6400, state.currentIso)

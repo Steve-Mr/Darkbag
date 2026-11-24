@@ -551,11 +551,20 @@ const Matrix3x3 M_Bradford_D50_to_D65 = {
 
 // 1. Khronos PBR Neutral (Industry standard neutral 1:1 fidelity with smooth highlight compression)
 Vec3 apply_khronos_pbr_neutral(Vec3 color) {
-    constexpr float startCompression = 0.8f - 0.04f;
+    // Photographic black floor. Khronos' reference constants target 3D rendering where
+    // the signal is unclamped and an 0.04 lift-to-black is harmless. On a RAW pipeline
+    // that already removed the sensor black level it zeroes the origin slope below 0.08
+    // and crushes shadows (linear 0.01 -> sRGB 0.008). Use a 0.003 floor with a 0.012
+    // threshold instead, keeping a non-zero origin slope.
+    // The shoulder entry point is coupled to the offset in the reference spec, so it must
+    // move with it: otherwise compression starts ~0.04 early and eats highlight range.
+    constexpr float kBlackOffset = 0.003f;
+    constexpr float kBlackThreshold = 4.0f * kBlackOffset; // 0.012
+    constexpr float startCompression = 0.8f - kBlackOffset;
     constexpr float desaturation = 0.15f;
 
     float x = std::min(color.r, std::min(color.g, color.b));
-    float offset = (x < 0.08f) ? (x - 6.25f * x * x) : 0.04f;
+    float offset = (x < kBlackThreshold) ? (0.5f * x - 20.8333f * x * x) : kBlackOffset;
     color.r -= offset;
     color.g -= offset;
     color.b -= offset;
@@ -580,38 +589,67 @@ Vec3 apply_khronos_pbr_neutral(Vec3 color) {
     };
 }
 
-// 2. Pure Luma Filmic (Hasselblad/Leica micro-contrast with strictly locked hue)
-inline float filmic_luma_curve(float Y) {
-    if (Y <= 0.0f) return 0.0f;
-    constexpr float A = 2.35f;
-    constexpr float B = 0.02f;
-    constexpr float C = 2.35f;
-    constexpr float D = 0.70f;
-    constexpr float E = 0.12f;
-    float out = (Y * (A * Y + B)) / (Y * (C * Y + D) + E);
-    return std::clamp(out, 0.0f, 1.0f);
+// 2. Natural Filmic (AgX-style inset -> per-channel curve -> outset)
+//
+// Why not a luma-domain curve: scaling all three channels by mapped_luma / luma keeps the
+// colour ratios, so a highlight can never desaturate and a saturated channel still has to be
+// clipped. That is the "digital" signature this engine is supposed to avoid. AgX instead
+// insets the gamut toward neutral, applies a curve to each channel independently (channels
+// converge toward white as they saturate, which *is* film highlight desaturation), then
+// outsets to restore mid-tone chroma.
+//
+// The inset matrix is Blender 4.x AgX's (rows sum to 1, so neutrals pass through unchanged).
+// The outset is its exact inverse, so the neutral axis round-trips bit-exactly.
+const Matrix3x3 kAgxInset = {
+    0.8566271533f, 0.0951212405f, 0.0482516061f,
+    0.1373189729f, 0.7612419906f, 0.1014390365f,
+    0.1118982130f, 0.0767994186f, 0.8113023684f
+};
+
+const Matrix3x3 kAgxOutset = {
+    1.1974410769f, -0.1442615127f, -0.0531795642f,
+    -0.1964746263f, 1.3540951315f, -0.1576205051f,
+    -0.1465574171f, -0.1082840588f, 1.2548414759f
+};
+
+// Per-channel sigmoid f(x) = N / (N + 1) with N = x * (A*x + B).
+// Chosen over a white-point-1.0 curve on purpose: with white at 1.0 a pure primary maps to
+// ~0.98 and never enters the shoulder, so per-channel mapping would buy no highlight
+// desaturation at all. Here the shoulder spans roughly +4 EV, which is what makes channels
+// converge. Calibrated so f(0.18) = 0.18 exactly (18% grey anchor) and f'(0.18) = 1.10
+// (mild micro-contrast); monotone, asymptote exactly 1.0, origin slope 0.803 (a soft toe).
+inline constexpr float kAgxCurveA = 2.3134378f;
+inline constexpr float kAgxCurveB = 0.8030934f;
+
+inline float agx_curve(float x) {
+    if (x <= 0.0f) return 0.0f;
+    float n = x * (kAgxCurveA * x + kAgxCurveB);
+    return n / (n + 1.0f);
 }
 
-Vec3 apply_pure_luma_filmic(Vec3 c) {
-    float luma = 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
-    if (luma <= 0.00001f) return {0.0f, 0.0f, 0.0f};
+Vec3 apply_natural_filmic(Vec3 c) {
+    Vec3 positive = { std::max(0.0f, c.r), std::max(0.0f, c.g), std::max(0.0f, c.b) };
+    Vec3 inset = multiply(kAgxInset, positive);
+    Vec3 mapped = { agx_curve(inset.r), agx_curve(inset.g), agx_curve(inset.b) };
+    Vec3 out = multiply(kAgxOutset, mapped);
 
-    float mapped_luma = filmic_luma_curve(luma);
-    float scale = mapped_luma / luma;
-    Vec3 out = { c.r * scale, c.g * scale, c.b * scale };
-
-    // Highlight smooth desaturation above 0.85
-    if (mapped_luma > 0.85f) {
-        float t = (mapped_luma - 0.85f) / 0.15f;
-        float factor = 1.0f - (t * t * (3.0f - 2.0f * t)) * 0.5f;
-        out.r = mapped_luma + (out.r - mapped_luma) * factor;
-        out.g = mapped_luma + (out.g - mapped_luma) * factor;
-        out.b = mapped_luma + (out.b - mapped_luma) * factor;
+    // The outset has negative off-diagonals, so a very saturated highlight can push one
+    // channel above 1 (and another slightly below 0) even though every mapped channel is
+    // <= 1. Scale by 1/peak instead of clipping the dominant channel: the scaling is anchored
+    // at the origin, so hue and the channel ratios survive, the peak lands exactly on 1.0 and
+    // no channel gets a flat top. (Small out-of-gamut negatives still clamp.)
+    float peak = std::max({out.r, out.g, out.b});
+    if (peak > 1.0f) {
+        float t = 1.0f / peak;
+        out.r *= t;
+        out.g *= t;
+        out.b *= t;
     }
-    out.r = std::clamp(out.r, 0.0f, 1.0f);
-    out.g = std::clamp(out.g, 0.0f, 1.0f);
-    out.b = std::clamp(out.b, 0.0f, 1.0f);
-    return out;
+    return {
+        std::clamp(out.r, 0.0f, 1.0f),
+        std::clamp(out.g, 0.0f, 1.0f),
+        std::clamp(out.b, 0.0f, 1.0f)
+    };
 }
 
 // 3. Sony Uchimura (Gran Turismo 7 piecewise photographic tone curve)
@@ -634,23 +672,31 @@ inline float uchimura_scalar(float x, float P = 1.0f, float a = 1.25f, float m =
 
 Vec3 apply_sony_uchimura(Vec3 c, float gain) {
     float luma = 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
-    if (luma <= 0.00001f) return {0.0f, 0.0f, 0.0f};
+    float peak = std::max({c.r, c.g, c.b});
+    if (peak <= 0.00001f) return {0.0f, 0.0f, 0.0f};
 
     float mapped_luma = uchimura_scalar(luma, 1.0f, 1.25f, 0.22f, 0.40f, 1.33f, 0.0f, gain);
-    float scale = mapped_luma / luma;
-    Vec3 out = { c.r * scale, c.g * scale, c.b * scale };
+    float mapped_peak = uchimura_scalar(peak, 1.0f, 1.25f, 0.22f, 0.40f, 1.33f, 0.0f, gain);
 
-    // Highlight desaturation above 0.85
-    if (mapped_luma > 0.85f) {
-        float t = (mapped_luma - 0.85f) / 0.15f;
-        float factor = 1.0f - (t * t * (3.0f - 2.0f * t)) * 0.5f;
-        out.r = mapped_luma + (out.r - mapped_luma) * factor;
-        out.g = mapped_luma + (out.g - mapped_luma) * factor;
-        out.b = mapped_luma + (out.b - mapped_luma) * factor;
-    }
-    out.r = std::clamp(out.r, 0.0f, 1.0f);
-    out.g = std::clamp(out.g, 0.0f, 1.0f);
-    out.b = std::clamp(out.b, 0.0f, 1.0f);
+    // Scaling by mapped_luma / luma alone lets the dominant channel of a saturated colour
+    // overshoot 1.0 and get hard-clipped (e.g. (1.0, 0.05, 0.02) -> R = 1.030), which shifts
+    // hue and burns the highlight core to flat white. Bounding the scale by the peak channel's
+    // own mapping keeps every channel inside the curve: uchimura_scalar is strictly < P = 1.0,
+    // so peak * safe_scale <= mapped_peak < 1.0 and no clamp is ever needed afterwards.
+    float luma_scale = (luma > 1e-5f) ? (mapped_luma / luma) : 1.0f;
+    float peak_scale = mapped_peak / peak;
+    float safe_scale = std::min(luma_scale, peak_scale);
+    Vec3 out = { c.r * safe_scale, c.g * safe_scale, c.b * safe_scale };
+
+    // Desaturate by how much the peak channel actually got compressed above the 0.22 toe anchor.
+    float compression = (peak > 0.22f) ? std::max(0.0f, peak - mapped_peak) : 0.0f;
+    float desat = 1.0f - 1.0f / (0.20f * compression + 1.0f);
+    float out_luma = 0.2126f * out.r + 0.7152f * out.g + 0.0722f * out.b;
+    float target_white = std::max(out_luma, mapped_peak);
+
+    out.r = std::clamp(out.r + (target_white - out.r) * desat, 0.0f, 1.0f);
+    out.g = std::clamp(out.g + (target_white - out.g) * desat, 0.0f, 1.0f);
+    out.b = std::clamp(out.b + (target_white - out.b) * desat, 0.0f, 1.0f);
     return out;
 }
 
@@ -680,6 +726,23 @@ Vec3 apply_aces_fit(Vec3 c) {
         aces_fit_scalar(c.g),
         aces_fit_scalar(c.b)
     };
+}
+
+// 6. Subtractive Colour Density (film print density, applied after the tone map)
+// Saturated colours carry optical density in subtractive media, so they read darker and
+// calmer than the digital "everything scales with luminance" behaviour. The weight is the
+// squared chroma, so neutrals (chroma 0) are untouched. Note that warm skin in scene linear
+// sits near chroma 0.55, not 0.35, so 0.12 costs it about 3.7% -- visible, which is why the
+// constant ships at 0.0 and the A/B has to look at skin before it moves.
+inline constexpr float kColorDensityReduction = 0.0f;
+
+Vec3 apply_subtractive_density(Vec3 c, float reduction) {
+    float peak = std::max({c.r, c.g, c.b});
+    float trough = std::min({c.r, c.g, c.b});
+    if (peak <= 1e-4f) return c;
+    float chroma = (peak - trough) / peak;
+    float density = 1.0f - reduction * (chroma * chroma);
+    return { c.r * density, c.g * density, c.b * density };
 }
 
 // --- Initialization ---
@@ -1045,11 +1108,6 @@ bool process_and_save_image(
         return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
     };
     const float exp_gain = std::pow(2.0f, exposure);
-    // Align with GPU shader rawMax > 0.98 specification:
-    // Highlight desaturation protects against sensor highlight clipping/fringing in the raw white balance domain.
-    // It must remain independent of post-WB digital gain / exposure compensation to avoid erroneously desaturating midtones.
-    const float desat_threshold = 65535.0f * 0.95f;
-    const float theoretical_max = 65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f);
 
     struct LscWeight { int idx0, idx1; float w0, w1; };
     std::vector<LscWeight> lscX, lscY;
@@ -1100,56 +1158,30 @@ bool process_and_save_image(
         }
         
         // Highlight handling.
-        //  * Multi-frame path (faithfulHighlights == false): joint proportional
-        //    knee (display-oriented soft shoulder) + ad-hoc highlight desaturation.
-        //  * Minimal single-frame path (faithfulHighlights == true): the data stays
-        //    linear up to the sensor white level. A pixel whose channels reached
-        //    that level has an unknowable colour, so it is neutralized point-wise
-        //    (no reconstruction, no neighbourhood, no parameters).
-        //    Detection happens here, in the sensor domain; the neutralization itself
-        //    is applied *after* white balance and the container clamp (see below),
-        //    because equalizing raw channels would still come out coloured once the
-        //    per-channel gains and the clamp are applied.
-        bool sensorBlown = false;
-        if (faithfulHighlights) {
-            constexpr float kSensorWhiteLevel = 65535.0f * 0.98f;
-            sensorBlown = (std::max({r, g, b}) >= kSensorWhiteLevel);
-        } else {
-            // Smooth knee shoulder compression for display rendering highlights (Joint Proportional)
-            float max_rgb_raw = std::max({r, g, b});
-            const float knee = 50000.0f;
-            if (max_rgb_raw > knee) {
-                const float range = 65535.0f - knee;
-                float excess = max_rgb_raw - knee;
-                float compressed = knee + range * (excess / (excess + range));
-                float scale = compressed / max_rgb_raw;
-                r *= scale;
-                g *= scale;
-                b *= scale;
-            }
-        }
+        //  * A pixel whose channels reached the sensor white level has an unknowable
+        //    colour, so it is neutralized point-wise (no reconstruction, no
+        //    neighbourhood, no parameters). Detection happens here, in the sensor
+        //    domain; the neutralization itself is applied *after* white balance and
+        //    the container clamp (see below), because equalizing raw channels would
+        //    still come out coloured once the per-channel gains and the clamp are
+        //    applied.
+        //  * The previous 50000-count joint-proportional knee (a display-oriented soft
+        //    shoulder covering [0.76, 1.0]) is gone. It pre-compressed exactly the range
+        //    that belongs to the colour engine's own shoulder, and the GPU final render
+        //    never had it, so CPU and GPU disagreed above 76% of full scale.
+        //
+        //    Note the two paths still differ in *how* they handle blown pixels: this one
+        //    hard-neutralizes in the raw/WB domain, the GPU smoothsteps to the peak after the
+        //    CCM. Same 0.98 threshold, different blend, so they can differ inside the last
+        //    2% of full scale. Left as-is because unifying the domains is a separate change.
+        constexpr float kSensorWhiteLevel = 65535.0f * 0.98f;
+        bool sensorBlown = (std::max({r, g, b}) >= kSensorWhiteLevel);
 
         // 1. Apply White Balance
         if (wb) {
             r *= wb[0];
             g *= wb[1];
             b *= wb[3];
-        }
-
-        // 2. Highlight Desaturation
-        // Multi-frame path only: this ramp is gain dependent and effectively inert
-        // at gain == 1, so the minimal path leaves highlight colour to the display
-        // transform (and to the point-wise neutralization applied after the clamp).
-        if (!faithfulHighlights) {
-            float max_rgb = std::max({r, g, b});
-            if (max_rgb > desat_threshold) {
-                float desat = std::clamp((max_rgb - desat_threshold) / std::max(1.0f, theoretical_max - desat_threshold), 0.0f, 1.0f);
-                desat = desat * desat * (3.0f - 2.0f * desat); // Smoothstep
-                float y_lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-                r = r * (1.0f - desat) + y_lum * desat;
-                g = g * (1.0f - desat) + y_lum * desat;
-                b = b * (1.0f - desat) + y_lum * desat;
-            }
         }
 
         r = std::min(r, 65535.0f);
@@ -1222,15 +1254,28 @@ bool process_and_save_image(
                     color = apply_khronos_pbr_neutral(color);
                     break;
                 case COLOR_ENGINE_PURE_LUMA:
-                    color = apply_pure_luma_filmic(color);
+                    color = apply_natural_filmic(color);
                     break;
                 case COLOR_ENGINE_SONY_UCHIMURA:
-                    color = apply_sony_uchimura(color, gain);
+                    // The signal carries gain * exp_gain (see norm_* above) and the GPU hands the
+                    // same product to uDigitalGain, so the shoulder must widen by the total gain.
+                    color = apply_sony_uchimura(color, gain * exp_gain);
                     break;
                 case COLOR_ENGINE_ACES_FIT:
                 default:
                     color = apply_aces_fit(color);
                     break;
+            }
+
+            // Subtractive colour density: saturated colours carry optical density in
+            // subtractive media, so they read darker and calmer than the digital
+            // "everything scales with luminance" behaviour (Helmholtz-Kohlrausch inverse).
+            // Applied *after* the tone map so the curve's shoulder shape is untouched, and
+            // only to the Sony engine so Mode 0 keeps its 1:1 neutrality contract and Mode 1
+            // keeps its own character. kColorDensityReduction is the single tuning constant;
+            // it ships at 0.0 until the A/B sweep picks between 0.08 / 0.10 / 0.12.
+            if (colorEngineMode == COLOR_ENGINE_SONY_UCHIMURA && kColorDensityReduction > 0.0f) {
+                color = apply_subtractive_density(color, kColorDensityReduction);
             }
 
             // Apply sRGB OETF transfer function

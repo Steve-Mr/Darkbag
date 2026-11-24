@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import top.maary.darkbag.motionphoto.RawMotionQuality
 import java.util.Collections
 import java.util.WeakHashMap
 
@@ -183,6 +184,10 @@ class SettingsRepository(context: Context) {
             onboardingCompleted = bool(PreferenceKeys.KEY_ONBOARDING_COMPLETED, false),
             expFocusPeaking = bool(PreferenceKeys.KEY_EXP_FOCUS_PEAKING, false),
             expMultiCamColorHarmonization = bool(PreferenceKeys.KEY_EXP_MULTICAM_COLOR_HARMONIZATION, true),
+            expRawMotionPhoto = bool(PreferenceKeys.KEY_EXP_RAW_MOTION_PHOTO, false),
+            expRawMotionPhotoQuality = RawMotionQuality.fromLegacy(
+                rawMap[PreferenceKeys.KEY_EXP_RAW_MOTION_PHOTO_QUALITY]
+            ).mode,
             focusPeakingActive = bool(PreferenceKeys.KEY_FOCUS_PEAKING_ACTIVE, true),
             colorEngineMode = int(PreferenceKeys.KEY_COLOR_ENGINE_MODE, 2),
             wbStrategy = int(PreferenceKeys.KEY_WB_STRATEGY, PreferenceKeys.WB_STRATEGY_AMBIENCE),
@@ -564,6 +569,22 @@ class SettingsRepository(context: Context) {
 
     fun setExpMultiCamColorHarmonization(enabled: Boolean) {
         edit { this[PreferenceKeys.EXP_MULTICAM_COLOR_HARMONIZATION] = enabled }
+    }
+
+    fun setExpRawMotionPhoto(enabled: Boolean) {
+        edit { this[PreferenceKeys.EXP_RAW_MOTION_PHOTO] = enabled }
+    }
+
+    fun setExpRawMotionPhotoQuality(mode: Int) {
+        edit { this[PreferenceKeys.EXP_RAW_MOTION_PHOTO_QUALITY] = mode }
+    }
+
+    fun setExpRawMotionPhotoQuality(quality: RawMotionQuality) {
+        setExpRawMotionPhotoQuality(quality.mode)
+    }
+
+    fun setExpRawMotionPhotoQuality(legacyString: String) {
+        setExpRawMotionPhotoQuality(RawMotionQuality.fromLegacy(legacyString).mode)
     }
 
     @VisibleForTesting

@@ -476,12 +476,13 @@ internal class HdrPlusBurstCaptureExecutor(
         val previewSurface = env.sessionArbiter.camera2PreviewSurface
         val lscModes = chars.get(CameraCharacteristics.STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES)
         val supportsLsc = lscModes != null && lscModes.contains(CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)
+        val hasValidPreview = previewSurface != null && previewSurface.isValid
         return List(burstSize) {
             device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(reader.surface)
-                if (previewSurface != null && previewSurface.isValid) addTarget(previewSurface)
+                if (hasValidPreview) addTarget(previewSurface!!)
                 set(CaptureRequest.JPEG_ORIENTATION, combinedOrientation)
-                coordinator.applyManualSettingsToRequest(this, true)
+                coordinator.applyManualSettingsToRequest(this, isHdrBurst = true, isPreviewStream = hasValidPreview)
                 if (supportsLsc) {
                     set(CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE, CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)
                 }

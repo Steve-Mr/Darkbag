@@ -10,6 +10,9 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.FloatBuffer
 
 /**
  * EGL lifecycle, background GL thread, and dual-surface (Viewfinder + MediaCodec Encoder)
@@ -27,6 +30,7 @@ class LutSurfaceProcessor {
     private var eglDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext = EGL14.EGL_NO_CONTEXT
     private var eglSurface = EGL14.EGL_NO_SURFACE
+    private var pbufferSurface = EGL14.EGL_NO_SURFACE
     private var eglConfig: EGLConfig? = null
 
     private var inputSurfaceTexture: SurfaceTexture? = null
@@ -52,11 +56,24 @@ class LutSurfaceProcessor {
     private var inputHeight = 0
 
     private val transformMatrix = FloatArray(16)
-    private var currentColorEngineMode = 0
+    private var currentColorEngineMode = 2
     private var currentWbPreviewMatrix = LutGlShaderPipeline.IDENTITY_MATRIX_3X3.copyOf()
 
     @Volatile private var isFocusPeakingEnabled = false
     @Volatile private var previewGain = 1.0f
+    @Volatile private var previewInputDomain = 0
+
+    @Volatile private var rawMotionEnabled = false
+    @Volatile private var lastRawFrameNs = 0L
+
+    private var rawBayerTextureId = 0
+    private var currentRawTexWidth = 0
+    private var currentRawTexHeight = 0
+
+    private var rawLscTextureId = 0
+    private var currentLscCols = 0
+    private var currentLscRows = 0
+    private var lscFloatBuffer: FloatBuffer? = null
 
     init {
         thread.start()
@@ -75,6 +92,23 @@ class LutSurfaceProcessor {
         previewGain = gain.coerceIn(1.0f, 4.0f)
     }
 
+    fun setPreviewInputDomain(domain: Int) {
+        handler.post {
+            previewInputDomain = domain
+        }
+    }
+
+    fun setRawMotionEnabled(enabled: Boolean) {
+        rawMotionEnabled = enabled
+        if (!enabled) {
+            handler.post {
+                if (!rawMotionEnabled) {
+                    lastRawFrameNs = 0L
+                }
+            }
+        }
+    }
+
     fun updateColorEngineMode(engineMode: Int) {
         handler.post {
             currentColorEngineMode = engineMode
@@ -83,6 +117,7 @@ class LutSurfaceProcessor {
 
     fun getInputSurface(w: Int, h: Int, onSurfaceReady: (Surface) -> Unit) {
         handler.post {
+            if (!ensureContextCurrent()) return@post
             inputWidth = w
             inputHeight = h
 
@@ -115,10 +150,10 @@ class LutSurfaceProcessor {
         handler.post {
             inputSurfaceTexture?.release()
             inputSurfaceTexture = null
-            if (inputTextureId != 0) {
+            if (inputTextureId != 0 && ensureContextCurrent()) {
                 GLES30.glDeleteTextures(1, intArrayOf(inputTextureId), 0)
-                inputTextureId = 0
             }
+            inputTextureId = 0
         }
     }
 
@@ -179,7 +214,7 @@ class LutSurfaceProcessor {
         handler.post {
             currentLogType = logType
             currentGamutMatrix = LutGlShaderPipeline.getGamutMatrix(logType)
-            if (lutData != null && size > 0) {
+            if (lutData != null && size > 0 && ensureContextCurrent()) {
                 currentLutSize = size
                 shaderPipeline.uploadLutTexture(lutData, size)
             } else {
@@ -208,6 +243,7 @@ class LutSurfaceProcessor {
 
         val attribs = intArrayOf(
             EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+            EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT or EGL14.EGL_PBUFFER_BIT,
             EGL14.EGL_RED_SIZE, 8,
             EGL14.EGL_GREEN_SIZE, 8,
             EGL14.EGL_BLUE_SIZE, 8,
@@ -216,17 +252,46 @@ class LutSurfaceProcessor {
         )
         val configs = arrayOfNulls<EGLConfig>(1)
         val numConfigs = IntArray(1)
-        EGL14.eglChooseConfig(eglDisplay, attribs, 0, configs, 0, 1, numConfigs, 0)
+        if (!EGL14.eglChooseConfig(eglDisplay, attribs, 0, configs, 0, 1, numConfigs, 0) ||
+            numConfigs[0] <= 0 || configs[0] == null
+        ) {
+            Log.e("LutProcessor", "eglChooseConfig failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+            return
+        }
         eglConfig = configs[0]
 
         val ctxAttribs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 3, EGL14.EGL_NONE)
         eglContext = EGL14.eglCreateContext(eglDisplay, eglConfig, EGL14.EGL_NO_CONTEXT, ctxAttribs, 0)
+        if (eglContext == null || eglContext == EGL14.EGL_NO_CONTEXT) {
+            Log.e("LutProcessor", "eglCreateContext failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+            eglContext = EGL14.EGL_NO_CONTEXT
+            return
+        }
 
         val surfAttribs = intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE)
-        eglSurface = EGL14.eglCreatePbufferSurface(eglDisplay, eglConfig, surfAttribs, 0)
-        EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+        pbufferSurface = EGL14.eglCreatePbufferSurface(eglDisplay, eglConfig, surfAttribs, 0)
+        if (pbufferSurface == null || pbufferSurface == EGL14.EGL_NO_SURFACE) {
+            Log.e("LutProcessor", "eglCreatePbufferSurface failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+            pbufferSurface = EGL14.EGL_NO_SURFACE
+            return
+        }
+        if (!EGL14.eglMakeCurrent(eglDisplay, pbufferSurface, pbufferSurface, eglContext)) {
+            Log.e("LutProcessor", "eglMakeCurrent(pbuffer) failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+            return
+        }
 
         shaderPipeline.initProgramAndDummyLut()
+    }
+
+    private fun ensureContextCurrent(): Boolean {
+        if (eglDisplay == EGL14.EGL_NO_DISPLAY || eglContext == EGL14.EGL_NO_CONTEXT) return false
+        if (EGL14.eglGetCurrentContext() == eglContext) return true
+        val target = when {
+            eglSurface != EGL14.EGL_NO_SURFACE -> eglSurface
+            pbufferSurface != EGL14.EGL_NO_SURFACE -> pbufferSurface
+            else -> return false
+        }
+        return EGL14.eglMakeCurrent(eglDisplay, target, target, eglContext)
     }
 
     private fun createEglSurface(surface: Surface) {
@@ -234,6 +299,7 @@ class LutSurfaceProcessor {
         if (eglSurface != EGL14.EGL_NO_SURFACE) {
             EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
             EGL14.eglDestroySurface(eglDisplay, eglSurface)
+            eglSurface = EGL14.EGL_NO_SURFACE
         }
 
         val surfaceAttribs = intArrayOf(EGL14.EGL_NONE)
@@ -241,6 +307,10 @@ class LutSurfaceProcessor {
         if (eglSurface == null || eglSurface == EGL14.EGL_NO_SURFACE) {
             val error = EGL14.eglGetError()
             Log.e("LutProcessor", "eglCreateWindowSurface failed: $error")
+            eglSurface = EGL14.EGL_NO_SURFACE
+            if (pbufferSurface != EGL14.EGL_NO_SURFACE) {
+                EGL14.eglMakeCurrent(eglDisplay, pbufferSurface, pbufferSurface, eglContext)
+            }
             return
         }
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
@@ -251,6 +321,157 @@ class LutSurfaceProcessor {
             EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
             EGL14.eglDestroySurface(eglDisplay, eglSurface)
             eglSurface = EGL14.EGL_NO_SURFACE
+        }
+        if (eglDisplay != EGL14.EGL_NO_DISPLAY && eglContext != EGL14.EGL_NO_CONTEXT && pbufferSurface != EGL14.EGL_NO_SURFACE) {
+            EGL14.eglMakeCurrent(eglDisplay, pbufferSurface, pbufferSurface, eglContext)
+        }
+    }
+
+    private fun uploadRawBayerTexture(buffer: ByteBuffer, w: Int, h: Int) {
+        if (rawBayerTextureId == 0) {
+            val textures = IntArray(1)
+            GLES30.glGenTextures(1, textures, 0)
+            rawBayerTextureId = textures[0]
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, rawBayerTextureId)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        } else {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, rawBayerTextureId)
+        }
+
+        buffer.position(0)
+        if (currentRawTexWidth != w || currentRawTexHeight != h) {
+            GLES30.glTexImage2D(
+                GLES30.GL_TEXTURE_2D, 0, GLES30.GL_R16UI,
+                w, h, 0,
+                GLES30.GL_RED_INTEGER, GLES30.GL_UNSIGNED_SHORT, buffer
+            )
+            currentRawTexWidth = w
+            currentRawTexHeight = h
+        } else {
+            GLES30.glTexSubImage2D(
+                GLES30.GL_TEXTURE_2D, 0, 0, 0,
+                w, h,
+                GLES30.GL_RED_INTEGER, GLES30.GL_UNSIGNED_SHORT, buffer
+            )
+        }
+    }
+
+    private fun uploadLscTexture(lscMap: FloatArray, rows: Int, cols: Int) {
+        val planeSize = rows * cols
+        if (lscMap.size < 4 * planeSize) return
+
+        val numFloats = planeSize * 4
+        var buf = lscFloatBuffer
+        if (buf == null || buf.capacity() < numFloats) {
+            buf = ByteBuffer.allocateDirect(numFloats * 4)
+                .order(ByteOrder.nativeOrder())
+                .asFloatBuffer()
+            lscFloatBuffer = buf
+        }
+        buf.clear()
+
+        // lscMap is channel-major: idx(ch, row, col) = ch * rows * cols + row * cols + col
+        // RGBA: R: ch 0, G: 0.5 * (ch 1 + ch 2), B: ch 3, A: 1.0f
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                val gridIdx = r * cols + c
+                val rGain = lscMap[0 * planeSize + gridIdx]
+                val gGain = 0.5f * (lscMap[1 * planeSize + gridIdx] + lscMap[2 * planeSize + gridIdx])
+                val bGain = lscMap[3 * planeSize + gridIdx]
+                buf.put(rGain)
+                buf.put(gGain)
+                buf.put(bGain)
+                buf.put(1.0f)
+            }
+        }
+        buf.position(0)
+
+        if (rawLscTextureId == 0) {
+            val texs = IntArray(1)
+            GLES30.glGenTextures(1, texs, 0)
+            rawLscTextureId = texs[0]
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, rawLscTextureId)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexImage2D(
+                GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F,
+                cols, rows, 0,
+                GLES30.GL_RGBA, GLES30.GL_FLOAT, buf
+            )
+            currentLscCols = cols
+            currentLscRows = rows
+        } else {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, rawLscTextureId)
+            if (currentLscCols != cols || currentLscRows != rows) {
+                GLES30.glTexImage2D(
+                    GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F,
+                    cols, rows, 0,
+                    GLES30.GL_RGBA, GLES30.GL_FLOAT, buf
+                )
+                currentLscCols = cols
+                currentLscRows = rows
+            } else {
+                GLES30.glTexSubImage2D(
+                    GLES30.GL_TEXTURE_2D, 0, 0, 0,
+                    cols, rows,
+                    GLES30.GL_RGBA, GLES30.GL_FLOAT, buf
+                )
+            }
+        }
+    }
+
+    fun submitRawMotionFrame(frame: RawMotionFrame) {
+        if (!rawMotionEnabled) return
+        handler.post {
+            if (!rawMotionEnabled) return@post
+            if (isEncoderActive && encoderEglSurface != EGL14.EGL_NO_SURFACE && encoderWidth > 0 && encoderHeight > 0) {
+                if (!EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)) {
+                    val restore = when {
+                        eglSurface != EGL14.EGL_NO_SURFACE -> eglSurface
+                        pbufferSurface != EGL14.EGL_NO_SURFACE -> pbufferSurface
+                        else -> EGL14.EGL_NO_SURFACE
+                    }
+                    if (restore != EGL14.EGL_NO_SURFACE) {
+                        EGL14.eglMakeCurrent(eglDisplay, restore, restore, eglContext)
+                    }
+                    return@post
+                }
+                uploadRawBayerTexture(frame.bayerBuffer, frame.width, frame.height)
+                val lscMap = frame.lensShadingMap
+                val hasLsc = lscMap != null && frame.lensShadingRows > 1 && frame.lensShadingCols > 1
+                if (hasLsc) {
+                    uploadLscTexture(lscMap!!, frame.lensShadingRows, frame.lensShadingCols)
+                }
+                shaderPipeline.setPreviewGain(previewGain)
+                shaderPipeline.drawRawFrame(
+                    targetWidth = encoderWidth,
+                    targetHeight = encoderHeight,
+                    frame = frame,
+                    rawBayerTextureId = rawBayerTextureId,
+                    rawLscTextureId = if (hasLsc) rawLscTextureId else 0,
+                    currentLutSize = currentLutSize,
+                    currentLogType = currentLogType,
+                    currentGamutMatrix = currentGamutMatrix,
+                    currentColorEngineMode = currentColorEngineMode
+                )
+                EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, frame.timestampNs)
+                EGL14.eglSwapBuffers(eglDisplay, encoderEglSurface)
+                lastRawFrameNs = System.nanoTime()
+
+                val restoreSurface = when {
+                    eglSurface != EGL14.EGL_NO_SURFACE -> eglSurface
+                    pbufferSurface != EGL14.EGL_NO_SURFACE -> pbufferSurface
+                    else -> EGL14.EGL_NO_SURFACE
+                }
+                if (restoreSurface != EGL14.EGL_NO_SURFACE) {
+                    EGL14.eglMakeCurrent(eglDisplay, restoreSurface, restoreSurface, eglContext)
+                }
+            }
         }
     }
 
@@ -273,12 +494,14 @@ class LutSurfaceProcessor {
             currentGamutMatrix = currentGamutMatrix,
             currentColorEngineMode = currentColorEngineMode,
             focusPeakingEnabled = isFocusPeakingEnabled,
-            currentWbPreviewMatrix = currentWbPreviewMatrix
+            currentWbPreviewMatrix = currentWbPreviewMatrix,
+            previewInputDomain = previewInputDomain
         )
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
 
         // Branch 2: Render to MediaCodec Encoder Surface for Motion Photo (never bake focus peaking lines)
-        if (isEncoderActive && encoderEglSurface != EGL14.EGL_NO_SURFACE && encoderWidth > 0 && encoderHeight > 0) {
+        val isRawActive = rawMotionEnabled && ((System.nanoTime() - lastRawFrameNs) < 1_500_000_000L)
+        if (!isRawActive && isEncoderActive && encoderEglSurface != EGL14.EGL_NO_SURFACE && encoderWidth > 0 && encoderHeight > 0) {
             EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
             // Match the viewfinder gain: HDR+ ZSL physically underexposes the sensor, so a
             // 1.0 encoder gain would record a dark Motion Photo. Focus peaking stays off.
@@ -295,7 +518,8 @@ class LutSurfaceProcessor {
                 currentGamutMatrix = currentGamutMatrix,
                 currentColorEngineMode = currentColorEngineMode,
                 focusPeakingEnabled = false,
-                currentWbPreviewMatrix = currentWbPreviewMatrix
+                currentWbPreviewMatrix = currentWbPreviewMatrix,
+                previewInputDomain = previewInputDomain
             )
             val frameTimestampNs = System.nanoTime()
             EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, frameTimestampNs)
@@ -320,6 +544,20 @@ class LutSurfaceProcessor {
             inputTextureId = 0
         }
 
+        if (rawBayerTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(rawBayerTextureId), 0)
+            rawBayerTextureId = 0
+        }
+        currentRawTexWidth = 0
+        currentRawTexHeight = 0
+
+        if (rawLscTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(rawLscTextureId), 0)
+            rawLscTextureId = 0
+        }
+        currentLscCols = 0
+        currentLscRows = 0
+
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
             EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
             if (encoderEglSurface != EGL14.EGL_NO_SURFACE) {
@@ -327,14 +565,18 @@ class LutSurfaceProcessor {
                 encoderEglSurface = EGL14.EGL_NO_SURFACE
             }
             if (eglSurface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(eglDisplay, eglSurface)
+            if (pbufferSurface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(eglDisplay, pbufferSurface)
             if (eglContext != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(eglDisplay, eglContext)
             EGL14.eglTerminate(eglDisplay)
         }
         eglDisplay = EGL14.EGL_NO_DISPLAY
         eglContext = EGL14.EGL_NO_CONTEXT
         eglSurface = EGL14.EGL_NO_SURFACE
+        pbufferSurface = EGL14.EGL_NO_SURFACE
         encoderEglSurface = EGL14.EGL_NO_SURFACE
         isEncoderActive = false
+        rawMotionEnabled = false
+        lastRawFrameNs = 0L
     }
 
     companion object {

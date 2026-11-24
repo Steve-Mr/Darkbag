@@ -187,6 +187,18 @@ class SettingsViewModel @JvmOverloads constructor(
         settingsRepository.setExpMultiCamColorHarmonization(enabled)
     }
 
+    fun updateExpRawMotionPhoto(enabled: Boolean) {
+        settingsRepository.setExpRawMotionPhoto(enabled)
+    }
+
+    fun updateExpRawMotionPhotoQuality(mode: Int) {
+        settingsRepository.setExpRawMotionPhotoQuality(mode)
+    }
+
+    fun updateExpRawMotionPhotoQuality(quality: top.maary.darkbag.motionphoto.RawMotionQuality) {
+        settingsRepository.setExpRawMotionPhotoQuality(quality.mode)
+    }
+
     fun updateZslAdaptive(enabled: Boolean) {
         settingsRepository.setZslAdaptive(enabled)
     }
