@@ -24,6 +24,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.provider.DocumentsContract
+import android.util.Log
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -255,6 +256,8 @@ class MediaStoreUtils(private val context: Context) {
     }
 
     companion object {
+        private const val TAG = "MediaStoreUtils"
+
         // Suppress DATA index deprecation warning since we need the file location for the Glide library
         @Suppress("DEPRECATION")
         private const val imageDataColumnIndex = MediaStore.Images.Media.DATA
@@ -274,22 +277,73 @@ class MediaStoreUtils(private val context: Context) {
 
         suspend fun deleteUriSafe(context: Context, uri: Uri): Boolean {
             return withContext(Dispatchers.IO) {
-                try {
-                    if (uri.scheme == "content" && DocumentsContract.isDocumentUri(context, uri)) {
-                        DocumentsContract.deleteDocument(context.contentResolver, uri)
-                    } else if (uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) {
-                        val docUri = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
-                        DocumentsContract.deleteDocument(context.contentResolver, docUri)
-                    } else {
-                        context.contentResolver.delete(uri, null, null) > 0
+                when {
+                    uri.scheme == "file" -> {
+                        val path = uri.path ?: return@withContext false
+                        val deleted = File(path).delete()
+                        if (!deleted) {
+                            Log.w(TAG, "File.delete() returned false for $uri")
+                        }
+                        deleted
                     }
-                } catch (e: Exception) {
-                    try {
-                        val docFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)
-                            ?: androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)
-                        docFile?.delete() ?: false
-                    } catch (e2: Exception) {
-                        throw e
+                    uri.scheme == "content" && DocumentsContract.isDocumentUri(context, uri) -> {
+                        try {
+                            val deleted = DocumentsContract.deleteDocument(context.contentResolver, uri)
+                            if (!deleted) {
+                                Log.w(TAG, "DocumentsContract.deleteDocument returned false for $uri")
+                            }
+                            deleted
+                        } catch (e: SecurityException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.w(TAG, "DocumentsContract.deleteDocument failed for $uri, trying DocumentFile fallback", e)
+                            val docFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)
+                            val deleted = docFile?.delete() ?: false
+                            if (!deleted) {
+                                Log.w(TAG, "DocumentFile.fromSingleUri.delete() returned false for $uri")
+                            }
+                            deleted
+                        }
+                    }
+                    uri.scheme == "content" && DocumentsContract.isTreeUri(uri) -> {
+                        try {
+                            val docUri = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
+                            val deleted = DocumentsContract.deleteDocument(context.contentResolver, docUri)
+                            if (!deleted) {
+                                Log.w(TAG, "DocumentsContract.deleteDocument(tree) returned false for $uri")
+                            }
+                            deleted
+                        } catch (e: SecurityException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.w(TAG, "DocumentsContract.deleteDocument(tree) failed for $uri, trying DocumentFile fallback", e)
+                            val docFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)
+                            val deleted = docFile?.delete() ?: false
+                            if (!deleted) {
+                                Log.w(TAG, "DocumentFile.fromTreeUri.delete() returned false for $uri")
+                            }
+                            deleted
+                        }
+                    }
+                    else -> {
+                        try {
+                            val rows = context.contentResolver.delete(uri, null, null)
+                            if (rows <= 0) {
+                                Log.w(TAG, "ContentResolver.delete returned $rows rows for $uri")
+                            }
+                            rows > 0
+                        } catch (e: SecurityException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.w(TAG, "ContentResolver.delete failed for $uri", e)
+                            if (uri.authority == MediaStore.AUTHORITY) {
+                                false
+                            } else {
+                                val docFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)
+                                    ?: androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)
+                                docFile?.delete() ?: false
+                            }
+                        }
                     }
                 }
             }

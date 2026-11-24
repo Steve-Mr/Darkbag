@@ -134,6 +134,72 @@ void BayerProcessor::bayer2x2BinningNEON(
     }
 }
 
+void BayerProcessor::bayer4x4SubsampleNEON(
+    const uint8_t* srcBytes,
+    uint32_t srcWidth,
+    uint32_t srcHeight,
+    uint32_t srcRowStrideBytes,
+    uint16_t* dst
+) {
+    if (!srcBytes || !dst || srcWidth < 8 || srcHeight < 8) {
+        return;
+    }
+
+    const uint32_t dstWidth = ((srcWidth / 4) & ~1u);
+    const uint32_t dstHeight = ((srcHeight / 4) & ~1u);
+    const uint32_t numQuadsY = dstHeight / 2;
+    const uint32_t numQuadsX = dstWidth / 2;
+
+    // Average all 16 same-phase pixels across an 8x8 source block into each output CFA sample
+    // so 100% of sensor pixels contribute without aliasing or cross-channel mixing.
+    const auto avg4x4Phase = [](
+        const uint16_t* a,
+        const uint16_t* b,
+        const uint16_t* c,
+        const uint16_t* d,
+        uint32_t x
+    ) -> uint16_t {
+        const uint32_t sum =
+            static_cast<uint32_t>(a[x]) + a[x + 2] + a[x + 4] + a[x + 6] +
+            b[x] + b[x + 2] + b[x + 4] + b[x + 6] +
+            c[x] + c[x + 2] + c[x + 4] + c[x + 6] +
+            d[x] + d[x + 2] + d[x + 4] + d[x + 6];
+        return static_cast<uint16_t>((sum + 8u) >> 4);
+    };
+
+    #if defined(_OPENMP)
+    #pragma omp parallel for schedule(static)
+    #endif
+    for (uint32_t qy = 0; qy < numQuadsY; ++qy) {
+        uint32_t srcY = 8 * qy;
+        if (srcY + 7 >= srcHeight) continue;
+
+        const auto* r0 = reinterpret_cast<const uint16_t*>(srcBytes + (srcY + 0) * srcRowStrideBytes);
+        const auto* r1 = reinterpret_cast<const uint16_t*>(srcBytes + (srcY + 1) * srcRowStrideBytes);
+        const auto* r2 = reinterpret_cast<const uint16_t*>(srcBytes + (srcY + 2) * srcRowStrideBytes);
+        const auto* r3 = reinterpret_cast<const uint16_t*>(srcBytes + (srcY + 3) * srcRowStrideBytes);
+        const auto* r4 = reinterpret_cast<const uint16_t*>(srcBytes + (srcY + 4) * srcRowStrideBytes);
+        const auto* r5 = reinterpret_cast<const uint16_t*>(srcBytes + (srcY + 5) * srcRowStrideBytes);
+        const auto* r6 = reinterpret_cast<const uint16_t*>(srcBytes + (srcY + 6) * srcRowStrideBytes);
+        const auto* r7 = reinterpret_cast<const uint16_t*>(srcBytes + (srcY + 7) * srcRowStrideBytes);
+
+        uint16_t* outRow0 = dst + (2 * qy + 0) * dstWidth;
+        uint16_t* outRow1 = dst + (2 * qy + 1) * dstWidth;
+
+        for (uint32_t qx = 0; qx < numQuadsX; ++qx) {
+            uint32_t srcX = 8 * qx;
+            uint32_t dstX = 2 * qx;
+
+            if (srcX + 7 < srcWidth && dstX + 1 < dstWidth) {
+                outRow0[dstX]     = avg4x4Phase(r0, r2, r4, r6, srcX);
+                outRow0[dstX + 1] = avg4x4Phase(r0, r2, r4, r6, srcX + 1);
+                outRow1[dstX]     = avg4x4Phase(r1, r3, r5, r7, srcX);
+                outRow1[dstX + 1] = avg4x4Phase(r1, r3, r5, r7, srcX + 1);
+            }
+        }
+    }
+}
+
 void BayerProcessor::cropBayer16(
     const uint8_t* srcBytes,
     uint32_t srcWidth,

@@ -116,11 +116,15 @@ vec3 linearToSrgb(vec3 c) {
 
 // 3. Khronos PBR Neutral Tone Mapper
 vec3 applyPbrNeutral(vec3 color) {
-    const float startCompression = 0.8 - 0.04;
+    // Photographic black floor (see ColorPipe.cpp): 0.003 floor, 0.012 threshold, and a
+    // shoulder entry coupled to the offset so highlight range is not eaten twice.
+    const float kBlackOffset = 0.003;
+    const float kBlackThreshold = 4.0 * kBlackOffset;
+    const float startCompression = 0.8 - kBlackOffset;
     const float desaturation = 0.15;
 
     float x = min(color.r, min(color.g, color.b));
-    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    float offset = x < kBlackThreshold ? 0.5 * x - 20.8333 * x * x : kBlackOffset;
     color -= offset;
 
     float peak = max(color.r, max(color.g, color.b));
@@ -134,35 +138,35 @@ vec3 applyPbrNeutral(vec3 color) {
     return clamp(mix(color, vec3(newPeak), g), 0.0, 1.0);
 }
 
-// 4. Pure Luma Filmic Tone Mapper
-float filmicLumaCurve(float Y) {
-    if (Y <= 0.0) return 0.0;
-    const float A = 2.35;
-    const float B = 0.02;
-    const float C = 2.35;
-    const float D = 0.70;
-    const float E = 0.12;
-    return clamp((Y * (A * Y + B)) / (Y * (C * Y + D) + E), 0.0, 1.0);
-}
+// 4. Natural Filmic (AgX-style inset -> per-channel curve -> outset), see ColorPipe.cpp.
+// Matrices are built inside the function: GLSL ES rejects a global `const mat3` whose
+// initializer is a constructor call ("non-constant initializer ... with this profile: es").
+vec3 applyNaturalFilmic(vec3 c) {
+    mat3 inset = mat3(
+        vec3(0.8566271533, 0.1373189729, 0.1118982130),
+        vec3(0.0951212405, 0.7612419906, 0.0767994186),
+        vec3(0.0482516061, 0.1014390365, 0.8113023684));
+    mat3 outset = mat3(
+        vec3(1.1974410769, -0.1964746263, -0.1465574171),
+        vec3(-0.1442615127, 1.3540951315, -0.1082840588),
+        vec3(-0.0531795642, -0.1576205051, 1.2548414759));
 
-vec3 applyPureLuma(vec3 c) {
-    float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
-    if (luma <= 0.00001) return vec3(0.0);
-
-    float mappedLuma = filmicLumaCurve(luma);
-    float scale = mappedLuma / luma;
-    vec3 outCol = c * scale;
-
-    if (mappedLuma > 0.85) {
-        float t = (mappedLuma - 0.85) / 0.15;
-        float factor = 1.0 - (t * t * (3.0 - 2.0 * t)) * 0.5;
-        outCol = vec3(mappedLuma) + (outCol - vec3(mappedLuma)) * factor;
+    vec3 v = inset * max(c, vec3(0.0));
+    // f(x) = N / (N + 1), N = x * (A*x + B): monotone, asymptote 1.0, f(0.18) = 0.18.
+    vec3 n = v * (2.3134378 * v + 0.8030934);
+    vec3 mapped = n / (n + vec3(1.0));
+    vec3 outRgb = outset * mapped;
+    // Scale by 1/peak so the peak lands exactly on 1.0 instead of clipping the dominant
+    // channel; origin-anchored, so hue and channel ratios survive (see ColorPipe.cpp).
+    float peak = max(outRgb.r, max(outRgb.g, outRgb.b));
+    if (peak > 1.0) {
+        outRgb *= 1.0 / peak;
     }
-    return clamp(outCol, 0.0, 1.0);
+    return clamp(outRgb, 0.0, 1.0);
 }
 
 // 5. Sony Uchimura Tone Mapper
-float uchimuraScalar(float x) {
+float uchimuraScalar(float x, float gain) {
     if (x <= 0.0) return 0.0;
     const float P = 1.0;
     const float a = 1.25;
@@ -175,7 +179,10 @@ float uchimuraScalar(float x) {
     const float S0 = m + l0;
     const float S1 = m + a * l0;
     const float C2 = (a * P) / (P - S1);
-    const float CP = -C2 / P;
+    // Gain-aware shoulder: matches uchimura_scalar in ColorPipe.cpp. Without it the GPU render
+    // crushes highlights under HDR+ -1/-2 EV digital gain (2x..4x) while the CPU preview
+    // does not, so the two paths diverge exactly where highlight detail matters.
+    float CP = -C2 / (P * max(1.0, gain * 0.75));
 
     if (x <= m) {
         return m * pow(x / m, c) + b;
@@ -186,20 +193,28 @@ float uchimuraScalar(float x) {
     }
 }
 
-vec3 applySonyUchimura(vec3 c) {
+vec3 applySonyUchimura(vec3 c, float gain) {
     float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
-    if (luma <= 0.00001) return vec3(0.0);
+    float peak = max(c.r, max(c.g, c.b));
+    if (peak <= 0.00001) return vec3(0.0);
 
-    float mappedLuma = uchimuraScalar(luma);
-    float scale = mappedLuma / luma;
-    vec3 outCol = c * scale;
+    float mappedLuma = uchimuraScalar(luma, gain);
+    float mappedPeak = uchimuraScalar(peak, gain);
 
-    if (mappedLuma > 0.85) {
-        float t = (mappedLuma - 0.85) / 0.15;
-        float factor = 1.0 - (t * t * (3.0 - 2.0 * t)) * 0.5;
-        outCol = vec3(mappedLuma) + (outCol - vec3(mappedLuma)) * factor;
-    }
-    return clamp(outCol, 0.0, 1.0);
+    // Bound the scale by the peak channel's own mapping (see ColorPipe.cpp): luma-only
+    // scaling overshoots 1.0 on saturated colours and hard-clips the dominant channel.
+    // uchimuraScalar is strictly < P = 1.0, so no post-clamp is required.
+    float lumaScale = (luma > 1e-5) ? (mappedLuma / luma) : 1.0;
+    float peakScale = mappedPeak / peak;
+    float safeScale = min(lumaScale, peakScale);
+    vec3 outCol = c * safeScale;
+
+    // Compression-driven highlight desaturation above the 0.22 toe anchor.
+    float compression = (peak > 0.22) ? max(0.0, peak - mappedPeak) : 0.0;
+    float desat = 1.0 - 1.0 / (0.20 * compression + 1.0);
+    float outLuma = 0.2126 * outCol.r + 0.7152 * outCol.g + 0.0722 * outCol.b;
+    float targetWhite = max(outLuma, mappedPeak);
+    return clamp(mix(outCol, vec3(targetWhite), desat), 0.0, 1.0);
 }
 
 // 6. ACES Fit Tone Mapper
@@ -210,6 +225,17 @@ vec3 applyAcesFit(vec3 v) {
     const float d = 0.59;
     const float e = 0.14;
     return clamp((v * (a * v + b)) / (v * (c * v + d) + e), 0.0, 1.0);
+}
+
+// 6b. Subtractive colour density (see ColorPipe.cpp). Ships at 0.0 until A/B decides.
+const float kColorDensityReduction = 0.0;
+
+vec3 applySubtractiveDensity(vec3 c, float reduction) {
+    float peak = max(c.r, max(c.g, c.b));
+    float trough = min(c.r, min(c.g, c.b));
+    if (peak <= 1e-4) return c;
+    float chroma = (peak - trough) / peak;
+    return c * (1.0 - reduction * chroma * chroma);
 }
 
 // 7. Analytic Camera Log Curves (Identical to ColorPipe.cpp)
@@ -416,9 +442,13 @@ void main() {
         if (uColorEngineMode == 0) {
             color = applyPbrNeutral(color);
         } else if (uColorEngineMode == 1) {
-            color = applyPureLuma(color);
+            color = applyNaturalFilmic(color);
         } else if (uColorEngineMode == 2) {
-            color = applySonyUchimura(color);
+            color = applySonyUchimura(color, uDigitalGain);
+            // Subtractive density: Sony engine only, after the tone map (see ColorPipe.cpp).
+            if (kColorDensityReduction > 0.0) {
+                color = applySubtractiveDensity(color, kColorDensityReduction);
+            }
         } else {
             color = applyAcesFit(color);
         }

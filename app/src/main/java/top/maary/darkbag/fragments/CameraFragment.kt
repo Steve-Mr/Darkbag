@@ -32,6 +32,7 @@ import androidx.navigation.Navigation
 import androidx.window.layout.WindowMetricsCalculator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import top.maary.darkbag.MainActivity
@@ -296,6 +297,22 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
                     ColorProcessor.halfFrameFlow.collect {
                         hub.onHalfFrameStoreChanged()
                     }
+                }
+                launch {
+                    settingsRepository.preferences
+                        .map { prefs ->
+                            listOf(
+                                prefs.motionPhotoEnabled,
+                                prefs.motionPhotoAudioEnabled,
+                                prefs.expRawMotionPhoto,
+                                prefs.expRawMotionPhotoQuality
+                            )
+                        }
+                        .distinctUntilChanged()
+                        .drop(1)
+                        .collect {
+                            hub.updateMotionPhotoEncoder()
+                        }
                 }
             }
         }

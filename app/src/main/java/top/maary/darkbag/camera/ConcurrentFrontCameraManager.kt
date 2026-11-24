@@ -132,10 +132,26 @@ class ConcurrentFrontCameraManager(
             device.createCaptureSession(sessionConfig)
             val session = sessionDeferred.await()
 
+            val frontChars = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, frontId)
+            val availableModes = frontChars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
+            val maxCurvePoints = frontChars.get(CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS) ?: 0
+            val strategy = top.maary.darkbag.camera.session.PreviewToneMapPolicy.resolvePreviewToneMapStrategy(
+                availableModes = availableModes,
+                maxCurvePoints = maxCurvePoints
+            )
+
             val requestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(previewSurface)
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                val applied = top.maary.darkbag.camera.session.PreviewToneMapPolicy.applyStrategyToRequest(
+                    request = this,
+                    strategy = strategy,
+                    availableModes = availableModes,
+                    maxCurvePoints = maxCurvePoints,
+                    tag = TAG
+                )
+                Log.i(TAG, "Front PiP preview tone map [camera=$frontId] = $applied (maxCurvePoints=$maxCurvePoints)")
             }
             session.setRepeatingRequest(requestBuilder.build(), null, frontHandler)
             isStreaming = true

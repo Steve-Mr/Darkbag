@@ -10,6 +10,7 @@ import com.google.android.material.shape.ShapeAppearanceModel
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentSettingsBinding
 import top.maary.darkbag.modes.CaptureMode
+import top.maary.darkbag.motionphoto.RawMotionQuality
 import top.maary.darkbag.repository.DarkbagPreferences
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.ui.CameraBentoDeckView
@@ -291,6 +292,16 @@ class SettingsBentoDelegate(
             isValueManual = true,
             context = context
         )
+
+        // 16. RAW Motion Photo Quality
+        val quality = RawMotionQuality.fromMode(state.expRawMotionPhotoQuality)
+        binding.btnMenuRawMotionQuality.text = CameraBentoDeckView.formatProTelemetry(
+            label = context.getString(R.string.settings_exp_raw_motion_quality_title),
+            value = quality.getTitle(context),
+            isTabActive = false,
+            isValueManual = true,
+            context = context
+        )
     }
 
     private fun renderSwitchesAndCheckboxes(binding: FragmentSettingsBinding, state: DarkbagPreferences) {
@@ -305,6 +316,7 @@ class SettingsBentoDelegate(
         binding.switchUseInternalViewer.isChecked = state.useInternalViewer
         binding.switchForce60fps.isChecked = state.force60Fps
         binding.switchExpMulticamColorHarmonization.isChecked = state.expMultiCamColorHarmonization
+        binding.switchExpRawMotionPhoto.isChecked = state.expRawMotionPhoto
         binding.switchZsl.isChecked = state.zslEnabled
         binding.switchZslAdaptive.isChecked = state.zslAdaptive
         binding.switchZslLazyRing.isChecked = state.zslLazyRing
@@ -339,6 +351,7 @@ class SettingsBentoDelegate(
         updateMultiCameraCardStyling(binding, mcEnabled, animated = false)
 
         // Storage visibility & paths
+        binding.layoutExpRawMotionOptions.visibility = if (state.expRawMotionPhoto) View.VISIBLE else View.GONE
         binding.layoutJpgStorage.visibility = if (state.saveJpg) View.VISIBLE else View.GONE
         binding.layoutRawStorage.visibility = if (state.saveRaw) View.VISIBLE else View.GONE
         binding.btnMenuDngCompression.visibility = if (state.saveRaw) View.VISIBLE else View.GONE

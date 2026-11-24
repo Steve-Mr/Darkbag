@@ -1856,6 +1856,86 @@
                         </LinearLayout>
                     </top.maary.darkbag.ui.bento.BentoTrayCard>
 
+                    <!-- Sub-tray: RAW SENSOR MOTION PHOTO (card_tray_exp_raw_motion) -->
+                    <top.maary.darkbag.ui.bento.BentoTrayCard
+                        android:id="@+id/card_tray_exp_raw_motion"
+                        style="@style/Widget.Darkbag.BentoTray"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="10dp"
+                        app:cardCornerRadius="18dp"
+                        app:strokeWidth="0dp"
+                        app:bentoContainerRole="surfaceContainerHigh">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <!-- Header Row: Title & Badge -->
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal"
+                                android:gravity="center_vertical"
+                                android:paddingHorizontal="4dp"
+                                android:paddingVertical="2dp"
+                                android:layout_marginBottom="4dp">
+
+                                <TextView
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:text="@string/pref_exp_raw_motion_photo_tray_title"
+                                    android:textSize="10.5sp"
+                                    android:textStyle="bold"
+                                    android:letterSpacing="0.06"
+                                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:background="@drawable/bg_bento_badge_secondary"
+                                    android:paddingHorizontal="8dp"
+                                    android:paddingVertical="2dp"
+                                    android:text="RAW"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold"
+                                    android:textColor="?attr/colorTertiary" />
+                            </LinearLayout>
+
+                            <!-- switch_exp_raw_motion_photo -->
+                            <top.maary.darkbag.ui.bento.BentoSwitchTile
+                                android:id="@+id/switch_exp_raw_motion_photo"
+                                android:layout_width="match_parent"
+                                android:layout_height="48dp"
+                                android:layout_marginBottom="8dp"
+                                app:bentoSwitchTitle="@string/pref_exp_raw_motion_photo"
+                                app:bentoSwitchBadge="STREAM"
+                                app:bentoSwitchBadgeStyle="tertiary" />
+
+                            <!-- layout_exp_raw_motion_options: Expandable container for RAW Motion options -->
+                            <LinearLayout
+                                android:id="@+id/layout_exp_raw_motion_options"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:visibility="gone">
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btn_menu_raw_motion_quality"
+                                    style="@style/Widget.Darkbag.BentoTile.Button"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="52dp"
+                                    app:backgroundTint="?attr/colorSurface"
+                                    android:textColor="?attr/colorOnSurface"
+                                    app:strokeWidth="0dp"
+                                    app:cornerRadius="14dp"
+                                    tools:text="RAW MOTION QUALITY&#10;2x2 Binning" />
+                            </LinearLayout>
+                        </LinearLayout>
+                    </top.maary.darkbag.ui.bento.BentoTrayCard>
+
                     <!-- Sub-tray 3: DIAGNOSTIC LOGS (card_tray_exp_diagnostics) -->
                     <top.maary.darkbag.ui.bento.BentoTrayCard
                         android:id="@+id/card_tray_exp_diagnostics"

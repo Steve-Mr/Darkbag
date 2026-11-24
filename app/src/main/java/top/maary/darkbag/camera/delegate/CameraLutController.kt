@@ -202,8 +202,9 @@ class CameraLutController(
             }
             if (isActive) {
                 val engineMode = settingsRepository.current().colorEngineMode
+                val effectiveLogIndex = if (isPreviewEnabled) targetLogIndex.coerceAtLeast(0) else 0
                 proc.updateColorEngineMode(engineMode)
-                proc.updateLut(lutData, size, targetLogIndex)
+                proc.updateLut(lutData, size, effectiveLogIndex)
             }
         }
     }

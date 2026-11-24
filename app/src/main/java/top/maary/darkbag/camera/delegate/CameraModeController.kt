@@ -244,6 +244,9 @@ class CameraModeController(
             manager.previewRequestConfigProvider = { builder ->
                 coordinator.applyPreviewFocusAndExposureSettings(builder)
             }
+            manager.onPreviewDeviceChangedListener = { deviceId, chars ->
+                coordinator.updatePreviewToneMapPolicyForDevice(deviceId, chars)
+            }
             manager.onSessionFailedListener = { error ->
                 Log.e(TAG, "Multi-camera session failed: $error, falling back to standard mode")
                 env.lifecycleScope.launch(Dispatchers.Main) {

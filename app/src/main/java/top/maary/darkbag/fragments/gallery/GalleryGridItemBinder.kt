@@ -44,10 +44,6 @@ internal class GalleryGridItemBinder(
     private val isKeySelected: (String) -> Boolean,
     private val getColumnCount: () -> Int,
     private val isWaterfallMode: () -> Boolean,
-    private val onToggleSingleSelection: (ImageGroup) -> Unit,
-    private val onToggleLensSelection: (ImageGroup, MultiCameraLensItem) -> Unit,
-    private val onEnterSelectionAndToggleSingle: (ImageGroup) -> Unit,
-    private val onEnterSelectionAndToggleLens: (ImageGroup, MultiCameraLensItem) -> Unit,
     private val onItemClick: (ImageGroup, Int, String?) -> Unit,
     private val onItemLongClick: (ImageGroup, Int, String?) -> Unit
 ) {
@@ -66,25 +62,14 @@ internal class GalleryGridItemBinder(
         holder.binding.cardRoot.setOnClickListener {
             val adapterPos = holder.bindingAdapterPosition
             if (adapterPos != RecyclerView.NO_POSITION) {
-                val item = getItemAt(adapterPos)
-                if (isSelectionMode()) {
-                    onToggleSingleSelection(item)
-                } else {
-                    onItemClick(item, adapterPos, null)
-                }
+                onItemClick(getItemAt(adapterPos), adapterPos, null)
             }
         }
 
         holder.binding.cardRoot.setOnLongClickListener {
             val adapterPos = holder.bindingAdapterPosition
             if (adapterPos != RecyclerView.NO_POSITION) {
-                val item = getItemAt(adapterPos)
-                if (!isSelectionMode()) {
-                    onEnterSelectionAndToggleSingle(item)
-                } else {
-                    onToggleSingleSelection(item)
-                }
-                onItemLongClick(item, adapterPos, null)
+                onItemLongClick(getItemAt(adapterPos), adapterPos, null)
             }
             true
         }
@@ -298,7 +283,7 @@ internal class GalleryGridItemBinder(
 
         tagView.text = lens.lensTag
         bindLensFormatBadge(formatBadgeView, lens)
-        setupLensSlotListeners(slotCard, group, lens, holder)
+        setupLensSlotListeners(slotCard, lens, holder)
     }
 
     private fun bindLensFormatBadge(badgeView: TextView, lens: MultiCameraLensItem) {
@@ -323,30 +308,20 @@ internal class GalleryGridItemBinder(
 
     private fun setupLensSlotListeners(
         slotView: View,
-        group: ImageGroup,
         lens: MultiCameraLensItem,
         holder: DarkbagGalleryGridAdapter.MultiCamViewHolder
     ) {
         slotView.setOnClickListener {
             val adapterPos = holder.bindingAdapterPosition
             if (adapterPos != RecyclerView.NO_POSITION) {
-                if (isSelectionMode()) {
-                    onToggleLensSelection(group, lens)
-                } else {
-                    onItemClick(group, adapterPos, lens.lensTag)
-                }
+                onItemClick(getItemAt(adapterPos), adapterPos, lens.lensTag)
             }
         }
 
         slotView.setOnLongClickListener {
             val adapterPos = holder.bindingAdapterPosition
             if (adapterPos != RecyclerView.NO_POSITION) {
-                if (!isSelectionMode()) {
-                    onEnterSelectionAndToggleLens(group, lens)
-                } else {
-                    onToggleLensSelection(group, lens)
-                }
-                onItemLongClick(group, adapterPos, lens.lensTag)
+                onItemLongClick(getItemAt(adapterPos), adapterPos, lens.lensTag)
             }
             true
         }

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.fragment.app.FragmentManager
 import top.maary.darkbag.R
+import top.maary.darkbag.motionphoto.RawMotionQuality
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.ui.BentoSelectionBottomSheet
 import top.maary.darkbag.ui.RawVideoSettingsBottomSheet
@@ -343,6 +344,22 @@ class SettingsSheetDispatcher(
             badge = "DUAL"
         ) { which ->
             viewModel.updateMultiCameraDualPair(pairKeys[which])
+        }
+    }
+
+    fun showExpRawMotionQualitySheet() {
+        val items = RawMotionQuality.entries
+        val currentMode = viewModel.preferences.value.expRawMotionPhotoQuality
+        val selectedIndex = items.indexOfFirst { it.mode == currentMode }.coerceAtLeast(0)
+        BentoSelectionBottomSheet.show(
+            fragmentManager = fragmentManager,
+            title = context.getString(top.maary.darkbag.R.string.settings_exp_raw_motion_quality_title),
+            options = items.map { it.getTitle(context) },
+            descriptions = items.map { it.getDescription(context) },
+            selectedIndex = selectedIndex,
+            badge = "RAW"
+        ) { which ->
+            viewModel.updateExpRawMotionPhotoQuality(items[which].mode)
         }
     }
 }

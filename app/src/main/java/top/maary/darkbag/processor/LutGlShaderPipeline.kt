@@ -15,28 +15,54 @@ import kotlin.math.abs
  * - CIE XYZ wide-gamut conversion matrices matching native `ColorPipe.cpp`
  * - Vertex & fragment shader sources (Log curves, 3D LUT sampling, Color Engines, TPDF dithering, Focus Peaking)
  * - Program compilation/linking, 3D LUT `.cube` texture upload, and fullscreen quad drawing
+ * - Decoupled Preview Shader Program (OES preview stream) and RAW Shader Program (2x2 superpixel Bayer GLES3)
  */
 internal class LutGlShaderPipeline {
 
-    private var program = 0
+    private var previewProgram = 0
+    private var rawProgram = 0
     private var lutTextureId = 0
     private var dummyLutTextureId = 0
 
-    private var colorEngineModeLoc = -1
-    private var scaleLoc = -1
-    private var textureLoc = -1
-    private var textureMatrixLoc = -1
-    private var lutLoc = -1
-    private var gamutMatrixLoc = -1
-    private var logTypeLoc = -1
-    private var lutSizeLoc = -1
-    private var focusPeakingLoc = -1
-    private var texelSizeLoc = -1
+    // Preview Program Locations
+    private var previewScaleLoc = -1
+    private var previewTextureLoc = -1
+    private var previewTextureMatrixLoc = -1
+    private var previewLutLoc = -1
+    private var previewGamutMatrixLoc = -1
+    private var previewLogTypeLoc = -1
+    private var previewLutSizeLoc = -1
+    private var previewColorEngineModeLoc = -1
+    private var previewFocusPeakingLoc = -1
+    private var previewTexelSizeLoc = -1
     private var previewGainLoc = -1
+    private var previewWbPreviewMatrixLoc = -1
+    private var previewInputDomainLoc = -1
+    private var previewPosHandle = -1
+    private var previewTexHandle = -1
+
+    // RAW Bayer Program Locations
+    private var rawScaleLoc = -1
+    private var rawTextureMatrixLoc = -1
+    private var rawBayerTextureLoc = -1
+    private var rawLutLoc = -1
+    private var rawGamutMatrixLoc = -1
+    private var rawLogTypeLoc = -1
+    private var rawLutSizeLoc = -1
+    private var rawColorEngineModeLoc = -1
+    private var rawPreviewGainLoc = -1
+    private var rawImageSizeLoc = -1
+    private var rawCfaPatternLoc = -1
+    private var rawBlackLevelLoc = -1
+    private var rawWhiteLevelLoc = -1
+    private var rawWbGainsLoc = -1
+    private var rawCcmLoc = -1
+    private var rawLscLoc = -1
+    private var rawHasLscLoc = -1
+    private var rawPosHandle = -1
+    private var rawTexHandle = -1
+
     @Volatile private var previewGain = 1.0f
-    private var wbPreviewMatrixLoc = -1
-    private var posHandle = -1
-    private var texHandle = -1
 
     private val vertexData = floatArrayOf(
         -1f, -1f, 0f, 0f,
@@ -50,7 +76,8 @@ internal class LutGlShaderPipeline {
         .put(vertexData).also { it.position(0) }
 
     fun initProgramAndDummyLut() {
-        createProgram()
+        createPreviewProgram()
+        createRawProgram()
         createDummyLut()
     }
 
@@ -82,61 +109,158 @@ internal class LutGlShaderPipeline {
         currentGamutMatrix: FloatArray,
         currentColorEngineMode: Int,
         focusPeakingEnabled: Boolean,
-        currentWbPreviewMatrix: FloatArray? = null
+        currentWbPreviewMatrix: FloatArray? = null,
+        previewInputDomain: Int = 0
     ) {
+        if (previewProgram == 0) return
         GLES30.glViewport(0, 0, targetWidth, targetHeight)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
-        GLES30.glUseProgram(program)
+        GLES30.glUseProgram(previewProgram)
 
         val (scaleX, scaleY) = computeAspectScale(targetWidth, targetHeight, inputWidth, inputHeight, transformMatrix)
-        if (scaleLoc >= 0) GLES30.glUniform2f(scaleLoc, scaleX, scaleY)
+        if (previewScaleLoc >= 0) GLES30.glUniform2f(previewScaleLoc, scaleX, scaleY)
 
         val activeWbMatrix = currentWbPreviewMatrix ?: IDENTITY_MATRIX_3X3
-        if (wbPreviewMatrixLoc >= 0) GLES30.glUniformMatrix3fv(wbPreviewMatrixLoc, 1, false, activeWbMatrix, 0)
+        if (previewWbPreviewMatrixLoc >= 0) GLES30.glUniformMatrix3fv(previewWbPreviewMatrixLoc, 1, false, activeWbMatrix, 0)
+
+        if (previewInputDomainLoc >= 0) GLES30.glUniform1i(previewInputDomainLoc, previewInputDomain)
 
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTextureId)
-        if (textureLoc >= 0) GLES30.glUniform1i(textureLoc, 0)
-        if (textureMatrixLoc >= 0) GLES30.glUniformMatrix4fv(textureMatrixLoc, 1, false, transformMatrix, 0)
+        if (previewTextureLoc >= 0) GLES30.glUniform1i(previewTextureLoc, 0)
+        if (previewTextureMatrixLoc >= 0) GLES30.glUniformMatrix4fv(previewTextureMatrixLoc, 1, false, transformMatrix, 0)
 
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
         val activeLutTex = if (currentLutSize > 0 && lutTextureId != 0) lutTextureId else dummyLutTextureId
         GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, activeLutTex)
-        if (lutLoc >= 0) GLES30.glUniform1i(lutLoc, 1)
+        if (previewLutLoc >= 0) GLES30.glUniform1i(previewLutLoc, 1)
 
-        if (gamutMatrixLoc >= 0) GLES30.glUniformMatrix3fv(gamutMatrixLoc, 1, false, currentGamutMatrix, 0)
-        if (logTypeLoc >= 0) GLES30.glUniform1i(logTypeLoc, currentLogType)
-        if (lutSizeLoc >= 0) GLES30.glUniform1i(lutSizeLoc, currentLutSize)
-        if (colorEngineModeLoc >= 0) GLES30.glUniform1i(colorEngineModeLoc, currentColorEngineMode)
-        if (focusPeakingLoc >= 0) GLES30.glUniform1i(focusPeakingLoc, if (focusPeakingEnabled) 1 else 0)
+        if (previewGamutMatrixLoc >= 0) GLES30.glUniformMatrix3fv(previewGamutMatrixLoc, 1, false, currentGamutMatrix, 0)
+        if (previewLogTypeLoc >= 0) GLES30.glUniform1i(previewLogTypeLoc, currentLogType)
+        if (previewLutSizeLoc >= 0) GLES30.glUniform1i(previewLutSizeLoc, currentLutSize)
+        if (previewColorEngineModeLoc >= 0) GLES30.glUniform1i(previewColorEngineModeLoc, currentColorEngineMode)
+        if (previewFocusPeakingLoc >= 0) GLES30.glUniform1i(previewFocusPeakingLoc, if (focusPeakingEnabled) 1 else 0)
         if (previewGainLoc >= 0) GLES30.glUniform1f(previewGainLoc, previewGain)
-        if (focusPeakingEnabled && texelSizeLoc >= 0) {
+        if (focusPeakingEnabled && previewTexelSizeLoc >= 0) {
             val tw = if (inputWidth > 0) 1.0f / inputWidth.toFloat() else 1.0f / 1080f
             val th = if (inputHeight > 0) 1.0f / inputHeight.toFloat() else 1.0f / 1920f
-            GLES30.glUniform2f(texelSizeLoc, tw, th)
+            GLES30.glUniform2f(previewTexelSizeLoc, tw, th)
         }
 
-        if (posHandle >= 0) {
+        if (previewPosHandle >= 0) {
             vertexBuffer.position(0)
-            GLES30.glVertexAttribPointer(posHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
-            GLES30.glEnableVertexAttribArray(posHandle)
+            GLES30.glVertexAttribPointer(previewPosHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
+            GLES30.glEnableVertexAttribArray(previewPosHandle)
         }
-        if (texHandle >= 0) {
+        if (previewTexHandle >= 0) {
             vertexBuffer.position(2)
-            GLES30.glVertexAttribPointer(texHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
-            GLES30.glEnableVertexAttribArray(texHandle)
+            GLES30.glVertexAttribPointer(previewTexHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
+            GLES30.glEnableVertexAttribArray(previewTexHandle)
         }
 
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
 
-        if (posHandle >= 0) GLES30.glDisableVertexAttribArray(posHandle)
-        if (texHandle >= 0) GLES30.glDisableVertexAttribArray(texHandle)
+        if (previewPosHandle >= 0) GLES30.glDisableVertexAttribArray(previewPosHandle)
+        if (previewTexHandle >= 0) GLES30.glDisableVertexAttribArray(previewTexHandle)
+    }
+
+    fun drawRawFrame(
+        targetWidth: Int,
+        targetHeight: Int,
+        frame: RawMotionFrame,
+        rawBayerTextureId: Int,
+        rawLscTextureId: Int = 0,
+        currentLutSize: Int,
+        currentLogType: Int,
+        currentGamutMatrix: FloatArray,
+        currentColorEngineMode: Int
+    ) {
+        if (rawProgram == 0) return
+        GLES30.glViewport(0, 0, targetWidth, targetHeight)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        GLES30.glUseProgram(rawProgram)
+
+        val rawTransform = buildRawTransformMatrix(frame.sensorOrientationDegrees)
+        val (scaleX, scaleY) = computeAspectScale(
+            targetWidth = targetWidth,
+            targetHeight = targetHeight,
+            inputWidth = frame.width,
+            inputHeight = frame.height,
+            transformMatrix = rawTransform
+        )
+        if (rawScaleLoc >= 0) GLES30.glUniform2f(rawScaleLoc, scaleX, scaleY)
+
+        if (rawTextureMatrixLoc >= 0) GLES30.glUniformMatrix4fv(rawTextureMatrixLoc, 1, false, rawTransform, 0)
+
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, rawBayerTextureId)
+        if (rawBayerTextureLoc >= 0) GLES30.glUniform1i(rawBayerTextureLoc, 0)
+
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+        val activeLutTex = if (currentLutSize > 0 && lutTextureId != 0) lutTextureId else dummyLutTextureId
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, activeLutTex)
+        if (rawLutLoc >= 0) GLES30.glUniform1i(rawLutLoc, 1)
+
+        val hasLsc = rawLscTextureId != 0 &&
+            frame.lensShadingMap != null &&
+            frame.lensShadingRows > 1 &&
+            frame.lensShadingCols > 1
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, if (hasLsc) rawLscTextureId else 0)
+        if (rawLscLoc >= 0) GLES30.glUniform1i(rawLscLoc, 2)
+        if (rawHasLscLoc >= 0) GLES30.glUniform1i(rawHasLscLoc, if (hasLsc) 1 else 0)
+
+        if (rawImageSizeLoc >= 0) GLES30.glUniform2i(rawImageSizeLoc, frame.width, frame.height)
+        if (rawCfaPatternLoc >= 0) GLES30.glUniform1i(rawCfaPatternLoc, frame.cfaPattern)
+        if (rawBlackLevelLoc >= 0) {
+            val bl = frame.blackLevel
+            val bl0 = if (bl.isNotEmpty()) bl[0] else 64f
+            val bl1 = if (bl.size > 1) bl[1] else bl0
+            val bl2 = if (bl.size > 2) bl[2] else bl0
+            val bl3 = if (bl.size > 3) bl[3] else bl1
+            GLES30.glUniform4f(rawBlackLevelLoc, bl0, bl1, bl2, bl3)
+        }
+        if (rawWhiteLevelLoc >= 0) GLES30.glUniform1f(rawWhiteLevelLoc, frame.whiteLevel)
+        if (rawWbGainsLoc >= 0) {
+            val wb = frame.wbGains
+            val gR = if (wb.isNotEmpty()) wb[0] else 1f
+            val gG = if (wb.size > 1) wb[1] else 1f
+            val gB = if (wb.size > 2) wb[2] else 1f
+            GLES30.glUniform3f(rawWbGainsLoc, gR, gG, gB)
+        }
+        if (rawCcmLoc >= 0) GLES30.glUniformMatrix3fv(rawCcmLoc, 1, false, frame.dngCcm, 0)
+
+        if (rawGamutMatrixLoc >= 0) GLES30.glUniformMatrix3fv(rawGamutMatrixLoc, 1, false, currentGamutMatrix, 0)
+        if (rawLogTypeLoc >= 0) GLES30.glUniform1i(rawLogTypeLoc, currentLogType)
+        if (rawLutSizeLoc >= 0) GLES30.glUniform1i(rawLutSizeLoc, currentLutSize)
+        if (rawColorEngineModeLoc >= 0) GLES30.glUniform1i(rawColorEngineModeLoc, currentColorEngineMode)
+        if (rawPreviewGainLoc >= 0) GLES30.glUniform1f(rawPreviewGainLoc, previewGain)
+
+        if (rawPosHandle >= 0) {
+            vertexBuffer.position(0)
+            GLES30.glVertexAttribPointer(rawPosHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
+            GLES30.glEnableVertexAttribArray(rawPosHandle)
+        }
+        if (rawTexHandle >= 0) {
+            vertexBuffer.position(2)
+            GLES30.glVertexAttribPointer(rawTexHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
+            GLES30.glEnableVertexAttribArray(rawTexHandle)
+        }
+
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+
+        if (rawPosHandle >= 0) GLES30.glDisableVertexAttribArray(rawPosHandle)
+        if (rawTexHandle >= 0) GLES30.glDisableVertexAttribArray(rawTexHandle)
     }
 
     fun releaseGlResources() {
-        if (program != 0) {
-            GLES30.glDeleteProgram(program)
-            program = 0
+        if (previewProgram != 0) {
+            GLES30.glDeleteProgram(previewProgram)
+            previewProgram = 0
+        }
+        if (rawProgram != 0) {
+            GLES30.glDeleteProgram(rawProgram)
+            rawProgram = 0
         }
         val textures = IntArray(2)
         var count = 0
@@ -169,30 +293,73 @@ internal class LutGlShaderPipeline {
         GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, 0)
     }
 
-    private fun createProgram() {
+    private fun createPreviewProgram() {
         val vShader = loadShader(GLES30.GL_VERTEX_SHADER, VERTEX_SHADER_SRC)
-        val fShader = loadShader(GLES30.GL_FRAGMENT_SHADER, FRAGMENT_SHADER_SRC)
+        val fShader = loadShader(GLES30.GL_FRAGMENT_SHADER, PREVIEW_FRAGMENT_SHADER_SRC)
 
-        program = GLES30.glCreateProgram()
-        GLES30.glAttachShader(program, vShader)
-        GLES30.glAttachShader(program, fShader)
-        GLES30.glLinkProgram(program)
+        previewProgram = GLES30.glCreateProgram()
+        GLES30.glAttachShader(previewProgram, vShader)
+        GLES30.glAttachShader(previewProgram, fShader)
+        GLES30.glLinkProgram(previewProgram)
 
-        scaleLoc = GLES30.glGetUniformLocation(program, "uScale")
-        textureLoc = GLES30.glGetUniformLocation(program, "uTexture")
-        textureMatrixLoc = GLES30.glGetUniformLocation(program, "uTextureMatrix")
-        lutLoc = GLES30.glGetUniformLocation(program, "uLut")
-        gamutMatrixLoc = GLES30.glGetUniformLocation(program, "uGamutMatrix")
-        logTypeLoc = GLES30.glGetUniformLocation(program, "uLogType")
-        lutSizeLoc = GLES30.glGetUniformLocation(program, "uLutSize")
-        colorEngineModeLoc = GLES30.glGetUniformLocation(program, "uColorEngineMode")
-        focusPeakingLoc = GLES30.glGetUniformLocation(program, "uFocusPeakingEnabled")
-        texelSizeLoc = GLES30.glGetUniformLocation(program, "uTexelSize")
-        previewGainLoc = GLES30.glGetUniformLocation(program, "uPreviewGain")
-        wbPreviewMatrixLoc = GLES30.glGetUniformLocation(program, "uWbPreviewMatrix")
+        previewScaleLoc = GLES30.glGetUniformLocation(previewProgram, "uScale")
+        previewTextureLoc = GLES30.glGetUniformLocation(previewProgram, "uTexture")
+        previewTextureMatrixLoc = GLES30.glGetUniformLocation(previewProgram, "uTextureMatrix")
+        previewLutLoc = GLES30.glGetUniformLocation(previewProgram, "uLut")
+        previewGamutMatrixLoc = GLES30.glGetUniformLocation(previewProgram, "uGamutMatrix")
+        previewLogTypeLoc = GLES30.glGetUniformLocation(previewProgram, "uLogType")
+        previewLutSizeLoc = GLES30.glGetUniformLocation(previewProgram, "uLutSize")
+        previewColorEngineModeLoc = GLES30.glGetUniformLocation(previewProgram, "uColorEngineMode")
+        previewFocusPeakingLoc = GLES30.glGetUniformLocation(previewProgram, "uFocusPeakingEnabled")
+        previewTexelSizeLoc = GLES30.glGetUniformLocation(previewProgram, "uTexelSize")
+        previewGainLoc = GLES30.glGetUniformLocation(previewProgram, "uPreviewGain")
+        previewWbPreviewMatrixLoc = GLES30.glGetUniformLocation(previewProgram, "uWbPreviewMatrix")
+        previewInputDomainLoc = GLES30.glGetUniformLocation(previewProgram, "uPreviewInputDomain")
 
-        posHandle = GLES30.glGetAttribLocation(program, "aPosition")
-        texHandle = GLES30.glGetAttribLocation(program, "aTexCoord")
+        previewPosHandle = GLES30.glGetAttribLocation(previewProgram, "aPosition")
+        previewTexHandle = GLES30.glGetAttribLocation(previewProgram, "aTexCoord")
+
+        GLES30.glUseProgram(previewProgram)
+        if (previewTextureLoc >= 0) GLES30.glUniform1i(previewTextureLoc, 0)
+        if (previewLutLoc >= 0) GLES30.glUniform1i(previewLutLoc, 1)
+        GLES30.glUseProgram(0)
+    }
+
+    private fun createRawProgram() {
+        val vShader = loadShader(GLES30.GL_VERTEX_SHADER, VERTEX_SHADER_SRC)
+        val fShader = loadShader(GLES30.GL_FRAGMENT_SHADER, RAW_FRAGMENT_SHADER_SRC)
+
+        rawProgram = GLES30.glCreateProgram()
+        GLES30.glAttachShader(rawProgram, vShader)
+        GLES30.glAttachShader(rawProgram, fShader)
+        GLES30.glLinkProgram(rawProgram)
+
+        rawScaleLoc = GLES30.glGetUniformLocation(rawProgram, "uScale")
+        rawTextureMatrixLoc = GLES30.glGetUniformLocation(rawProgram, "uTextureMatrix")
+        rawBayerTextureLoc = GLES30.glGetUniformLocation(rawProgram, "uRawBayerTexture")
+        rawLutLoc = GLES30.glGetUniformLocation(rawProgram, "uLut")
+        rawGamutMatrixLoc = GLES30.glGetUniformLocation(rawProgram, "uGamutMatrix")
+        rawLogTypeLoc = GLES30.glGetUniformLocation(rawProgram, "uLogType")
+        rawLutSizeLoc = GLES30.glGetUniformLocation(rawProgram, "uLutSize")
+        rawColorEngineModeLoc = GLES30.glGetUniformLocation(rawProgram, "uColorEngineMode")
+        rawPreviewGainLoc = GLES30.glGetUniformLocation(rawProgram, "uPreviewGain")
+        rawImageSizeLoc = GLES30.glGetUniformLocation(rawProgram, "uRawImageSize")
+        rawCfaPatternLoc = GLES30.glGetUniformLocation(rawProgram, "uRawCfaPattern")
+        rawBlackLevelLoc = GLES30.glGetUniformLocation(rawProgram, "uRawBlackLevel")
+        rawWhiteLevelLoc = GLES30.glGetUniformLocation(rawProgram, "uRawWhiteLevel")
+        rawWbGainsLoc = GLES30.glGetUniformLocation(rawProgram, "uRawWbGains")
+        rawCcmLoc = GLES30.glGetUniformLocation(rawProgram, "uRawCcm")
+        rawLscLoc = GLES30.glGetUniformLocation(rawProgram, "uTexLsc")
+        rawHasLscLoc = GLES30.glGetUniformLocation(rawProgram, "uHasLsc")
+
+        rawPosHandle = GLES30.glGetAttribLocation(rawProgram, "aPosition")
+        rawTexHandle = GLES30.glGetAttribLocation(rawProgram, "aTexCoord")
+
+        GLES30.glUseProgram(rawProgram)
+        if (rawBayerTextureLoc >= 0) GLES30.glUniform1i(rawBayerTextureLoc, 0)
+        if (rawLutLoc >= 0) GLES30.glUniform1i(rawLutLoc, 1)
+        if (rawLscLoc >= 0) GLES30.glUniform1i(rawLscLoc, 2)
+        GLES30.glUseProgram(0)
     }
 
     private fun loadShader(type: Int, src: String): Int {
@@ -213,6 +380,13 @@ internal class LutGlShaderPipeline {
             1f, 0f, 0f,
             0f, 1f, 0f,
             0f, 0f, 1f
+        )
+
+        val IDENTITY_MATRIX_4X4 = floatArrayOf(
+            1f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f,
+            0f, 0f, 1f, 0f,
+            0f, 0f, 0f, 1f
         )
 
         /**
@@ -284,6 +458,41 @@ internal class LutGlShaderPipeline {
             return multiply3x3ToColMajor(targetM, M_sRGB_D65_to_XYZ)
         }
 
+        /**
+         * Builds a column-major 4x4 texture transform mapping GL quad texcoords `(u, v)`
+         * (with `v = 1` at screen top) to sensor-space `(tx, ty)` (with `ty = 0` at row 0)
+         * rotated clockwise by [sensorOrientationDegrees] so landscape sensor buffers render upright.
+         */
+        internal fun buildRawTransformMatrix(sensorOrientationDegrees: Int): FloatArray {
+            val normalized = ((sensorOrientationDegrees % 360) + 360) % 360
+            return when (normalized) {
+                90 -> floatArrayOf(
+                    0f, -1f, 0f, 0f,
+                    -1f, 0f, 0f, 0f,
+                    0f, 0f, 1f, 0f,
+                    1f, 1f, 0f, 1f
+                )
+                180 -> floatArrayOf(
+                    -1f, 0f, 0f, 0f,
+                    0f, 1f, 0f, 0f,
+                    0f, 0f, 1f, 0f,
+                    1f, 0f, 0f, 1f
+                )
+                270 -> floatArrayOf(
+                    0f, 1f, 0f, 0f,
+                    1f, 0f, 0f, 0f,
+                    0f, 0f, 1f, 0f,
+                    0f, 0f, 0f, 1f
+                )
+                else -> floatArrayOf(
+                    1f, 0f, 0f, 0f,
+                    0f, -1f, 0f, 0f,
+                    0f, 0f, 1f, 0f,
+                    0f, 1f, 0f, 1f
+                )
+            }
+        }
+
         internal fun computeAspectScale(
             targetWidth: Int,
             targetHeight: Int,
@@ -317,24 +526,7 @@ internal class LutGlShaderPipeline {
             }
         """.trimIndent()
 
-        internal val FRAGMENT_SHADER_SRC = """
-            #version 300 es
-            #extension GL_OES_EGL_image_external_essl3 : require
-            precision highp float;
-            precision highp sampler3D;
-            uniform samplerExternalOES uTexture;
-            uniform sampler3D uLut;
-            uniform mat3 uGamutMatrix;
-            uniform int uLogType;
-            uniform int uLutSize;
-            uniform int uColorEngineMode;
-            uniform int uFocusPeakingEnabled;
-            uniform vec2 uTexelSize;
-            uniform float uPreviewGain;
-            uniform mat3 uWbPreviewMatrix;
-            in vec2 vTexCoord;
-            out vec4 outColor;
-
+        private val COMMON_SHADER_MATH = """
             vec3 srgbToLinear(vec3 c) {
                 return mix(c / 12.92, pow((c + vec3(0.055)) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
             }
@@ -346,11 +538,30 @@ internal class LutGlShaderPipeline {
             }
             float log10_f(float x) { return log(max(x, 1e-7)) * 0.4342944819; }
 
+            vec3 applyInverseIspCurve(vec3 c) {
+                const float m = 0.22;
+                const float invToePower = 0.7518797; // 1.0 / 1.33
+                float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+                if (luma <= 1e-5) return vec3(0.0);
+                float targetLuma = luma;
+                if (luma < m) {
+                    float gate = smoothstep(0.0002, 0.0020, luma);
+                    float lifted = m * pow(luma / m, invToePower);
+                    targetLuma = mix(luma, lifted, gate);
+                } else if (luma > 0.50) {
+                    float excess = min(luma, 1.0) - 0.50;
+                    targetLuma = luma + 0.30 * (excess * excess) / (1.08 - min(luma, 1.0));
+                }
+                return c * (targetLuma / luma);
+            }
+
             vec3 applyPbrNeutral(vec3 color) {
-                const float startCompression = 0.8 - 0.04;
+                const float kBlackOffset = 0.003;
+                const float kBlackThreshold = 4.0 * kBlackOffset;
+                const float startCompression = 0.8 - kBlackOffset;
                 const float desaturation = 0.15;
                 float x = min(color.r, min(color.g, color.b));
-                color -= (x < 0.08 ? x - 6.25 * x * x : 0.04);
+                color -= (x < kBlackThreshold ? 0.5 * x - 20.8333 * x * x : kBlackOffset);
                 float peak = max(color.r, max(color.g, color.b));
                 if (peak < startCompression) return max(vec3(0.0), color);
                 const float d = 1.0 - startCompression;
@@ -360,47 +571,63 @@ internal class LutGlShaderPipeline {
                 return clamp(mix(color, vec3(newPeak), g), 0.0, 1.0);
             }
 
-            float filmicLumaCurve(float Y) {
-                if (Y <= 0.0) return 0.0;
-                return clamp((Y * (2.35 * Y + 0.02)) / (Y * (2.35 * Y + 0.70) + 0.12), 0.0, 1.0);
-            }
-
-            vec3 applyPureLuma(vec3 c) {
-                float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
-                if (luma <= 0.00001) return vec3(0.0);
-                float mappedLuma = filmicLumaCurve(luma);
-                vec3 outCol = c * (mappedLuma / luma);
-                if (mappedLuma > 0.85) {
-                    float t = (mappedLuma - 0.85) / 0.15;
-                    outCol = vec3(mappedLuma) + (outCol - vec3(mappedLuma)) * (1.0 - (t * t * (3.0 - 2.0 * t)) * 0.5);
+            vec3 applyNaturalFilmic(vec3 c) {
+                mat3 inset = mat3(
+                    vec3(0.8566271533, 0.1373189729, 0.1118982130),
+                    vec3(0.0951212405, 0.7612419906, 0.0767994186),
+                    vec3(0.0482516061, 0.1014390365, 0.8113023684));
+                mat3 outset = mat3(
+                    vec3(1.1974410769, -0.1964746263, -0.1465574171),
+                    vec3(-0.1442615127, 1.3540951315, -0.1082840588),
+                    vec3(-0.0531795642, -0.1576205051, 1.2548414759));
+                vec3 v = inset * max(c, vec3(0.0));
+                vec3 n = v * (2.3134378 * v + 0.8030934);
+                vec3 mapped = n / (n + vec3(1.0));
+                vec3 outRgb = outset * mapped;
+                float peak = max(outRgb.r, max(outRgb.g, outRgb.b));
+                if (peak > 1.0) {
+                    outRgb *= 1.0 / peak;
                 }
-                return clamp(outCol, 0.0, 1.0);
+                return clamp(outRgb, 0.0, 1.0);
             }
 
-            float uchimuraScalar(float x) {
+            float uchimuraScalar(float x, float gain) {
                 if (x <= 0.0) return 0.0;
                 const float P = 1.0, a = 1.25, m = 0.22, l = 0.40, c = 1.33, b = 0.0;
                 const float l0 = ((P - m) * l) / a, S0 = m + l0, S1 = m + a * l0;
-                const float CP = -((a * P) / (P - S1)) / P;
+                float CP = -((a * P) / (P - S1)) / (P * max(1.0, gain * 0.75));
                 if (x <= m) return m * pow(x / m, c) + b;
                 if (x < m + l0) return m + a * (x - m);
                 return P - (P - S1) * exp(CP * (x - S0));
             }
 
-            vec3 applySonyUchimura(vec3 c) {
+            vec3 applySonyUchimura(vec3 c, float gain) {
                 float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
-                if (luma <= 0.00001) return vec3(0.0);
-                float mappedLuma = uchimuraScalar(luma);
-                vec3 outCol = c * (mappedLuma / luma);
-                if (mappedLuma > 0.85) {
-                    float t = (mappedLuma - 0.85) / 0.15;
-                    outCol = vec3(mappedLuma) + (outCol - vec3(mappedLuma)) * (1.0 - (t * t * (3.0 - 2.0 * t)) * 0.5);
-                }
-                return clamp(outCol, 0.0, 1.0);
+                float peak = max(c.r, max(c.g, c.b));
+                if (peak <= 0.00001) return vec3(0.0);
+                float mappedLuma = uchimuraScalar(luma, gain);
+                float mappedPeak = uchimuraScalar(peak, gain);
+                float lumaScale = (luma > 1e-5) ? (mappedLuma / luma) : 1.0;
+                float peakScale = mappedPeak / peak;
+                vec3 outCol = c * min(lumaScale, peakScale);
+                float compression = (peak > 0.22) ? max(0.0, peak - mappedPeak) : 0.0;
+                float desat = 1.0 - 1.0 / (0.20 * compression + 1.0);
+                float outLuma = 0.2126 * outCol.r + 0.7152 * outCol.g + 0.0722 * outCol.b;
+                float targetWhite = max(outLuma, mappedPeak);
+                return clamp(mix(outCol, vec3(targetWhite), desat), 0.0, 1.0);
             }
 
             vec3 applyAcesFit(vec3 v) {
                 return clamp((v * (2.51 * v + 0.03)) / (v * (2.43 * v + 0.59) + 0.14), 0.0, 1.0);
+            }
+
+            const float kColorDensityReduction = 0.0;
+            vec3 applySubtractiveDensity(vec3 c, float reduction) {
+                float peak = max(c.r, max(c.g, c.b));
+                float trough = min(c.r, min(c.g, c.b));
+                if (peak <= 1e-4) return c;
+                float chroma = (peak - trough) / peak;
+                return c * (1.0 - reduction * chroma * chroma);
             }
 
             float applyLogCurve(float x, int type) {
@@ -429,11 +656,44 @@ internal class LutGlShaderPipeline {
                 vec3 n2 = fract(sin(vec3(dot(coord, vec2(93.9898, 67.345)), dot(coord, vec2(41.1234, 39.876)), dot(coord, vec2(27.8192, 84.192)))) * 24634.6345);
                 return clamp(color + (n1 - n2) / 255.0, 0.0, 1.0);
             }
+        """.trimIndent()
+
+        internal val PREVIEW_FRAGMENT_SHADER_SRC = """
+            #version 300 es
+            #extension GL_OES_EGL_image_external_essl3 : require
+            precision highp float;
+            precision highp sampler3D;
+
+            uniform samplerExternalOES uTexture;
+            uniform sampler3D uLut;
+            uniform mat3 uGamutMatrix;
+            uniform int uLogType;
+            uniform int uLutSize;
+            uniform int uColorEngineMode;
+            uniform int uFocusPeakingEnabled;
+            uniform vec2 uTexelSize;
+            uniform float uPreviewGain;
+            uniform mat3 uWbPreviewMatrix;
+            uniform int uPreviewInputDomain;
+
+            in vec2 vTexCoord;
+            out vec4 outColor;
+
+            $COMMON_SHADER_MATH
 
             void main() {
                 vec4 src = texture(uTexture, vTexCoord);
-                vec3 srcLinear = srgbToLinear(src.rgb) * uPreviewGain;
+                vec3 srcLinear;
+                if (uPreviewInputDomain == 2) {
+                    srcLinear = pow(max(src.rgb, vec3(0.0)), vec3(2.2));
+                } else if (uPreviewInputDomain == 1) {
+                    srcLinear = applyInverseIspCurve(srgbToLinear(src.rgb));
+                } else {
+                    srcLinear = srgbToLinear(src.rgb);
+                }
+                srcLinear *= uPreviewGain;
                 vec3 linearRgb = max(vec3(0.0), uWbPreviewMatrix * srcLinear);
+
                 vec3 finalRgb;
                 if (uLutSize > 0) {
                     vec3 wideGamutRgb = max(vec3(0.0), uGamutMatrix * linearRgb);
@@ -447,8 +707,11 @@ internal class LutGlShaderPipeline {
                     finalRgb = triangularDither(logRgb, gl_FragCoord.xy);
                 } else {
                     vec3 mapped = uColorEngineMode == 0 ? applyPbrNeutral(linearRgb)
-                        : (uColorEngineMode == 1 ? applyPureLuma(linearRgb)
-                        : (uColorEngineMode == 2 ? applySonyUchimura(linearRgb) : applyAcesFit(linearRgb)));
+                        : (uColorEngineMode == 1 ? applyNaturalFilmic(linearRgb)
+                        : (uColorEngineMode == 2 ? applySonyUchimura(linearRgb, uPreviewGain) : applyAcesFit(linearRgb)));
+                    if (uColorEngineMode == 2 && kColorDensityReduction > 0.0) {
+                        mapped = applySubtractiveDensity(mapped, kColorDensityReduction);
+                    }
                     finalRgb = triangularDither(linearToSrgb(mapped), gl_FragCoord.xy);
                 }
                 if (uFocusPeakingEnabled == 1) {
@@ -459,6 +722,136 @@ internal class LutGlShaderPipeline {
                     if (abs(lumN - lumS) + abs(lumE - lumW) > 0.16) {
                         finalRgb = mix(finalRgb, vec3(0.0, 1.0, 0.3), 0.85);
                     }
+                }
+                outColor = vec4(finalRgb, 1.0);
+            }
+        """.trimIndent()
+
+        internal val FRAGMENT_SHADER_SRC = PREVIEW_FRAGMENT_SHADER_SRC
+
+        internal val RAW_FRAGMENT_SHADER_SRC = """
+            #version 300 es
+            precision highp float;
+            precision highp sampler2D;
+            precision highp usampler2D;
+            precision highp sampler3D;
+
+            uniform highp usampler2D uRawBayerTexture;
+            uniform sampler3D uLut;
+            uniform highp sampler2D uTexLsc;
+            uniform int uHasLsc;
+            uniform ivec2 uRawImageSize;
+            uniform int uRawCfaPattern;
+            uniform vec4 uRawBlackLevel;
+            uniform float uRawWhiteLevel;
+            uniform vec3 uRawWbGains;
+            uniform mat3 uRawCcm;
+            uniform mat3 uGamutMatrix;
+            uniform int uLogType;
+            uniform int uLutSize;
+            uniform int uColorEngineMode;
+            uniform float uPreviewGain;
+
+            in vec2 vTexCoord;
+            out vec4 outColor;
+
+            $COMMON_SHADER_MATH
+
+            float fetchBayerNorm(ivec2 pos, float bl) {
+                uint v = texelFetch(uRawBayerTexture, pos, 0).r;
+                return clamp((float(v) - bl) / max(1.0, uRawWhiteLevel - bl), 0.0, 1.0);
+            }
+
+            void main() {
+                ivec2 p = clamp(ivec2(vTexCoord * vec2(uRawImageSize)), ivec2(0), uRawImageSize - 1);
+                int xL = (p.x > 0) ? (p.x - 1) : min(1, uRawImageSize.x - 1);
+                int xR = (p.x + 1 < uRawImageSize.x) ? (p.x + 1) : max(0, uRawImageSize.x - 2);
+                int yT = (p.y > 0) ? (p.y - 1) : min(1, uRawImageSize.y - 1);
+                int yB = (p.y + 1 < uRawImageSize.y) ? (p.y + 1) : max(0, uRawImageSize.y - 2);
+
+                float blR = uRawBlackLevel.r, blGr = uRawBlackLevel.g, blGb = uRawBlackLevel.b, blB = uRawBlackLevel.a;
+
+                int sx = (uRawCfaPattern == 1 || uRawCfaPattern == 3) ? (1 - (p.x & 1)) : (p.x & 1);
+                int sy = (uRawCfaPattern == 2 || uRawCfaPattern == 3) ? (1 - (p.y & 1)) : (p.y & 1);
+                int site = (sy << 1) | sx;
+
+                float r = 0.0, g = 0.0, b = 0.0;
+                if (site == 0) { // R
+                    r = fetchBayerNorm(p, blR);
+                    g = 0.25 * (
+                        fetchBayerNorm(ivec2(xL, p.y), blGr) +
+                        fetchBayerNorm(ivec2(xR, p.y), blGr) +
+                        fetchBayerNorm(ivec2(p.x, yT), blGb) +
+                        fetchBayerNorm(ivec2(p.x, yB), blGb)
+                    );
+                    b = 0.25 * (
+                        fetchBayerNorm(ivec2(xL, yT), blB) +
+                        fetchBayerNorm(ivec2(xR, yT), blB) +
+                        fetchBayerNorm(ivec2(xL, yB), blB) +
+                        fetchBayerNorm(ivec2(xR, yB), blB)
+                    );
+                } else if (site == 1) { // Gr
+                    g = fetchBayerNorm(p, blGr);
+                    r = 0.5 * (fetchBayerNorm(ivec2(xL, p.y), blR) + fetchBayerNorm(ivec2(xR, p.y), blR));
+                    b = 0.5 * (fetchBayerNorm(ivec2(p.x, yT), blB) + fetchBayerNorm(ivec2(p.x, yB), blB));
+                } else if (site == 2) { // Gb
+                    g = fetchBayerNorm(p, blGb);
+                    b = 0.5 * (fetchBayerNorm(ivec2(xL, p.y), blB) + fetchBayerNorm(ivec2(xR, p.y), blB));
+                    r = 0.5 * (fetchBayerNorm(ivec2(p.x, yT), blR) + fetchBayerNorm(ivec2(p.x, yB), blR));
+                } else { // 3: B
+                    b = fetchBayerNorm(p, blB);
+                    g = 0.25 * (
+                        fetchBayerNorm(ivec2(xL, p.y), blGb) +
+                        fetchBayerNorm(ivec2(xR, p.y), blGb) +
+                        fetchBayerNorm(ivec2(p.x, yT), blGr) +
+                        fetchBayerNorm(ivec2(p.x, yB), blGr)
+                    );
+                    r = 0.25 * (
+                        fetchBayerNorm(ivec2(xL, yT), blR) +
+                        fetchBayerNorm(ivec2(xR, yT), blR) +
+                        fetchBayerNorm(ivec2(xL, yB), blR) +
+                        fetchBayerNorm(ivec2(xR, yB), blR)
+                    );
+                }
+
+                if (uHasLsc != 0) {
+                    vec4 lscGain = texture(uTexLsc, vTexCoord);
+                    r *= lscGain.r;
+                    g *= lscGain.g;
+                    b *= lscGain.b;
+                }
+
+                vec3 wbColor = vec3(r, g, b) * uRawWbGains * uPreviewGain;
+                vec3 sensorLinear = max(vec3(0.0), uRawCcm * wbColor);
+
+                float maxRaw = max(r, max(g, b));
+                if (maxRaw > 0.95) {
+                    float t = clamp((maxRaw - 0.95) / (1.0 - 0.95), 0.0, 1.0);
+                    float blendFactor = t * t * (3.0 - 2.0 * t);
+                    float peakLuma = max(sensorLinear.r, max(sensorLinear.g, sensorLinear.b));
+                    sensorLinear = mix(sensorLinear, vec3(peakLuma), blendFactor);
+                }
+                vec3 linearRgb = sensorLinear;
+
+                vec3 finalRgb;
+                if (uLutSize > 0) {
+                    vec3 wideGamutRgb = max(vec3(0.0), uGamutMatrix * linearRgb);
+                    vec3 logRgb = vec3(applyLogCurve(wideGamutRgb.r, uLogType), applyLogCurve(wideGamutRgb.g, uLogType), applyLogCurve(wideGamutRgb.b, uLogType));
+                    float lutSizeFloat = float(uLutSize);
+                    vec3 lutCoord = logRgb * ((lutSizeFloat - 1.0) / lutSizeFloat) + vec3(0.5 / lutSizeFloat);
+                    finalRgb = triangularDither(texture(uLut, lutCoord).rgb, gl_FragCoord.xy);
+                } else if (uLogType > 0) {
+                    vec3 wideGamutRgb = max(vec3(0.0), uGamutMatrix * linearRgb);
+                    vec3 logRgb = vec3(applyLogCurve(wideGamutRgb.r, uLogType), applyLogCurve(wideGamutRgb.g, uLogType), applyLogCurve(wideGamutRgb.b, uLogType));
+                    finalRgb = triangularDither(logRgb, gl_FragCoord.xy);
+                } else {
+                    vec3 mapped = uColorEngineMode == 0 ? applyPbrNeutral(linearRgb)
+                        : (uColorEngineMode == 1 ? applyNaturalFilmic(linearRgb)
+                        : (uColorEngineMode == 2 ? applySonyUchimura(linearRgb, uPreviewGain) : applyAcesFit(linearRgb)));
+                    if (uColorEngineMode == 2 && kColorDensityReduction > 0.0) {
+                        mapped = applySubtractiveDensity(mapped, kColorDensityReduction);
+                    }
+                    finalRgb = triangularDither(linearToSrgb(mapped), gl_FragCoord.xy);
                 }
                 outColor = vec4(finalRgb, 1.0);
             }

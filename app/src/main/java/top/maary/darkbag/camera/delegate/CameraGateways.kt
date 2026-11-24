@@ -90,11 +90,24 @@ interface CameraCoordinatorHost {
     fun ensureActiveCoordinator(): CaptureModeCoordinator?
     fun bindCameraUseCases()
     fun applyCameraControls()
-    fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean = false)
+    fun applyManualSettingsToRequest(
+        request: CaptureRequest.Builder,
+        isHdrBurst: Boolean = false,
+        isPreviewStream: Boolean = false
+    )
+    /**
+     * Applies 3A settings to a *preview* request. Implementations also apply preview-only
+     * overrides such as the tone map policy, so this must never be used for still captures.
+     */
     fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder)
+    fun updatePreviewToneMapPolicyForDevice(
+        deviceId: String,
+        chars: android.hardware.camera2.CameraCharacteristics
+    )
     fun handleCaptureResult(result: TotalCaptureResult)
     fun getCombinedOrientation(): Int
     fun updateMotionPhotoEncoder()
+    fun setRawMotionPhotoTargetEnabled(enabled: Boolean) {}
     fun triggerAutoBurst()
     fun onCaptureModeCycled(modeChanged: Boolean)
     fun readScopedHalfFrameState(requireFileForStep1: Boolean = false)

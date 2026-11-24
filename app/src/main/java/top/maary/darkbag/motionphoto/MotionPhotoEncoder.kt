@@ -2,7 +2,9 @@ package top.maary.darkbag.motionphoto
 
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
@@ -16,7 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Hardware accelerated video encoder and audio recorder managing the continuous
  * encoding pipeline and circular buffers for Motion Photo recording.
  */
-class MotionPhotoEncoder(
+open class MotionPhotoEncoder(
     private val width: Int = 1080,
     private val height: Int = 1440,
     private val frameRate: Int = 30,
@@ -25,8 +27,44 @@ class MotionPhotoEncoder(
 ) {
     companion object {
         private const val TAG = "MotionPhotoEncoder"
-        private const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_AVC
+        private const val MIME_TYPE_HEVC = MediaFormat.MIMETYPE_VIDEO_HEVC
+        private const val MIME_TYPE_AVC = MediaFormat.MIMETYPE_VIDEO_AVC
         private const val I_FRAME_INTERVAL = 1 // 1 second between keyframes
+
+        /**
+         * Queries [MediaCodecList] to check whether any hardware encoder (or fallback encoder)
+         * supports [width]x[height] at [frameRate] fps for [mimeType].
+         * Returns true when codec enumeration is unavailable (e.g., JVM test environments).
+         */
+        fun isCodecSizeSupported(
+            mimeType: String,
+            width: Int,
+            height: Int,
+            frameRate: Int
+        ): Boolean {
+            return try {
+                val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+                val encoders = codecList.codecInfos.filter { info ->
+                    info.isEncoder && info.supportedTypes.any { it.equals(mimeType, ignoreCase = true) }
+                }
+                if (encoders.isEmpty()) {
+                    return true
+                }
+                val candidateEncoders = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    encoders.filter { it.isHardwareAccelerated }.ifEmpty { encoders }
+                } else {
+                    encoders
+                }
+                candidateEncoders.any { info ->
+                    val caps = runCatching { info.getCapabilitiesForType(mimeType) }.getOrNull()
+                        ?.videoCapabilities ?: return@any false
+                    caps.isSizeSupported(width, height) &&
+                        caps.areSizeAndRateSupported(width, height, frameRate.toDouble())
+                }
+            } catch (_: Throwable) {
+                true
+            }
+        }
     }
 
     private val ringBuffer = CircularVideoRingBuffer(maxRetentionDurationUs = 4_500_000L)
@@ -42,34 +80,67 @@ class MotionPhotoEncoder(
     private val isRunning = AtomicBoolean(false)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    val surface: Surface?
+    open val surface: Surface?
         get() = inputSurface
 
-    val isEncoding: Boolean
+    open val isEncoding: Boolean
         get() = isRunning.get()
 
-    /**
-     * Initializes and starts the video encoder and optional audio recorder.
-     */
-    @Synchronized
-    fun start() {
-        if (isRunning.get()) return
-
-        try {
-            val format = MediaFormat.createVideoFormat(MIME_TYPE, width, height).apply {
-                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
-                setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
-                // Use Main profile and Level 4 for 1080p resolution compatibility across players
+    private fun createVideoFormat(mimeType: String): MediaFormat {
+        return MediaFormat.createVideoFormat(mimeType, width, height).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+            setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
+            setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
+            if (mimeType == MIME_TYPE_HEVC) {
+                setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.HEVCProfileMain)
+            } else {
                 setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileMain)
-                setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel4)
             }
+            setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+            setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
+            setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+        }
+    }
 
-            val codec = MediaCodec.createEncoderByType(MIME_TYPE)
+    private fun tryConfigureAndStartCodec(mimeType: String): MediaCodec {
+        val format = createVideoFormat(mimeType)
+        val codec = MediaCodec.createEncoderByType(mimeType)
+        try {
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             inputSurface = codec.createInputSurface()
             codec.start()
+            return codec
+        } catch (e: Exception) {
+            try {
+                inputSurface?.release()
+            } catch (_: Exception) {}
+            inputSurface = null
+            try {
+                codec.release()
+            } catch (_: Exception) {}
+            throw e
+        }
+    }
+
+    /**
+     * Initializes and starts the video encoder (HEVC preferred, H.264 fallback) and optional audio recorder.
+     *
+     * @return true if the encoder started successfully, false otherwise (cleaning up any partial resources).
+     */
+    @Synchronized
+    open fun start(): Boolean {
+        if (isRunning.get()) return true
+
+        try {
+            var activeMime = MIME_TYPE_HEVC
+            val codec = try {
+                tryConfigureAndStartCodec(MIME_TYPE_HEVC)
+            } catch (hevcError: Exception) {
+                Log.w(TAG, "HEVC encoder failed for ${width}x${height}, falling back to H.264", hevcError)
+                activeMime = MIME_TYPE_AVC
+                tryConfigureAndStartCodec(MIME_TYPE_AVC)
+            }
 
             mediaCodec = codec
             mediaFormat = codec.outputFormat
@@ -88,10 +159,13 @@ class MotionPhotoEncoder(
                 startAudioRecorderInternal()
             }
 
-            Log.i(TAG, "MotionPhotoEncoder started: ${width}x${height} @ ${frameRate}fps, ${bitRate / 1_000_000}Mbps, audio=$isAudioEnabled")
+            Log.i(TAG, "MotionPhotoEncoder started ($activeMime): ${width}x${height} @ ${frameRate}fps, ${bitRate / 1_000_000}Mbps, audio=$isAudioEnabled")
+            return true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start MotionPhotoEncoder", e)
-            stop()
+            Log.e(TAG, "Failed to start MotionPhotoEncoder (${width}x${height})", e)
+            isRunning.set(false)
+            cleanupResourcesLocked()
+            return false
         }
     }
 
@@ -99,7 +173,7 @@ class MotionPhotoEncoder(
      * Starts or stops audio recording dynamically while video encoding is active.
      */
     @Synchronized
-    fun updateAudioEnabled(enabled: Boolean) {
+    open fun updateAudioEnabled(enabled: Boolean) {
         isAudioEnabled = enabled
         if (!isRunning.get()) return
 
@@ -188,7 +262,7 @@ class MotionPhotoEncoder(
      * @param orientationDegrees Orientation hint in degrees (0, 90, 180, 270).
      * @param onComplete Callback with the generated MP4 file (or null on failure) and the still PTS in us.
      */
-    fun captureSnapshot(
+    open fun captureSnapshot(
         captureTimestampNs: Long,
         preDurationMs: Long = 1500L,
         postDurationMs: Long = 1500L,
@@ -268,29 +342,41 @@ class MotionPhotoEncoder(
      * Stops and releases encoder and audio resources.
      */
     @Synchronized
-    fun stop() {
+    open fun stop() {
         if (!isRunning.getAndSet(false)) return
+        cleanupResourcesLocked()
+        Log.i(TAG, "MotionPhotoEncoder stopped")
+    }
 
-        try {
-            stopAudioRecorderInternal()
+    private fun cleanupResourcesLocked() {
+        runCatching { stopAudioRecorderInternal() }
+            .onFailure { Log.w(TAG, "Error stopping audio recorder during cleanup", it) }
 
+        runCatching {
             encoderHandler?.removeCallbacksAndMessages(null)
             encoderThread?.quitSafely()
             encoderThread?.join(500)
-            encoderThread = null
-            encoderHandler = null
+        }.onFailure { Log.w(TAG, "Error stopping encoder thread during cleanup", it) }
+        encoderThread = null
+        encoderHandler = null
 
-            mediaCodec?.stop()
-            mediaCodec?.release()
-            mediaCodec = null
-
-            inputSurface?.release()
-            inputSurface = null
-
-            ringBuffer.clear()
-            Log.i(TAG, "MotionPhotoEncoder stopped")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error while stopping MotionPhotoEncoder", e)
+        val codec = mediaCodec
+        mediaCodec = null
+        if (codec != null) {
+            runCatching { codec.stop() }
+                .onFailure { Log.w(TAG, "Error stopping MediaCodec during cleanup", it) }
+            runCatching { codec.release() }
+                .onFailure { Log.w(TAG, "Error releasing MediaCodec during cleanup", it) }
         }
+
+        val surf = inputSurface
+        inputSurface = null
+        if (surf != null) {
+            runCatching { surf.release() }
+                .onFailure { Log.w(TAG, "Error releasing input surface during cleanup", it) }
+        }
+
+        mediaFormat = null
+        ringBuffer.clear()
     }
 }

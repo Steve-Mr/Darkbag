@@ -11,6 +11,7 @@
 #include <android/native_window_jni.h>
 #include "RawVideoContainer.h"
 #include "RawVideoRecorder.h"
+#include "BayerProcessor.h"
 #include "RawVideoGLRenderer.h"
 #include "ColorMath.h"
 #include "../ColorPipe.h"
@@ -911,6 +912,163 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDestroyGLRenderer(
     if (renderer) {
         delete renderer;
     }
+}
+
+JNIEXPORT jint JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeProcessRawMotionBayer(
+        JNIEnv* env,
+        jobject /* thiz */,
+        jobject jSrcBuffer,
+        jint srcWidth,
+        jint srcHeight,
+        jint srcRowStride,
+        jobject jDstBuffer,
+        jint qualityMode
+) {
+    if (!jSrcBuffer || !jDstBuffer || srcWidth < 8 || srcHeight < 8) return 0;
+
+    const size_t minRowBytes = static_cast<size_t>(srcWidth) * sizeof(uint16_t);
+    if (srcRowStride < 0 || static_cast<size_t>(srcRowStride) < minRowBytes) {
+        LOGE("Invalid srcRowStride %d for srcWidth %d", srcRowStride, srcWidth);
+        return 0;
+    }
+
+    auto* srcBytes = static_cast<const uint8_t*>(env->GetDirectBufferAddress(jSrcBuffer));
+    auto* dstBytes = static_cast<uint8_t*>(env->GetDirectBufferAddress(jDstBuffer));
+    if (!srcBytes || !dstBytes) return 0;
+
+    const size_t requiredSrcBytes =
+        static_cast<size_t>(srcHeight - 1) * static_cast<size_t>(srcRowStride) + minRowBytes;
+    jlong srcCapacity = env->GetDirectBufferCapacity(jSrcBuffer);
+    if (srcCapacity < 0 || static_cast<size_t>(srcCapacity) < requiredSrcBytes) {
+        LOGE("Source buffer capacity %lld is insufficient for %zu bytes",
+             static_cast<long long>(srcCapacity), requiredSrcBytes);
+        return 0;
+    }
+
+    uint32_t dstWidth = 0;
+    uint32_t dstHeight = 0;
+
+    if (qualityMode == 1) { // 2x2 Binning
+        dstWidth = ((static_cast<uint32_t>(srcWidth) / 2) & ~1u);
+        dstHeight = ((static_cast<uint32_t>(srcHeight) / 2) & ~1u);
+    } else if (qualityMode == 2) { // Native 1x1
+        dstWidth = (static_cast<uint32_t>(srcWidth) & ~1u);
+        dstHeight = (static_cast<uint32_t>(srcHeight) & ~1u);
+    } else { // 0: 4x4 Subsample
+        dstWidth = ((static_cast<uint32_t>(srcWidth) / 4) & ~1u);
+        dstHeight = ((static_cast<uint32_t>(srcHeight) / 4) & ~1u);
+    }
+    if (dstWidth == 0 || dstHeight == 0) return 0;
+
+    const size_t requiredBytes = static_cast<size_t>(dstWidth) * dstHeight * sizeof(uint16_t);
+
+    jlong dstCapacity = env->GetDirectBufferCapacity(jDstBuffer);
+    if (dstCapacity < 0 || static_cast<size_t>(dstCapacity) < requiredBytes) {
+        LOGE("Destination buffer capacity %lld is insufficient for %zu bytes (mode %d)",
+             static_cast<long long>(dstCapacity), requiredBytes, qualityMode);
+        return 0;
+    }
+
+    if (qualityMode == 1) {
+        // bayer2x2BinningNEON outputs srcW/2 x srcH/2; pass even-aligned dstWidth*2 x dstHeight*2
+        // to match requiredBytes and prevent odd-row stride or OOB writes when dim % 4 >= 2.
+        BayerProcessor::bayer2x2BinningNEON(
+            srcBytes,
+            dstWidth * 2,
+            dstHeight * 2,
+            static_cast<uint32_t>(srcRowStride),
+            dstBytes
+        );
+    } else if (qualityMode == 2) {
+        if (static_cast<uint32_t>(srcRowStride) == dstWidth * sizeof(uint16_t)) {
+            std::memcpy(dstBytes, srcBytes, requiredBytes);
+        } else {
+            const size_t rowBytes = dstWidth * sizeof(uint16_t);
+            #if defined(_OPENMP)
+            #pragma omp parallel for schedule(static)
+            #endif
+            for (uint32_t y = 0; y < dstHeight; ++y) {
+                std::memcpy(dstBytes + y * rowBytes,
+                            srcBytes + y * static_cast<size_t>(srcRowStride),
+                            rowBytes);
+            }
+        }
+    } else {
+        BayerProcessor::bayer4x4SubsampleNEON(
+            srcBytes,
+            static_cast<uint32_t>(srcWidth),
+            static_cast<uint32_t>(srcHeight),
+            static_cast<uint32_t>(srcRowStride),
+            dstBytes
+        );
+    }
+
+    return (static_cast<jint>(dstWidth) << 16) | static_cast<jint>(dstHeight);
+}
+
+JNIEXPORT jint JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeSubsampleBayer4x4(
+        JNIEnv* env,
+        jobject thiz,
+        jobject jSrcBuffer,
+        jint srcWidth,
+        jint srcHeight,
+        jint srcRowStride,
+        jobject jDstBuffer
+) {
+    return Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeProcessRawMotionBayer(
+        env, thiz, jSrcBuffer, srcWidth, srcHeight, srcRowStride, jDstBuffer, 0
+    );
+}
+
+JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeComputeAdaptiveColorMatrix(
+        JNIEnv* env,
+        jobject /* thiz */,
+        jfloatArray jNeutralPoint,
+        jfloatArray jForwardMatrix1,
+        jfloatArray jForwardMatrix2,
+        jint illum1,
+        jint illum2,
+        jfloatArray jOutColMajor
+) {
+    if (!jOutColMajor || env->GetArrayLength(jOutColMajor) < 9) return JNI_FALSE;
+
+    float npVals[3] = {1.0f, 1.0f, 1.0f};
+    const float* npPtr = nullptr;
+    if (jNeutralPoint && env->GetArrayLength(jNeutralPoint) >= 3) {
+        env->GetFloatArrayRegion(jNeutralPoint, 0, 3, npVals);
+        npPtr = npVals;
+    }
+
+    float fm1Vals[9];
+    const float* fm1Ptr = nullptr;
+    if (jForwardMatrix1 && env->GetArrayLength(jForwardMatrix1) >= 9) {
+        env->GetFloatArrayRegion(jForwardMatrix1, 0, 9, fm1Vals);
+        fm1Ptr = fm1Vals;
+    }
+
+    float fm2Vals[9];
+    const float* fm2Ptr = nullptr;
+    if (jForwardMatrix2 && env->GetArrayLength(jForwardMatrix2) >= 9) {
+        env->GetFloatArrayRegion(jForwardMatrix2, 0, 9, fm2Vals);
+        fm2Ptr = fm2Vals;
+    }
+
+    float colMajor[9] = {1,0,0, 0,1,0, 0,0,1};
+    bool ok = darkbag::rawvideo::computeAdaptiveColorMatrix(
+        npPtr,
+        fm1Ptr,
+        fm2Ptr,
+        illum1,
+        illum2,
+        nullptr,
+        colMajor
+    );
+
+    env->SetFloatArrayRegion(jOutColMajor, 0, 9, colMajor);
+    return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 } // extern "C"

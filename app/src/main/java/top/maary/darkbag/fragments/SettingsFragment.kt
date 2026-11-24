@@ -280,6 +280,7 @@ class SettingsFragment : Fragment() {
         binding.btnMenuDngFormat.setOnClickListener { sheetDispatcher.showDngFormatSheet() }
         binding.btnMenuMultiCameraCount.setOnClickListener { sheetDispatcher.showMultiCameraCountSheet() }
         binding.btnMenuMultiCameraDualPair.setOnClickListener { sheetDispatcher.showMultiCameraDualPairSheet() }
+        binding.btnMenuRawMotionQuality.setOnClickListener { sheetDispatcher.showExpRawMotionQualitySheet() }
     }
 
     private fun setupStartupSettings() {
@@ -418,6 +419,10 @@ class SettingsFragment : Fragment() {
         binding.switchExpMulticamColorHarmonization.setOnCheckedChangeListener { _, isChecked ->
             if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
             settingsViewModel.updateExpMultiCamColorHarmonization(isChecked)
+        }
+        binding.switchExpRawMotionPhoto.setOnCheckedChangeListener { _, isChecked ->
+            if (bentoDelegate.isRendering) return@setOnCheckedChangeListener
+            settingsViewModel.updateExpRawMotionPhoto(isChecked)
         }
 
         binding.toggleUiTiers.addOnButtonCheckedListener { _, checkedId, isChecked ->

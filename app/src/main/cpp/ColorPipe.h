@@ -72,7 +72,7 @@ enum ColorEngineMode {
 };
 
 Vec3 apply_khronos_pbr_neutral(Vec3 color);
-Vec3 apply_pure_luma_filmic(Vec3 c);
+Vec3 apply_natural_filmic(Vec3 c);
 Vec3 apply_sony_uchimura(Vec3 c, float gain = 1.0f);
 Vec3 apply_aces_fit(Vec3 c);
 

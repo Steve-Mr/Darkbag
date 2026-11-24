@@ -521,6 +521,16 @@
     <string name="pref_cache_category">缓存与存储管理</string>
     <string name="pref_force_60fps">强制 60fps 取景</string>
     <string name="pref_exp_multicam_color_harmonization_title">多摄色彩一致性</string>
+    <string name="pref_exp_raw_motion_photo_tray_title">RAW 传感器动态照片</string>
+    <string name="pref_exp_raw_motion_photo">RAW 传感器动态照片</string>
+    <string name="pref_exp_raw_motion_photo_summary">动态照片直接从 RAW 传感器流处理，跳过 ISP 预览</string>
+    <string name="settings_exp_raw_motion_quality_title">RAW 动态照片画质</string>
+    <string name="raw_motion_quality_2x2">2x2 合并</string>
+    <string name="raw_motion_quality_2x2_desc">保留完整细节，硬件 NEON 矢量加速</string>
+    <string name="raw_motion_quality_4x4">4x4 抽样</string>
+    <string name="raw_motion_quality_4x4_desc">极低内存占用与发热，长效平稳</string>
+    <string name="raw_motion_quality_native">原生全像素</string>
+    <string name="raw_motion_quality_native_desc">零拷贝全分辨率直出，极致解析力</string>
     <string name="pref_hdr_fusion_mode_title">HDR+ 融合算法引擎</string>
     <string name="pref_hdr_fusion_mode_helper">自动模式：1.0x 使用空间融合与 RCD，超过 1.05x 变焦启用 Sabre 超分</string>
     <string name="dialog_reset_storage_title">重置存储目录</string>

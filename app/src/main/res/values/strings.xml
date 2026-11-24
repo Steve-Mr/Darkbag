@@ -547,6 +547,16 @@
     <string name="pref_cache_category">Cache &amp; Storage Management</string>
     <string name="pref_force_60fps">Force 60fps Viewfinder Preview</string>
     <string name="pref_exp_multicam_color_harmonization_title">Multi-Camera Color Harmonization</string>
+    <string name="pref_exp_raw_motion_photo_tray_title">RAW SENSOR MOTION PHOTO</string>
+    <string name="pref_exp_raw_motion_photo">RAW Sensor Motion Photo</string>
+    <string name="pref_exp_raw_motion_photo_summary">Process Motion Photo directly from RAW sensor stream instead of ISP preview</string>
+    <string name="settings_exp_raw_motion_quality_title">RAW MOTION QUALITY</string>
+    <string name="raw_motion_quality_2x2">2x2 Binning</string>
+    <string name="raw_motion_quality_2x2_desc">High detail, hardware-accelerated NEON binning</string>
+    <string name="raw_motion_quality_4x4">4x4 Subsample</string>
+    <string name="raw_motion_quality_4x4_desc">Ultra-low power, lightweight pre-roll capture</string>
+    <string name="raw_motion_quality_native">Native Resolution</string>
+    <string name="raw_motion_quality_native_desc">Zero-copy full resolution, maximum sharpness</string>
     <string name="dialog_reset_storage_title">Reset Storage Directory</string>
     <string name="dialog_reset_storage_jpg_message">Reset custom JPEG storage back to default (Pictures/Darkbag)?</string>
     <string name="dialog_reset_storage_raw_message">Reset custom RAW storage back to default (Pictures/Darkbag)?</string>

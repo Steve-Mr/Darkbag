@@ -110,8 +110,9 @@ class CameraDelegatesTest {
         override fun ensureActiveCoordinator(): CaptureModeCoordinator? = null
         override fun bindCameraUseCases() {}
         override fun applyCameraControls() { cameraControlsApplied = true }
-        override fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean) {}
+        override fun applyManualSettingsToRequest(request: CaptureRequest.Builder, isHdrBurst: Boolean, isPreviewStream: Boolean) {}
         override fun applyPreviewFocusAndExposureSettings(builder: CaptureRequest.Builder) {}
+        override fun updatePreviewToneMapPolicyForDevice(deviceId: String, chars: android.hardware.camera2.CameraCharacteristics) {}
         override fun handleCaptureResult(result: TotalCaptureResult) {}
         override fun getCombinedOrientation(): Int = 0
         override fun updateMotionPhotoEncoder() {}

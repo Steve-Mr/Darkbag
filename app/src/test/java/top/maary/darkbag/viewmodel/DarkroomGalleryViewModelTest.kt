@@ -234,4 +234,40 @@ class DarkroomGalleryViewModelTest {
         assertTrue(effect is DarkroomGalleryEffect.ScrollToPosition)
         assertEquals(0, (effect as DarkroomGalleryEffect.ScrollToPosition).position)
     }
+
+    @Test
+    fun testToggleSelectAllOnEmptyItemsDoesNotEnterSelectionMode() {
+        assertTrue(viewModel.uiState.value.items.isEmpty())
+        viewModel.processIntent(DarkroomGalleryUserIntent.SetSelectionMode(true))
+        viewModel.processIntent(DarkroomGalleryUserIntent.ToggleSelectAll)
+
+        val state = viewModel.uiState.value
+        assertFalse(state.isSelectionMode)
+        assertTrue(state.selectedKeys.isEmpty())
+        assertEquals(BentoContainerRole.SURFACE_CONTAINER, state.containerRole)
+    }
+
+    @Test
+    fun testMultiSelectMultipleGroupsTracksAllSelectedKeys() {
+        val g1 = ImageGroup(baseName = "DARK_20261121_001")
+        val g2 = ImageGroup(baseName = "DARK_20261121_002")
+        val g3 = ImageGroup(baseName = "DARK_20261121_003")
+
+        viewModel.processIntent(DarkroomGalleryUserIntent.ToggleSingleSelection(g1))
+        viewModel.processIntent(DarkroomGalleryUserIntent.ToggleSingleSelection(g2))
+        viewModel.processIntent(DarkroomGalleryUserIntent.ToggleSingleSelection(g3))
+
+        val state = viewModel.uiState.value
+        assertTrue(state.isSelectionMode)
+        assertEquals(3, state.selectedCount)
+        assertEquals(setOf("DARK_20261121_001", "DARK_20261121_002", "DARK_20261121_003"), state.selectedKeys)
+
+        viewModel.processIntent(DarkroomGalleryUserIntent.ToggleSingleSelection(g2))
+        assertEquals(2, viewModel.uiState.value.selectedCount)
+        assertEquals(setOf("DARK_20261121_001", "DARK_20261121_003"), viewModel.uiState.value.selectedKeys)
+
+        viewModel.processIntent(DarkroomGalleryUserIntent.ClearSelection)
+        assertFalse(viewModel.uiState.value.isSelectionMode)
+        assertTrue(viewModel.uiState.value.selectedKeys.isEmpty())
+    }
 }
