@@ -390,7 +390,7 @@
     <string name="pref_fusion_spatial">空间融合 + RCD</string>
     <string name="pref_fusion_classic">Wiener 降噪</string>
     <string name="pref_fusion_auto">自动智能选择</string>
-    <string name="pref_fusion_auto_desc">自适应选择最优空间对齐融合或 Sabre 超分辨率</string>
+    <string name="pref_fusion_auto_desc">1.0x 使用空间对齐融合，变焦裁切自动启用 Sabre 超分</string>
     <string name="pref_fusion_spatial_desc">高精度空间对齐融合与 RCD 色彩去马赛克</string>
     <string name="pref_fusion_sabre_desc">光学亚像素微振多帧超分辨率重构算法</string>
     <string name="pref_fusion_classic_desc">传统维纳滤波 HDR+ 多帧降噪与动态范围融合</string>
@@ -532,7 +532,7 @@
     <string name="raw_motion_quality_native">原生全像素</string>
     <string name="raw_motion_quality_native_desc">零拷贝全分辨率直出，极致解析力</string>
     <string name="pref_hdr_fusion_mode_title">HDR+ 融合算法引擎</string>
-    <string name="pref_hdr_fusion_mode_helper">自动模式：1.0x 使用 Spatial+RCD，变焦（≥1.25x）启用 Sabre 超分</string>
+    <string name="pref_hdr_fusion_mode_helper">自动模式：1.0x 使用空间融合与 RCD，超过 1.05x 变焦启用 Sabre 超分</string>
     <string name="dialog_reset_storage_title">重置存储目录</string>
     <string name="dialog_reset_storage_jpg_message">是否将自定义 JPEG 存储目录重置为默认位置 (Pictures/Darkbag)？</string>
     <string name="dialog_reset_storage_raw_message">是否将自定义 RAW 存储目录重置为默认位置 (Pictures/Darkbag)？</string>

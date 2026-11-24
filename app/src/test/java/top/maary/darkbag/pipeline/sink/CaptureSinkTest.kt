@@ -389,5 +389,71 @@ class CaptureSinkTest {
         tempFile.delete()
         Unit
     }
+
+    @Test
+    fun testDirectMediaStoreSink_EmitsPersistedZoomFactorOneWhenZoomBaked() = runBlocking {
+        val testPfd = android.os.ParcelFileDescriptor.createPipe()
+        val mockUri = android.net.Uri.parse("content://media/external/images/media/77777")
+        val sink = DirectMediaStoreSink(
+            pfdProvider = { _, _, _ -> Pair(testPfd[1], mockUri) }
+        )
+        val bakedSpec = createDummySpec(saveJpg = true, saveRaw = true).copy(
+            zoomFactor = 2.0f,
+            isOutputZoomBaked = true
+        )
+        val targets = sink.prepareTargets(context, bakedSpec)
+
+        val events = mutableListOf<ColorProcessor.BackgroundSaveEvent>()
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            ColorProcessor.backgroundSaveFlow.collect { events.add(it) }
+        }
+
+        sink.onImageExported(
+            context = context,
+            spec = bakedSpec,
+            success = true,
+            outputPath = targets.outJpgPath,
+            outputFd = targets.outJpgFd
+        )
+
+        kotlinx.coroutines.yield()
+        job.cancel()
+        testPfd[0].close()
+        assertEquals(1, events.size)
+        assertEquals(1.0f, events.first().zoomFactor, 1e-4f)
+    }
+
+    @Test
+    fun testDirectMediaStoreSink_EmitsOpticalZoomFactorWhenOutputUncropped() = runBlocking {
+        val testPfd = android.os.ParcelFileDescriptor.createPipe()
+        val mockUri = android.net.Uri.parse("content://media/external/images/media/88888")
+        val sink = DirectMediaStoreSink(
+            pfdProvider = { _, _, _ -> Pair(testPfd[1], mockUri) }
+        )
+        val unbakedSpec = createDummySpec(saveJpg = true, saveRaw = true).copy(
+            zoomFactor = 1.458f,
+            isOutputZoomBaked = false
+        )
+        val targets = sink.prepareTargets(context, unbakedSpec)
+
+        val events = mutableListOf<ColorProcessor.BackgroundSaveEvent>()
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            ColorProcessor.backgroundSaveFlow.collect { events.add(it) }
+        }
+
+        sink.onImageExported(
+            context = context,
+            spec = unbakedSpec,
+            success = true,
+            outputPath = targets.outJpgPath,
+            outputFd = targets.outJpgFd
+        )
+
+        kotlinx.coroutines.yield()
+        job.cancel()
+        testPfd[0].close()
+        assertEquals(1, events.size)
+        assertEquals(1.458f, events.first().zoomFactor, 1e-4f)
+    }
 }
 

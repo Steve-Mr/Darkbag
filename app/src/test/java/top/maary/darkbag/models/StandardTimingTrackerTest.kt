@@ -289,6 +289,20 @@ class StandardTimingTrackerTest {
         assertTrue("Expected 'Mode: Auto(RCD)' at zoom 1.0f",
             reportAutoRcd.contains("Mode: Auto(RCD)"))
 
+        // fusionMode = 0 (Auto) at boundary zoom 1.05f -> Auto(RCD)
+        val timingAutoBoundary = StandardTimingTracker(shutterClick = 1000L).apply {
+            recordEnvironment(width = 4032, height = 3024, zoom = 1.05f, fusion = 0)
+        }
+        assertTrue("Expected 'Mode: Auto(RCD)' at zoom 1.05f",
+            timingAutoBoundary.buildSummaryReport().contains("Mode: Auto(RCD)"))
+
+        // fusionMode = 0 (Auto) at 28mm crop (zoom 1.167f) -> Auto(Sabre)
+        val timingAuto28mm = StandardTimingTracker(shutterClick = 1000L).apply {
+            recordEnvironment(width = 4032, height = 3024, zoom = 1.167f, fusion = 0)
+        }
+        assertTrue("Expected 'Mode: Auto(Sabre)' at 28mm crop zoom 1.167f",
+            timingAuto28mm.buildSummaryReport().contains("Mode: Auto(Sabre)"))
+
         // fusionMode = 0 (Auto) at zoom 1.5f -> Auto(Sabre)
         val timingAutoSabre = StandardTimingTracker(shutterClick = 1000L).apply {
             recordEnvironment(width = 4032, height = 3024, zoom = 1.5f, fusion = 0)

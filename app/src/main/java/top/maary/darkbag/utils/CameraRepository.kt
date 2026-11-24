@@ -1,11 +1,13 @@
 package top.maary.darkbag.utils
 
 import android.content.Context
+import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.util.Log
 import android.util.Range
+import android.util.Size
 import kotlin.math.abs
 import kotlin.math.sqrt
 
@@ -32,6 +34,13 @@ enum class LensType {
     TELE,
     UNKNOWN
 }
+
+data class UltraHighResSensorCapability(
+    val supported: Boolean,
+    val defaultRawSize: Size?,
+    val maxResolutionRawSize: Size?,
+    val areaRatio: Float
+)
 
 class CameraRepository(private val context: Context) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
@@ -64,6 +73,53 @@ class CameraRepository(private val context: Context) {
                 ?.maxByOrNull { it.width * it.height }
                 ?: candidates?.minByOrNull { it.width * it.height }
                 ?: android.util.Size(1440, 1080)
+        }
+
+        fun evaluateUltraHighResCapability(
+            sdkInt: Int,
+            capabilities: IntArray?,
+            defaultRawSizes: Array<Size>?,
+            maxResRawSizes: Array<Size>?
+        ): UltraHighResSensorCapability {
+            val defaultMax = defaultRawSizes?.maxByOrNull { it.width.toLong() * it.height.toLong() }
+            val maxResMax = maxResRawSizes?.maxByOrNull { it.width.toLong() * it.height.toLong() }
+            if (sdkInt < Build.VERSION_CODES.S) {
+                return UltraHighResSensorCapability(false, defaultMax, null, 1.0f)
+            }
+            val hasUltraHighResCap = capabilities?.contains(
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR
+            ) == true
+            if (!hasUltraHighResCap || defaultMax == null || maxResMax == null) {
+                return UltraHighResSensorCapability(false, defaultMax, maxResMax, 1.0f)
+            }
+            val defaultArea = defaultMax.width.toLong() * defaultMax.height.toLong()
+            val maxArea = maxResMax.width.toLong() * maxResMax.height.toLong()
+            if (defaultArea <= 0L || maxArea <= 0L) {
+                return UltraHighResSensorCapability(false, defaultMax, maxResMax, 1.0f)
+            }
+            val areaRatio = maxArea.toFloat() / defaultArea.toFloat()
+            return UltraHighResSensorCapability(
+                supported = areaRatio >= 1.8f,
+                defaultRawSize = defaultMax,
+                maxResolutionRawSize = maxResMax,
+                areaRatio = areaRatio
+            )
+        }
+
+        fun probeUltraHighResCapability(chars: CameraCharacteristics): UltraHighResSensorCapability {
+            val capabilities = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+            val defaultMap = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            val maxResMap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP_MAXIMUM_RESOLUTION)
+            } else {
+                null
+            }
+            return evaluateUltraHighResCapability(
+                sdkInt = Build.VERSION.SDK_INT,
+                capabilities = capabilities,
+                defaultRawSizes = defaultMap?.getOutputSizes(ImageFormat.RAW_SENSOR),
+                maxResRawSizes = maxResMap?.getOutputSizes(ImageFormat.RAW_SENSOR)
+            )
         }
     }
 

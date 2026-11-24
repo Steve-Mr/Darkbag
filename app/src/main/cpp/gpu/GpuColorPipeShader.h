@@ -89,6 +89,7 @@ uniform vec2 uDistortionCenter; // normalized cx, cy in [0, 1]
 uniform float uDistortionFocalPx; // focal length in pixels
 uniform float uDistortionFitScale; // default 1.0
 uniform vec2 uImageSize; // width, height
+uniform float uZoomFactor;
 uniform float uPhysicalZoomFactor;
 
 in vec2 vTexCoord;
@@ -335,8 +336,64 @@ void main() {
     sampleTc = clamp(sampleTc, 0.0, 1.0);
 
     // 1. Fetch linear sensor RGB (Layout 1: unified RGBA16F float, Layout 0: planar 3-texture uint16)
+    // When digital zoom crop (> 1.001x) or geometric distortion warp is active, apply separable 4x4 Catmull-Rom
+    // resampling with inner-2x2 anti-ringing clamp in linear sensor light prior to LSC / WB / CCM.
     float rawR, rawG, rawB;
-    if (uInputLayout == 1) {
+    if (uZoomFactor > 1.001 || uDistortionMode == 1) {
+        vec2 imgSize = max(uImageSize, vec2(1.0));
+        vec2 p = clamp(sampleTc * imgSize - 0.5, vec2(0.0), imgSize - 1.0);
+        ivec2 base = ivec2(floor(p));
+        vec2 f = p - vec2(base);
+        vec2 f2 = f * f;
+        vec2 f3 = f2 * f;
+
+        vec4 wx = vec4(
+            -0.5 * f.x + f2.x - 0.5 * f3.x,
+             1.0 - 2.5 * f2.x + 1.5 * f3.x,
+             0.5 * f.x + 2.0 * f2.x - 1.5 * f3.x,
+            -0.5 * f2.x + 0.5 * f3.x
+        );
+        vec4 wy = vec4(
+            -0.5 * f.y + f2.y - 0.5 * f3.y,
+             1.0 - 2.5 * f2.y + 1.5 * f3.y,
+             0.5 * f.y + 2.0 * f2.y - 1.5 * f3.y,
+            -0.5 * f2.y + 0.5 * f3.y
+        );
+
+        ivec2 maxIdx = max(ivec2(0), ivec2(imgSize) - 1);
+        vec3 min2 = vec3(1e9);
+        vec3 max2 = vec3(-1e9);
+        vec3 sum = vec3(0.0);
+
+        for (int j = 0; j < 4; ++j) {
+            int cy = clamp(base.y + j - 1, 0, maxIdx.y);
+            vec3 rowSum = vec3(0.0);
+            for (int i = 0; i < 4; ++i) {
+                int cx = clamp(base.x + i - 1, 0, maxIdx.x);
+                ivec2 cc = ivec2(cx, cy);
+                vec3 s;
+                if (uInputLayout == 1) {
+                    s = texelFetch(uTexUnifiedRgb, cc, 0).rgb;
+                } else {
+                    s = vec3(
+                        float(texelFetch(uTexR, cc, 0).r),
+                        float(texelFetch(uTexG, cc, 0).r),
+                        float(texelFetch(uTexB, cc, 0).r)
+                    ) * (1.0 / 65535.0);
+                }
+                rowSum += wx[i] * s;
+                if ((i == 1 || i == 2) && (j == 1 || j == 2)) {
+                    min2 = min(min2, s);
+                    max2 = max(max2, s);
+                }
+            }
+            sum += wy[j] * rowSum;
+        }
+        vec3 cr = clamp(sum, min2, max2);
+        rawR = cr.r;
+        rawG = cr.g;
+        rawB = cr.b;
+    } else if (uInputLayout == 1) {
         vec4 rawRgba = texture(uTexUnifiedRgb, sampleTc);
         rawR = rawRgba.r;
         rawG = rawRgba.g;
@@ -351,8 +408,10 @@ void main() {
         vec2 lscTc = vLscTexCoord;
         if (uDistortionMode != 0) {
             lscTc = sampleTc;
-            if (uPhysicalZoomFactor > 1.001) {
-                lscTc = (lscTc - 0.5) / uPhysicalZoomFactor + 0.5;
+            float effZoom = (uZoomFactor > 1.001) ? uZoomFactor : 1.0;
+            float effPhys = (uPhysicalZoomFactor > 1.001) ? uPhysicalZoomFactor : 1.0;
+            if (effPhys > effZoom + 0.001) {
+                lscTc = (lscTc - 0.5) * (effZoom / effPhys) + 0.5;
             }
         }
         vec4 lscGain = texture(uTexLsc, lscTc);

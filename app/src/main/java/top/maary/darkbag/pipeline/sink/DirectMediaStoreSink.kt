@@ -97,7 +97,7 @@ class DirectMediaStoreSink(
                         dngPath = if (spec.saveRaw) dngPathToUse else null,
                         jpgPath = null,
                         targetUri = targetUriStr,
-                        zoomFactor = spec.zoomFactor,
+                        zoomFactor = spec.persistedZoomFactor,
                         orientation = spec.orientation,
                         saveJpg = true
                     )
@@ -138,7 +138,7 @@ class DirectMediaStoreSink(
                         dngPath = dngPathToUse,
                         jpgPath = null,
                         targetUri = targetUriStr,
-                        zoomFactor = spec.zoomFactor,
+                        zoomFactor = spec.persistedZoomFactor,
                         orientation = spec.orientation,
                         saveJpg = false
                     )
@@ -169,7 +169,7 @@ class DirectMediaStoreSink(
                 inputBitmap = null,
                 bmpPath = if (needsSecondaryJpg) spec.fullResJpgPath else null,
                 rotationDegrees = 0,
-                zoomFactor = spec.zoomFactor,
+                zoomFactor = spec.persistedZoomFactor,
                 baseName = spec.baseName,
                 linearDngPath = if (needsSecondaryRaw) dngPathToUse else null,
                 saveJpg = needsSecondaryJpg,

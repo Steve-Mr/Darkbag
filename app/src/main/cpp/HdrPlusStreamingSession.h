@@ -23,6 +23,7 @@ struct SharedCaptureResult {
     std::vector<uint16_t> rgbBuf;   // width * height * 3 (Linear RGB)
     std::vector<double> noiseProfile;
     bool isZoomCropped = false;
+    float zoomFactor = 1.0f;
     bool isWhiteBalanceApplied = false;
 
     GLuint gpuRgbTexture = 0;

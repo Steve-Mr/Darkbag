@@ -1,14 +1,22 @@
 #include "SabreEngine.h"
-#include <android/log.h>
 #include <omp.h>
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#include <tuple>
 
+#ifdef __ANDROID__
+#include <android/log.h>
 #define TAG "SabreEngine"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+#else
+#include <cstdio>
+#define LOGD(...) do {} while (0)
+#define LOGW(...) do {} while (0)
+#define LOGE(...) do {} while (0)
+#endif
 
 namespace darkbag {
 namespace sabre {
@@ -118,23 +126,45 @@ void SabreEngine::computeStructureTensorAndCovariance() {
         }
     }
 
-    // 2. Compute Structure Tensor J and Anisotropic Steering Covariance Matrix Omega
+    // 2. Compute 3x3 Gaussian-integrated Structure Tensor J and SNR-gated Anisotropic Steering Covariance
+    const float wl = std::max(1.0f, static_cast<float>(m_config.whiteLevel));
+    const float dnNoiseS = m_config.noiseModelS * wl;
+    const float dnNoiseO = m_config.noiseModelO * (wl * wl);
+    const float tZoom = clampf((m_config.zoomFactor - 1.05f) / (2.0f - 1.05f), 0.0f, 1.0f);
+    const float zoomT = tZoom * tZoom * (3.0f - 2.0f * tZoom);
+    const float sigma0 = 0.58f + (0.50f - 0.58f) * zoomT;
+    const float kTan = 1.8f + (1.6f - 1.8f) * zoomT;
+    const float kNorm = 0.9f + (0.65f - 0.9f) * zoomT;
+
+    auto quadGrad = [&](int px, int py) -> std::pair<float, float> {
+        const int x = std::clamp(px, 0, m_quadWidth - 1);
+        const int y = std::clamp(py, 0, m_quadHeight - 1);
+        const int xm = std::max(0, x - 1);
+        const int xp = std::min(m_quadWidth - 1, x + 1);
+        const int ym = std::max(0, y - 1);
+        const int yp = std::min(m_quadHeight - 1, y + 1);
+        const float gx = 0.5f * (greenQuad[y * m_quadWidth + xp] - greenQuad[y * m_quadWidth + xm]);
+        const float gy = 0.5f * (greenQuad[yp * m_quadWidth + x] - greenQuad[ym * m_quadWidth + x]);
+        return {gx, gy};
+    };
+
     #pragma omp parallel for schedule(dynamic, 16)
     for (int qy = 0; qy < m_quadHeight; ++qy) {
         for (int qx = 0; qx < m_quadWidth; ++qx) {
-            // Central difference gradient in quad coordinates
-            int qx_m = std::max(0, qx - 1);
-            int qx_p = std::min(m_quadWidth - 1, qx + 1);
-            int qy_m = std::max(0, qy - 1);
-            int qy_p = std::min(m_quadHeight - 1, qy + 1);
-
-            float gx = 0.5f * (greenQuad[qy * m_quadWidth + qx_p] - greenQuad[qy * m_quadWidth + qx_m]);
-            float gy = 0.5f * (greenQuad[qy_p * m_quadWidth + qx] - greenQuad[qy_m * m_quadWidth + qx]);
-
-            // Structure tensor components
-            float jxx = gx * gx;
-            float jyy = gy * gy;
-            float jxy = gx * gy;
+            float jxx = 0.0f;
+            float jyy = 0.0f;
+            float jxy = 0.0f;
+            for (int dy = -1; dy <= 1; ++dy) {
+                const float wy = (dy == 0) ? 2.0f : 1.0f;
+                for (int dx = -1; dx <= 1; ++dx) {
+                    const float wx = (dx == 0) ? 2.0f : 1.0f;
+                    const float w = (wx * wy) * 0.0625f;
+                    auto [gx, gy] = quadGrad(qx + dx, qy + dy);
+                    jxx += w * gx * gx;
+                    jyy += w * gy * gy;
+                    jxy += w * gx * gy;
+                }
+            }
 
             // Eigenvalue decomposition
             float trace = jxx + jyy;
@@ -159,17 +189,18 @@ void SabreEngine::computeStructureTensorAndCovariance() {
             float e2x = -e1y;
             float e2y = e1x;
 
+            // DN-scaled SNR gating suppresses flat-region noise false anisotropy
+            float lumaC = greenQuad[qy * m_quadWidth + qx];
+            float sigmaSq = std::max(1e-6f, dnNoiseS * std::max(lumaC, 0.0f) + dnNoiseO);
+            float snrGate = trace / (trace + 4.0f * sigmaSq);
+
             // Coherence in [0, 1]
             float s1 = std::sqrt(std::max(0.0f, lambda1));
             float s2 = std::sqrt(std::max(0.0f, lambda2));
-            float coherence = (s1 - s2) / (s1 + s2 + 1e-5f);
-            coherence = clampf(coherence, 0.0f, 1.0f);
+            float coherence = clampf(((s1 - s2) / (s1 + s2 + 1e-5f)) * snrGate, 0.0f, 1.0f);
 
-            // Anisotropic steering kernel radii (in quad pixel units)
-            // Base radius sigma0 ~ 0.85 quad pixels
-            const float sigma0 = 0.85f;
-            float sigma_tangent = sigma0 * (1.0f + 1.8f * coherence);  // Elongate along edge
-            float sigma_normal  = sigma0 / (1.0f + 0.8f * coherence);  // Narrow across edge
+            float sigma_tangent = sigma0 * (1.0f + kTan * coherence);  // Elongate along edge
+            float sigma_normal  = sigma0 / (1.0f + kNorm * coherence); // Narrow across edge
 
             float inv_s1_sq = 1.0f / (sigma_normal * sigma_normal);
             float inv_s2_sq = 1.0f / (sigma_tangent * sigma_tangent);
@@ -200,7 +231,10 @@ bool SabreEngine::accumulateFrame(
     const float* flowX,
     const float* flowY,
     int flowWidth,
-    int flowHeight
+    int flowHeight,
+    int flowOriginX,
+    int flowOriginY,
+    int flowTileStep
 ) {
     if (!altBayer) return false;
 
@@ -209,7 +243,7 @@ bool SabreEngine::accumulateFrame(
     const float noiseS = m_config.noiseModelS * wl;
     const float noiseO = m_config.noiseModelO * (wl * wl);
     const bool isRef = (m_framesAccumulated == 0);
-    const float kernelRadius = std::max(1.5f, m_config.zoomFactor * 1.25f);
+    const float kernelRadius = std::max(1.6f, m_config.zoomFactor * 1.6f);
     const float kernelRadiusSq = kernelRadius * kernelRadius;
 
     // Bounding box of crop in sensor pixels (with 2px margin)
@@ -225,9 +259,13 @@ bool SabreEngine::accumulateFrame(
             float dy = 0.0f;
 
             if (!isRef && flowX && flowY && flowWidth > 0 && flowHeight > 0) {
-                // Bilinear interpolation across neighboring tile flow vectors
-                float fx = (static_cast<float>(x) / m_width) * flowWidth - 0.5f;
-                float fy = (static_cast<float>(y) / m_height) * flowHeight - 0.5f;
+                // Bilinear interpolation across neighboring tile flow vectors (ROI-mapped when flowTileStep > 0)
+                float fx = (flowTileStep > 0)
+                    ? ((static_cast<float>(x) - static_cast<float>(flowOriginX)) / static_cast<float>(flowTileStep) - 0.5f)
+                    : ((static_cast<float>(x) / m_width) * flowWidth - 0.5f);
+                float fy = (flowTileStep > 0)
+                    ? ((static_cast<float>(y) - static_cast<float>(flowOriginY)) / static_cast<float>(flowTileStep) - 0.5f)
+                    : ((static_cast<float>(y) / m_height) * flowHeight - 0.5f);
                 float fx_c = std::clamp(fx, 0.0f, static_cast<float>(std::max(0, flowWidth - 1)));
                 float fy_c = std::clamp(fy, 0.0f, static_cast<float>(std::max(0, flowHeight - 1)));
                 int x0 = static_cast<int>(std::floor(fx_c));
@@ -266,13 +304,26 @@ bool SabreEngine::accumulateFrame(
 
             if (itx_min > itx_max || ity_min > ity_max) continue;
 
-            // Anisotropic steering matrix at quad location
-            int qx = std::clamp(static_cast<int>(sx * 0.5f), 0, m_quadWidth - 1);
-            int qy = std::clamp(static_cast<int>(sy * 0.5f), 0, m_quadHeight - 1);
-            size_t qidx = static_cast<size_t>(qy) * m_quadWidth + qx;
-            float oxx = m_covXX[qidx];
-            float oyy = m_covYY[qidx];
-            float oxy = m_covXY[qidx];
+            // Bilinear interpolation of anisotropic steering matrix in quad space
+            float qxf = std::clamp(sx * 0.5f - 0.25f, 0.0f, static_cast<float>(std::max(0, m_quadWidth - 1)));
+            float qyf = std::clamp(sy * 0.5f - 0.25f, 0.0f, static_cast<float>(std::max(0, m_quadHeight - 1)));
+            int qx0 = static_cast<int>(std::floor(qxf));
+            int qy0 = static_cast<int>(std::floor(qyf));
+            int qx1 = std::min(qx0 + 1, std::max(0, m_quadWidth - 1));
+            int qy1 = std::min(qy0 + 1, std::max(0, m_quadHeight - 1));
+            float qwx = qxf - static_cast<float>(qx0);
+            float qwy = qyf - static_cast<float>(qy0);
+            auto lerpCov = [&](const std::vector<float>& buf) -> float {
+                float v00 = buf[static_cast<size_t>(qy0) * m_quadWidth + qx0];
+                float v10 = buf[static_cast<size_t>(qy0) * m_quadWidth + qx1];
+                float v01 = buf[static_cast<size_t>(qy1) * m_quadWidth + qx0];
+                float v11 = buf[static_cast<size_t>(qy1) * m_quadWidth + qx1];
+                return (v00 * (1.0f - qwx) + v10 * qwx) * (1.0f - qwy) +
+                       (v01 * (1.0f - qwx) + v11 * qwx) * qwy;
+            };
+            float oxx = lerpCov(m_covXX);
+            float oyy = lerpCov(m_covYY);
+            float oxy = lerpCov(m_covXY);
 
             // Bayer channel for this sample
             int channel = getBayerChannel(x, y);
@@ -317,9 +368,30 @@ bool SabreEngine::accumulateFrame(
                 float var_spatial = (count > 0) ? (sumSqDiff / static_cast<float>(count)) : 0.0f;
 
                 const float eps = 1e-4f;
-                float var_noise = std::max(0.0f, noiseS * mean_ref + noiseO);
-                float var_total = 0.15f * var_spatial + std::max(var_noise, 16.0f) + eps;
-                float diffVal = rawVal - mean_ref;
+                const int maxKx = std::max(0, (m_width - 1 - px) >> 1);
+                const int maxKy = std::max(0, (m_height - 1 - py) >> 1);
+                const float lkX = std::clamp((sx - static_cast<float>(px)) * 0.5f, 0.0f, static_cast<float>(maxKx));
+                const float lkY = std::clamp((sy - static_cast<float>(py)) * 0.5f, 0.0f, static_cast<float>(maxKy));
+                const int kx0 = static_cast<int>(std::floor(lkX));
+                const int ky0 = static_cast<int>(std::floor(lkY));
+                const int kx1 = std::min(kx0 + 1, maxKx);
+                const int ky1 = std::min(ky0 + 1, maxKy);
+                const float kfx = lkX - static_cast<float>(kx0);
+                const float kfy = lkY - static_cast<float>(ky0);
+                const int sx0_r = px + (kx0 << 1);
+                const int sx1_r = px + (kx1 << 1);
+                const int sy0_r = py + (ky0 << 1);
+                const int sy1_r = py + (ky1 << 1);
+                const float r00 = static_cast<float>(m_refBayer[static_cast<size_t>(sy0_r) * m_width + sx0_r]);
+                const float r10 = static_cast<float>(m_refBayer[static_cast<size_t>(sy0_r) * m_width + sx1_r]);
+                const float r01 = static_cast<float>(m_refBayer[static_cast<size_t>(sy1_r) * m_width + sx0_r]);
+                const float r11 = static_cast<float>(m_refBayer[static_cast<size_t>(sy1_r) * m_width + sx1_r]);
+                const float refPred = (r00 * (1.0f - kfx) + r10 * kfx) * (1.0f - kfy) +
+                                      (r01 * (1.0f - kfx) + r11 * kfx) * kfy;
+
+                float var_noise = std::max(0.0f, noiseS * std::max(refPred, 0.0f) + noiseO);
+                float var_total = 0.75f * var_spatial + std::max(var_noise, 16.0f) + eps;
+                float diffVal = rawVal - refPred;
                 float distSq = (diffVal * diffVal) / var_total;
 
                 w_motion = std::exp(-std::max(0.0f, distSq - 2.5f) * 0.75f);
@@ -394,10 +466,6 @@ bool SabreEngine::resolve(uint16_t* outRgb, uint16_t* outBayer) {
     const float bl_g = 0.5f * (static_cast<float>(m_config.blackLevel[1]) + static_cast<float>(m_config.blackLevel[2]));
     const float bl_b = static_cast<float>(m_config.blackLevel[3]);
 
-    const float scale_r = 65535.0f / std::max(1.0f, wl - bl_r);
-    const float scale_g = 65535.0f / std::max(1.0f, wl - bl_g);
-    const float scale_b = 65535.0f / std::max(1.0f, wl - bl_b);
-
     // Temporary normalized RGB buffers
     std::vector<float> normR(m_numPixels);
     std::vector<float> normG(m_numPixels);
@@ -406,15 +474,103 @@ bool SabreEngine::resolve(uint16_t* outRgb, uint16_t* outBayer) {
     // 1. Initial dehomogenization / channel normalization
     #pragma omp parallel for schedule(static)
     for (size_t i = 0; i < m_numPixels; ++i) {
-        normR[i] = m_accumR[i] / std::max(0.001f, m_weightR[i]);
-        normG[i] = m_accumG[i] / std::max(0.001f, m_weightG[i]);
-        normB[i] = m_accumB[i] / std::max(0.001f, m_weightB[i]);
+        normR[i] = (m_weightR[i] > 0.0001f) ? (m_accumR[i] / m_weightR[i]) : bl_r;
+        normG[i] = (m_weightG[i] > 0.0001f) ? (m_accumG[i] / m_weightG[i]) : bl_g;
+        normB[i] = (m_weightB[i] > 0.0001f) ? (m_accumB[i] / m_weightB[i]) : bl_b;
     }
 
-    // 2. Cross-Channel Guided Chrominance Filtering
-    // Green channel has high spatial density and high SNR.
-    // Filter chroma differences (R - G) and (B - G) guided by Green gradients
-    // to fill in sparse chroma sites and suppress chromatic aberration.
+    auto clampBayerCoord = [&](int x, int y) -> std::pair<int, int> {
+        if (x < 0) {
+            x = (x & 1) ? 1 : 0;
+        } else if (x >= m_width) {
+            int rem = x & 1;
+            int lastRem = (m_width - 1) & 1;
+            x = (rem == lastRem) ? (m_width - 1) : (m_width - 2);
+        }
+        if (y < 0) {
+            y = (y & 1) ? 1 : 0;
+        } else if (y >= m_height) {
+            int rem = y & 1;
+            int lastRem = (m_height - 1) & 1;
+            y = (rem == lastRem) ? (m_height - 1) : (m_height - 2);
+        }
+        return {std::clamp(x, 0, m_width - 1), std::clamp(y, 0, m_height - 1)};
+    };
+
+    auto sampleRef = [&](int x, int y) -> float {
+        auto [cx, cy] = clampBayerCoord(x, y);
+        return static_cast<float>(m_refBayer[static_cast<size_t>(cy) * m_width + cx]);
+    };
+
+    auto computeRcdPrior = [&](int x, int y) -> std::tuple<float, float, float> {
+        const float refVal = sampleRef(x, y);
+        const int refChan = getBayerChannel(x, y);
+        if (refChan == 1) {
+            const int hChan = getBayerChannel(x + 1, y);
+            const float h0 = sampleRef(x - 1, y), h1 = sampleRef(x + 1, y);
+            const float gH0 = sampleRef(x - 2, y), gH1 = sampleRef(x + 2, y);
+            const float v0 = sampleRef(x, y - 1), v1 = sampleRef(x, y + 1);
+            const float gV0 = sampleRef(x, y - 2), gV1 = sampleRef(x, y + 2);
+            const float estH = 0.5f * (h0 + h1) + 0.25f * (2.0f * refVal - gH0 - gH1);
+            const float estV = 0.5f * (v0 + v1) + 0.25f * (2.0f * refVal - gV0 - gV1);
+            return (hChan == 0) ? std::make_tuple(estH, refVal, estV)
+                                : std::make_tuple(estV, refVal, estH);
+        }
+        const float gW = sampleRef(x - 1, y), gE = sampleRef(x + 1, y);
+        const float gN = sampleRef(x, y - 1), gS = sampleRef(x, y + 1);
+        const float cW2 = sampleRef(x - 2, y), cE2 = sampleRef(x + 2, y);
+        const float cN2 = sampleRef(x, y - 2), cS2 = sampleRef(x, y + 2);
+
+        const float estGH = 0.5f * (gW + gE) + 0.25f * (2.0f * refVal - cW2 - cE2);
+        const float gradH = std::abs(gW - gE) + std::abs(2.0f * refVal - cW2 - cE2);
+        const float estGV = 0.5f * (gN + gS) + 0.25f * (2.0f * refVal - cN2 - cS2);
+        const float gradV = std::abs(gN - gS) + std::abs(2.0f * refVal - cN2 - cS2);
+        const float wH = 1.0f / (1.0f + gradH);
+        const float wV = 1.0f / (1.0f + gradV);
+        const float priorG = (wH * estGH + wV * estGV) / std::max(wH + wV, 1e-6f);
+
+        const float opNW = sampleRef(x - 1, y - 1), opNE = sampleRef(x + 1, y - 1);
+        const float opSW = sampleRef(x - 1, y + 1), opSE = sampleRef(x + 1, y + 1);
+        const float diffNW = opNW - 0.5f * (gW + gN), diffNE = opNE - 0.5f * (gE + gN);
+        const float diffSW = opSW - 0.5f * (gW + gS), diffSE = opSE - 0.5f * (gE + gS);
+        const float gradP = std::abs(opNW - opSE) + std::abs(0.5f * (gW + gN) - 0.5f * (gE + gS));
+        const float gradQ = std::abs(opNE - opSW) + std::abs(0.5f * (gE + gN) - 0.5f * (gW + gS));
+        const float wP = 1.0f / (1.0f + gradP);
+        const float wQ = 1.0f / (1.0f + gradQ);
+        const float oppVal = priorG + (wP * 0.5f * (diffNW + diffSE) + wQ * 0.5f * (diffNE + diffSW)) / std::max(wP + wQ, 1e-6f);
+        return (refChan == 0) ? std::make_tuple(refVal, priorG, oppVal)
+                              : std::make_tuple(oppVal, priorG, refVal);
+    };
+
+    auto sampleZoomedRcdPrior = [&](int outX, int outY) -> std::tuple<float, float, float> {
+        if (m_config.zoomFactor <= 1.05f) {
+            return computeRcdPrior(outX, outY);
+        }
+        const float sx = std::clamp(static_cast<float>(outX) / m_config.zoomFactor + m_cropXStart, 0.0f, static_cast<float>(m_width - 1));
+        const float sy = std::clamp(static_cast<float>(outY) / m_config.zoomFactor + m_cropYStart, 0.0f, static_cast<float>(m_height - 1));
+        const int x0 = static_cast<int>(std::floor(sx));
+        const int y0 = static_cast<int>(std::floor(sy));
+        const int x1 = std::min(x0 + 1, m_width - 1);
+        const int y1 = std::min(y0 + 1, m_height - 1);
+        const float wx = sx - static_cast<float>(x0);
+        const float wy = sy - static_cast<float>(y0);
+        auto [r00, g00, b00] = computeRcdPrior(x0, y0);
+        auto [r10, g10, b10] = computeRcdPrior(x1, y0);
+        auto [r01, g01, b01] = computeRcdPrior(x0, y1);
+        auto [r11, g11, b11] = computeRcdPrior(x1, y1);
+        auto bilerp = [&](float c00, float c10, float c01, float c11) {
+            return (c00 * (1.0f - wx) + c10 * wx) * (1.0f - wy) + (c01 * (1.0f - wx) + c11 * wx) * wy;
+        };
+        return {bilerp(r00, r10, r01, r11), bilerp(g00, g10, g01, g11), bilerp(b00, b10, b01, b11)};
+    };
+
+    const float normScaleR = 1.0f / std::max(1.0f, wl - bl_r);
+    const float normScaleG = 1.0f / std::max(1.0f, wl - bl_g);
+    const float normScaleB = 1.0f / std::max(1.0f, wl - bl_b);
+
+    std::vector<float> linR(m_numPixels), linG(m_numPixels), linB(m_numPixels);
+
+    // 2. Continuous Zoom-Mapped RCD Prior & Green-Guided Chroma Difference Fusion
     #pragma omp parallel for schedule(dynamic, 16)
     for (int y = 0; y < m_height; ++y) {
         for (int x = 0; x < m_width; ++x) {
@@ -429,56 +585,103 @@ bool SabreEngine::resolve(uint16_t* outRgb, uint16_t* outBayer) {
             float gOut = gCenter;
             float bOut = normB[idx];
 
-            // If R or B weight is insufficient, use local guided color difference
-            if (wr < 0.25f || wb < 0.25f) {
-                float sumDiffR = 0.0f, sumWeightR = 0.0f;
-                float sumDiffB = 0.0f, sumWeightB = 0.0f;
+            if (!m_refBayer.empty() && (wr < 1.0f || wg < 1.0f || wb < 1.0f)) {
+                auto [pr, pg, pb] = sampleZoomedRcdPrior(x, y);
+                pr = clampf(pr, bl_r, wl);
+                pg = clampf(pg, bl_g, wl);
+                pb = clampf(pb, bl_b, wl);
 
-                for (int dy = -2; dy <= 2; ++dy) {
-                    int ny = std::clamp(y + dy, 0, m_height - 1);
-                    for (int dx = -2; dx <= 2; ++dx) {
-                        int nx = std::clamp(x + dx, 0, m_width - 1);
-                        size_t nidx = static_cast<size_t>(ny) * m_width + nx;
+                const float greenTrust = clampf((wg - 0.1f) / 0.5f, 0.0f, 1.0f);
+                const float chromaPriorR = clampf(gCenter + (pr - pg), bl_r, wl);
+                const float chromaPriorB = clampf(gCenter + (pb - pg), bl_b, wl);
+                const float effPriorR = pr * (1.0f - greenTrust) + chromaPriorR * greenTrust;
+                const float effPriorB = pb * (1.0f - greenTrust) + chromaPriorB * greenTrust;
 
-                        float gNeighbor = normG[nidx];
-                        float guideWeight = 1.0f / (1.0f + std::abs(gNeighbor - gCenter) * 0.05f);
+                const float confR = clampf(wr, 0.0f, 1.0f);
+                const float confG = clampf(wg, 0.0f, 1.0f);
+                const float confB = clampf(wb, 0.0f, 1.0f);
 
-                        if (m_weightR[nidx] > 0.05f) {
-                            sumDiffR += guideWeight * (normR[nidx] - gNeighbor);
-                            sumWeightR += guideWeight;
-                        }
-                        if (m_weightB[nidx] > 0.05f) {
-                            sumDiffB += guideWeight * (normB[nidx] - gNeighbor);
-                            sumWeightB += guideWeight;
-                        }
+                rOut = effPriorR * (1.0f - confR) + normR[idx] * confR;
+                gOut = pg * (1.0f - confG) + normG[idx] * confG;
+                bOut = effPriorB * (1.0f - confB) + normB[idx] * confB;
+            }
+
+            linR[idx] = clampf((rOut - bl_r) * normScaleR, 0.0f, 1.0f);
+            linG[idx] = clampf((gOut - bl_g) * normScaleG, 0.0f, 1.0f);
+            linB[idx] = clampf((bOut - bl_b) * normScaleB, 0.0f, 1.0f);
+        }
+    }
+
+    // 3. Optional Zoom-Aware Multi-Scale Physical MTF Restoration (matching GPU Pass 4)
+    const float baseSharpen = (m_config.sharpenStrength > 0.0f) ? m_config.sharpenStrength : 0.0f;
+    const float baseCoring = (m_config.coringThreshold > 0.0f) ? m_config.coringThreshold : 2.0f;
+    const float tZoomMtf = clampf((m_config.zoomFactor - 1.05f) / (2.0f - 1.05f), 0.0f, 1.0f);
+    const float zoomMtf = tZoomMtf * tZoomMtf * (3.0f - 2.0f * tZoomMtf);
+    const float effStrength = baseSharpen * (1.0f + 0.25f * zoomMtf);
+    const float effCoring = baseCoring * (1.0f + 0.20f * zoomMtf);
+
+    #pragma omp parallel for schedule(dynamic, 16)
+    for (int y = 0; y < m_height; ++y) {
+        for (int x = 0; x < m_width; ++x) {
+            size_t idx = static_cast<size_t>(y) * m_width + x;
+            float rN = linR[idx];
+            float gN = linG[idx];
+            float bN = linB[idx];
+
+            if (effStrength > 0.0f) {
+                auto lumaAt = [&](int lx, int ly) -> float {
+                    size_t nidx = static_cast<size_t>(std::clamp(ly, 0, m_height - 1)) * m_width +
+                                  std::clamp(lx, 0, m_width - 1);
+                    return 0.2126f * linR[nidx] + 0.7152f * linG[nidx] + 0.0722f * linB[nidx];
+                };
+                const float Y = 0.2126f * rN + 0.7152f * gN + 0.0722f * bN;
+                float yBlurFine = 0.0f, yBlurMid = 0.0f, yMin = Y, yMax = Y;
+                for (int dy = -1; dy <= 1; ++dy) {
+                    const float wy = (dy == 0) ? 2.0f : 1.0f;
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        const float wx = (dx == 0) ? 2.0f : 1.0f;
+                        const float w = (wx * wy) * 0.0625f;
+                        const float yf = lumaAt(x + dx, y + dy);
+                        yBlurFine += w * yf;
+                        yMin = std::min(yMin, yf);
+                        yMax = std::max(yMax, yf);
+                        yBlurMid += w * lumaAt(x + dx * 2, y + dy * 2);
                     }
                 }
-
-                if (wr < 0.25f) {
-                    if (sumWeightR > 0.0f) {
-                        rOut = clampf(gCenter + sumDiffR / sumWeightR, bl_r, static_cast<float>(whiteLevel));
-                    } else {
-                        rOut = bl_r + std::max(0.0f, gOut - bl_g);
-                    }
-                }
-                if (wb < 0.25f) {
-                    if (sumWeightB > 0.0f) {
-                        bOut = clampf(gCenter + sumDiffB / sumWeightB, bl_b, static_cast<float>(whiteLevel));
-                    } else {
-                        bOut = bl_b + std::max(0.0f, gOut - bl_g);
-                    }
-                }
+                const float deltaYFine = Y - yBlurFine;
+                const float deltaYMid = Y - yBlurMid;
+                const float deltaY = deltaYFine * (1.0f - zoomMtf) + (0.65f * deltaYFine + 0.35f * deltaYMid) * zoomMtf;
+                const float sigma = std::sqrt(std::max(1e-7f, m_config.noiseModelS * Y + m_config.noiseModelO));
+                const float sgn = (deltaY >= 0.0f) ? 1.0f : -1.0f;
+                const float deltaYCored = sgn * std::max(0.0f, std::abs(deltaY) - effCoring * sigma);
+                const float deltaYSq = deltaY * deltaY;
+                const float gain = deltaYSq / (deltaYSq + sigma * sigma + 1e-6f);
+                const float haloMargin = 0.35f * (yMax - yMin);
+                const float yNew = clampf(Y + effStrength * gain * deltaYCored,
+                                          std::max(0.0f, yMin - haloMargin),
+                                          std::min(1.0f, yMax + haloMargin));
+                const float factor = yNew / std::max(1e-4f, Y);
+                rN = clampf(rN * factor, 0.0f, 1.0f);
+                gN = clampf(gN * factor, 0.0f, 1.0f);
+                bN = clampf(bN * factor, 0.0f, 1.0f);
             }
 
             // Pack planar RGB: channel 0 = R, channel 1 = G, channel 2 = B
-            outRgb[idx]                          = static_cast<uint16_t>(clampf((rOut - bl_r) * scale_r, 0.0f, 65535.0f));
-            outRgb[m_numPixels + idx]            = static_cast<uint16_t>(clampf((gOut - bl_g) * scale_g, 0.0f, 65535.0f));
-            outRgb[2 * m_numPixels + idx]        = static_cast<uint16_t>(clampf((bOut - bl_b) * scale_b, 0.0f, 65535.0f));
+            outRgb[idx]                   = static_cast<uint16_t>(clampf(rN * 65535.0f + 0.5f, 0.0f, 65535.0f));
+            outRgb[m_numPixels + idx]     = static_cast<uint16_t>(clampf(gN * 65535.0f + 0.5f, 0.0f, 65535.0f));
+            outRgb[2 * m_numPixels + idx] = static_cast<uint16_t>(clampf(bN * 65535.0f + 0.5f, 0.0f, 65535.0f));
 
             if (outBayer) {
-                int c = getBayerChannel(x, y);
-                float val = (c == 0) ? rOut : ((c == 1) ? gOut : bOut);
-                outBayer[idx] = static_cast<uint16_t>(clampf(val, 0.0f, static_cast<float>(whiteLevel)));
+                int px = x & 1, py = y & 1;
+                int cfaCh = 1;
+                if (m_config.cfa == CfaPattern::RGGB) cfaCh = (py == 0) ? ((px == 0) ? 0 : 1) : ((px == 0) ? 2 : 3);
+                else if (m_config.cfa == CfaPattern::GRBG) cfaCh = (py == 0) ? ((px == 0) ? 1 : 0) : ((px == 0) ? 3 : 2);
+                else if (m_config.cfa == CfaPattern::GBRG) cfaCh = (py == 0) ? ((px == 0) ? 2 : 3) : ((px == 0) ? 0 : 1);
+                else cfaCh = (py == 0) ? ((px == 0) ? 3 : 2) : ((px == 0) ? 1 : 0);
+
+                float valN = (cfaCh == 0) ? rN : ((cfaCh == 3) ? bN : gN);
+                float bl = static_cast<float>(m_config.blackLevel[cfaCh]);
+                outBayer[idx] = static_cast<uint16_t>(clampf(valN * (wl - bl) + bl + 0.5f, 0.0f, wl));
             }
         }
     }

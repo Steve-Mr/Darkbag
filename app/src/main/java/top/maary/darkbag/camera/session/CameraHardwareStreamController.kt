@@ -247,7 +247,14 @@ class CameraHardwareStreamController(
         isPreviewStream: Boolean = false
     ) {
         applyFocusAndExposureSettingsToRequest(request, isHdrBurst, isPreviewStream)
-        env.sessionArbiter.applySingleCameraCropToRequest(request)
+        env.sessionArbiter.applySingleCameraCropToRequest(
+            builder = request,
+            hasUserAfRegion = env.runtimeState.focusMeteringRegion != null,
+            hasUserAeRegion = env.runtimeState.exposureMeteringRegion != null,
+            isManualFocus = env.runtimeState.isManualFocus,
+            isManualExposure = env.runtimeState.isManualExposure,
+            isManualWb = env.runtimeState.isManualWb
+        )
     }
 
     /** Adds/removes the RAW ring target without recreating the capture session. */

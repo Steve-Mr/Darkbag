@@ -6,6 +6,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.params.MeteringRectangle
 import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
@@ -135,7 +136,35 @@ class CameraSessionArbiter(
         }
     }
 
-    fun applySingleCameraCropToRequest(builder: CaptureRequest.Builder) {
+    internal data class CropMeteringPlan(
+        val afRegions: Array<MeteringRectangle>?,
+        val aeRegions: Array<MeteringRectangle>?,
+        val awbRegions: Array<MeteringRectangle>?
+    ) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is CropMeteringPlan) return false
+            return afRegions.contentEquals(other.afRegions) &&
+                aeRegions.contentEquals(other.aeRegions) &&
+                awbRegions.contentEquals(other.awbRegions)
+        }
+
+        override fun hashCode(): Int {
+            var result = afRegions?.contentHashCode() ?: 0
+            result = 31 * result + (aeRegions?.contentHashCode() ?: 0)
+            result = 31 * result + (awbRegions?.contentHashCode() ?: 0)
+            return result
+        }
+    }
+
+    fun applySingleCameraCropToRequest(
+        builder: CaptureRequest.Builder,
+        hasUserAfRegion: Boolean = state.focusMeteringRegion != null,
+        hasUserAeRegion: Boolean = state.exposureMeteringRegion != null,
+        isManualFocus: Boolean = state.isManualFocus,
+        isManualExposure: Boolean = state.isManualExposure,
+        isManualWb: Boolean = state.isManualWb
+    ) {
         val lens = state.currentLens ?: return
         if (!lens.useCamera2) return
         val deviceId = camera2Device?.id ?: lens.id
@@ -150,8 +179,78 @@ class CameraSessionArbiter(
             }
             val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
             builder.set(CaptureRequest.SCALER_CROP_REGION, computeCropRegion(activeArray, lens))
+
+            val maxAf = chars.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0
+            val maxAe = chars.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 0
+            val maxAwb = chars.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AWB) ?: 0
+            val meteringPlan = resolveCropMeteringPlan(
+                activeArray = activeArray,
+                lens = lens,
+                maxAfRegions = maxAf,
+                maxAeRegions = maxAe,
+                maxAwbRegions = maxAwb,
+                hasUserAfRegion = hasUserAfRegion,
+                hasUserAeRegion = hasUserAeRegion,
+                isManualFocus = isManualFocus,
+                isManualExposure = isManualExposure,
+                isManualWb = isManualWb
+            )
+            meteringPlan.afRegions?.let { builder.set(CaptureRequest.CONTROL_AF_REGIONS, it) }
+            meteringPlan.aeRegions?.let { builder.set(CaptureRequest.CONTROL_AE_REGIONS, it) }
+            meteringPlan.awbRegions?.let { builder.set(CaptureRequest.CONTROL_AWB_REGIONS, it) }
         } catch (_: Exception) {
             // Characteristics unavailable in headless/mock test environment
+        }
+    }
+
+    internal fun computeCropMeteringRect(activeArray: Rect, lens: LensInfo?): MeteringRectangle? {
+        val targetRatio = if (lens?.isZoomPreset == true && lens.targetZoomRatio != null) {
+            lens.targetZoomRatio!!
+        } else {
+            1.0f
+        }
+        if (targetRatio <= 1.05f || activeArray.width() <= 0 || activeArray.height() <= 0) {
+            return null
+        }
+        val cropRegion = computeCropRegion(activeArray, lens)
+        val rectW = (cropRegion.width() * 0.8f).toInt().coerceIn(1, activeArray.width())
+        val rectH = (cropRegion.height() * 0.8f).toInt().coerceIn(1, activeArray.height())
+        val maxLeft = (activeArray.right - rectW).coerceAtLeast(activeArray.left)
+        val maxTop = (activeArray.bottom - rectH).coerceAtLeast(activeArray.top)
+        val left = (cropRegion.centerX() - rectW / 2).coerceIn(activeArray.left, maxLeft)
+        val top = (cropRegion.centerY() - rectH / 2).coerceIn(activeArray.top, maxTop)
+        return MeteringRectangle(left, top, rectW, rectH, MeteringRectangle.METERING_WEIGHT_MAX)
+    }
+
+    internal fun resolveCropMeteringPlan(
+        activeArray: Rect,
+        lens: LensInfo?,
+        maxAfRegions: Int,
+        maxAeRegions: Int,
+        maxAwbRegions: Int,
+        hasUserAfRegion: Boolean,
+        hasUserAeRegion: Boolean,
+        isManualFocus: Boolean,
+        isManualExposure: Boolean,
+        isManualWb: Boolean
+    ): CropMeteringPlan {
+        val cropRect = computeCropMeteringRect(activeArray, lens)
+        return if (cropRect != null) {
+            CropMeteringPlan(
+                afRegions = if (!isManualFocus && !hasUserAfRegion && maxAfRegions > 0) arrayOf(cropRect) else null,
+                aeRegions = if (!isManualExposure && !hasUserAeRegion && maxAeRegions > 0) arrayOf(cropRect) else null,
+                awbRegions = if (!isManualWb && maxAwbRegions > 0) arrayOf(cropRect) else null
+            )
+        } else {
+            CropMeteringPlan(
+                afRegions = null,
+                aeRegions = null,
+                awbRegions = if (!isManualWb && maxAwbRegions > 0) {
+                    arrayOf(MeteringRectangle(0, 0, 0, 0, 0))
+                } else {
+                    null
+                }
+            )
         }
     }
 

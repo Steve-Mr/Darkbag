@@ -276,4 +276,28 @@ class CaptureTaskSpecTest {
         assertEquals(true, hwEmptyCalib.isUltraWide())
         assertEquals(0, hwEmptyCalib.getDistortionMode())
     }
+
+    @Test
+    fun testPersistedZoomFactor_ReturnsOneWhenOutputZoomBaked() {
+        val hw = HardwareProfile(cfaPattern = 0, whiteLevel = 1023)
+        val fm = CaptureFrameMetadata(captureMetadata = CaptureMetadata())
+        val rr = RenderRecipe()
+
+        val unbaked = CaptureTaskSpec(
+            taskId = "unbaked",
+            width = 4000,
+            height = 3000,
+            orientation = 0,
+            zoomFactor = 2.0f,
+            hardwareProfile = hw,
+            frameMetadata = fm,
+            renderRecipe = rr,
+            isOutputZoomBaked = false
+        )
+        assertEquals(2.0f, unbaked.persistedZoomFactor, 1e-4f)
+
+        val baked = unbaked.copy(isOutputZoomBaked = true)
+        assertEquals(2.0f, baked.zoomFactor, 1e-4f)
+        assertEquals(1.0f, baked.persistedZoomFactor, 1e-4f)
+    }
 }

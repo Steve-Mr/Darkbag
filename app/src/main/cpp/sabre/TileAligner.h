@@ -10,16 +10,15 @@ namespace sabre {
 /**
  * TileAligner -- Hierarchical Tile Block Matching Aligner for Sabre Super-Resolution.
  *
- * Implements a 3-level image pyramid (Level 0: W/2 x H/2, Level 1: W/4 x H/4, Level 2: W/8 x H/8)
+ * Implements a 3-level image pyramid (Level 0: roiW/2 x roiH/2, Level 1: roiW/4 x roiH/4, Level 2: roiW/8 x roiH/8)
  * using Bayer Quad fast grayscale downsampling L = (R + 2G + B) / 4.
  *
- * Hierarchical matching:
- * - Level 2 (4x4 tile): Coarse search [-4, +4] with OpenMP parallel SAD.
- * - Level 1 (8x8 tile): Neighborhood [-1, +1] around predicted 2 * (dx2, dy2).
- * - Level 0 (16x16 tile): Fine search [-1, +1] around predicted 2 * (dx1, dy1)
- *   followed by subpixel parabolic interpolation.
+ * When zoomFactor > 1.05x, pyramids are restricted to the centered sensor crop ROI
+ * (+ safety margin) to focus compute on the active field of view; for zoomFactor >= 1.35x,
+ * Level-0 tile size tightens from 16x16 quads (32px) to 8x8 quads (16px) for 4x denser flow,
+ * followed by same-phase green-channel Gauss-Newton subpixel refinement.
  *
- * Outputs flow vectors in sensor coordinates: (dx_sensor, dy_sensor) = 2.0 * (dx0 + dx_sub, dy0 + dy_sub).
+ * Outputs flow vectors in sensor coordinates: (dx_sensor, dy_sensor).
  */
 class TileAligner {
 public:
@@ -39,8 +38,9 @@ public:
      * @param width Sensor image width.
      * @param height Sensor image height.
      * @param cfaPattern CFA layout (0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR).
+     * @param zoomFactor Digital zoom factor (>= 1.0f) for ROI & dense tile sizing.
      */
-    void setReferenceFrame(const uint16_t* refBayer, int width, int height, int cfaPattern);
+    void setReferenceFrame(const uint16_t* refBayer, int width, int height, int cfaPattern, float zoomFactor = 1.0f);
 
     /**
      * Align an alternate frame against the reference frame.
@@ -65,14 +65,31 @@ public:
     int height() const { return m_height; }
     int tilesX() const { return m_tilesX; }
     int tilesY() const { return m_tilesY; }
+    int roiXStart() const { return m_roiXStart; }
+    int roiYStart() const { return m_roiYStart; }
+    int roiWidth() const { return m_roiWidth; }
+    int roiHeight() const { return m_roiHeight; }
+    int tileStepSensor() const { return m_tileStepSensor; }
+    float zoomFactor() const { return m_zoomFactor; }
 
 private:
     int m_width = 0;
     int m_height = 0;
     int m_cfaPattern = 0;
+    float m_zoomFactor = 1.0f;
     bool m_hasRefFrame = false;
 
-    // Pyramid dimensions (active image content)
+    // Centered ROI in full-sensor coordinates (even-aligned)
+    int m_roiXStart = 0;
+    int m_roiYStart = 0;
+    int m_roiWidth = 0;
+    int m_roiHeight = 0;
+
+    // Tile grid granularity (in Level-0 quad pixels and sensor pixels)
+    int m_tileSizeLvl0 = 16;
+    int m_tileStepSensor = 32;
+
+    // Pyramid dimensions (active ROI image content)
     int m_lvl0Width = 0;
     int m_lvl0Height = 0;
     int m_lvl1Width = 0;
@@ -91,6 +108,9 @@ private:
     int m_stride1 = 0;
     int m_stride2 = 0;
 
+    // Reference ROI Bayer copy for same-phase green subpixel Gauss-Newton refinement
+    std::vector<uint16_t> m_refRoiBayer;
+
     // Reference pyramids (with padding)
     std::vector<uint16_t> m_refLvl0;
     std::vector<uint16_t> m_refLvl1;
@@ -107,12 +127,17 @@ private:
     std::vector<int16_t> m_flowLvl1X;
     std::vector<int16_t> m_flowLvl1Y;
 
-    void allocateBuffers(int width, int height);
+    void allocateBuffers(int width, int height, float zoomFactor);
     void buildPyramid(
         const uint16_t* bayer,
         std::vector<uint16_t>& lvl0,
         std::vector<uint16_t>& lvl1,
         std::vector<uint16_t>& lvl2
+    );
+    void refineFlowSubpixelGreen(
+        const uint16_t* altBayer,
+        std::vector<float>& flowX,
+        std::vector<float>& flowY
     );
 };
 

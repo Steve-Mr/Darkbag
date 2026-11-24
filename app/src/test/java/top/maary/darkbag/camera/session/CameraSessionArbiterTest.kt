@@ -206,4 +206,125 @@ class CameraSessionArbiterTest {
         assertTrue(focusOnlyApplied)
         assertTrue(arbiter.requiresSessionRebind)
     }
+
+    @Test
+    fun testComputeCropMeteringRect_scalesCentered80PercentAndReturnsNullAt1x() {
+        val activeArray = Rect(0, 0, 4000, 3000)
+        val base1x = LensInfo(
+            id = "0",
+            physicalId = null,
+            sensorId = "0",
+            name = "24mm",
+            focalLength = 5.0f,
+            equivalentFocalLength = 24.0f,
+            multiplier = 1.0f,
+            type = LensType.WIDE,
+            facing = CameraCharacteristics.LENS_FACING_BACK,
+            isZoomPreset = false,
+            targetZoomRatio = 1.0f
+        )
+        val preset28mm = base1x.copy(name = "28mm", isZoomPreset = true, targetZoomRatio = 28f / 24f)
+        val preset2x = base1x.copy(name = "2x", isZoomPreset = true, targetZoomRatio = 2.0f)
+
+        assertNull(arbiter.computeCropMeteringRect(activeArray, base1x))
+
+        val rect28mm = arbiter.computeCropMeteringRect(activeArray, preset28mm)!!
+        val crop28mm = arbiter.computeCropRegion(activeArray, preset28mm)
+        assertEquals((crop28mm.width() * 0.8f).toInt(), rect28mm.width)
+        assertEquals((crop28mm.height() * 0.8f).toInt(), rect28mm.height)
+        assertEquals(activeArray.centerX(), rect28mm.rect.centerX())
+        assertEquals(activeArray.centerY(), rect28mm.rect.centerY())
+
+        val rect2x = arbiter.computeCropMeteringRect(activeArray, preset2x)!!
+        // 2x crop is 2000x1500 around (2000,1500); 80% is 1600x1200 -> [1200, 900, 2800, 2100]
+        assertEquals(Rect(1200, 900, 2800, 2100), rect2x.rect)
+        assertEquals(android.hardware.camera2.params.MeteringRectangle.METERING_WEIGHT_MAX, rect2x.meteringWeight)
+    }
+
+    @Test
+    fun testResolveCropMeteringPlan_respectsUserRegionsManualLocksAndResetsAwbAt1x() {
+        val activeArray = Rect(0, 0, 4000, 3000)
+        val base1x = LensInfo(
+            id = "0",
+            physicalId = null,
+            sensorId = "0",
+            name = "24mm",
+            focalLength = 5.0f,
+            equivalentFocalLength = 24.0f,
+            multiplier = 1.0f,
+            type = LensType.WIDE,
+            facing = CameraCharacteristics.LENS_FACING_BACK,
+            isZoomPreset = false,
+            targetZoomRatio = 1.0f
+        )
+        val preset2x = base1x.copy(name = "2x", isZoomPreset = true, targetZoomRatio = 2.0f)
+
+        // All auto at 2x -> AF, AE, AWB all centered on crop
+        val auto2x = arbiter.resolveCropMeteringPlan(
+            activeArray = activeArray,
+            lens = preset2x,
+            maxAfRegions = 1,
+            maxAeRegions = 1,
+            maxAwbRegions = 1,
+            hasUserAfRegion = false,
+            hasUserAeRegion = false,
+            isManualFocus = false,
+            isManualExposure = false,
+            isManualWb = false
+        )
+        assertEquals(Rect(1200, 900, 2800, 2100), auto2x.afRegions!!.single().rect)
+        assertEquals(Rect(1200, 900, 2800, 2100), auto2x.aeRegions!!.single().rect)
+        assertEquals(Rect(1200, 900, 2800, 2100), auto2x.awbRegions!!.single().rect)
+
+        // Touch-to-focus & manual WB active -> AF/AE left untouched (null), AWB left untouched (null)
+        val userAndManual2x = arbiter.resolveCropMeteringPlan(
+            activeArray = activeArray,
+            lens = preset2x,
+            maxAfRegions = 1,
+            maxAeRegions = 1,
+            maxAwbRegions = 1,
+            hasUserAfRegion = true,
+            hasUserAeRegion = true,
+            isManualFocus = false,
+            isManualExposure = false,
+            isManualWb = true
+        )
+        assertNull(userAndManual2x.afRegions)
+        assertNull(userAndManual2x.aeRegions)
+        assertNull(userAndManual2x.awbRegions)
+
+        // Manual focus + manual exposure, auto WB -> only AWB gets crop region
+        val manualAfAe2x = arbiter.resolveCropMeteringPlan(
+            activeArray = activeArray,
+            lens = preset2x,
+            maxAfRegions = 1,
+            maxAeRegions = 1,
+            maxAwbRegions = 1,
+            hasUserAfRegion = false,
+            hasUserAeRegion = false,
+            isManualFocus = true,
+            isManualExposure = true,
+            isManualWb = false
+        )
+        assertNull(manualAfAe2x.afRegions)
+        assertNull(manualAfAe2x.aeRegions)
+        assertEquals(Rect(1200, 900, 2800, 2100), manualAfAe2x.awbRegions!!.single().rect)
+
+        // Returning to 1.0x clears AWB region back to zero-weight empty rectangle without overwriting user AF/AE
+        val reset1x = arbiter.resolveCropMeteringPlan(
+            activeArray = activeArray,
+            lens = base1x,
+            maxAfRegions = 1,
+            maxAeRegions = 1,
+            maxAwbRegions = 1,
+            hasUserAfRegion = false,
+            hasUserAeRegion = false,
+            isManualFocus = false,
+            isManualExposure = false,
+            isManualWb = false
+        )
+        assertNull(reset1x.afRegions)
+        assertNull(reset1x.aeRegions)
+        assertEquals(android.hardware.camera2.params.MeteringRectangle(0, 0, 0, 0, 0), reset1x.awbRegions!!.single())
+    }
 }

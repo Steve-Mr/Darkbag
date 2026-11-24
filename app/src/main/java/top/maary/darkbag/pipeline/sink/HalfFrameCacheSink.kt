@@ -78,7 +78,7 @@ class HalfFrameCacheSink : CaptureSink {
             inputBitmap = null,
             bmpPath = if (jpgSuccess) spec.fullResJpgPath else null,
             rotationDegrees = 0,
-            zoomFactor = spec.zoomFactor,
+            zoomFactor = spec.persistedZoomFactor,
             baseName = spec.baseName,
             linearDngPath = if (shouldSaveRaw && rawSuccess) dngPathToUse else null,
             saveJpg = jpgSuccess,
