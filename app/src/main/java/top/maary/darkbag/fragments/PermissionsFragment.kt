@@ -42,7 +42,9 @@ import top.maary.darkbag.databinding.FragmentPermissionsBinding
 import top.maary.darkbag.fragments.onboarding.OnboardingStepBinder
 import top.maary.darkbag.repository.PreferenceKeys
 import top.maary.darkbag.repository.SettingsRepository
+import top.maary.darkbag.ui.ViewfinderDeckCustomizerSheet
 import top.maary.darkbag.utils.LutManager
+import top.maary.darkbag.utils.MediaStoreUtils
 
 /**
  * First-install Onboarding and Permissions controller for Darkbag.
@@ -111,10 +113,30 @@ class PermissionsFragment : Fragment(), OnboardingStepBinder.Callbacks {
         stepBinder?.updatePermissionTilesState()
         stepBinder?.updatePrimaryCtaButton()
 
-        if (cameraGranted) {
-            stepBinder?.goToStep(2)
+        if (cameraGranted || !settingsRepository.current().enableCamera) {
+            stepBinder?.goToNextStep()
         } else {
             Toast.makeText(requireContext(), R.string.toast_camera_permission_continue, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val jpgStoragePicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            requireContext().contentResolver.takePersistableUriPermission(it, takeFlags)
+            val folderName = MediaStoreUtils.getFolderNameFromUri(requireContext(), it)
+            settingsRepository.setStorageUri(isJpg = true, uri = it.toString(), name = folderName)
+            stepBinder?.refreshStoragePaths()
+        }
+    }
+
+    private val rawStoragePicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            requireContext().contentResolver.takePersistableUriPermission(it, takeFlags)
+            val folderName = MediaStoreUtils.getFolderNameFromUri(requireContext(), it)
+            settingsRepository.setStorageUri(isJpg = false, uri = it.toString(), name = folderName)
+            stepBinder?.refreshStoragePaths()
         }
     }
 
@@ -149,8 +171,8 @@ class PermissionsFragment : Fragment(), OnboardingStepBinder.Callbacks {
         // Fast zero-delay routing for returning users when DataStore is already hydrated
         if (!forceOnboarding && settingsRepository.isHydrated) {
             val current = settingsRepository.current()
-            val isPlaygroundStartup = current.defaultStartupPage == PreferenceKeys.STARTUP_PLAYGROUND
-            if (current.onboardingCompleted && (isPlaygroundStartup || hasPermissions(requireContext()))) {
+            val canBypassCameraPerm = !current.enableCamera || current.defaultStartupPage == PreferenceKeys.STARTUP_PLAYGROUND
+            if (current.onboardingCompleted && (canBypassCameraPerm || hasPermissions(requireContext()))) {
                 routeStartup()
             }
         }
@@ -176,8 +198,8 @@ class PermissionsFragment : Fragment(), OnboardingStepBinder.Callbacks {
                 settingsRepository.awaitHydrated()
                 if (!isAdded) return@launch
                 val current = settingsRepository.current()
-                val isPlaygroundStartup = current.defaultStartupPage == PreferenceKeys.STARTUP_PLAYGROUND
-                if (!forceOnboarding && current.onboardingCompleted && (isPlaygroundStartup || hasPermissions(requireContext()))) {
+                val canBypassCameraPerm = !current.enableCamera || current.defaultStartupPage == PreferenceKeys.STARTUP_PLAYGROUND
+                if (!forceOnboarding && current.onboardingCompleted && (canBypassCameraPerm || hasPermissions(requireContext()))) {
                     routeStartup()
                     return@launch
                 }
@@ -232,6 +254,18 @@ class PermissionsFragment : Fragment(), OnboardingStepBinder.Callbacks {
 
     override fun launchLutPicker(selectedLog: String) {
         lutFilePicker.launch("*/*")
+    }
+
+    override fun launchJpgStoragePicker() {
+        jpgStoragePicker.launch(null)
+    }
+
+    override fun launchRawStoragePicker() {
+        rawStoragePicker.launch(null)
+    }
+
+    override fun openDeckCustomizer(onUpdated: () -> Unit) {
+        ViewfinderDeckCustomizerSheet.show(requireContext(), onUpdated)
     }
 
     override fun onFinishOnboarding() {
