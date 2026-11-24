@@ -679,4 +679,29 @@
     <string name="wb_preset_daylight">Daylight</string>
     <string name="wb_preset_cloudy">Cloudy</string>
     <string name="wb_preset_shade">Shade</string>
+
+    <!-- Settings 6-Module Reorganization -->
+    <string name="settings_section_app_interface">App &amp; Interface</string>
+    <string name="settings_section_capture_optics">Capture &amp; Optics</string>
+    <string name="settings_section_output_storage">Output &amp; Storage</string>
+    <string name="settings_badge_storage">OUTPUT</string>
+    <string name="settings_adv_hdr_sub">Fusion, burst frames, exposure, OIS</string>
+    <string name="settings_adv_video_sub">Shutter hold &amp; RAW video</string>
+    <string name="settings_adv_viewfinder_sub">Control tier, deck layout &amp; viewer</string>
+    <string name="settings_adv_color_engine_title">Color Engine</string>
+    <string name="settings_adv_color_engine_sub">Tone mapping curve engine</string>
+    <string name="settings_adv_storage_sub">DNG codec &amp; custom folders</string>
+    <string name="pref_storage_default_path">Default · Pictures/Darkbag</string>
+
+    <!-- Onboarding Overhaul -->
+    <string name="onboarding_perm_playground_only_hint">Camera and microphone permissions are not required when Camera is disabled.</string>
+    <string name="onboarding_section_storage">Capture Storage</string>
+    <string name="onboarding_badge_storage">STORAGE</string>
+    <string name="onboarding_storage_hint">Default saves to Pictures/Darkbag. Tap to pick a custom folder, or long-press to reset.</string>
+    <string name="onboarding_recipe_log_none">Do Not Use</string>
+    <string name="onboarding_recipe_none_hint">Not using Log / LUT. Darkbag will render with its built-in film tone curve.</string>
+    <string name="onboarding_live_preview_diff_hint">Live viewfinder preview approximates color on the preview stream and may differ from the final HDR+ photo.</string>
+    <string name="onboarding_tier_custom_short">Custom Deck</string>
+    <string name="onboarding_tier_custom_desc">Customize every viewfinder tile individually with real-time layout preview.</string>
+    <string name="onboarding_btn_customize_deck">Customize Viewfinder Controls</string>
 </resources>

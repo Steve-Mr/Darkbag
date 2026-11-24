@@ -48,6 +48,8 @@ class OnboardingAndPermissionsTest {
         assertNotNull(binding.cardTrayStartup)
         assertNotNull(binding.cardStartupCamera)
         assertNotNull(binding.cardStartupPlayground)
+        assertNotNull(binding.switchEnableCamera)
+        assertNotNull(binding.switchEnablePlayground)
         assertNotNull(binding.cardTrayPermissions)
         assertNotNull(binding.tilePermCamera)
         assertNotNull(binding.btnGrantCamera)
@@ -55,8 +57,9 @@ class OnboardingAndPermissionsTest {
         assertNotNull(binding.btnGrantNotifications)
         assertNotNull(binding.tilePermAudio)
         assertNotNull(binding.btnGrantAudio)
+        assertNotNull(binding.cardPermPlaygroundOnlyHint)
 
-        // Step 2: Formats & Optics
+        // Step 2: Formats, Storage & Optics
         assertNotNull(binding.containerStep2)
         assertNotNull(binding.cardTrayOutput)
         assertNotNull(binding.tileFormatJpg)
@@ -64,6 +67,11 @@ class OnboardingAndPermissionsTest {
         assertNotNull(binding.tileFormatRaw)
         assertNotNull(binding.cbSaveRaw)
         assertNotNull(binding.tvFormatExplain)
+        assertNotNull(binding.cardTrayStorage)
+        assertNotNull(binding.layoutJpgStorage)
+        assertNotNull(binding.tvJpgPath)
+        assertNotNull(binding.layoutRawStorage)
+        assertNotNull(binding.tvRawPath)
         assertNotNull(binding.cardTrayOptics)
         assertNotNull(binding.tileFocal24)
         assertNotNull(binding.tileFocal28)
@@ -77,6 +85,7 @@ class OnboardingAndPermissionsTest {
         // Step 3: Recipe & Log Pairing
         assertNotNull(binding.containerStep3)
         assertNotNull(binding.cardTrayRecipePairing)
+        assertNotNull(binding.btnLogNone)
         assertNotNull(binding.btnLogFlog2)
         assertNotNull(binding.btnLogApple)
         assertNotNull(binding.btnLogSlog3)
@@ -86,7 +95,11 @@ class OnboardingAndPermissionsTest {
         assertNotNull(binding.btnImportLut)
         assertNotNull(binding.layoutPairingResult)
         assertNotNull(binding.tvPairingDesc)
+        assertNotNull(binding.tvRecipeSkipHint)
+        assertNotNull(binding.cardTrayLivePreview)
         assertNotNull(binding.switchLivePreview)
+        assertNotNull(binding.cardLivePreviewHint)
+        assertNotNull(binding.tvLivePreviewHint)
 
         // Step 4: UI Tier & Viewer Navigation
         assertNotNull(binding.containerStep4)
@@ -94,7 +107,11 @@ class OnboardingAndPermissionsTest {
         assertNotNull(binding.tileTierPs)
         assertNotNull(binding.tileTierFilm)
         assertNotNull(binding.tileTierPro)
+        assertNotNull(binding.tileTierCustom)
+        assertNotNull(binding.cardViewfinderPreview)
+        assertNotNull(binding.previewDeckHost)
         assertNotNull(binding.tvTierDesc)
+        assertNotNull(binding.btnCustomizeDeck)
         assertNotNull(binding.tileShutterHoldAction)
         assertNotNull(binding.tvShutterHoldValue)
         assertNotNull(binding.cardTrayViewer)

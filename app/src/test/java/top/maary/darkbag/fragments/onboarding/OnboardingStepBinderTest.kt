@@ -31,6 +31,9 @@ class OnboardingStepBinderTest {
     private var finishedOnboarding = false
     private var lastLutPickerLog: String? = null
     private var locationPermissionRequestCount = 0
+    private var jpgPickerLaunchCount = 0
+    private var rawPickerLaunchCount = 0
+    private var customizerOpenCount = 0
 
     @Before
     fun setUp() {
@@ -42,6 +45,9 @@ class OnboardingStepBinderTest {
         finishedOnboarding = false
         lastLutPickerLog = null
         locationPermissionRequestCount = 0
+        jpgPickerLaunchCount = 0
+        rawPickerLaunchCount = 0
+        customizerOpenCount = 0
     }
 
     private fun createBinder(): OnboardingStepBinder {
@@ -58,6 +64,16 @@ class OnboardingStepBinderTest {
                 override fun requestBatchStartupPermissions(permissions: Array<String>) {}
                 override fun launchLutPicker(selectedLog: String) {
                     lastLutPickerLog = selectedLog
+                }
+                override fun launchJpgStoragePicker() {
+                    jpgPickerLaunchCount++
+                }
+                override fun launchRawStoragePicker() {
+                    rawPickerLaunchCount++
+                }
+                override fun openDeckCustomizer(onUpdated: () -> Unit) {
+                    customizerOpenCount++
+                    onUpdated()
                 }
                 override fun onFinishOnboarding() {
                     finishedOnboarding = true
@@ -163,5 +179,107 @@ class OnboardingStepBinderTest {
         assertEquals(0, writeEmissions)
 
         collectJob.cancel()
+    }
+
+    @Test
+    fun disablingCameraSwitchLinksPermissionsAndSkipsStorageAndViewfinderSteps() {
+        val binder = createBinder()
+        binder.setupAllSteps()
+        binder.goToStep(1)
+
+        assertEquals(listOf(1, 2, 3, 4), binder.getActiveSteps())
+        assertEquals(View.VISIBLE, binding.tilePermCamera.visibility)
+        assertEquals(View.VISIBLE, binding.tilePermAudio.visibility)
+        assertEquals(View.GONE, binding.cardPermPlaygroundOnlyHint.visibility)
+        assertEquals(View.VISIBLE, binding.cardTrayLivePreview.visibility)
+
+        // Turn off Camera module -> switches startup to Playground, hides camera/audio perms, 2-step flow [1, 3]
+        binding.switchEnableCamera.isChecked = false
+        assertFalse(repo.current().enableCamera)
+        assertEquals(PreferenceKeys.STARTUP_PLAYGROUND, repo.current().defaultStartupPage)
+        assertFalse(binding.switchEnablePlayground.isEnabled)
+        assertEquals(View.GONE, binding.tilePermCamera.visibility)
+        assertEquals(View.GONE, binding.tilePermAudio.visibility)
+        assertEquals(View.VISIBLE, binding.cardPermPlaygroundOnlyHint.visibility)
+        assertEquals(View.GONE, binding.cardTrayLivePreview.visibility)
+        assertEquals(listOf(1, 3), binder.getActiveSteps())
+        assertEquals(View.GONE, binding.progStep3.visibility)
+        assertEquals(View.GONE, binding.progStep4.visibility)
+
+        binder.goToNextStep()
+        assertEquals(3, binder.currentStep)
+        assertEquals(View.VISIBLE, binding.containerStep3.visibility)
+
+        binder.goToNextStep()
+        assertTrue(finishedOnboarding)
+    }
+
+    @Test
+    fun step2StoragePickersSyncWithFormatsAndTriggerCallbacks() {
+        val binder = createBinder()
+        binder.setupAllSteps()
+        binder.goToStep(2)
+
+        assertEquals(View.VISIBLE, binding.layoutJpgStorage.visibility)
+        assertEquals(View.VISIBLE, binding.layoutRawStorage.visibility)
+        assertEquals(themedContext.getString(R.string.pref_storage_default_path), binding.tvJpgPath.text.toString())
+
+        binding.layoutJpgStorage.performClick()
+        binding.layoutRawStorage.performClick()
+        assertEquals(1, jpgPickerLaunchCount)
+        assertEquals(1, rawPickerLaunchCount)
+
+        binding.cbSaveRaw.isChecked = false
+        assertEquals(View.GONE, binding.layoutRawStorage.visibility)
+    }
+
+    @Test
+    fun step3LogNoneOptionClearsSelectionAndHidesImportButton() {
+        val binder = createBinder()
+        binder.setupAllSteps()
+        binder.goToStep(3)
+
+        // Default with no Log/LUT configured -> None is selected and import button is hidden
+        assertEquals("None", binder.selectedPairingLog)
+        assertEquals(View.GONE, binding.btnImportLut.visibility)
+
+        // Selecting a Log curve reveals the import button
+        binding.btnLogFlog2.performClick()
+        assertEquals("F-Log2", binder.selectedPairingLog)
+        assertEquals(View.VISIBLE, binding.btnImportLut.visibility)
+
+        // Selecting None clears Target Log & Active LUT and hides import button
+        binding.btnLogNone.performClick()
+        assertEquals("None", binder.selectedPairingLog)
+        assertEquals("None", repo.current().targetLog)
+        assertEquals("None", repo.current().activeLut)
+        assertEquals(View.GONE, binding.btnImportLut.visibility)
+    }
+
+    @Test
+    fun step4CustomTierPreservesCustomFlagsAndRendersAuthenticLivePreview() {
+        repo.edit {
+            this[PreferenceKeys.MANUAL_CONTROLS] = true
+            this[PreferenceKeys.SHOW_LUT_SWITCHER] = false
+        }
+        val binder = createBinder()
+        binder.setupAllSteps()
+        binder.goToStep(4)
+
+        assertTrue(binding.previewDeckHost.childCount > 0)
+
+        binding.tileTierCustom.performClick()
+        assertEquals("CUSTOM", binder.selectedUiTier)
+        assertEquals("CUSTOM", repo.current().uiTier)
+        assertTrue(repo.current().enableManualControls)
+        assertFalse(repo.current().showLutSwitcher)
+        assertEquals(View.VISIBLE, binding.btnCustomizeDeck.visibility)
+
+        binding.btnCustomizeDeck.performClick()
+        assertEquals(1, customizerOpenCount)
+
+        binding.tileTierPs.performClick()
+        assertEquals("PS", binder.selectedUiTier)
+        assertEquals(View.GONE, binding.btnCustomizeDeck.visibility)
     }
 }
