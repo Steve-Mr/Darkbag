@@ -26,7 +26,8 @@ class GalleryBatchDeletionCoordinator(
     private val launchDeleteRequest: (IntentSenderRequest) -> Unit,
     private val onBeforeDelete: (selectedCount: Int) -> Unit,
     private val onClearSelection: () -> Unit,
-    private val onAfterDeleteComplete: () -> Unit
+    private val onAfterDeleteComplete: () -> Unit,
+    private val onDeletePromptFailed: () -> Unit = {}
 ) {
 
     data class BatchDeleteDialogOptions(
@@ -38,14 +39,17 @@ class GalleryBatchDeletionCoordinator(
     data class BatchDeleteOutcome(
         val attemptedCount: Int,
         val deleteRequest: IntentSenderRequest?,
-        val promptCreationFailed: Boolean = false
+        val promptCreationFailed: Boolean = false,
+        val deletedCount: Int = 0,
+        val securityExceptionCount: Int = 0
     )
 
     fun showBatchDeleteDialog(
         selectedItems: List<GallerySelectedItem>,
         fragmentManager: FragmentManager
     ) {
-        if (selectedItems.isEmpty()) return
+        if (selectedItems.isEmpty() || fragmentManager.isStateSaved) return
+        if (fragmentManager.findFragmentByTag(DarkbagBatchDeleteSheet.TAG) != null) return
         val options = computeDialogOptions(selectedItems)
         val sheet = DarkbagBatchDeleteSheet.newInstance(
             selectedCount = selectedItems.size,
@@ -61,11 +65,22 @@ class GalleryBatchDeletionCoordinator(
 
     fun deleteBatchImages(selectedItems: List<GallerySelectedItem>, deleteMode: Int) {
         if (selectedItems.isEmpty()) return
+        val itemLabels = selectedItems.joinToString(",") { item ->
+            if (item.specificLens != null) "${item.group.baseName}#${item.specificLens.lensTag}" else item.group.baseName
+        }
+        Log.d(TAG, "deleteBatchImages start: selectedCount=${selectedItems.size}, mode=$deleteMode, items=[$itemLabels]")
         onBeforeDelete(selectedItems.size)
 
         scope.launch {
             val urisToDelete = resolveBatchDeleteUris(selectedItems, deleteMode)
+            Log.d(TAG, "Resolved ${urisToDelete.size} URI(s) for batch delete: $urisToDelete")
             val outcome = executeUriBatchDeletion(context, urisToDelete)
+            Log.d(
+                TAG,
+                "executeUriBatchDeletion outcome: attempted=${outcome.attemptedCount}, deleted=${outcome.deletedCount}, " +
+                    "securityExceptions=${outcome.securityExceptionCount}, hasDeleteRequest=${outcome.deleteRequest != null}, " +
+                    "promptCreationFailed=${outcome.promptCreationFailed}"
+            )
 
             onClearSelection()
 
@@ -75,7 +90,10 @@ class GalleryBatchDeletionCoordinator(
                     return@launch
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to launch MediaStore batch delete request", e)
+                    onDeletePromptFailed()
                 }
+            } else if (outcome.promptCreationFailed) {
+                onDeletePromptFailed()
             }
 
             onAfterDeleteComplete()
@@ -101,11 +119,15 @@ class GalleryBatchDeletionCoordinator(
                 }
             }
             val hasAnyCinemaDng = selectedItems.any { item ->
-                val g = item.group
-                g.isCinemaDng ||
-                    g.cinemaDngFolderUri != null ||
-                    g.cinemaDngFirstFrameUri != null ||
-                    g.cinemaDngFrameUris.isNotEmpty()
+                if (item.specificLens != null) {
+                    false
+                } else {
+                    val g = item.group
+                    g.isCinemaDng ||
+                        g.cinemaDngFolderUri != null ||
+                        g.cinemaDngFirstFrameUri != null ||
+                        g.cinemaDngFrameUris.isNotEmpty()
+                }
             }
             return BatchDeleteDialogOptions(
                 hasAnyRaw = hasAnyRaw,
@@ -161,16 +183,45 @@ class GalleryBatchDeletionCoordinator(
 
         suspend fun executeUriBatchDeletion(
             context: Context,
-            uris: List<Uri>
+            uris: List<Uri>,
+            createDeleteIntentSender: (Context, List<Uri>) -> IntentSenderRequest = { ctx, targetUris ->
+                val pendingIntent = MediaStore.createDeleteRequest(ctx.contentResolver, targetUris)
+                IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+            }
         ): BatchDeleteOutcome {
             val distinctUris = uris.distinct()
             val securityExceptionUris = mutableListOf<Uri>()
+            var deletedCount = 0
 
             withContext(Dispatchers.IO) {
                 for (uri in distinctUris) {
                     try {
-                        MediaStoreUtils.deleteUriSafe(context, uri)
-                    } catch (_: SecurityException) {
+                        val deleted = MediaStoreUtils.deleteUriSafe(context, uri)
+                        if (deleted) {
+                            deletedCount++
+                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                            uri.scheme == "content" &&
+                            uri.authority == MediaStore.AUTHORITY
+                        ) {
+                            val stillExists = try {
+                                context.contentResolver.query(
+                                    uri,
+                                    arrayOf(MediaStore.MediaColumns._ID),
+                                    null,
+                                    null,
+                                    null
+                                )?.use { it.moveToFirst() } == true
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to verify existence of $uri after delete returned false", e)
+                                false
+                            }
+                            if (stillExists) {
+                                Log.w(TAG, "MediaStore delete returned false while URI still exists, queuing for createDeleteRequest: $uri")
+                                securityExceptionUris.add(uri)
+                            }
+                        }
+                    } catch (e: SecurityException) {
+                        Log.w(TAG, "SecurityException deleting $uri (${e::class.java.simpleName}: ${e.message})")
                         if (uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
                             securityExceptionUris.add(uri)
                         }
@@ -180,30 +231,89 @@ class GalleryBatchDeletionCoordinator(
                 }
             }
 
-            if (securityExceptionUris.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                return try {
-                    val pendingIntent = MediaStore.createDeleteRequest(
-                        context.contentResolver,
-                        securityExceptionUris
-                    )
-                    BatchDeleteOutcome(
+            if (securityExceptionUris.isNotEmpty()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    return createMediaStoreDeleteOutcome(
+                        context = context,
                         attemptedCount = distinctUris.size,
-                        deleteRequest = IntentSenderRequest.Builder(pendingIntent.intentSender).build()
-                    )
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to request batch deletion via MediaStore", e)
-                    BatchDeleteOutcome(
-                        attemptedCount = distinctUris.size,
-                        deleteRequest = null,
-                        promptCreationFailed = true
+                        deletedCount = deletedCount,
+                        securityExceptionUris = securityExceptionUris,
+                        createDeleteIntentSender = createDeleteIntentSender
                     )
                 }
+                Log.w(
+                    TAG,
+                    "Batch delete prompt requires API 30+, cannot prompt for $securityExceptionUris on API ${Build.VERSION.SDK_INT}"
+                )
+                return BatchDeleteOutcome(
+                    attemptedCount = distinctUris.size,
+                    deleteRequest = null,
+                    promptCreationFailed = true,
+                    deletedCount = deletedCount,
+                    securityExceptionCount = securityExceptionUris.size
+                )
             }
 
             return BatchDeleteOutcome(
                 attemptedCount = distinctUris.size,
-                deleteRequest = null
+                deleteRequest = null,
+                deletedCount = deletedCount,
+                securityExceptionCount = securityExceptionUris.size
             )
+        }
+
+        private fun createMediaStoreDeleteOutcome(
+            context: Context,
+            attemptedCount: Int,
+            deletedCount: Int,
+            securityExceptionUris: List<Uri>,
+            createDeleteIntentSender: (Context, List<Uri>) -> IntentSenderRequest
+        ): BatchDeleteOutcome {
+            return try {
+                BatchDeleteOutcome(
+                    attemptedCount = attemptedCount,
+                    deleteRequest = createDeleteIntentSender(context, securityExceptionUris),
+                    deletedCount = deletedCount,
+                    securityExceptionCount = securityExceptionUris.size
+                )
+            } catch (e: IllegalArgumentException) {
+                val standardMediaUris = securityExceptionUris.filter { uri ->
+                    val path = uri.path.orEmpty()
+                    path.contains("/images/") || path.contains("/video/") || path.contains("/audio/")
+                }
+                if (standardMediaUris.isNotEmpty() && standardMediaUris.size < securityExceptionUris.size) {
+                    val skipped = securityExceptionUris - standardMediaUris.toSet()
+                    Log.w(TAG, "createDeleteRequest rejected non-standard media URIs $skipped; retrying with $standardMediaUris", e)
+                    try {
+                        return BatchDeleteOutcome(
+                            attemptedCount = attemptedCount,
+                            deleteRequest = createDeleteIntentSender(context, standardMediaUris),
+                            deletedCount = deletedCount,
+                            securityExceptionCount = securityExceptionUris.size
+                        )
+                    } catch (retryEx: Exception) {
+                        Log.e(TAG, "Retry MediaStore.createDeleteRequest failed for $standardMediaUris", retryEx)
+                    }
+                } else {
+                    Log.e(TAG, "Failed to request batch deletion via MediaStore for $securityExceptionUris", e)
+                }
+                BatchDeleteOutcome(
+                    attemptedCount = attemptedCount,
+                    deleteRequest = null,
+                    promptCreationFailed = true,
+                    deletedCount = deletedCount,
+                    securityExceptionCount = securityExceptionUris.size
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to request batch deletion via MediaStore for $securityExceptionUris", e)
+                BatchDeleteOutcome(
+                    attemptedCount = attemptedCount,
+                    deleteRequest = null,
+                    promptCreationFailed = true,
+                    deletedCount = deletedCount,
+                    securityExceptionCount = securityExceptionUris.size
+                )
+            }
         }
     }
 }
