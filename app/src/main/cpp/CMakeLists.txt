@@ -4,7 +4,7 @@ project("darkbag")
 
 # LibRaw Configuration
 set(CMAKE_CXX_STANDARD 17)
-add_definitions(-DNO_JASPER -DNO_JPEG)
+add_definitions(-DNO_JASPER)
 
 # Setup Halide (Host)
 include(download_halide.cmake)
