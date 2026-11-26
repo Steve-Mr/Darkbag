@@ -94,13 +94,11 @@ class CameraFocusMeteringController(
                 try {
                     if (!state.isManualFocus) {
                         val cancelRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                        cancelRequest.addTarget(surface)
-                        coordinator.applyManualSettingsToRequest(cancelRequest, isPreviewStream = true)
-                        arbiter.applyPreviewZoomAndCropToRequest(cancelRequest)
+                        coordinator.configureActivePreviewTriggerRequest(cancelRequest, surface)
                         cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
                         session.capture(cancelRequest.build(), null, handler)
                     }
-                    coordinator.applyCameraControls()
+                    coordinator.applyCameraControlsSyncOnCameraThread()
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to unlock focus and metering", e)
                 }
@@ -116,6 +114,7 @@ class CameraFocusMeteringController(
     fun triggerTapToFocusCamera2(x: Float, y: Float) {
         val arbiter = env.sessionArbiter
         val state = env.runtimeState
+        if (state.isBurstActive) return
         val device = arbiter.activePreviewDevice ?: return
         val session = arbiter.activePreviewSession ?: return
         val surface = arbiter.activePreviewSurface ?: return
@@ -149,18 +148,16 @@ class CameraFocusMeteringController(
                     cropRegion
                 )
 
-                state.focusMeteringRegion = if (afSupported) region else null
-                if (!state.isManualExposure && aeRegionsSupported) {
-                    state.exposureMeteringRegion = region
-                }
-
                 // 1. Show scanning visual feedback immediately on UI
                 withContext(Dispatchers.Main) {
                     showFocusRingScanning(x, y)
-                    ui.updateProInfoBar()
                 }
 
                 if (!afSupported) {
+                    state.focusMeteringRegion = null
+                    if (!state.isManualExposure && aeRegionsSupported) {
+                        state.exposureMeteringRegion = region
+                    }
                     withContext(Dispatchers.Main) {
                         coordinator.applyCameraControls()
                         if (state.exposureMeteringRegion != null) {
@@ -173,90 +170,94 @@ class CameraFocusMeteringController(
                     return@launch
                 }
 
-                // 2. Submit cancel request cleanly and suspend until processed by HAL
-                val cancelRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                cancelRequest.addTarget(surface)
-                coordinator.applyManualSettingsToRequest(cancelRequest, isPreviewStream = true)
-                arbiter.applyPreviewZoomAndCropToRequest(cancelRequest)
-                cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
-
+                // 2. Submit cancel request cleanly on camera handler and suspend until processed by HAL
                 suspendCancellableCoroutine<Unit> { cont ->
-                    try {
-                        session.capture(cancelRequest.build(), object : CameraCaptureSession.CaptureCallback() {
-                            override fun onCaptureCompleted(
-                                session: CameraCaptureSession,
-                                request: CaptureRequest,
-                                result: TotalCaptureResult
-                            ) {
-                                super.onCaptureCompleted(session, request, result)
-                                if (cont.isActive) cont.resume(Unit)
-                            }
+                    handler.post {
+                        try {
+                            val cancelRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                            coordinator.configureActivePreviewTriggerRequest(cancelRequest, surface)
+                            cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+                            session.capture(cancelRequest.build(), object : CameraCaptureSession.CaptureCallback() {
+                                override fun onCaptureCompleted(
+                                    session: CameraCaptureSession,
+                                    request: CaptureRequest,
+                                    result: TotalCaptureResult
+                                ) {
+                                    super.onCaptureCompleted(session, request, result)
+                                    if (cont.isActive) cont.resume(Unit)
+                                }
 
-                            override fun onCaptureFailed(
-                                session: CameraCaptureSession,
-                                request: CaptureRequest,
-                                failure: CaptureFailure
-                            ) {
-                                super.onCaptureFailed(session, request, failure)
-                                if (cont.isActive) cont.resume(Unit)
-                            }
-                        }, handler)
-                    } catch (e: Exception) {
-                        if (cont.isActive) cont.resume(Unit)
+                                override fun onCaptureFailed(
+                                    session: CameraCaptureSession,
+                                    request: CaptureRequest,
+                                    failure: CaptureFailure
+                                ) {
+                                    super.onCaptureFailed(session, request, failure)
+                                    if (cont.isActive) cont.resume(Unit)
+                                }
+                            }, handler)
+                        } catch (e: Exception) {
+                            if (cont.isActive) cont.resume(Unit)
+                        }
                     }
                 }
 
                 ensureActive()
 
-                // 3. Update repeating request with AF_MODE_AUTO and updated metering regions
+                state.focusMeteringRegion = region
+                if (!state.isManualExposure && aeRegionsSupported) {
+                    state.exposureMeteringRegion = region
+                }
                 withContext(Dispatchers.Main) {
-                    coordinator.applyCameraControls()
+                    ui.updateProInfoBar()
                 }
 
                 ensureActive()
 
-                // 4. Submit trigger request (CONTROL_AF_TRIGGER_START)
-                val triggerRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                triggerRequest.addTarget(surface)
-                coordinator.applyManualSettingsToRequest(triggerRequest, isPreviewStream = true)
-                arbiter.applyPreviewZoomAndCropToRequest(triggerRequest)
-                triggerRequest.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(region))
-                if (!state.isManualExposure && aeRegionsSupported) {
-                    triggerRequest.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(region))
-                }
-                if (state.isManualFocus) {
-                    triggerRequest.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
-                }
-                triggerRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
-
+                // 3 & 4. Update repeating request synchronously on camera handler, then submit AF_TRIGGER_START
                 var triggerFrameNumber = -1L
                 val triggerSucceeded = suspendCancellableCoroutine<Boolean> { cont ->
-                    try {
-                        session.capture(triggerRequest.build(), object : CameraCaptureSession.CaptureCallback() {
-                            override fun onCaptureCompleted(
-                                session: CameraCaptureSession,
-                                request: CaptureRequest,
-                                result: TotalCaptureResult
-                            ) {
-                                super.onCaptureCompleted(session, request, result)
-                                triggerFrameNumber = result.frameNumber
-                                if (state.isManualFocus) {
-                                    syncManualFocusAfterTap(triggerFrameNumber)
-                                }
-                                if (cont.isActive) cont.resume(true)
-                            }
+                    handler.post {
+                        try {
+                            coordinator.applyCameraControlsSyncOnCameraThread()
 
-                            override fun onCaptureFailed(
-                                session: CameraCaptureSession,
-                                request: CaptureRequest,
-                                failure: CaptureFailure
-                            ) {
-                                super.onCaptureFailed(session, request, failure)
-                                if (cont.isActive) cont.resume(false)
+                            val triggerRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                            coordinator.configureActivePreviewTriggerRequest(triggerRequest, surface)
+                            triggerRequest.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(region))
+                            if (!state.isManualExposure && aeRegionsSupported) {
+                                triggerRequest.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(region))
                             }
-                        }, handler)
-                    } catch (e: Exception) {
-                        if (cont.isActive) cont.resume(false)
+                            if (state.isManualFocus) {
+                                triggerRequest.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                            }
+                            triggerRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+
+                            session.capture(triggerRequest.build(), object : CameraCaptureSession.CaptureCallback() {
+                                override fun onCaptureCompleted(
+                                    session: CameraCaptureSession,
+                                    request: CaptureRequest,
+                                    result: TotalCaptureResult
+                                ) {
+                                    super.onCaptureCompleted(session, request, result)
+                                    triggerFrameNumber = result.frameNumber
+                                    if (state.isManualFocus) {
+                                        syncManualFocusAfterTap(triggerFrameNumber)
+                                    }
+                                    if (cont.isActive) cont.resume(true)
+                                }
+
+                                override fun onCaptureFailed(
+                                    session: CameraCaptureSession,
+                                    request: CaptureRequest,
+                                    failure: CaptureFailure
+                                ) {
+                                    super.onCaptureFailed(session, request, failure)
+                                    if (cont.isActive) cont.resume(false)
+                                }
+                            }, handler)
+                        } catch (e: Exception) {
+                            if (cont.isActive) cont.resume(false)
+                        }
                     }
                 }
 

@@ -99,6 +99,9 @@ class CameraMotionPhotoController(
                     wbMode = if (isManual) 2 else prefs.wbStrategy,
                     wbManualTempK = env.runtimeState.manualWbTempK.toFloat()
                 )
+            },
+            frameGainProvider = { ts, res ->
+                env.sessionArbiter.previewGainSynchronizer.resolveGainForRawFrame(ts, res)
             }
         )
     }

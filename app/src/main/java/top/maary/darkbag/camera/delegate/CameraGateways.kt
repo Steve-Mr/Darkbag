@@ -95,6 +95,16 @@ interface CameraCoordinatorHost {
         isHdrBurst: Boolean = false,
         isPreviewStream: Boolean = false
     )
+    fun configureActivePreviewTriggerRequest(
+        request: CaptureRequest.Builder,
+        previewSurface: android.view.Surface
+    ) {
+        request.addTarget(previewSurface)
+        applyManualSettingsToRequest(request, isPreviewStream = true)
+    }
+    fun applyCameraControlsSyncOnCameraThread() {
+        applyCameraControls()
+    }
     /**
      * Applies 3A settings to a *preview* request. Implementations also apply preview-only
      * overrides such as the tone map policy, so this must never be used for still captures.

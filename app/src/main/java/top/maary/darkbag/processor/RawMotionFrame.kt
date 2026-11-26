@@ -19,5 +19,6 @@ class RawMotionFrame(
     val sensorOrientationDegrees: Int = 90,
     val lensShadingMap: FloatArray? = null,
     val lensShadingRows: Int = 0,
-    val lensShadingCols: Int = 0
+    val lensShadingCols: Int = 0,
+    val digitalGain: Float = 1.0f
 )
