@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#include <unistd.h>
 
 #include <omp.h>
 #include <android/native_window_jni.h>

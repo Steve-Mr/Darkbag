@@ -1,6 +1,7 @@
 #include "RawVideoContainer.h"
 #include <android/log.h>
 #include <cstring>
+#include <unistd.h>
 
 #define TAG "RawVideoContainer"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
