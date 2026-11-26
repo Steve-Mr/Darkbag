@@ -96,7 +96,7 @@ class DarkroomGalleryFragment : Fragment() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requireActivity().onBackPressedDispatcher.addCallback(this, backPressedCallback)
+        top.maary.darkbag.utils.PredictiveBackTransitions.apply(this)
     }
 
     override fun onCreateView(
@@ -110,6 +110,7 @@ class DarkroomGalleryFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, backPressedCallback)
 
         batchDeletionCoordinator = GalleryBatchDeletionCoordinator(
             context = requireContext(),

@@ -58,6 +58,11 @@ class SettingsFragment : Fragment() {
     private lateinit var bentoDelegate: SettingsBentoDelegate
     private lateinit var sheetDispatcher: SettingsSheetDispatcher
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        top.maary.darkbag.utils.PredictiveBackTransitions.apply(this)
+    }
+
     private val expandedSectionIds = mutableSetOf<Int>()
     private var aboutClickCount = 0
     private var zslToggleGuard = false

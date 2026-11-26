@@ -229,6 +229,8 @@ internal object Mp4VideoMuxerPipeline {
                 val colorFormat = if (useGpu) {
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
                 } else {
+                    // CPU fallback writes raw NV12 semi-planar bytes directly into encoder input ByteBuffer.
+                    @Suppress("DEPRECATION")
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
                 }
                 val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, exportW, exportH).apply {

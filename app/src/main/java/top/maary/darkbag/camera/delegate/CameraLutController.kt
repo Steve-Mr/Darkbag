@@ -302,6 +302,7 @@ class CameraLutController(
         container.cardElevation = 8f
         container.layoutParams.width = env.hostContext.resources.getDimensionPixelSize(R.dimen.round_button_large) * 3
         container.visibility = View.VISIBLE
+        ui.notifyFloatingOverlayStateChanged()
 
         rv.layoutManager = LinearLayoutManager(env.hostContext)
         rv.adapter = object : RecyclerView.Adapter<RecyclerView.ViewHolder>() {

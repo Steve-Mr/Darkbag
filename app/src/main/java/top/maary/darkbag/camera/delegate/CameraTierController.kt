@@ -160,6 +160,7 @@ class CameraTierController(
             updateFocusPeakingState()
             updateProInfoBar()
         }
+        ui.notifyFloatingOverlayStateChanged()
     }
 
     fun dismissFloatingOverlays() {
@@ -185,6 +186,7 @@ class CameraTierController(
             binding.lutListContainer?.visibility = View.GONE
             binding.touchOverlay?.visibility = View.GONE
         }
+        ui.notifyFloatingOverlayStateChanged()
     }
 
     fun updateFocusPeakingState() {

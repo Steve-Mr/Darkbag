@@ -47,6 +47,17 @@ class PlaygroundGalleryFragment : Fragment() {
         }
     }
 
+    private val selectionBackCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            viewModel.processIntent(PlaygroundUserIntent.ClearSelection)
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        top.maary.darkbag.utils.PredictiveBackTransitions.apply(this)
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
@@ -76,25 +87,20 @@ class PlaygroundGalleryFragment : Fragment() {
         val defaultStartup = currentPrefs.defaultStartupPage
         val enableCamera = currentPrefs.enableCamera
 
-        val onBackPressedCallback = object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                if (viewModel.uiState.value.isSelectionMode) {
-                    viewModel.processIntent(PlaygroundUserIntent.ClearSelection)
-                } else if (enableCamera && defaultStartup == PreferenceKeys.STARTUP_CAMERA) {
-                    if (!findNavController().navigateUp()) {
-                        requireActivity().finishAfterTransition()
-                    }
-                } else {
-                    requireActivity().finishAfterTransition()
-                }
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, selectionBackCallback)
+
+        val navigateBackAction = {
+            if (viewModel.uiState.value.isSelectionMode) {
+                viewModel.processIntent(PlaygroundUserIntent.ClearSelection)
+            } else if (!findNavController().navigateUp()) {
+                requireActivity().finishAfterTransition()
             }
         }
-        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, onBackPressedCallback)
 
         if (!showToolbar && defaultStartup == PreferenceKeys.STARTUP_CAMERA && enableCamera) {
             binding.toolbar.setNavigationIcon(R.drawable.ic_back)
             binding.toolbar.setNavigationOnClickListener {
-                requireActivity().onBackPressedDispatcher.onBackPressed()
+                navigateBackAction()
             }
         } else {
             binding.toolbar.navigationIcon = null
@@ -105,13 +111,7 @@ class PlaygroundGalleryFragment : Fragment() {
 
         binding.btnPlaygroundBack.visibility = if (enableCamera) View.VISIBLE else View.GONE
         binding.btnPlaygroundBack.setOnClickListener {
-            if (viewModel.uiState.value.isSelectionMode) {
-                viewModel.processIntent(PlaygroundUserIntent.ClearSelection)
-            } else {
-                if (!findNavController().navigateUp()) {
-                    requireActivity().onBackPressedDispatcher.onBackPressed()
-                }
-            }
+            navigateBackAction()
         }
 
         binding.btnPlaygroundCamera.visibility = if (enableCamera) View.VISIBLE else View.GONE
@@ -247,6 +247,7 @@ class PlaygroundGalleryFragment : Fragment() {
     }
 
     private fun renderUiState(state: PlaygroundGalleryUiState) {
+        selectionBackCallback.isEnabled = state.isSelectionMode
         val hasSelection = state.isSelectionMode && state.selectedFiles.isNotEmpty()
         val titleText = getString(R.string.playground_title)
         val subtitleText = if (hasSelection) {

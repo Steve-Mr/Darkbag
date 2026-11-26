@@ -18,7 +18,7 @@ internal object ExifMetadataApplier {
 
     fun writeStandardExif(exif: ExifInterface, captureMetadata: CaptureMetadata?) {
         captureMetadata?.let { meta ->
-            meta.iso?.let { exif.setAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS, it.toString()) }
+            meta.iso?.let { exif.setAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, it.toString()) }
             meta.exposureTime?.let {
                 val exposureInSec = it.toDouble() / 1_000_000_000.0
                 exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, exposureInSec.toString())

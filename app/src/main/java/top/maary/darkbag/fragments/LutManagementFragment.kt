@@ -48,6 +48,11 @@ class LutManagementFragment : Fragment() {
     private var pendingImportLog: String? = null
     private var selectedCategoryFilter: String = FILTER_ALL
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        top.maary.darkbag.utils.PredictiveBackTransitions.apply(this)
+    }
+
     private val supportedLogCurves by lazy {
         listOf(
             "F-Log2",

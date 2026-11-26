@@ -207,17 +207,15 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
 
         ColorProcessor.warmupGpuAsync(requireContext())
 
-        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, object : OnBackPressedCallback(true) {
+        val floatingOverlayBackCallback = object : OnBackPressedCallback(hub.isFloatingOverlayOpen) {
             override fun handleOnBackPressed() {
-                if (hub.isFloatingOverlayOpen) {
-                    hub.dismissFloatingOverlays()
-                    return
-                }
-                isEnabled = false
-                requireActivity().onBackPressedDispatcher.onBackPressed()
-                isEnabled = true
+                hub.dismissFloatingOverlays()
             }
-        })
+        }
+        hub.onFloatingOverlayStateChanged = { isOpen ->
+            floatingOverlayBackCallback.isEnabled = isOpen
+        }
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, floatingOverlayBackCallback)
 
         val mainApp = requireContext().applicationContext as MainApplication
         viewLifecycleOwner.ownerLifecycleScope.launch {

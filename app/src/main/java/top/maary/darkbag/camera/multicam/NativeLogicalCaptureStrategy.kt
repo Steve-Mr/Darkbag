@@ -270,7 +270,13 @@ internal class NativeLogicalCaptureStrategy(
                     request: CaptureRequest,
                     result: TotalCaptureResult
                 ) {
-                    val physResults = result.physicalCameraResults
+                    val physResults: Map<String, CaptureResult> =
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                            result.physicalCameraTotalResults
+                        } else {
+                            @Suppress("DEPRECATION")
+                            result.physicalCameraResults
+                        }
                     for ((pid, presult) in physResults) {
                         physicalCaptureResults[pid] = presult
                         resultDeferredMap[pid]?.complete(presult)

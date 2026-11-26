@@ -31,15 +31,11 @@ object ShareUtils {
 
         // 2. Extract Uris from EXTRA_STREAM
         if (intent.action == Intent.ACTION_SEND) {
-            val uri = intent.getParcelableExtra<Parcelable>(Intent.EXTRA_STREAM) as? Uri
-            if (uri != null) {
-                urisToProcess.add(uri)
-            }
+            androidx.core.content.IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+                ?.let { urisToProcess.add(it) }
         } else if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
-            val uris = intent.getParcelableArrayListExtra<Parcelable>(Intent.EXTRA_STREAM)
-            uris?.forEach {
-                if (it is Uri) urisToProcess.add(it)
-            }
+            androidx.core.content.IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+                ?.let { urisToProcess.addAll(it) }
         }
 
         // Also check intent.data

@@ -147,7 +147,11 @@ class ProDialWheelView @JvmOverloads constructor(
         tickStrokeWidth = 1.5f * density
         majorTickStrokeWidth = 2.2f * density
         indicatorStrokeWidth = 3.0f * density
-        textSize = 11f * resources.displayMetrics.scaledDensity
+        textSize = android.util.TypedValue.applyDimension(
+            android.util.TypedValue.COMPLEX_UNIT_SP,
+            11f,
+            resources.displayMetrics
+        )
 
         textPaint.textSize = textSize
 

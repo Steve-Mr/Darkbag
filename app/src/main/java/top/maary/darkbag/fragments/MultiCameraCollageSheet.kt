@@ -59,7 +59,7 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        group = arguments?.getParcelable(ARG_GROUP)
+        group = arguments?.let { androidx.core.os.BundleCompat.getParcelable(it, ARG_GROUP, ImageGroup::class.java) }
         val imageGroup = group ?: run {
             dismiss()
             return

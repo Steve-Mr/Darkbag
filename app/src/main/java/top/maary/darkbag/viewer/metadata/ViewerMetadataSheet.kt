@@ -97,9 +97,9 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
         super.onViewCreated(view, savedInstanceState)
 
         dialog?.window?.let { window ->
-            window.navigationBarColor = Color.TRANSPARENT
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                window.setDecorFitsSystemWindows(false)
+            androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                window.isNavigationBarContrastEnforced = false
             }
         }
 

@@ -107,6 +107,7 @@ class CameraControllerHub(
     )
 
     private var bindJob: Job? = null
+    var onFloatingOverlayStateChanged: ((Boolean) -> Unit)? = null
 
     init {
         env.sessionArbiter.isMultiCameraActiveProvider = { modeController.isMultiCameraActive }
@@ -141,6 +142,10 @@ class CameraControllerHub(
     }
 
     override fun dismissFloatingOverlays() = tierController.dismissFloatingOverlays()
+
+    override fun notifyFloatingOverlayStateChanged() {
+        onFloatingOverlayStateChanged?.invoke(isFloatingOverlayOpen)
+    }
 
     override fun updateProInfoBar() = tierController.updateProInfoBar()
 

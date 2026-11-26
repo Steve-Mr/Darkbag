@@ -29,8 +29,8 @@ class HalfFrameShareSheet : BottomSheetDialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        val uri1 = arguments?.getParcelable<Uri>("uri1")
-        val uri2 = arguments?.getParcelable<Uri>("uri2")
+        val uri1 = arguments?.let { androidx.core.os.BundleCompat.getParcelable(it, "uri1", Uri::class.java) }
+        val uri2 = arguments?.let { androidx.core.os.BundleCompat.getParcelable(it, "uri2", Uri::class.java) }
 
         lifecycleScope.launch {
             uri1?.let {

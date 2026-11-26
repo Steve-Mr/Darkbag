@@ -113,6 +113,11 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        top.maary.darkbag.utils.PredictiveBackTransitions.apply(this)
+    }
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentImageViewerBinding.inflate(inflater, container, false)
         return binding.root
@@ -284,7 +289,9 @@ open class ImageViewerFragment : Fragment() {
 
     private fun setupResultListeners() {
         childFragmentManager.setFragmentResultListener(HalfFrameShareSheet.REQUEST_KEY, viewLifecycleOwner) { _, bundle ->
-            bundle.getParcelableArrayList<Uri>(HalfFrameShareSheet.BUNDLE_KEY_URIS)?.let { exportCoordinator.shareImages(it) }
+            androidx.core.os.BundleCompat.getParcelableArrayList(bundle, HalfFrameShareSheet.BUNDLE_KEY_URIS, Uri::class.java)?.let {
+                exportCoordinator.shareImages(it)
+            }
         }
 
         childFragmentManager.setFragmentResultListener(DarkbagBatchDeleteSheet.REQUEST_KEY, viewLifecycleOwner) { _, bundle ->

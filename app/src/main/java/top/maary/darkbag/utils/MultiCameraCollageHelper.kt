@@ -516,7 +516,6 @@ object MultiCameraCollageHelper {
                 } ?: ""
 
                 val iso = exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
-                    ?: exif.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS)
                     ?: ""
 
                 FrameMetadata(

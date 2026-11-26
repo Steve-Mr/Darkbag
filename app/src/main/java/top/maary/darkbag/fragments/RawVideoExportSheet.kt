@@ -139,14 +139,14 @@ class RawVideoExportSheet : BottomSheetDialogFragment() {
             }
             setFragmentResult(
                 REQUEST_KEY,
-                bundleOf(
-                    RESULT_ACTION to action,
-                    RESULT_LOG to selectedLog,
-                    RESULT_LUT to selectedLut,
-                    RESULT_RESOLUTION to selectedResolution,
-                    RESULT_FRAME_INDEX to frameIndex,
-                    RESULT_EXPORT_MODE to exportMode
-                )
+                Bundle().apply {
+                    putString(RESULT_ACTION, action)
+                    putString(RESULT_LOG, selectedLog)
+                    putString(RESULT_LUT, selectedLut)
+                    putInt(RESULT_RESOLUTION, selectedResolution)
+                    putInt(RESULT_FRAME_INDEX, frameIndex)
+                    putInt(RESULT_EXPORT_MODE, exportMode)
+                }
             )
             dismiss()
         }
@@ -196,12 +196,12 @@ class RawVideoExportSheet : BottomSheetDialogFragment() {
             frameIndex: Int = 0
         ): RawVideoExportSheet {
             return RawVideoExportSheet().apply {
-                arguments = bundleOf(
-                    ARG_GROUP to group,
-                    ARG_LOG to (currentLog ?: "None"),
-                    ARG_LUT to (currentLut ?: "None"),
-                    ARG_FRAME_INDEX to frameIndex
-                )
+                arguments = Bundle().apply {
+                    putParcelable(ARG_GROUP, group)
+                    putString(ARG_LOG, currentLog ?: "None")
+                    putString(ARG_LUT, currentLut ?: "None")
+                    putInt(ARG_FRAME_INDEX, frameIndex)
+                }
             }
         }
 
@@ -212,12 +212,12 @@ class RawVideoExportSheet : BottomSheetDialogFragment() {
             frameIndex: Int = 0
         ): RawVideoExportSheet {
             return RawVideoExportSheet().apply {
-                arguments = bundleOf(
-                    ARG_LOG to (currentLog ?: "None"),
-                    ARG_LUT to (currentLut ?: "None"),
-                    ARG_EXPORT_MODE to exportMode,
-                    ARG_FRAME_INDEX to frameIndex
-                )
+                arguments = Bundle().apply {
+                    putString(ARG_LOG, currentLog ?: "None")
+                    putString(ARG_LUT, currentLut ?: "None")
+                    putInt(ARG_EXPORT_MODE, exportMode)
+                    putInt(ARG_FRAME_INDEX, frameIndex)
+                }
             }
         }
     }

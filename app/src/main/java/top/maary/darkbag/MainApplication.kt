@@ -23,7 +23,7 @@ class MainApplication : Application() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND ||
             level == android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
             top.maary.darkbag.processor.ColorProcessor.clearSabreTexturePoolAsync()
             top.maary.darkbag.camera.zsl.ZslRuntimeHooks.onTrimMemory()

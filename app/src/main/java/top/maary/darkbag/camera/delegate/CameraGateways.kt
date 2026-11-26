@@ -60,6 +60,7 @@ interface CameraUiHost {
 
     fun applyUIVisibility()
     fun dismissFloatingOverlays()
+    fun notifyFloatingOverlayStateChanged() {}
     fun updateProInfoBar()
     fun updateDialPanel()
     fun formatFocusDist(dist: Float): String

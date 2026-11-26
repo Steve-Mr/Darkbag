@@ -24,6 +24,7 @@ import android.os.Bundle
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup.MarginLayoutParams
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -82,6 +83,13 @@ class MainActivity : AppCompatActivity() {
         }
         if (savedInstanceState == null) {
             handleIntent(intent)
+        }
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+            onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    finishAfterTransition()
+                }
+            })
         }
     }
 
@@ -247,7 +255,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND ||
             level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
             top.maary.darkbag.processor.ColorProcessor.clearSabreTexturePoolAsync()
         }
@@ -260,14 +268,6 @@ class MainActivity : AppCompatActivity() {
                 true
             }
             else -> super.onKeyDown(keyCode, event)
-        }
-    }
-
-    override fun onBackPressed() {
-        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
-            finishAfterTransition()
-        } else {
-            super.onBackPressed()
         }
     }
 
