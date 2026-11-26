@@ -1,50 +1,87 @@
 # Darkbag
 
-Darkbag is a professional computational photography camera app powered by native Camera2 and Halide image processing pipelines written in Kotlin and C++.
+English | [简体中文](README_ZH.md)
+
+**Darkbag** is an experimental Android computational photography camera and RAW darkroom app built with Kotlin, Camera2, OpenGL ES / EGL, and native C++ / Halide pipelines.
+
+> [!WARNING]
+> **Experimental & "AS IS" Notice**
+> Darkbag is an exploratory, unstable personal project provided **"AS IS"** without warranty of any kind. Because Android devices vary significantly in Camera2 HAL, RAW sensor metadata, OpenCL/Vulkan, and MediaCodec implementations, crashes, color shifts, or device-specific quirks may occur. Please do not rely on it as your primary camera for irreplaceable moments.
+
+> [!NOTE]
+> **Origin & AI-Assisted Development**
+> Darkbag evolved from a fork of Google's official [android/camera-samples](https://github.com/android/camera-samples) (`CameraXBasic`). Since that fork, virtually all architecture, features, native pipelines, and UI code have been developed almost entirely with LLMs and AI coding agents — including **Jules**, **Antigravity**, **DeepSeek**, and similar tools.
+
+---
 
 ## Features
-- **Manual Camera Controls**: ISO, Shutter Speed, Focus, Exposure Compensation (EV).
-- **Log Curves & ACES**: Support for F-Log2, S-Log3, Canon Log, Rec.709, and Film Emulation engines.
-- **LUT Support**: Import and apply 3D LUTs (.cube) with real-time EGL/GL preview and rendering.
-- **RAW Processing**: Native processing using LibRaw and high-performance Halide pipelines.
-- **HDR+ Support**: Burst mode computational photography with RAW alignment and merging.
 
-## HDR+ Usage
+- **Computational Photography & Native Pipelines**
+  - **HDR+ Multi-Frame RAW**: Burst RAW alignment and merging powered by Halide AOT kernels (`Fast`, `Standard`, `High`, and `Streaming` pipelines).
+  - **Sabre & Digital-Crop Super-Resolution**: Multi-frame super-resolution and crop-centered 3A metering/processing.
+  - **RCD Demosaicing & GPU Acceleration**: Ratio Corrected Demosaicing and EGL/OpenGL ES accelerated color grading and rendering.
+- **Color Science & Output Formats**
+  - **Log Curves & Color Engine**: Built-in color engine and Log curve profiles (such as F-Log, F-Log2, S-Log3, Canon Log, Arri LogC3, V-Log, etc.).
+  - **3D LUTs**: Import `.cube` 3D LUTs with real-time viewfinder preview and offline rendering.
+  - **16-bit Lossless Compressed DNG & JPEG**: Unified native DNG writer with 16-bit lossless JPEG compression and `OpcodeList2` GainMap calibration, plus optional JPEG output.
+- **Shooting Modes & Video**
+  - **Manual / Pro Controls**: ISO, shutter speed, manual focus peaking & dial, exposure compensation (EV), OIS, anti-banding, and Zero-Shutter-Lag (ZSL) ring buffer.
+  - **Half-Frame Film Mode**: Side-by-side / top-bottom two-shot stitching, optional date stamp, and random light-leak effects.
+  - **Multi-Camera Simultaneous Capture (Experimental)**: Logical/physical multi-lens capture with cross-camera color harmonization and collage export.
+  - **RAW Motion Photo**: Live photo capture with synchronized preview gain and HEVC/H.264 MP4 muxing.
+  - **RAW Video**: Custom LZ4-compressed RAW video container (`RAWVID`) with live GL debayer preview and MP4 / CinemaDNG export.
+- **Darkroom, Playground & UI**
+  - **Non-Destructive Darkroom / Playground**: Import external `.dng` files (including share intents and `DocumentsProvider`) and adjust exposure, dynamic range, tone, white balance, and LUT recipes.
+  - **Material 3 Expressive Bento UI**: Modular Bento deck, customizable viewfinder tiers, edge-to-edge layout, and Android Predictive Back gesture support.
 
-To use the HDR+ feature:
-1. Ensure your device supports RAW capture (Camera2 Hardware Level Full/Level 3).
-2. Tap the **HDR+** toggle in the camera interface to enable it (icon turns blue).
-3. Press the shutter button. The app will capture a burst of RAW frames.
-4. The frames are aligned and merged using the [timothybrooks/hdr-plus](https://github.com/timothybrooks/hdr-plus) algorithm (implemented in Halide) to reduce noise and increase dynamic range.
-5. The result is saved as a new RAW (DNG) file, along with optional JPG outputs.
+---
+
+## Requirements
+
+- **OS**: Android 8.0+ (`minSdk 26`, `targetSdk 35`)
+- **ABI**: `arm64-v8a`
+- **Hardware**: A device supporting Camera2 `RAW_SENSOR` (`Level 3` / `Full` with RAW capability) is required for HDR+, DNG, and RAW video features.
+
+---
 
 ## Build
 
-To build the app directly from the command line, run:
-```sh
+Darkbag uses Git submodules for `libraw` and `hdr-plus`, and CMake fetches `Halide`, `LibTIFF`, and `libjpeg-turbo` during native configuration.
+
+```bash
+git clone --recursive https://github.com/Steve-Mr/Darkbag.git
+cd Darkbag
+
+# Build Debug APK
 ./gradlew assembleDebug
+
+# Build Release APK (R8 enabled)
+./gradlew assembleRelease
 ```
 
-## Test
+---
 
-Unit testing and instrumented device testing share the same code. To test the app using Robolectric, no device required, run:
-```sh
-./gradlew test
-```
+## Open-Source Acknowledgments
 
-To run the same tests in an Android device connected via ADB, run:
-```sh
-./gradlew connectedAndroidTest
-```
+Darkbag stands on the shoulders of the following open-source projects and libraries:
 
-Alternatively, test running configurations can be added to Android Studio for convenience (and a nice UI). To do that:
-1. Go to: `Run` > `Edit Configurations` > `Add New Configuration`.
-1. For Robolectric select `Android JUnit`, for connected device select `Android Instrumented Tests`.
-1. Select `app` module and `com.android.example.cameraxbasic.MainInstrumentedTest` class.
-1. Optional: Give the run configuration a name, like `test robolectric` or `test device`
+| Project / Library | Role in Darkbag | License |
+| :--- | :--- | :--- |
+| [android/camera-samples](https://github.com/android/camera-samples) (`CameraXBasic`) | Original upstream fork base | Apache-2.0 |
+| [timothybrooks/hdr-plus](https://github.com/timothybrooks/hdr-plus) & [Steve-Mr/hdr-plus](https://github.com/Steve-Mr/hdr-plus) | HDR+ alignment & merge Halide kernels | MIT |
+| [Halide](https://halide-lang.org/) | AOT image processing compiler & runtime | MIT |
+| [LibRaw](https://www.libraw.org/) | RAW image decoding & metadata parsing | LGPL-2.1 / CDDL-1.0 |
+| [LibTIFF](https://gitlab.com/libtiff/libtiff) | TIFF/DNG container writing | libtiff |
+| [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) | High-speed JPEG encoding/decoding | IJG / BSD-3-Clause / Zlib |
+| [LZ4](https://github.com/lz4/lz4) | Fast lossless compression for RAW video | BSD-2-Clause |
+| [stb_image_write](https://github.com/nothings/stb) | Lightweight image writing utilities | Public Domain / MIT |
+| [AndroidX](https://developer.android.com/jetpack/androidx) & [Media3 ExoPlayer](https://developer.android.com/media/media3) | Jetpack Camera/Navigation/Lifecycle/DataStore & video playback | Apache-2.0 |
+| [Material Components for Android](https://github.com/material-components/material-components-android) | Material 3 Expressive UI & Motion transitions | Apache-2.0 |
+| [Glide](https://github.com/bumptech/glide) | Asynchronous thumbnail & image loading | BSD / MIT / Apache-2.0 |
+| [Robolectric](https://robolectric.org/) | Local JVM Android unit test framework | MIT |
 
-## Acknowledgments
+---
 
-*   **[LibRaw](https://www.libraw.org/)**: For RAW image decoding and processing.
-*   **[timothybrooks/hdr-plus](https://github.com/timothybrooks/hdr-plus)**: For the HDR+ alignment and merging algorithm implementation.
-*   **[Halide](https://halide-lang.org/)**: For high-performance image processing kernels used in the HDR+ pipeline.
+## License
+
+Darkbag is licensed under the [Apache License 2.0](LICENSE).
