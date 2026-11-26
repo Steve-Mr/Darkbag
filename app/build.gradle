@@ -42,6 +42,8 @@ def hdrPlusGitShortSha = resolveGitShortSha('app/src/main/cpp/hdr-plus', 'embedd
 android {
     namespace 'top.maary.darkbag'
     compileSdkVersion 35
+    buildToolsVersion "35.0.0"
+    ndkVersion "27.0.12077973"
     defaultConfig {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         applicationId "top.maary.darkbag"
@@ -92,7 +94,7 @@ android {
                signingConfig signingConfigs.release
            }
            minifyEnabled false
-           proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+           proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
        }
        debug {
            if (keystorePropertiesFile.exists() && keystoreFile.exists()) {
