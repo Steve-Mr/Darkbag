@@ -5,7 +5,6 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Environment
 import android.util.Log
-import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.CancellationException
@@ -74,7 +73,6 @@ internal class ViewerCinemaDngExportHelper(
 
                     if (isUserCancelled.get() || !isActive) {
                         withContext(NonCancellable + Dispatchers.IO) { tempDir.deleteRecursively() }
-                        Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
                         return@launch
                     }
 
@@ -85,15 +83,22 @@ internal class ViewerCinemaDngExportHelper(
                         }
 
                         if (isUserCancelled.get() || !isActive) {
-                            Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
                             return@launch
                         }
 
                         onComplete(group.baseName)
-                        Toast.makeText(context, "CinemaDNG exported: $exportedClipName", Toast.LENGTH_LONG).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            context,
+                            context.getString(R.string.cinemadng_clip_exported, exportedClipName),
+                            com.google.android.material.snackbar.Snackbar.LENGTH_LONG
+                        )
                     } else {
                         withContext(NonCancellable + Dispatchers.IO) { tempDir.deleteRecursively() }
-                        Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            context,
+                            R.string.cinemadng_clip_export_failed,
+                            isError = true
+                        )
                     }
                 } else {
                     val picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
@@ -111,7 +116,6 @@ internal class ViewerCinemaDngExportHelper(
 
                     if (isUserCancelled.get() || !isActive) {
                         withContext(NonCancellable + Dispatchers.IO) { targetDir.deleteRecursively() }
-                        Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
                         return@launch
                     }
 
@@ -123,10 +127,18 @@ internal class ViewerCinemaDngExportHelper(
                             }
                         }
                         onComplete(group.baseName)
-                        Toast.makeText(context, "CinemaDNG exported: $clipName", Toast.LENGTH_LONG).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            context,
+                            context.getString(R.string.cinemadng_clip_exported, clipName),
+                            com.google.android.material.snackbar.Snackbar.LENGTH_LONG
+                        )
                     } else {
                         withContext(NonCancellable + Dispatchers.IO) { targetDir.deleteRecursively() }
-                        Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            context,
+                            R.string.cinemadng_clip_export_failed,
+                            isError = true
+                        )
                     }
                 }
             } catch (e: CancellationException) {
@@ -134,17 +146,18 @@ internal class ViewerCinemaDngExportHelper(
                     tempExportDir?.deleteRecursively()
                     destDir?.deleteRecursively()
                 }
-                Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 withContext(NonCancellable + Dispatchers.IO) {
                     tempExportDir?.deleteRecursively()
                     destDir?.deleteRecursively()
                 }
-                if (isUserCancelled.get()) {
-                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                } else {
+                if (!isUserCancelled.get()) {
                     Log.e("ViewerExportCoordinator", "CinemaDNG export error", e)
-                    Toast.makeText(context, "CinemaDNG export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                        context,
+                        context.getString(R.string.cinemadng_clip_export_error, e.message ?: ""),
+                        isError = true
+                    )
                 }
             } finally {
                 dismissIfActive(progressDialog)
@@ -212,7 +225,6 @@ internal class ViewerCinemaDngExportHelper(
 
                 if (isUserCancelled.get() || !isActive) {
                     withContext(NonCancellable + Dispatchers.IO) { tempMp4File.delete() }
-                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
                     return@launch
                 }
 
@@ -225,24 +237,37 @@ internal class ViewerCinemaDngExportHelper(
                     )
                     if (savedUri != null) {
                         onComplete(group.baseName)
-                        Toast.makeText(context, "Graded MP4 saved: ${group.baseName}_graded.mp4", Toast.LENGTH_LONG).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            context,
+                            context.getString(R.string.mp4_graded_saved, "${group.baseName}_graded.mp4"),
+                            com.google.android.material.snackbar.Snackbar.LENGTH_LONG
+                        )
                     } else {
-                        Toast.makeText(context, "Failed to save MP4 to storage", Toast.LENGTH_SHORT).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            context,
+                            R.string.mp4_save_storage_failed,
+                            isError = true
+                        )
                     }
                 } else {
                     withContext(NonCancellable + Dispatchers.IO) { tempMp4File.delete() }
-                    Toast.makeText(context, "MP4 export failed", Toast.LENGTH_SHORT).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                        context,
+                        R.string.mp4_export_failed,
+                        isError = true
+                    )
                 }
             } catch (e: CancellationException) {
                 withContext(NonCancellable + Dispatchers.IO) { tempMp4File.delete() }
-                Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 withContext(NonCancellable + Dispatchers.IO) { tempMp4File.delete() }
-                if (isUserCancelled.get()) {
-                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
-                } else {
+                if (!isUserCancelled.get()) {
                     Log.e("ViewerExportCoordinator", "MP4 export error", e)
-                    Toast.makeText(context, "MP4 export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                        context,
+                        context.getString(R.string.mp4_export_error, e.message ?: ""),
+                        isError = true
+                    )
                 }
             } finally {
                 dismissIfActive(progressDialog)
@@ -261,12 +286,15 @@ internal class ViewerCinemaDngExportHelper(
         onFinished: (success: Boolean) -> Unit
     ) {
         if (frameUri == null) {
-            Toast.makeText(context, R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                context,
+                R.string.cinemadng_export_failed,
+                isError = true
+            )
             return
         }
 
         onStart()
-        Toast.makeText(context, R.string.cinemadng_exporting_frame, Toast.LENGTH_SHORT).show()
 
         scope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -287,9 +315,13 @@ internal class ViewerCinemaDngExportHelper(
             val (rawUri, jpgUri) = result
             val success = rawUri != null || jpgUri != null
             if (success) {
-                Toast.makeText(context, R.string.cinemadng_export_success, Toast.LENGTH_SHORT).show()
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(context, R.string.cinemadng_export_success)
             } else {
-                Toast.makeText(context, R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                    context,
+                    R.string.cinemadng_export_failed,
+                    isError = true
+                )
             }
             onFinished(success)
         }

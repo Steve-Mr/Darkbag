@@ -27,7 +27,6 @@ import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -73,7 +72,11 @@ class PermissionsFragment : Fragment(), OnboardingStepBinder.Callbacks {
             stepBinder?.updatePermissionTilesState()
             stepBinder?.updatePrimaryCtaButton()
         } else {
-            Toast.makeText(requireContext(), R.string.toast_camera_permission_required, Toast.LENGTH_LONG).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                view,
+                R.string.toast_camera_permission_required,
+                com.google.android.material.snackbar.Snackbar.LENGTH_LONG
+            )
         }
     }
 
@@ -100,7 +103,7 @@ class PermissionsFragment : Fragment(), OnboardingStepBinder.Callbacks {
         } else {
             settingsRepository.setSaveLocationEnabled(false)
             stepBinder?.setSaveLocationChecked(false)
-            Toast.makeText(requireContext(), R.string.location_permission_denied, Toast.LENGTH_SHORT).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.location_permission_denied)
         }
     }
 
@@ -116,7 +119,7 @@ class PermissionsFragment : Fragment(), OnboardingStepBinder.Callbacks {
         if (cameraGranted || !settingsRepository.current().enableCamera) {
             stepBinder?.goToNextStep()
         } else {
-            Toast.makeText(requireContext(), R.string.toast_camera_permission_continue, Toast.LENGTH_SHORT).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.toast_camera_permission_continue)
         }
     }
 
@@ -152,13 +155,8 @@ class PermissionsFragment : Fragment(), OnboardingStepBinder.Callbacks {
             }
 
             stepBinder?.showImportedRecipeResult(importedFileName, pairingLog)
-            Toast.makeText(
-                requireContext(),
-                getString(R.string.toast_lut_imported_paired, importedFileName, pairingLog),
-                Toast.LENGTH_SHORT
-            ).show()
         } else {
-            Toast.makeText(requireContext(), R.string.toast_lut_import_failed, Toast.LENGTH_SHORT).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.toast_lut_import_failed, isError = true)
         }
     }
 

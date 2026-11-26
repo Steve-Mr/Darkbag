@@ -6,6 +6,7 @@ import android.hardware.camera2.CaptureResult
 import android.media.Image
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import top.maary.darkbag.models.CaptureMetadata
@@ -19,7 +20,11 @@ object ColorProcessor {
         }
     }
 
-    val backgroundSaveFlow = MutableSharedFlow<BackgroundSaveEvent>(extraBufferCapacity = 10)
+    val backgroundSaveFlow = MutableSharedFlow<BackgroundSaveEvent>(
+        replay = 0,
+        extraBufferCapacity = 32,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
     val halfFrameFlow = MutableSharedFlow<Int>(extraBufferCapacity = 5)
 
     val imageProcessingDispatcher = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
@@ -159,7 +164,8 @@ object ColorProcessor {
         val targetUri: String?,
         val zoomFactor: Float,
         val orientation: Int,
-        val saveJpg: Boolean
+        val saveJpg: Boolean,
+        val captureTimestamp: Long = System.currentTimeMillis()
     )
 
     /**

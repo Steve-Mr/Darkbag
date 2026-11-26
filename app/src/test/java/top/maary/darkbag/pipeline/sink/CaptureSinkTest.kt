@@ -455,5 +455,60 @@ class CaptureSinkTest {
         assertEquals(1, events.size)
         assertEquals(1.458f, events.first().zoomFactor, 1e-4f)
     }
+
+    @Test
+    fun testDirectMediaStoreSink_EmitsCaptureTimestampMillisAndReleasesForegroundContract() = runBlocking {
+        val testPfd = android.os.ParcelFileDescriptor.createPipe()
+        val mockUri = android.net.Uri.parse("content://media/external/images/media/99999")
+        val sink = DirectMediaStoreSink(
+            pfdProvider = { _, _, _ -> Pair(testPfd[1], mockUri) }
+        )
+        val timing = top.maary.darkbag.models.StandardTimingTracker(shutterClick = 1_750_000_123_456L)
+        val spec = createDummySpec(saveJpg = true, saveRaw = true).copy(timing = timing)
+        val targets = sink.prepareTargets(context, spec)
+
+        assertTrue(sink.releasesForegroundOnImageExport(spec, targets))
+        assertFalse(HalfFrameCacheSink().releasesForegroundOnImageExport(spec, targets))
+
+        val events = mutableListOf<ColorProcessor.BackgroundSaveEvent>()
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            ColorProcessor.backgroundSaveFlow.collect { events.add(it) }
+        }
+
+        sink.onImageExported(
+            context = context,
+            spec = spec,
+            success = true,
+            outputPath = targets.outJpgPath,
+            outputFd = targets.outJpgFd
+        )
+
+        kotlinx.coroutines.yield()
+        job.cancel()
+        testPfd[0].close()
+        assertEquals(1, events.size)
+        assertEquals(1_750_000_123_456L, events.first().captureTimestamp)
+    }
+
+    @Test
+    fun testBackgroundSaveFlow_DropOldestRetainsNewestUnderBurstOverflow() = runBlocking {
+        // Emit >32 events without any active collector; DROP_OLDEST must retain the newest 32
+        for (i in 1..40) {
+            assertTrue(
+                ColorProcessor.backgroundSaveFlow.tryEmit(
+                    ColorProcessor.BackgroundSaveEvent(
+                        baseName = "BURST_$i",
+                        dngPath = null,
+                        jpgPath = null,
+                        targetUri = "content://media/external/images/media/$i",
+                        zoomFactor = 1.0f,
+                        orientation = 0,
+                        saveJpg = true,
+                        captureTimestamp = 1000L + i
+                    )
+                )
+            )
+        }
+    }
 }
 

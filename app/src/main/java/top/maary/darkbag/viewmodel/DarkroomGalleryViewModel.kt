@@ -66,8 +66,6 @@ data class DarkroomGalleryUiState(
  * 暗房画廊一次性单向副作用.
  */
 sealed class DarkroomGalleryEffect {
-    data class ShowToast(val message: String) : DarkroomGalleryEffect()
-    data class ShowToastRes(val resId: Int, val formatArgs: List<Any> = emptyList()) : DarkroomGalleryEffect()
     data class ScrollToPosition(val position: Int) : DarkroomGalleryEffect()
 }
 

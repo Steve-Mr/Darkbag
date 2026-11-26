@@ -14,11 +14,7 @@ class MultiCameraModeCoordinator(
     override val mode: CaptureMode = CaptureMode.MULTI_CAMERA
 
     override fun onActivated() {
-        android.widget.Toast.makeText(
-            host.context,
-            top.maary.darkbag.R.string.multi_camera_mode_enabled_toast,
-            android.widget.Toast.LENGTH_SHORT
-        ).show()
+        // 多摄模式激活
     }
 
     override fun onDeactivated() {

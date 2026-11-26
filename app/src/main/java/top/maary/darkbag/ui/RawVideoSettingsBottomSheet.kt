@@ -9,7 +9,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.fragment.app.FragmentManager
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.button.MaterialButton
@@ -110,7 +109,10 @@ class RawVideoSettingsBottomSheet : BottomSheetDialogFragment() {
 
                 btn.setOnClickListener {
                     if (!isSupported) {
-                        Toast.makeText(requireContext(), getString(R.string.raw_video_option_unsupported_suffix, "$fpsStr FPS"), Toast.LENGTH_SHORT).show()
+                        DarkbagFeedback.showSnackbar(
+                            dialog?.window?.findViewById(android.R.id.content) ?: view,
+                            getString(R.string.raw_video_option_unsupported_suffix, "$fpsStr FPS")
+                        )
                     }
                     settingsRepository.setRawVideoFps(fpsStr)
                     updateFpsStyles(fpsStr)
@@ -198,7 +200,10 @@ class RawVideoSettingsBottomSheet : BottomSheetDialogFragment() {
 
                 itemBinding.cardOption.setOnClickListener {
                     if (!isSupported) {
-                        Toast.makeText(requireContext(), getString(R.string.raw_video_option_unsupported_suffix, resOption), Toast.LENGTH_SHORT).show()
+                        DarkbagFeedback.showSnackbar(
+                            dialog?.window?.findViewById(android.R.id.content) ?: view,
+                            getString(R.string.raw_video_option_unsupported_suffix, resOption)
+                        )
                     }
                     settingsRepository.setRawVideoResolution(resOption)
                     renderCards(resOption)

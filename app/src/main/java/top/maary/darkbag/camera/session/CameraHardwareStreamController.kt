@@ -21,7 +21,6 @@ import android.util.Range
 import android.util.Size
 import android.view.Surface
 import android.view.View
-import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -543,7 +542,12 @@ class CameraHardwareStreamController(
                 }
 
                 env.lifecycleScope.launch(Dispatchers.Main) {
-                    Toast.makeText(env.hostContext, env.hostContext.getString(R.string.error_camera_hardware, error), Toast.LENGTH_LONG).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                        ui.fragmentCameraBinding?.root,
+                        env.hostContext.getString(R.string.error_camera_hardware, error),
+                        com.google.android.material.snackbar.Snackbar.LENGTH_LONG,
+                        isError = true
+                    )
                 }
             }
         })
@@ -675,11 +679,11 @@ class CameraHardwareStreamController(
                             env.lifecycleScope.launch(Dispatchers.Main) {
                                 env.runtimeState.isSwitchingLens = false
                                 ui.fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(200L)?.start()
-                                Toast.makeText(
-                                    env.hostContext,
-                                    env.hostContext.getString(R.string.error_configure_camera_session),
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                                    ui.fragmentCameraBinding?.root,
+                                    R.string.error_configure_camera_session,
+                                    isError = true
+                                )
                             }
                         }
                     })

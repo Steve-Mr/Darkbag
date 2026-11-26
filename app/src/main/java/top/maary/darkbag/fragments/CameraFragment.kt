@@ -15,7 +15,6 @@ import android.view.LayoutInflater
 import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.constraintlayout.widget.ConstraintLayout
@@ -238,7 +237,7 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
 
         viewLifecycleOwner.ownerLifecycleScope.launch {
             ColorProcessor.backgroundSaveFlow.collect { event ->
-                hub.onBackgroundSaveCompleted(event.targetUri)
+                hub.onBackgroundSaveCompleted(event.targetUri, event.captureTimestamp)
             }
         }
 
@@ -280,7 +279,6 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
                             is CameraEffect.ShutterBlackout -> hub.overlayController.showShutterBlackout()
                             is CameraEffect.ResetShutterUi -> hub.shutterController.resetBurstUi()
                             is CameraEffect.SetShutterProgress -> cameraUiContainerBinding?.cameraCaptureButton?.setProgress(effect.progress)
-                            is CameraEffect.ShowToast -> Toast.makeText(context, effect.message, Toast.LENGTH_SHORT).show()
                             is CameraEffect.AnimateHalfFrame -> hub.overlayController.updateHalfFrameUI(animate = true)
                             is CameraEffect.ClearThumbnailPlaceholder -> {
                                 cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
@@ -348,7 +346,6 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
         cameraUiContainerBinding?.let { CameraBentoDeckView.applyDynamicRowHeights(it) }
         hub.overlayController.updateViewFinderConstraints()
         hub.shutterController.updateShutterOrientation()
-        hub.thumbnailController.loadLatestThumbnail()
 
         cameraUiContainerBinding?.root?.let { rootView ->
             var currentBottomInset = 0
@@ -402,6 +399,7 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
         }
 
         hub.bindCameraDeckUi()
+        hub.thumbnailController.loadLatestThumbnail()
     }
 
     companion object {

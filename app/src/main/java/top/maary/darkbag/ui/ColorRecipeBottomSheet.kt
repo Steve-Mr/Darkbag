@@ -15,7 +15,6 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -593,8 +592,7 @@ object ColorRecipeBottomSheet {
                         }
                     }
                     if (lutReset) {
-                        val msg = context.getString(R.string.lut_reset_incompatible_toast, session.currentLog)
-                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        // Incompatible LUT automatically reset when switching Log curve
                     }
 
                     reloadLutEntries()

@@ -4,7 +4,6 @@ import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureResult
 import android.util.Log
-import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -41,7 +40,7 @@ internal class HdrPlusBurstProcessingEnqueuer(
     private val metadataExtractor: CameraCaptureMetadataExtractor,
     private val specAssembler: CameraTaskSpecAssembler,
     private val onEnqueueRequest: (Context, HdrPlusRequest, StandardTimingTracker?) -> Unit,
-    private val onNotifyQueuedOnMain: suspend (Context, Int) -> Unit,
+    private val onClearThumbnailOnMain: suspend () -> Unit,
     private val activePhysicalIdProvider: (CaptureResult?) -> String?
 ) {
     companion object {
@@ -281,7 +280,11 @@ internal class HdrPlusBurstProcessingEnqueuer(
                     }
                 }
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(appContext, appContext.getString(R.string.toast_hdr_failed_fallback), Toast.LENGTH_SHORT).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                        ui.fragmentCameraBinding?.root,
+                        R.string.toast_hdr_failed_fallback,
+                        isError = true
+                    )
                 }
             } finally {
                 env.lifecycleScope.launch(Dispatchers.Main) {
@@ -299,7 +302,7 @@ internal class HdrPlusBurstProcessingEnqueuer(
         streamingSessionHandle: Long,
         numFrames: Int
     ) {
-        onNotifyQueuedOnMain(appContext, R.string.toast_hdr_queued)
+        onClearThumbnailOnMain()
 
         val (motionMp4Path, motionStillPtsUs) = specAssembler.awaitPendingMotionPhoto(
             pendingTaskProvider = { env.runtimeState.pendingMotionPhotoTask },
@@ -370,8 +373,10 @@ internal class HdrPlusBurstProcessingEnqueuer(
                 withContext(Dispatchers.Main) {
                     if (uri != null) {
                         env.imageRepository.invalidateCache()
-                        settingsRepository.setLastCaptureUri(uri.toString())
-                        ui.setGalleryThumbnail(uri.toString())
+                        val captureTimestamp = captureMetadata?.dateTimeOriginal?.takeIf { it > 0L } ?: System.currentTimeMillis()
+                        if (ui.setGalleryThumbnail(uri.toString(), captureTimestamp)) {
+                            settingsRepository.setLastCaptureUri(uri.toString())
+                        }
                     } else if (coordinator.activeCoordinator?.shouldClearThumbnailOnCapture() == true) {
                         ui.setGalleryThumbnail(null)
                     }

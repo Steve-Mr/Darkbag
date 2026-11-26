@@ -15,7 +15,6 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -104,10 +103,10 @@ class LutManagementFragment : Fragment() {
             } else {
                 getString(R.string.lut_import_success_paired, imported, targetLogToBind)
             }
-            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, msg)
             updateList()
         } else {
-            Toast.makeText(context, getString(R.string.lut_import_no_valid), Toast.LENGTH_SHORT).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.lut_import_no_valid)
         }
     }
 
@@ -517,7 +516,7 @@ class LutManagementFragment : Fragment() {
                     }
                     updateList()
                 } else {
-                    Toast.makeText(context, "Invalid name", Toast.LENGTH_SHORT).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.lut_invalid_name, isError = true)
                 }
             }
             .setNegativeButton(android.R.string.cancel, null)

@@ -9,7 +9,6 @@ import android.os.Build
 import android.util.Log
 import android.view.TextureView
 import android.view.View
-import android.widget.Toast
 import com.google.android.material.color.MaterialColors
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -119,11 +118,11 @@ class CameraMultiCaptureDispatcher(
                 env.lifecycleScope.launch(Dispatchers.Main) {
                     ui.resetBurstUi()
                     ui.hideProcessingAnimation()
-                    Toast.makeText(
-                        env.hostContext,
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                        ui.fragmentCameraBinding?.root,
                         env.hostContext.getString(R.string.error_multi_camera_capture_failed, errorMsg),
-                        Toast.LENGTH_SHORT
-                    ).show()
+                        isError = true
+                    )
                 }
             }
         )
@@ -298,8 +297,10 @@ class CameraMultiCaptureDispatcher(
             withContext(Dispatchers.Main) {
                 if (primarySavedUri != null) {
                     env.imageRepository.invalidateCache()
-                    settingsRepository.setLastCaptureUri(primarySavedUri.toString())
-                    ui.setGalleryThumbnail(primarySavedUri.toString())
+                    val captureTimestamp = timing?.shutterClick?.takeIf { it > 0L } ?: System.currentTimeMillis()
+                    if (ui.setGalleryThumbnail(primarySavedUri.toString(), captureTimestamp)) {
+                        settingsRepository.setLastCaptureUri(primarySavedUri.toString())
+                    }
                 }
             }
             notifyForegroundFinished()
@@ -334,7 +335,10 @@ class CameraMultiCaptureDispatcher(
 
     fun toggleFrontPipInMultiCameraMode() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || !MultiCameraHelper.isConcurrentFrontBackSupported(env.hostContext)) {
-            Toast.makeText(env.hostContext, R.string.concurrent_front_camera_unsupported, Toast.LENGTH_SHORT).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                ui.fragmentCameraBinding?.root,
+                R.string.concurrent_front_camera_unsupported
+            )
             return
         }
 
@@ -365,7 +369,10 @@ class CameraMultiCaptureDispatcher(
                             val surfaceContainer = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorSurfaceContainerHighest)
                             switchBtn.iconTint = ColorStateList.valueOf(onSurface)
                             switchBtn.backgroundTintList = ColorStateList.valueOf(surfaceContainer)
-                            Toast.makeText(env.hostContext, R.string.concurrent_front_camera_unsupported, Toast.LENGTH_SHORT).show()
+                            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                                ui.fragmentCameraBinding?.root,
+                                R.string.concurrent_front_camera_unsupported
+                            )
                         }
                     }
                 }

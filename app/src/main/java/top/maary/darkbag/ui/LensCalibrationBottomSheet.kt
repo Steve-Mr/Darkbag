@@ -8,7 +8,6 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetBehavior
@@ -164,13 +163,6 @@ class LensCalibrationBottomSheet : BottomSheetDialogFragment() {
                 isEnabled = kotlin.math.abs(k1) > 0.0001f
             )
             calibrationStore.saveCalibration(calib)
-
-            val msg = if (calib.isEnabled) {
-                String.format(Locale.US, "已保存 %s 标定参数 (k1=%.3f)", lens.name, k1)
-            } else {
-                String.format(Locale.US, "已重置 %s 标定", lens.name)
-            }
-            Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
             dismiss()
         }
     }
@@ -217,12 +209,20 @@ class LensCalibrationBottomSheet : BottomSheetDialogFragment() {
                     if (bitmap != null) {
                         binding.calibrationPreview.setBitmap(bitmap)
                     } else {
-                        Toast.makeText(requireContext(), "无法解析图片", Toast.LENGTH_SHORT).show()
+                        DarkbagFeedback.showSnackbar(
+                            dialog?.window?.findViewById(android.R.id.content) ?: view,
+                            top.maary.darkbag.R.string.calibration_decode_failed,
+                            isError = true
+                        )
                     }
                 }
             } catch (e: Exception) {
                 if (_binding != null) {
-                    Toast.makeText(requireContext(), "读取图片失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    DarkbagFeedback.showSnackbar(
+                        dialog?.window?.findViewById(android.R.id.content) ?: view,
+                        getString(top.maary.darkbag.R.string.calibration_read_failed, e.message ?: ""),
+                        isError = true
+                    )
                 }
             }
         }

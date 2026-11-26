@@ -39,6 +39,12 @@ data class CaptureTaskSpec(
     val persistedZoomFactor: Float
         get() = if (isOutputZoomBaked) 1.0f else zoomFactor
 
+    val captureTimestampMillis: Long
+        get() = timing?.shutterClick?.takeIf { it > 0L }
+            ?: hfMetadata?.captureTimeMillis?.takeIf { it > 0L }
+            ?: frameMetadata.captureMetadata.dateTimeOriginal?.takeIf { it > 0L }
+            ?: System.currentTimeMillis()
+
     fun getEffectiveSink(): top.maary.darkbag.pipeline.sink.CaptureSink =
         sink ?: top.maary.darkbag.pipeline.sink.CaptureSinkFactory.createDefaultSink(this)
 }

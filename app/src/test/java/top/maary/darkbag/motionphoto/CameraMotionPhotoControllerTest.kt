@@ -435,8 +435,8 @@ class CameraMotionPhotoControllerTest {
         override fun showProcessingAnimation() {}
         override fun hideProcessingAnimation() {}
         override fun resetBurstUi() {}
-        override fun updateCurrentThumbnail(uri: Uri?) {}
-        override fun setGalleryThumbnail(filename: String?) {}
+        override fun updateCurrentThumbnail(uri: Uri?, timestamp: Long): Boolean = true
+        override fun setGalleryThumbnail(filename: String?, timestamp: Long): Boolean = true
         override fun onSessionConfigured() {}
         override fun triggerTapToFocus(x: Float, y: Float) {}
         override fun unlockFocusAndMetering() {}

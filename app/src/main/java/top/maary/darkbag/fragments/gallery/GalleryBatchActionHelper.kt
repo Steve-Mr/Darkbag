@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
-import android.widget.Toast
 import androidx.fragment.app.FragmentManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,7 +56,7 @@ internal class GalleryBatchActionHelper(
             val uri2 = item2.specificLens?.jpgUri ?: item2.group.firstAvailableUri ?: item2.group.jpgUri
 
             if (uri1 == null || uri2 == null) {
-                Toast.makeText(activeCtx, R.string.gallery_collage_resolve_failed, Toast.LENGTH_SHORT).show()
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(activeCtx, R.string.gallery_collage_resolve_failed, isError = true)
                 return@show
             }
 
@@ -74,9 +73,9 @@ internal class GalleryBatchActionHelper(
                 if (insertedUri != null) {
                     repository.invalidateCache()
                     onRefreshAfterSuccess()
-                    Toast.makeText(activeCtx, R.string.gallery_merge_success, Toast.LENGTH_SHORT).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(activeCtx, R.string.gallery_merge_success)
                 } else {
-                    Toast.makeText(activeCtx, R.string.gallery_collage_create_failed, Toast.LENGTH_SHORT).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(activeCtx, R.string.gallery_collage_create_failed, isError = true)
                 }
             }
         }
@@ -115,11 +114,10 @@ internal class GalleryBatchActionHelper(
                 onEndWork()
                 repository.invalidateCache()
                 onRefreshAfterSuccess()
-                Toast.makeText(
-                    appContext,
-                    appContext.getString(R.string.gallery_batch_grade_success, gradedCount),
-                    Toast.LENGTH_SHORT
-                ).show()
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                    activeCtx,
+                    appContext.getString(R.string.gallery_batch_grade_success, gradedCount)
+                )
             }
         }
     }

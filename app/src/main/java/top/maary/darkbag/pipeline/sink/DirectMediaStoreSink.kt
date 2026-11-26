@@ -26,6 +26,11 @@ class DirectMediaStoreSink(
     private var pfdJpgFinalized = false
     private var pfdDngFinalized = false
     private var jpgExportSucceeded = false
+    private var secondaryJpgSaved = false
+    private var emittedBackgroundEvent = false
+
+    override fun releasesForegroundOnImageExport(spec: CaptureTaskSpec, targets: SinkOutputTargets): Boolean =
+        spec.saveJpg && (pfdJpg != null || secondaryJpgSaved)
 
     private fun createPfd(context: Context, displayName: String, mimeType: String): Pair<ParcelFileDescriptor, Uri>? {
         return pfdProvider?.invoke(context, displayName, mimeType)
@@ -99,10 +104,41 @@ class DirectMediaStoreSink(
                         targetUri = targetUriStr,
                         zoomFactor = spec.persistedZoomFactor,
                         orientation = spec.orientation,
-                        saveJpg = true
+                        saveJpg = true,
+                        captureTimestamp = spec.captureTimestampMillis
                     )
                 )
+                emittedBackgroundEvent = true
                 SettingsRepository.getInstance(context).setLastCaptureUri(targetUriStr)
+            }
+        } else if (success && spec.saveJpg) {
+            val savedUri = ImageSaver.saveProcessedImage(
+                context = context,
+                inputBitmap = null,
+                bmpPath = spec.fullResJpgPath,
+                rotationDegrees = 0,
+                zoomFactor = spec.persistedZoomFactor,
+                baseName = spec.baseName,
+                linearDngPath = null,
+                saveJpg = true,
+                saveRaw = false,
+                jpgFolderUri = spec.jpgFolderUri,
+                rawFolderUri = spec.rawFolderUri,
+                mirror = false,
+                isFastPath = false,
+                halfFrameMetadata = null,
+                editConfig = spec.renderRecipe.editConfig,
+                digitalGain = spec.renderRecipe.digitalGain,
+                captureMetadata = spec.frameMetadata.captureMetadata,
+                isAlreadyCropped = true,
+                motionPhotoMp4Path = spec.motionPhotoMp4Path,
+                motionPhotoStillPtsUs = spec.motionPhotoStillPtsUs,
+                captureTimestamp = spec.captureTimestampMillis,
+                emitBackgroundEvent = true
+            )
+            if (savedUri != null) {
+                secondaryJpgSaved = true
+                emittedBackgroundEvent = true
             }
         }
     }
@@ -124,7 +160,7 @@ class DirectMediaStoreSink(
                 editConfig = spec.renderRecipe.editConfig,
                 captureMetadata = spec.frameMetadata.captureMetadata
             )
-            val shouldEmitDng = success && (!spec.saveJpg || (pfdJpg == null && !jpgExportSucceeded))
+            val shouldEmitDng = success && !emittedBackgroundEvent && (!spec.saveJpg || (pfdJpg == null && !jpgExportSucceeded))
             if (shouldEmitDng) {
                 val dngPathToUse = if (spec.rawOutputType == 0 && spec.linearDngPath.endsWith("_linear.dng")) {
                     spec.linearDngPath.removeSuffix("_linear.dng") + ".dng"
@@ -140,9 +176,11 @@ class DirectMediaStoreSink(
                         targetUri = targetUriStr,
                         zoomFactor = spec.persistedZoomFactor,
                         orientation = spec.orientation,
-                        saveJpg = false
+                        saveJpg = false,
+                        captureTimestamp = spec.captureTimestampMillis
                     )
                 )
+                emittedBackgroundEvent = true
                 SettingsRepository.getInstance(context).setLastCaptureUri(targetUriStr)
             }
         }
@@ -154,7 +192,7 @@ class DirectMediaStoreSink(
         jpgSuccess: Boolean,
         rawSuccess: Boolean
     ) {
-        val needsSecondaryJpg = spec.saveJpg && pfdJpg == null
+        val needsSecondaryJpg = spec.saveJpg && pfdJpg == null && !secondaryJpgSaved
         val needsSecondaryRaw = spec.saveRaw && pfdDng == null
 
         val dngPathToUse = if (spec.rawOutputType == 0 && spec.linearDngPath.endsWith("_linear.dng")) {
@@ -184,7 +222,9 @@ class DirectMediaStoreSink(
                 captureMetadata = spec.frameMetadata.captureMetadata,
                 isAlreadyCropped = true,
                 motionPhotoMp4Path = spec.motionPhotoMp4Path,
-                motionPhotoStillPtsUs = spec.motionPhotoStillPtsUs
+                motionPhotoStillPtsUs = spec.motionPhotoStillPtsUs,
+                captureTimestamp = spec.captureTimestampMillis,
+                emitBackgroundEvent = !emittedBackgroundEvent || needsSecondaryJpg
             )
         }
     }

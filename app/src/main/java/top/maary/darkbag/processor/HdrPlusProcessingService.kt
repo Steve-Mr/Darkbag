@@ -249,7 +249,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                         outputPath = targets.outJpgPath,
                                         outputFd = targets.outJpgFd
                                     )
-                                    if (jpgSuccess && targets.outJpgFd != -1) {
+                                    if (jpgSuccess && sink.releasesForegroundOnImageExport(spec, targets)) {
                                         notifyForegroundComplete()
                                     }
                                     if (jpgSuccess && req.timing?.firstOutputWritten == 0L) {
@@ -340,9 +340,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                     rawSuccess = dngSuccess
                                 )
 
-                                val isFastPath = (shouldSaveJpg && targets.outJpgFd != -1) ||
-                                    (!shouldSaveJpg && shouldSaveRaw && targets.outDngFd != -1)
-                                if (!isFastPath) {
+                                if (!foregroundCompleted.get()) {
                                     notifyForegroundComplete()
                                 }
 

@@ -72,8 +72,10 @@ interface CameraUiHost {
     fun showZslCaptureFeedback() {}
 
     fun resetBurstUi()
-    fun updateCurrentThumbnail(uri: Uri?)
-    fun setGalleryThumbnail(filename: String?)
+    fun updateCurrentThumbnail(uri: Uri?, timestamp: Long = System.currentTimeMillis()): Boolean
+    fun setGalleryThumbnail(filename: String?, timestamp: Long = System.currentTimeMillis()): Boolean
+    fun setGalleryThumbnailBitmap(uri: Uri, bitmap: android.graphics.Bitmap?, timestamp: Long = System.currentTimeMillis()): Boolean =
+        setGalleryThumbnail(uri.toString(), timestamp)
     fun onSessionConfigured()
     fun triggerTapToFocus(x: Float, y: Float)
     fun unlockFocusAndMetering()

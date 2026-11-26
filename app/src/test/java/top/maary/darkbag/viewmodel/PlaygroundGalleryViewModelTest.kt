@@ -163,8 +163,8 @@ class PlaygroundGalleryViewModelTest {
         }
         viewModel.processIntent(PlaygroundUserIntent.ExportSelected)
         val effect = job.await()
-        assertTrue(effect is PlaygroundEffect.ShowToastRes)
-        assertEquals(R.string.playground_export_hint, (effect as PlaygroundEffect.ShowToastRes).resId)
+        assertTrue(effect is PlaygroundEffect.ShowSnackbarRes)
+        assertEquals(R.string.playground_export_hint, (effect as PlaygroundEffect.ShowSnackbarRes).resId)
     }
 
     @Test

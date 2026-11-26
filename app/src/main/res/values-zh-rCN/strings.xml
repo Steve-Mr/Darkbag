@@ -680,4 +680,22 @@
     <string name="onboarding_tier_custom_short">自由定制</string>
     <string name="onboarding_tier_custom_desc">自由开关取景器各功能磁贴，打造专属操控布局。</string>
     <string name="onboarding_btn_customize_deck">自定义取景器控件</string>
+
+    <!-- 反馈与导出本地化 -->
+    <string name="lut_invalid_name">名称无效</string>
+    <string name="error_no_share_app">未找到可用的分享应用</string>
+    <string name="collage_save_failed">保存拼图失败</string>
+    <string name="collage_render_failed">生成拼图失败</string>
+    <string name="calibration_decode_failed">无法解析图片</string>
+    <string name="calibration_read_failed">读取图片失败：%1$s</string>
+    <string name="cinemadng_clip_exported">已导出 CinemaDNG：%1$s</string>
+    <string name="cinemadng_clip_export_failed">CinemaDNG 导出失败</string>
+    <string name="cinemadng_clip_export_error">CinemaDNG 导出错误：%1$s</string>
+    <string name="mp4_graded_saved">已保存调色 MP4：%1$s</string>
+    <string name="mp4_save_storage_failed">保存 MP4 至存储失败</string>
+    <string name="mp4_export_failed">MP4 导出失败</string>
+    <string name="mp4_export_error">MP4 导出错误：%1$s</string>
+    <string name="share_ignored_and_failed">已忽略 %1$d 个非 DNG 文件，%2$d 个文件读取失败。</string>
+    <string name="share_only_dng_supported">已忽略 %1$d 个文件，仅支持 DNG 格式。</string>
+    <string name="share_import_failed">%1$d 个文件因读取或权限错误导入失败。</string>
 </resources>

@@ -8,7 +8,6 @@ sealed interface CameraEffect {
     data object ShutterBlackout : CameraEffect
     data object PlayShutterClick : CameraEffect
     data object PerformHapticFeedback : CameraEffect
-    data class ShowToast(val message: String) : CameraEffect
     data class SetShutterProgress(val progress: Float) : CameraEffect
     data object ResetShutterUi : CameraEffect
     data class AnimateHalfFrame(val isFrame1: Boolean) : CameraEffect

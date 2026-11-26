@@ -5,7 +5,6 @@ import android.graphics.Color
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
 import top.maary.darkbag.R
@@ -55,12 +54,6 @@ class CameraTierController(
             state.isMultiCameraManualLinked = !state.isMultiCameraManualLinked
             settingsRepository.setMultiCameraManualLinked(state.isMultiCameraManualLinked)
             v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
-            val msg = if (state.isMultiCameraManualLinked) {
-                env.hostContext.getString(R.string.multi_camera_link_synced)
-            } else {
-                env.hostContext.getString(R.string.multi_camera_link_primary_only)
-            }
-            Toast.makeText(env.hostContext, msg, Toast.LENGTH_SHORT).show()
             updateProInfoBar()
         }
 

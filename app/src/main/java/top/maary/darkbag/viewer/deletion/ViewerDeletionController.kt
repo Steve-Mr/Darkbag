@@ -2,7 +2,6 @@ package top.maary.darkbag.viewer.deletion
 
 import android.content.Context
 import android.net.Uri
-import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
 import androidx.fragment.app.FragmentManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -218,13 +217,13 @@ class ViewerDeletionController(
                 try {
                     launchDeleteRequest(outcome.deleteRequest)
                 } catch (e: Exception) {
-                    Toast.makeText(context, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(context, R.string.gallery_delete_prompt_failed, isError = true)
                     repository.invalidateCache(clearStale = true)
                     onReloadImages(nextTargetUri)
                 }
             } else {
                 if (outcome.promptCreationFailed) {
-                    Toast.makeText(context, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(context, R.string.gallery_delete_prompt_failed, isError = true)
                 }
                 repository.invalidateCache(clearStale = true)
                 onReloadImages(nextTargetUri)
@@ -242,7 +241,7 @@ class ViewerDeletionController(
             repository.invalidateCache(clearStale = true)
             onReloadImages(targetUri)
         } else {
-            Toast.makeText(context, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(context, R.string.gallery_delete_prompt_failed, isError = true)
             repository.invalidateCache(clearStale = true)
             onReloadImages(targetUri)
         }

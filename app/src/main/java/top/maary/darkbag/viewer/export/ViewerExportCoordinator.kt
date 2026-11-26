@@ -9,7 +9,6 @@ import android.provider.DocumentsContract
 import android.util.Log
 import android.view.LayoutInflater
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.FileProvider
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -262,7 +261,7 @@ class ViewerExportCoordinator(
                     DarkroomRenderEngine.render(appContext, spec)
                 }
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(appContext, appContext.getString(R.string.toast_export_jpg_success), Toast.LENGTH_SHORT).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(context, R.string.toast_export_jpg_success)
                 }
             } catch (e: Exception) {
                 Log.e("ViewerExportCoordinator", "Failed to export JPG", e)
@@ -425,7 +424,7 @@ class ViewerExportCoordinator(
         try {
             context.startActivity(Intent.createChooser(intent, "Share TIFF"))
         } catch (e: ActivityNotFoundException) {
-            Toast.makeText(context, "No app found to share TIFF.", Toast.LENGTH_SHORT).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(context, R.string.error_no_share_app)
         }
     }
 
@@ -463,7 +462,7 @@ class ViewerExportCoordinator(
         try {
             context.startActivity(Intent.createChooser(intent, "Share"))
         } catch (e: ActivityNotFoundException) {
-            Toast.makeText(context, "No app found to share.", Toast.LENGTH_SHORT).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(context, R.string.error_no_share_app)
         }
     }
 
@@ -498,7 +497,7 @@ class ViewerExportCoordinator(
             else -> group.firstAvailableUri
         }
         uri?.let { shareImages(listOf(it)) }
-            ?: Toast.makeText(context, R.string.error_no_external_viewer, Toast.LENGTH_SHORT).show()
+            ?: top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(context, R.string.error_no_external_viewer)
     }
 
     /**

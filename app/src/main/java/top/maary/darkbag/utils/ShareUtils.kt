@@ -6,8 +6,9 @@ import android.net.Uri
 import android.os.Parcelable
 import android.provider.OpenableColumns
 import android.util.Log
-import android.widget.Toast
 import com.google.android.material.snackbar.Snackbar
+import top.maary.darkbag.R
+import top.maary.darkbag.ui.DarkbagFeedback
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -62,21 +63,16 @@ object ShareUtils {
         withContext(Dispatchers.Main) {
             val message = when {
                 invalidFormatCount > 0 && ioErrorCount > 0 ->
-                    "$invalidFormatCount non-DNG file(s) ignored, $ioErrorCount file(s) failed to read."
+                    context.getString(R.string.share_ignored_and_failed, invalidFormatCount, ioErrorCount)
                 invalidFormatCount > 0 ->
-                    "$invalidFormatCount file(s) ignored. Only DNG format is supported."
+                    context.getString(R.string.share_only_dng_supported, invalidFormatCount)
                 ioErrorCount > 0 ->
-                    "Failed to import $ioErrorCount file(s) due to read/permission errors."
+                    context.getString(R.string.share_import_failed, ioErrorCount)
                 else -> null
             }
 
             if (message != null) {
-                val view = (context as? android.app.Activity)?.findViewById<android.view.View>(android.R.id.content)
-                if (view != null) {
-                    Snackbar.make(view, message, Snackbar.LENGTH_LONG).show()
-                } else {
-                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                }
+                DarkbagFeedback.showSnackbar(context, message, Snackbar.LENGTH_LONG, isError = true)
             }
         }
 

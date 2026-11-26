@@ -4,7 +4,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
@@ -205,7 +204,7 @@ class PlaygroundGalleryFragment : Fragment() {
                     }
                     .show()
             } else {
-                Toast.makeText(requireContext(), R.string.playground_merge_need_two, Toast.LENGTH_SHORT).show()
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.playground_merge_need_two)
             }
         }
 
@@ -236,8 +235,12 @@ class PlaygroundGalleryFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.effects.collect { effect ->
                     when (effect) {
-                        is PlaygroundEffect.ShowToast -> Toast.makeText(requireContext(), effect.message, Toast.LENGTH_SHORT).show()
-                        is PlaygroundEffect.ShowToastRes -> Toast.makeText(requireContext(), getString(effect.resId, *effect.formatArgs.toTypedArray()), Toast.LENGTH_SHORT).show()
+                        is PlaygroundEffect.ShowSnackbar -> top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            view, effect.message, isError = effect.isError
+                        )
+                        is PlaygroundEffect.ShowSnackbarRes -> top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            view, getString(effect.resId, *effect.formatArgs.toTypedArray()), isError = effect.isError
+                        )
                         is PlaygroundEffect.OpenViewer -> openViewer(effect.paths, effect.hfLayout)
                         is PlaygroundEffect.RequestRefresh -> viewModel.loadFiles(forceRefresh = true)
                     }

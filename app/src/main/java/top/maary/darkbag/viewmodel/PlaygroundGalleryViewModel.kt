@@ -38,8 +38,12 @@ data class PlaygroundGalleryUiState(
  * 工坊画廊一次性单向副作用.
  */
 sealed class PlaygroundEffect {
-    data class ShowToast(val message: String) : PlaygroundEffect()
-    data class ShowToastRes(val resId: Int, val formatArgs: List<Any> = emptyList()) : PlaygroundEffect()
+    data class ShowSnackbar(val message: String, val isError: Boolean = false) : PlaygroundEffect()
+    data class ShowSnackbarRes(
+        val resId: Int,
+        val formatArgs: List<Any> = emptyList(),
+        val isError: Boolean = false
+    ) : PlaygroundEffect()
     data class OpenViewer(val paths: List<String>, val hfLayout: String?) : PlaygroundEffect()
     object RequestRefresh : PlaygroundEffect()
 }
@@ -256,7 +260,7 @@ class PlaygroundGalleryViewModel @JvmOverloads constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             val count = repository.importDngs(uris, contentResolver)
-            emitEffect(PlaygroundEffect.ShowToastRes(R.string.playground_import_success, listOf(count)))
+            emitEffect(PlaygroundEffect.ShowSnackbarRes(R.string.playground_import_success, listOf(count)))
             loadFiles(forceRefresh = true)
         }
     }
@@ -264,15 +268,14 @@ class PlaygroundGalleryViewModel @JvmOverloads constructor(
     fun exportSelected() {
         val filesToExport = _uiState.value.selectedFiles.toList()
         if (filesToExport.isEmpty()) {
-            emitEffect(PlaygroundEffect.ShowToastRes(R.string.playground_export_hint))
+            emitEffect(PlaygroundEffect.ShowSnackbarRes(R.string.playground_export_hint))
             return
         }
 
         viewModelScope.launch {
             _uiState.update { it.copy(isExporting = true) }
-            emitEffect(PlaygroundEffect.ShowToastRes(R.string.playground_exporting, listOf(filesToExport.size)))
             val successCount = repository.exportFiles(filesToExport, _uiState.value.items)
-            emitEffect(PlaygroundEffect.ShowToastRes(R.string.playground_export_success, listOf(successCount)))
+            emitEffect(PlaygroundEffect.ShowSnackbarRes(R.string.playground_export_success, listOf(successCount)))
             clearSelection()
             _uiState.update { it.copy(isExporting = false) }
         }

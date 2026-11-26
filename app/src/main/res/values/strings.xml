@@ -704,4 +704,22 @@
     <string name="onboarding_tier_custom_short">Custom Deck</string>
     <string name="onboarding_tier_custom_desc">Customize every viewfinder tile individually with real-time layout preview.</string>
     <string name="onboarding_btn_customize_deck">Customize Viewfinder Controls</string>
+
+    <!-- Feedback & Export Localization -->
+    <string name="lut_invalid_name">Invalid name</string>
+    <string name="error_no_share_app">No app available to share</string>
+    <string name="collage_save_failed">Failed to save collage</string>
+    <string name="collage_render_failed">Failed to render collage</string>
+    <string name="calibration_decode_failed">Unable to decode image</string>
+    <string name="calibration_read_failed">Failed to read image: %1$s</string>
+    <string name="cinemadng_clip_exported">CinemaDNG exported: %1$s</string>
+    <string name="cinemadng_clip_export_failed">CinemaDNG export failed</string>
+    <string name="cinemadng_clip_export_error">CinemaDNG export error: %1$s</string>
+    <string name="mp4_graded_saved">Graded MP4 saved: %1$s</string>
+    <string name="mp4_save_storage_failed">Failed to save MP4 to storage</string>
+    <string name="mp4_export_failed">MP4 export failed</string>
+    <string name="mp4_export_error">MP4 export error: %1$s</string>
+    <string name="share_ignored_and_failed">%1$d non-DNG file(s) ignored, %2$d failed to read.</string>
+    <string name="share_only_dng_supported">%1$d file(s) ignored. Only DNG format is supported.</string>
+    <string name="share_import_failed">Failed to import %1$d file(s) due to read or permission errors.</string>
 </resources>

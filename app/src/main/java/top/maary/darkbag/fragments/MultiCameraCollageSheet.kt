@@ -8,7 +8,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.chip.Chip
@@ -19,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.LayoutMultiCameraCollageSheetBinding
+import top.maary.darkbag.ui.DarkbagFeedback
 import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.models.MultiCameraLensItem
 import top.maary.darkbag.repository.ImageRepository
@@ -145,7 +145,10 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
                     } else {
                         if (selectedLenses.size <= 2) {
                             this.isChecked = true
-                            Toast.makeText(requireContext(), R.string.collage_min_lenses_warning, Toast.LENGTH_SHORT).show()
+                            DarkbagFeedback.showSnackbar(
+                                dialog?.window?.findViewById(android.R.id.content) ?: view,
+                                R.string.collage_min_lenses_warning
+                            )
                             return@setOnCheckedChangeListener
                         }
                         selectedLenses.remove(lens)
@@ -297,7 +300,10 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
         val currentGroup = group ?: return
         val uris = getSelectedUris()
         if (uris.size < 2) {
-            Toast.makeText(requireContext(), R.string.collage_min_lenses_warning, Toast.LENGTH_SHORT).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                dialog?.window?.findViewById(android.R.id.content) ?: view,
+                R.string.collage_min_lenses_warning
+            )
             return
         }
 
@@ -354,7 +360,10 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
 
                     if (savedUri != null) {
                         ImageRepository(requireContext().applicationContext).invalidateCache()
-                        Toast.makeText(requireContext(), R.string.collage_saved_toast, Toast.LENGTH_SHORT).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            activity?.findViewById<View>(android.R.id.content),
+                            R.string.collage_saved_toast
+                        )
 
                         if (shareAfterSave) {
                             val intent = Intent(Intent.ACTION_SEND).apply {
@@ -365,12 +374,19 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
                             try {
                                 startActivity(Intent.createChooser(intent, getString(R.string.create_multi_cam_collage)))
                             } catch (e: Exception) {
-                                Toast.makeText(requireContext(), "No app found to share image", Toast.LENGTH_SHORT).show()
+                                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                                    activity?.findViewById<View>(android.R.id.content),
+                                    R.string.error_no_share_app
+                                )
                             }
                         }
                         dismiss()
                     } else {
-                        Toast.makeText(requireContext(), "Failed to save collage", Toast.LENGTH_SHORT).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            dialog?.window?.findViewById(android.R.id.content) ?: view,
+                            R.string.collage_save_failed,
+                            isError = true
+                        )
                     }
                 }
             } else {
@@ -379,7 +395,11 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
                     binding.btnSave.isEnabled = true
                     binding.btnShare.isEnabled = true
                     binding.progressPreview.visibility = View.GONE
-                    Toast.makeText(requireContext(), "Failed to render collage", Toast.LENGTH_SHORT).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                        dialog?.window?.findViewById(android.R.id.content) ?: view,
+                        R.string.collage_render_failed,
+                        isError = true
+                    )
                 }
             }
         }

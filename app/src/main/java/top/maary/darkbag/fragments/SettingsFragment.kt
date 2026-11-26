@@ -10,7 +10,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -76,17 +75,19 @@ class SettingsFragment : Fragment() {
             settingsViewModel.updateSaveLocationEnabled(true)
         } else {
             settingsViewModel.updateSaveLocationEnabled(false)
-            Toast.makeText(context, R.string.location_permission_denied, Toast.LENGTH_LONG).show()
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                view,
+                R.string.location_permission_denied,
+                com.google.android.material.snackbar.Snackbar.LENGTH_LONG
+            )
         }
     }
 
     private val audioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        if (isGranted) {
-            Toast.makeText(context, R.string.toast_audio_permission_granted, Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(context, R.string.error_mic_permission_silent_video, Toast.LENGTH_SHORT).show()
+        if (!isGranted) {
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.error_mic_permission_silent_video)
             settingsViewModel.updateMotionPhotoAudio(false)
         }
     }
@@ -276,7 +277,6 @@ class SettingsFragment : Fragment() {
             if (aboutClickCount >= 5) {
                 if (!settingsViewModel.preferences.value.debugEnabled) {
                     settingsViewModel.updateDebugEnabled(true)
-                    Toast.makeText(requireContext(), R.string.experimental_unlocked_toast, Toast.LENGTH_SHORT).show()
                 }
                 aboutClickCount = 0
             }
@@ -307,7 +307,10 @@ class SettingsFragment : Fragment() {
         binding.btnMenuDefaultFocal1x.setOnClickListener { sheetDispatcher.showDefaultFocal1xSheet() }
         binding.btnMenuTargetLog.setOnClickListener {
             sheetDispatcher.showTargetLogSheet { incompatibleLog ->
-                Toast.makeText(context, getString(R.string.lut_reset_incompatible_toast, incompatibleLog), Toast.LENGTH_SHORT).show()
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                    view,
+                    getString(R.string.lut_reset_incompatible_toast, incompatibleLog)
+                )
             }
         }
         binding.btnMenuHdrFusionMode.setOnClickListener { sheetDispatcher.showHdrFusionSheet() }
@@ -508,13 +511,11 @@ class SettingsFragment : Fragment() {
         binding.btnCloseExperimental.setOnClickListener {
             settingsViewModel.updateDebugEnabled(false)
             aboutClickCount = 0
-            Toast.makeText(requireContext(), R.string.experimental_locked_toast, Toast.LENGTH_SHORT).show()
         }
 
         binding.btnClearDebugLogs.setOnClickListener {
             DebugLogManager.clearLogs()
             updateDebugStats()
-            Toast.makeText(requireContext(), R.string.toast_debug_logs_cleared, Toast.LENGTH_SHORT).show()
         }
 
         binding.btnCopyDebugLogs.setOnClickListener {
@@ -522,9 +523,9 @@ class SettingsFragment : Fragment() {
             if (logs.isNotBlank() && logs != "No logs yet.") {
                 val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Darkbag Timing Logs", logs))
-                Toast.makeText(requireContext(), R.string.toast_debug_logs_copied, Toast.LENGTH_SHORT).show()
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.toast_debug_logs_copied)
             } else {
-                Toast.makeText(requireContext(), R.string.toast_no_logs_to_copy, Toast.LENGTH_SHORT).show()
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.toast_no_logs_to_copy)
             }
         }
     }
@@ -544,11 +545,7 @@ class SettingsFragment : Fragment() {
                 when {
                     report.route == ZslRoute.RAW_RING && hdrPlus && !report.supportsHdrPlusZsl -> {
                         revertZslToggle()
-                        Toast.makeText(
-                            requireContext(),
-                            R.string.zsl_reason_hdr_unsupported,
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.zsl_reason_hdr_unsupported)
                     }
 
                     report.route == ZslRoute.RAW_RING -> {
@@ -561,20 +558,12 @@ class SettingsFragment : Fragment() {
 
                     report.route == ZslRoute.REPROCESS_RAW -> {
                         revertZslToggle()
-                        Toast.makeText(
-                            requireContext(),
-                            R.string.zsl_toast_reprocess_not_enabled,
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.zsl_toast_reprocess_not_enabled)
                     }
 
                     else -> {
                         revertZslToggle()
-                        Toast.makeText(
-                            requireContext(),
-                            zslReasonText(report.reason),
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, zslReasonText(report.reason))
                     }
                 }
             }
@@ -693,11 +682,8 @@ class SettingsFragment : Fragment() {
                     .setNegativeButton(R.string.cancel, null)
                     .setPositiveButton(R.string.btn_reset) { _, _ ->
                         settingsViewModel.updateStorageUri(isJpg = true, uri = null, name = null)
-                        Toast.makeText(requireContext(), R.string.toast_storage_reset_default, Toast.LENGTH_SHORT).show()
                     }
                     .show()
-            } else {
-                Toast.makeText(requireContext(), R.string.toast_storage_already_default, Toast.LENGTH_SHORT).show()
             }
             true
         }
@@ -714,11 +700,8 @@ class SettingsFragment : Fragment() {
                     .setNegativeButton(R.string.cancel, null)
                     .setPositiveButton(R.string.btn_reset) { _, _ ->
                         settingsViewModel.updateStorageUri(isJpg = false, uri = null, name = null)
-                        Toast.makeText(requireContext(), R.string.toast_storage_reset_default, Toast.LENGTH_SHORT).show()
                     }
                     .show()
-            } else {
-                Toast.makeText(requireContext(), R.string.toast_storage_already_default, Toast.LENGTH_SHORT).show()
             }
             true
         }
@@ -754,17 +737,10 @@ class SettingsFragment : Fragment() {
                                 context = _binding?.btnClearCache?.context ?: ctx
                             )
                             if (freedBytes > 0) {
-                                Toast.makeText(
-                                    appContext,
-                                    getString(R.string.clear_cache_success_toast, freedFormatted),
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            } else {
-                                Toast.makeText(
-                                    appContext,
-                                    R.string.clear_cache_empty_toast,
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                                    view,
+                                    getString(R.string.clear_cache_success_toast, freedFormatted)
+                                )
                             }
                         }
                     }

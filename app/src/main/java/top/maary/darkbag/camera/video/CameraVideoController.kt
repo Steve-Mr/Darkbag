@@ -15,7 +15,6 @@ import android.provider.Settings
 import android.util.Log
 import android.view.Surface
 import android.view.View
-import android.widget.Toast
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -85,7 +84,12 @@ class CameraVideoController(
         env.runtimeState.rawVideoSessionManager.onLowStorageCallback = {
             Handler(Looper.getMainLooper()).post {
                 if (env.runtimeState.rawVideoSessionManager.recording) {
-                    Toast.makeText(env.hostContext, env.hostContext.getString(R.string.toast_low_storage_recording_stopped), Toast.LENGTH_LONG).show()
+                    top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                        ui.fragmentCameraBinding?.root,
+                        R.string.toast_low_storage_recording_stopped,
+                        com.google.android.material.snackbar.Snackbar.LENGTH_LONG,
+                        isError = true
+                    )
                     stopRawVideoRecording()
                 }
             }
@@ -221,7 +225,10 @@ class CameraVideoController(
                 val result = env.runtimeState.rawVideoSessionManager.stopRecording()
                 if (result == null) {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(appContext, appContext.getString(R.string.toast_recording_too_short), Toast.LENGTH_SHORT).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            ui.fragmentCameraBinding?.root,
+                            R.string.toast_recording_too_short
+                        )
                     }
                     return@launch
                 }
@@ -239,18 +246,9 @@ class CameraVideoController(
                 if (savedUri != null) {
                     settingsRepository.setLastCaptureUri(savedUri.toString())
                     env.imageRepository.invalidateCache()
+                    val videoTimestamp = result.file.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis()
                     withContext(Dispatchers.Main) {
-                        ui.updateCurrentThumbnail(savedUri)
-                        val photoViewButton = ui.cameraUiContainerBinding?.photoViewButton
-                        if (photoViewButton != null && thumbnail != null) {
-                            photoViewButton.visibility = View.VISIBLE
-                            photoViewButton.alpha = 1f
-                            photoViewButton.setPadding(0, 0, 0, 0)
-                            Glide.with(photoViewButton)
-                                .load(thumbnail)
-                                .apply(RequestOptions.centerCropTransform())
-                                .into(photoViewButton)
-                        }
+                        ui.setGalleryThumbnailBitmap(savedUri, thumbnail, videoTimestamp)
                     }
                 }
             } catch (e: Exception) {
@@ -313,7 +311,10 @@ class CameraVideoController(
                 val result = recorder?.stop()
                 if (result == null) {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(appContext, appContext.getString(R.string.toast_recording_too_short), Toast.LENGTH_SHORT).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            ui.fragmentCameraBinding?.root,
+                            R.string.toast_recording_too_short
+                        )
                     }
                     return@launch
                 }
@@ -329,18 +330,9 @@ class CameraVideoController(
                 if (savedUri != null) {
                     settingsRepository.setLastCaptureUri(savedUri.toString())
                     env.imageRepository.invalidateCache()
+                    val videoTimestamp = result.file.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis()
                     withContext(Dispatchers.Main) {
-                        ui.updateCurrentThumbnail(savedUri)
-                        val photoViewButton = ui.cameraUiContainerBinding?.photoViewButton
-                        if (photoViewButton != null && thumbnail != null) {
-                            photoViewButton.visibility = View.VISIBLE
-                            photoViewButton.alpha = 1f
-                            photoViewButton.setPadding(0, 0, 0, 0)
-                            Glide.with(photoViewButton)
-                                .load(thumbnail)
-                                .apply(RequestOptions.centerCropTransform())
-                                .into(photoViewButton)
-                        }
+                        ui.setGalleryThumbnailBitmap(savedUri, thumbnail, videoTimestamp)
                     }
                 }
             } catch (e: Exception) {

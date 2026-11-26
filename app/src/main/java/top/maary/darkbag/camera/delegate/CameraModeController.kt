@@ -8,7 +8,6 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
 import android.view.View
-import android.widget.Toast
 import com.google.android.material.button.MaterialButton
 import kotlin.coroutines.resume
 import kotlinx.coroutines.CompletableDeferred
@@ -308,7 +307,7 @@ class CameraModeController(
                 } else {
                     env.hostContext.getString(R.string.toast_memory_low)
                 }
-                Toast.makeText(env.hostContext, msg, Toast.LENGTH_SHORT).show()
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(ui.fragmentCameraBinding?.root, msg)
                 return false
             }
 

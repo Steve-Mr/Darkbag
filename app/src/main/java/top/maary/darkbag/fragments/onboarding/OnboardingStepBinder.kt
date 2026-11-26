@@ -13,7 +13,6 @@ import android.transition.TransitionSet
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.CompoundButton
-import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.google.android.material.R as MaterialR
 import com.google.android.material.button.MaterialButton
@@ -318,11 +317,8 @@ class OnboardingStepBinder(
                     .setPositiveButton(R.string.btn_reset) { _, _ ->
                         settingsRepository.setStorageUri(isJpg = true, uri = null, name = null)
                         refreshStoragePaths()
-                        Toast.makeText(context, R.string.toast_storage_reset_default, Toast.LENGTH_SHORT).show()
                     }
                     .show()
-            } else {
-                Toast.makeText(context, R.string.toast_storage_already_default, Toast.LENGTH_SHORT).show()
             }
             true
         }
@@ -337,11 +333,8 @@ class OnboardingStepBinder(
                     .setPositiveButton(R.string.btn_reset) { _, _ ->
                         settingsRepository.setStorageUri(isJpg = false, uri = null, name = null)
                         refreshStoragePaths()
-                        Toast.makeText(context, R.string.toast_storage_reset_default, Toast.LENGTH_SHORT).show()
                     }
                     .show()
-            } else {
-                Toast.makeText(context, R.string.toast_storage_already_default, Toast.LENGTH_SHORT).show()
             }
             true
         }

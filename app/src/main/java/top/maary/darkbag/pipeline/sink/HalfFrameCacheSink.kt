@@ -18,6 +18,8 @@ class HalfFrameCacheSink : CaptureSink {
         private const val TAG = "HalfFrameCacheSink"
     }
 
+    override fun releasesForegroundOnImageExport(spec: CaptureTaskSpec, targets: SinkOutputTargets): Boolean = false
+
     override fun prepareTargets(context: Context, spec: CaptureTaskSpec): SinkOutputTargets {
         val hfManager = HalfFrameManager(context)
         val shouldSaveRaw = hfManager.saveRaw
@@ -93,7 +95,8 @@ class HalfFrameCacheSink : CaptureSink {
             captureMetadata = spec.frameMetadata.captureMetadata,
             isAlreadyCropped = true,
             motionPhotoMp4Path = null, // 半格模式严格禁止动态照片
-            motionPhotoStillPtsUs = 0L
+            motionPhotoStillPtsUs = 0L,
+            captureTimestamp = spec.captureTimestampMillis
         )
     }
 

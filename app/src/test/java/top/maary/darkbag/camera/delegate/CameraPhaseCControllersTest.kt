@@ -267,7 +267,7 @@ class CameraPhaseCControllersTest {
         assertEquals(View.GONE, uiBinding.photoViewButton.visibility)
 
         val testUri = Uri.parse("content://media/external/images/media/42")
-        controller.setGalleryThumbnail(testUri.toString())
+        controller.setGalleryThumbnail(testUri.toString(), timestamp = 500L)
         ShadowLooperHelper.runMainLooperIdle()
         assertEquals(testUri, controller.currentThumbnailUri)
         assertEquals(View.VISIBLE, uiBinding.photoViewButton.visibility)
@@ -276,6 +276,51 @@ class CameraPhaseCControllersTest {
         controller.setGalleryThumbnail(null)
         ShadowLooperHelper.runMainLooperIdle()
         assertEquals(View.INVISIBLE, uiBinding.photoViewButton.visibility)
+
+        // Multi-shot: when a real URI arrives while isProcessing == true, it must remain VISIBLE
+        val shot1Uri = Uri.parse("content://media/external/images/media/101")
+        assertTrue(controller.setGalleryThumbnail(shot1Uri.toString(), timestamp = 1000L))
+        ShadowLooperHelper.runMainLooperIdle()
+        assertEquals(shot1Uri, controller.currentThumbnailUri)
+        assertEquals(View.VISIBLE, uiBinding.photoViewButton.visibility)
+
+        // Clearing placeholder must NOT bump timestamp forward to reject in-flight captures
+        assertTrue(controller.setGalleryThumbnail(null))
+        ShadowLooperHelper.runMainLooperIdle()
+
+        // Shot 2 (newer timestamp) arrives, then late Shot 1 (older timestamp) arrives out-of-order
+        val shot2Uri = Uri.parse("content://media/external/images/media/202")
+        assertTrue(controller.setGalleryThumbnail(shot2Uri.toString(), timestamp = 2000L))
+        assertFalse(controller.setGalleryThumbnail(shot1Uri.toString(), timestamp = 1000L))
+        assertEquals(shot2Uri, controller.currentThumbnailUri)
+
+        // Half-frame Step 1 (shouldHideGalleryThumbnail() == true) still hides the thumbnail button
+        gateway.activeCoordinatorOverride = object : CaptureModeCoordinator by StubCoordinator(CaptureMode.HALF_FRAME_SBS) {
+            override fun shouldHideGalleryThumbnail(): Boolean = true
+        }
+        val hfUri = Uri.parse("content://media/external/images/media/303")
+        assertTrue(controller.setGalleryThumbnail(hfUri.toString(), timestamp = 3000L))
+        ShadowLooperHelper.runMainLooperIdle()
+        assertEquals(View.INVISIBLE, uiBinding.photoViewButton.visibility)
+    }
+
+    @Test
+    fun testOverlayController_hideProcessingAnimation_respectsActiveProcessingState() {
+        val gateway = FakeCameraGateway()
+        val overlayController = CameraOverlayController(gateway, gateway, gateway)
+
+        gateway.runtimeState.isVideoSaving = true
+        overlayController.showProcessingAnimation()
+        assertEquals(View.VISIBLE, uiBinding.processingProgress.visibility)
+
+        // Still processing -> hideProcessingAnimation must keep spinner visible
+        overlayController.hideProcessingAnimation()
+        assertEquals(View.VISIBLE, uiBinding.processingProgress.visibility)
+
+        // All processing done -> spinner hides
+        gateway.runtimeState.isVideoSaving = false
+        overlayController.hideProcessingAnimation()
+        assertEquals(View.GONE, uiBinding.processingProgress.visibility)
     }
 
     // -------------------------------------------------------------------------
@@ -867,8 +912,8 @@ class CameraPhaseCControllersTest {
         override fun showProcessingAnimation() {}
         override fun hideProcessingAnimation() {}
         override fun resetBurstUi() {}
-        override fun updateCurrentThumbnail(uri: Uri?) {}
-        override fun setGalleryThumbnail(filename: String?) {}
+        override fun updateCurrentThumbnail(uri: Uri?, timestamp: Long): Boolean = true
+        override fun setGalleryThumbnail(filename: String?, timestamp: Long): Boolean = true
         override fun onSessionConfigured() {}
         override fun triggerTapToFocus(x: Float, y: Float) {}
         override fun unlockFocusAndMetering() {}

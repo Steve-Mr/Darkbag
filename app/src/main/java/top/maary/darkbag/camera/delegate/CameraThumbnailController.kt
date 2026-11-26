@@ -4,7 +4,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.view.View
-import android.widget.Toast
 import androidx.navigation.Navigation
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.resource.bitmap.DownsampleStrategy
@@ -41,82 +40,157 @@ class CameraThumbnailController(
         private set
     private var currentThumbnailTimestamp: Long = 0L
     private var thumbnailLoadJob: Job? = null
+    private var lastBoundUri: Uri? = null
+    private var lastBoundButton: View? = null
+    private var loadGeneration: Long = 0L
+    private var captureSequence: Long = 0L
 
     /** Updates the cached thumbnail URI; stale (older) timestamps never override a newer one. */
-    fun updateCurrentThumbnail(uri: Uri?, timestamp: Long = System.currentTimeMillis()) {
+    fun updateCurrentThumbnail(uri: Uri?, timestamp: Long = System.currentTimeMillis()): Boolean {
         if (uri == null) {
             currentThumbnailUri = null
-            currentThumbnailTimestamp = timestamp
-            return
+            lastBoundUri = null
+            lastBoundButton = null
+            return true
         }
         if (timestamp >= currentThumbnailTimestamp) {
             currentThumbnailUri = uri
             currentThumbnailTimestamp = timestamp
+            captureSequence++
+            return true
         }
+        return false
+    }
+
+    /** Syncs thumbnail visibility without triggering a redundant image decode. */
+    fun refreshThumbnailVisibility() {
+        val photoViewButton = ui.cameraUiContainerBinding?.photoViewButton ?: return
+        val shouldHideForMode = coordinator.activeCoordinator?.shouldHideGalleryThumbnail() == true
+        photoViewButton.visibility = if (currentThumbnailUri == null) {
+            if (shouldHideForMode || env.runtimeState.isProcessing) View.INVISIBLE else View.GONE
+        } else {
+            if (shouldHideForMode) View.INVISIBLE else View.VISIBLE
+        }
+        if (photoViewButton.visibility == View.VISIBLE) {
+            photoViewButton.alpha = 1f
+        }
+    }
+
+    /** Rebinds the currently tracked thumbnail URI on a newly inflated view without bumping its timestamp. */
+    fun rebindCurrentThumbnail() {
+        val uri = currentThumbnailUri ?: return
+        setGalleryThumbnail(uri.toString(), timestamp = currentThumbnailTimestamp, forceReload = true)
     }
 
     /** Loads the latest app image off the UI thread, shows it, and warms the viewer cache. */
     fun loadLatestThumbnail() {
+        val seqBefore = captureSequence
         env.lifecycleScope.launch {
             val thumbnailUri = mediaStoreUtils.getLatestAppImage()
-            updateCurrentThumbnail(thumbnailUri)
-            setGalleryThumbnail(thumbnailUri?.toString())
+            if (captureSequence != seqBefore) {
+                return@launch
+            }
+            if (currentThumbnailUri == null || currentThumbnailUri == thumbnailUri) {
+                val lm = thumbnailUri?.let { mediaStoreUtils.getFileLastModified(env.hostContext, it) } ?: 0L
+                setGalleryThumbnail(thumbnailUri?.toString(), timestamp = lm)
+            }
             kotlin.runCatching { env.imageRepository.getGroupedImages() }
         }
     }
 
-    fun setGalleryThumbnail(filename: String?) {
-        thumbnailLoadJob?.cancel()
-        thumbnailLoadJob = null
+    fun setGalleryThumbnail(
+        filename: String?,
+        timestamp: Long = System.currentTimeMillis(),
+        forceReload: Boolean = false
+    ): Boolean {
+        val shouldHideForMode = coordinator.activeCoordinator?.shouldHideGalleryThumbnail() == true
+        val photoViewButton = ui.cameraUiContainerBinding?.photoViewButton
 
-        val photoViewButton = ui.cameraUiContainerBinding?.photoViewButton ?: return
-        photoViewButton.post {
+        if (filename == null) {
             thumbnailLoadJob?.cancel()
-            val shouldHide = (coordinator.activeCoordinator?.shouldHideGalleryThumbnail() == true) ||
-                env.runtimeState.isProcessing
-            if (filename == null) {
-                updateCurrentThumbnail(null)
-                photoViewButton.setImageDrawable(null)
-                photoViewButton.visibility = if (shouldHide) View.INVISIBLE else View.GONE
+            thumbnailLoadJob = null
+            loadGeneration++
+            updateCurrentThumbnail(null)
+            if (photoViewButton != null) {
+                val hideNull = shouldHideForMode || env.runtimeState.isProcessing
+                photoViewButton.post {
+                    if (currentThumbnailUri == null) {
+                        photoViewButton.setImageDrawable(null)
+                        photoViewButton.visibility = if (hideNull) View.INVISIBLE else View.GONE
+                    }
+                }
+            }
+            return true
+        }
+
+        val parsedUri = try {
+            Uri.parse(filename)
+        } catch (_: Exception) {
+            return false
+        }
+
+        if (!updateCurrentThumbnail(parsedUri, timestamp)) {
+            return false
+        }
+
+        if (photoViewButton == null) {
+            return true
+        }
+
+        photoViewButton.post {
+            if (currentThumbnailUri != parsedUri) {
                 return@post
             }
-            try {
-                updateCurrentThumbnail(Uri.parse(filename))
-            } catch (_: Exception) {}
-
-            photoViewButton.visibility = if (shouldHide) View.INVISIBLE else View.VISIBLE
-            if (!shouldHide) photoViewButton.alpha = 1f
+            val hideForModeNow = coordinator.activeCoordinator?.shouldHideGalleryThumbnail() == true
+            photoViewButton.visibility = if (hideForModeNow) View.INVISIBLE else View.VISIBLE
+            if (!hideForModeNow) photoViewButton.alpha = 1f
             photoViewButton.setPadding(0, 0, 0, 0)
+
+            if (!forceReload &&
+                parsedUri == lastBoundUri &&
+                photoViewButton === lastBoundButton &&
+                photoViewButton.drawable != null
+            ) {
+                return@post
+            }
+
+            thumbnailLoadJob?.cancel()
+            val token = ++loadGeneration
 
             thumbnailLoadJob = env.lifecycleScope.launch(Dispatchers.Main) {
                 fun canBind(): Boolean {
                     return coroutineContext.isActive &&
+                        token == loadGeneration &&
+                        currentThumbnailUri == parsedUri &&
                         env.isHostAdded &&
                         ui.cameraUiContainerBinding?.photoViewButton === photoViewButton &&
                         photoViewButton.isAttachedToWindow
                 }
 
-                val uri = try { Uri.parse(filename) } catch (_: Exception) { null }
                 val isRawVid = filename.endsWith(".rawvid", ignoreCase = true) ||
-                    uri?.toString()?.endsWith(".rawvid", ignoreCase = true) == true
-                if (isRawVid && uri != null) {
-                    val bmp = withContext(Dispatchers.IO) { decodeRawVideoThumbnail(uri) }
+                    parsedUri.toString().endsWith(".rawvid", ignoreCase = true)
+                if (isRawVid) {
+                    val bmp = withContext(Dispatchers.IO) { decodeRawVideoThumbnail(parsedUri) }
                     if (bmp != null) {
                         if (canBind()) {
+                            lastBoundUri = parsedUri
+                            lastBoundButton = photoViewButton
                             Glide.with(photoViewButton).load(bmp).apply(RequestOptions.centerCropTransform()).into(photoViewButton)
                         }
                         return@launch
                     }
                 }
                 val isDng = filename.endsWith(".dng", ignoreCase = true) ||
-                    uri?.toString()?.endsWith(".dng", ignoreCase = true) == true ||
-                    (uri != null && withContext(Dispatchers.IO) {
-                        try { env.hostContext.contentResolver.getType(uri)?.contains("dng", ignoreCase = true) == true } catch (_: Exception) { false }
-                    })
-                if (isDng && uri != null) {
-                    val bmp = withContext(Dispatchers.IO) { GalleryThumbnailLoader.loadDngThumbnail(env.hostContext, uri) }
+                    parsedUri.toString().endsWith(".dng", ignoreCase = true) ||
+                    withContext(Dispatchers.IO) {
+                        try { env.hostContext.contentResolver.getType(parsedUri)?.contains("dng", ignoreCase = true) == true } catch (_: Exception) { false }
+                    }
+                if (isDng) {
+                    val bmp = withContext(Dispatchers.IO) { GalleryThumbnailLoader.loadDngThumbnail(env.hostContext, parsedUri) }
                     if (bmp != null) {
                         if (canBind()) {
+                            lastBoundUri = parsedUri
+                            lastBoundButton = photoViewButton
                             Glide.with(photoViewButton).load(bmp).apply(RequestOptions.centerCropTransform()).into(photoViewButton)
                         }
                         return@launch
@@ -124,7 +198,7 @@ class CameraThumbnailController(
                 }
                 val (loadTarget, lastModified) = withContext(Dispatchers.IO) {
                     val lm = try {
-                        mediaStoreUtils.getFileLastModified(env.hostContext, Uri.parse(filename))
+                        mediaStoreUtils.getFileLastModified(env.hostContext, parsedUri)
                     } catch (e: Exception) {
                         File(filename).let { if (it.exists()) it.lastModified() else 0L }
                     }
@@ -133,17 +207,65 @@ class CameraThumbnailController(
                     Pair(target, lm)
                 }
                 if (canBind()) {
+                    lastBoundUri = parsedUri
+                    lastBoundButton = photoViewButton
                     val thumbSizePx = env.hostContext.resources.getDimensionPixelSize(R.dimen.round_button_medium)
+                    val signatureKey = if (lastModified > 0L) {
+                        ObjectKey(lastModified)
+                    } else {
+                        ObjectKey("$filename@$timestamp")
+                    }
                     Glide.with(photoViewButton)
                         .load(loadTarget)
                         .override(thumbSizePx, thumbSizePx)
                         .downsample(DownsampleStrategy.CENTER_INSIDE)
                         .apply(RequestOptions.centerCropTransform())
-                        .signature(ObjectKey(lastModified))
+                        .signature(signatureKey)
                         .into(photoViewButton)
                 }
             }
         }
+        return true
+    }
+
+    /**
+     * Binds a pre-decoded thumbnail [bitmap] (e.g. from video recording) through the unified
+     * timestamp-ordered thumbnail channel, cancelling any older pending photo decode job.
+     */
+    fun setGalleryThumbnailBitmap(
+        uri: Uri,
+        bitmap: Bitmap?,
+        timestamp: Long = System.currentTimeMillis()
+    ): Boolean {
+        if (!updateCurrentThumbnail(uri, timestamp)) {
+            return false
+        }
+        if (bitmap == null) {
+            return setGalleryThumbnail(uri.toString(), timestamp = timestamp, forceReload = true)
+        }
+        thumbnailLoadJob?.cancel()
+        thumbnailLoadJob = null
+        loadGeneration++
+
+        val photoViewButton = ui.cameraUiContainerBinding?.photoViewButton ?: return true
+        photoViewButton.post {
+            if (currentThumbnailUri != uri || !env.isHostAdded ||
+                ui.cameraUiContainerBinding?.photoViewButton !== photoViewButton
+            ) {
+                return@post
+            }
+            val hideForModeNow = coordinator.activeCoordinator?.shouldHideGalleryThumbnail() == true
+            photoViewButton.visibility = if (hideForModeNow) View.INVISIBLE else View.VISIBLE
+            if (!hideForModeNow) photoViewButton.alpha = 1f
+            photoViewButton.setPadding(0, 0, 0, 0)
+            lastBoundUri = uri
+            lastBoundButton = photoViewButton
+            Glide.with(photoViewButton)
+                .load(bitmap)
+                .apply(RequestOptions.centerCropTransform())
+                .into(photoViewButton)
+        }
+        return true
     }
 
     /** Decodes frame 0 of a .rawvid file into a small preview bitmap (IO thread only). */
@@ -223,7 +345,10 @@ class CameraThumbnailController(
                         context.startActivity(intent)
                         externalViewerStarted = true
                     } catch (e: Exception) {
-                        Toast.makeText(context, R.string.error_no_external_viewer, Toast.LENGTH_SHORT).show()
+                        top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                            ui.fragmentCameraBinding?.root,
+                            R.string.error_no_external_viewer
+                        )
                     }
                 }
                 if (useInternalViewer || !externalViewerStarted) {

@@ -165,9 +165,14 @@ class CameraControllerHub(
 
     override fun resetBurstUi() = shutterController.resetBurstUi()
 
-    override fun updateCurrentThumbnail(uri: Uri?) = thumbnailController.updateCurrentThumbnail(uri)
+    override fun updateCurrentThumbnail(uri: Uri?, timestamp: Long): Boolean =
+        thumbnailController.updateCurrentThumbnail(uri, timestamp)
 
-    override fun setGalleryThumbnail(filename: String?) = thumbnailController.setGalleryThumbnail(filename)
+    override fun setGalleryThumbnail(filename: String?, timestamp: Long): Boolean =
+        thumbnailController.setGalleryThumbnail(filename, timestamp)
+
+    override fun setGalleryThumbnailBitmap(uri: Uri, bitmap: android.graphics.Bitmap?, timestamp: Long): Boolean =
+        thumbnailController.setGalleryThumbnailBitmap(uri, bitmap, timestamp)
 
     override fun onSessionConfigured() {
         env.runtimeState.isSwitchingLens = false
@@ -452,15 +457,17 @@ class CameraControllerHub(
         env.cameraViewModel.setTaskCounts(count, count)
         overlayController.updateProcessingAnimationUi()
         if (count == 0 && !env.runtimeState.isBurstActive) {
-            thumbnailController.setGalleryThumbnail(thumbnailController.currentThumbnailUri?.toString())
+            thumbnailController.refreshThumbnailVisibility()
         }
     }
 
-    fun onBackgroundSaveCompleted(targetUri: String?) {
+    fun onBackgroundSaveCompleted(targetUri: String?, captureTimestamp: Long = System.currentTimeMillis()) {
         if (targetUri != null) {
             env.imageRepository.invalidateCache()
-            SettingsRepository.getInstance(env.hostContext).setLastCaptureUri(targetUri)
-            thumbnailController.setGalleryThumbnail(targetUri)
+            val accepted = thumbnailController.setGalleryThumbnail(targetUri, timestamp = captureTimestamp)
+            if (accepted) {
+                SettingsRepository.getInstance(env.hostContext).setLastCaptureUri(targetUri)
+            }
             overlayController.updateProcessingAnimationUi()
         }
     }
@@ -498,7 +505,7 @@ class CameraControllerHub(
         lensController.initLensControls()
         hdrPlusController.updateHdrPlusUi()
         hdrPlusController.updateHdrPlusConstraints()
-        thumbnailController.setGalleryThumbnail(thumbnailController.currentThumbnailUri?.toString())
+        thumbnailController.rebindCurrentThumbnail()
         overlayController.updateViewFinderConstraints()
         overlayController.updateProcessingAnimationUi()
         applyUIVisibility()

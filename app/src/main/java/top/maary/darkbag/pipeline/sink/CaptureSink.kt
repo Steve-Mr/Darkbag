@@ -64,4 +64,10 @@ interface CaptureSink {
      * 异常或中断处理。
      */
     suspend fun onError(context: Context, spec: CaptureTaskSpec, error: Throwable)
+
+    /**
+     * 是否在图像导出阶段完成后即可提前释放前台处理计数（例如已有可用 JPEG 成片）。
+     */
+    fun releasesForegroundOnImageExport(spec: CaptureTaskSpec, targets: SinkOutputTargets): Boolean =
+        targets.outJpgFd != -1
 }

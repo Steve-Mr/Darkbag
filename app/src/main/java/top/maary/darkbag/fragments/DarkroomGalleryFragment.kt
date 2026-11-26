@@ -7,7 +7,6 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
@@ -72,7 +71,7 @@ class DarkroomGalleryFragment : Fragment() {
     private val deleteLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         Log.d(TAG, "deleteLauncher resultCode=${result.resultCode}")
         if (result.resultCode != Activity.RESULT_OK) {
-            context?.let { Toast.makeText(it, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show() }
+            top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.gallery_delete_prompt_failed, isError = true)
         }
         galleryViewModel.processIntent(DarkroomGalleryUserIntent.SetDeleting(false, 0))
         lifecycleScope.launch {
@@ -89,7 +88,10 @@ class DarkroomGalleryFragment : Fragment() {
                 galleryViewModel.processIntent(DarkroomGalleryUserIntent.SetLoading(false))
                 repository.invalidateCache(clearStale = true)
                 galleryViewModel.processIntent(DarkroomGalleryUserIntent.LoadImages(null))
-                Toast.makeText(requireContext(), getString(R.string.gallery_import_success, importedCount), Toast.LENGTH_SHORT).show()
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                    view,
+                    getString(R.string.gallery_import_success, importedCount)
+                )
             }
         }
     }
@@ -132,7 +134,7 @@ class DarkroomGalleryFragment : Fragment() {
                 galleryViewModel.processIntent(DarkroomGalleryUserIntent.LoadImages(null))
             },
             onDeletePromptFailed = {
-                context?.let { Toast.makeText(it, R.string.gallery_delete_prompt_failed, Toast.LENGTH_SHORT).show() }
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.gallery_delete_prompt_failed, isError = true)
             }
         )
 
@@ -269,7 +271,7 @@ class DarkroomGalleryFragment : Fragment() {
             if (selected.size == 2) {
                 batchActionHelper.performMergeCollage(selected, childFragmentManager)
             } else {
-                Toast.makeText(requireContext(), R.string.gallery_merge_need_two, Toast.LENGTH_SHORT).show()
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.gallery_merge_need_two)
             }
         }
 
@@ -279,7 +281,7 @@ class DarkroomGalleryFragment : Fragment() {
             if (checkHomogeneity(selected)) {
                 batchActionHelper.performBatchGrade(selected)
             } else {
-                Toast.makeText(requireContext(), R.string.gallery_batch_grade_mismatch, Toast.LENGTH_SHORT).show()
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(view, R.string.gallery_batch_grade_mismatch)
             }
         }
 
@@ -353,11 +355,6 @@ class DarkroomGalleryFragment : Fragment() {
                 launch {
                     galleryViewModel.effects.collect { effect ->
                         when (effect) {
-                            is DarkroomGalleryEffect.ShowToast -> Toast.makeText(context, effect.message, Toast.LENGTH_SHORT).show()
-                            is DarkroomGalleryEffect.ShowToastRes -> {
-                                val msg = getString(effect.resId, *effect.formatArgs.toTypedArray())
-                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                            }
                             is DarkroomGalleryEffect.ScrollToPosition -> {
                                 binding.galleryRecyclerView.post {
                                     binding.galleryRecyclerView.scrollToPosition(effect.position)

@@ -76,7 +76,7 @@ class CameraOverlayController(
     }
 
     fun hideProcessingAnimation() {
-        ui.cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+        updateProcessingAnimationUi()
     }
 
     /** Pins the viewfinder container between the top controls and the bottom island (portrait) or the docked island (landscape). */

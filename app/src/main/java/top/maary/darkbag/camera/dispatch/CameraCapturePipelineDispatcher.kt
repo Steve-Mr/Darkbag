@@ -8,7 +8,6 @@ import android.hardware.camera2.TotalCaptureResult
 import android.media.Image
 import android.os.Build
 import android.util.Log
-import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -66,7 +65,7 @@ class CameraCapturePipelineDispatcher(
         metadataExtractor = metadataExtractor,
         specAssembler = specAssembler,
         onEnqueueRequest = ::enqueueProcessingRequest,
-        onNotifyQueuedOnMain = ::notifyQueuedOnMain,
+        onClearThumbnailOnMain = ::clearThumbnailIfNeededOnMain,
         activePhysicalIdProvider = ::activePhysicalId
     )
 
@@ -277,7 +276,7 @@ class CameraCapturePipelineDispatcher(
                     capturedLens = image.capturedLens
                 )
 
-                notifyQueuedOnMain(env.hostContext, R.string.toast_processing_queued)
+                clearThumbnailIfNeededOnMain()
 
                 var motionMp4Path = image.motionPhotoMp4Path
                 var motionStillPtsUs = image.motionPhotoStillPtsUs
@@ -419,9 +418,8 @@ class CameraCapturePipelineDispatcher(
         } else null
     }
 
-    private suspend fun notifyQueuedOnMain(toastContext: Context, toastResId: Int) {
+    private suspend fun clearThumbnailIfNeededOnMain() {
         withContext(Dispatchers.Main) {
-            Toast.makeText(toastContext, toastContext.getString(toastResId), Toast.LENGTH_SHORT).show()
             if (coordinator.activeCoordinator?.shouldClearThumbnailOnCapture() == true) {
                 ui.setGalleryThumbnail(null)
             }

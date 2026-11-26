@@ -97,6 +97,8 @@ object ImageSaver {
         isAlreadyCropped: Boolean = false,
         motionPhotoMp4Path: String? = null,
         motionPhotoStillPtsUs: Long = 0L,
+        captureTimestamp: Long = System.currentTimeMillis(),
+        emitBackgroundEvent: Boolean = true,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
@@ -257,7 +259,7 @@ object ImageSaver {
         }
 
         val finalTargetUri = if (isHalfFrameActive && finalJpgUri == null) null else (finalJpgUri ?: finalRawUri)
-        if (!isFastPath && finalTargetUri != null) {
+        if (!isFastPath && emitBackgroundEvent && finalTargetUri != null) {
             ColorProcessor.backgroundSaveFlow.tryEmit(
                 ColorProcessor.BackgroundSaveEvent(
                     baseName = baseName,
@@ -266,7 +268,8 @@ object ImageSaver {
                     targetUri = finalTargetUri.toString(),
                     zoomFactor = zoomFactor,
                     orientation = rotationDegrees,
-                    saveJpg = (finalJpgUri != null)
+                    saveJpg = (finalJpgUri != null),
+                    captureTimestamp = captureTimestamp
                 )
             )
             SettingsRepository.getInstance(context).setLastCaptureUri(finalTargetUri.toString())
