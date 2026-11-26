@@ -1,0 +1,191 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: "Publish as GitHub Pre-release"
+        type: boolean
+        default: true
+      version_override:
+        description: "Optional version override (e.g. 2026.11.26 or 2026.11.26.2). Leave empty for automatic date versioning."
+        type: string
+        default: ""
+      extra_notes:
+        description: "Optional release highlights or notes prepended to the changelog"
+        type: string
+        default: ""
+      publish_telegram:
+        description: "Publish APK and release notes to Telegram channel"
+        type: boolean
+        default: true
+      skip_tests:
+        description: "Skip unit tests before building release APK"
+        type: boolean
+        default: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Decode Keystore and Properties
+        env:
+          ENCODED_KEYSTORE: ${{ secrets.KEYSTORE }}
+          ENCODED_KEY_PROPS: ${{ secrets.KEY_PROPERTIES }}
+        run: |
+          if [ -z "$ENCODED_KEYSTORE" ] || [ -z "$ENCODED_KEY_PROPS" ]; then
+            echo "ERROR: KEYSTORE and KEY_PROPERTIES secrets are required for release signing." >&2
+            exit 1
+          fi
+          echo "$ENCODED_KEYSTORE" | base64 --decode > keystore.jks
+          echo "$ENCODED_KEY_PROPS" | base64 --decode > keystore.properties
+
+      - name: Compute date-based version (Asia/Shanghai)
+        id: version
+        env:
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
+        run: |
+          git fetch --tags --force
+          if [ -n "$VERSION_OVERRIDE" ]; then
+            VERSION_NAME="$VERSION_OVERRIDE"
+            TAG="v${VERSION_NAME}"
+            if [[ "$VERSION_NAME" =~ ^([0-9]{4})\.([0-9]{2})\.([0-9]{2})(\.([0-9]+))?$ ]]; then
+              SEQ="${BASH_REMATCH[5]:-1}"
+              VERSION_CODE="${BASH_REMATCH[1]}${BASH_REMATCH[2]}${BASH_REMATCH[3]}$(printf '%02d' "$SEQ")"
+            else
+              BASE_NUM=$(TZ='Asia/Shanghai' date +'%Y%m%d')
+              VERSION_CODE="${BASE_NUM}01"
+            fi
+          else
+            BASE_DATE=$(TZ='Asia/Shanghai' date +'%Y.%m.%d')
+            BASE_NUM=$(TZ='Asia/Shanghai' date +'%Y%m%d')
+            EXISTING=$(git tag -l "v${BASE_DATE}" "v${BASE_DATE}.*" | wc -l | tr -d ' ')
+            if [ "$EXISTING" -eq 0 ]; then
+              VERSION_NAME="$BASE_DATE"
+              TAG="v${BASE_DATE}"
+              VERSION_CODE="${BASE_NUM}01"
+            else
+              SEQ=$((EXISTING + 1))
+              VERSION_NAME="${BASE_DATE}.${SEQ}"
+              TAG="v${BASE_DATE}.${SEQ}"
+              VERSION_CODE="${BASE_NUM}$(printf '%02d' "$SEQ")"
+            fi
+          fi
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${VERSION_NAME} (${VERSION_CODE}), tag: ${TAG}"
+
+      - name: Determine previous release tag
+        id: base_ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LATEST_TAG=$(gh release list --repo "${{ github.repository }}" --limit 1 --json tagName --jq '.[0].tagName // ""')
+          echo "base_ref=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No previous GitHub Release found -> Initial Release mode."
+          else
+            echo "Previous GitHub Release tag: ${LATEST_TAG}"
+          fi
+
+      - name: Run unit tests
+        if: ${{ !inputs.skip_tests }}
+        run: ./gradlew testDebugUnitTest
+
+      - name: Build signed Release APK
+        run: |
+          ./gradlew :app:assembleRelease \
+            -PappVersionName="${{ steps.version.outputs.version_name }}" \
+            -PappVersionCode="${{ steps.version.outputs.version_code }}"
+
+      - name: Package APK & compute SHA-256
+        id: artifact
+        run: |
+          mkdir -p dist
+          APK_SRC=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)
+          if [ -z "$APK_SRC" ]; then
+            echo "ERROR: Release APK not found." >&2
+            exit 1
+          fi
+          APK_NAME="Darkbag-${{ steps.version.outputs.version_name }}-arm64-v8a.apk"
+          cp "$APK_SRC" "dist/${APK_NAME}"
+          (cd dist && sha256sum "${APK_NAME}" > "${APK_NAME}.sha256")
+          SHA256=$(awk '{print $1}' "dist/${APK_NAME}.sha256")
+          HDRPLUS_SHA=$(git log -1 --format=%h -- app/src/main/cpp/hdr-plus || echo "embedded")
+          echo "apk_path=dist/${APK_NAME}" >> "$GITHUB_OUTPUT"
+          echo "sha256_path=dist/${APK_NAME}.sha256" >> "$GITHUB_OUTPUT"
+          echo "apk_name=${APK_NAME}" >> "$GITHUB_OUTPUT"
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+          echo "hdrplus_sha=${HDRPLUS_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        env:
+          EXTRA_NOTES: ${{ inputs.extra_notes }}
+        run: |
+          python3 .github/scripts/generate_release_notes.py \
+            --version "${{ steps.version.outputs.version_name }}" \
+            --version-code "${{ steps.version.outputs.version_code }}" \
+            --tag "${{ steps.version.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --apk-name "${{ steps.artifact.outputs.apk_name }}" \
+            --sha256 "${{ steps.artifact.outputs.sha256 }}" \
+            --hdrplus-sha "${{ steps.artifact.outputs.hdrplus_sha }}" \
+            --commit-sha "${{ github.sha }}" \
+            --base-ref "${{ steps.base_ref.outputs.base_ref }}" \
+            --head-ref "${{ github.sha }}" \
+            --extra-notes "$EXTRA_NOTES" \
+            --out-md dist/release_notes.md \
+            --out-tg dist/telegram_message.html
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: darkbag-${{ steps.version.outputs.version_name }}
+          path: dist/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FLAGS=()
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            FLAGS+=(--prerelease)
+          fi
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "${{ steps.artifact.outputs.apk_path }}" \
+            "${{ steps.artifact.outputs.sha256_path }}" \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Darkbag ${{ steps.version.outputs.version_name }}" \
+            --notes-file dist/release_notes.md \
+            "${FLAGS[@]}"
+
+      - name: Publish to Telegram Channel
+        if: ${{ inputs.publish_telegram }}
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          APK_PATH: ${{ steps.artifact.outputs.apk_path }}
+          MESSAGE_FILE: dist/telegram_message.html
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+        run: python3 .github/scripts/publish_telegram.py
