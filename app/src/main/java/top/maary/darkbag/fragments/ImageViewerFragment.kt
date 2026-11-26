@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
@@ -105,8 +106,74 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
+    private fun currentBackScrubTargets(): Pair<List<top.maary.darkbag.utils.PredictiveBackTransitions.ScrubTarget>, View?> {
+        val b = _binding ?: return Pair(emptyList(), null)
+        return when {
+            b.lutListContainer.visibility == View.VISIBLE -> Pair(
+                listOf(
+                    top.maary.darkbag.utils.PredictiveBackTransitions.ScrubTarget(
+                        view = b.lutListContainer,
+                        maxTranslationYDp = 24f,
+                        minScale = 0.96f
+                    )
+                ),
+                b.touchOverlay
+            )
+            isEditingAdjustments && b.editAdjustmentPanel.visibility == View.VISIBLE -> Pair(
+                listOf(
+                    top.maary.darkbag.utils.PredictiveBackTransitions.ScrubTarget(
+                        view = b.editAdjustmentPanel,
+                        maxTranslationYDp = 42f,
+                        minScale = 0.97f,
+                        minAlpha = 0.7f
+                    )
+                ),
+                null
+            )
+            isAdjusted -> Pair(
+                listOf(
+                    top.maary.darkbag.utils.PredictiveBackTransitions.ScrubTarget(
+                        view = b.viewerBentoDeck,
+                        maxTranslationYDp = 16f,
+                        maxTranslationXDp = 10f,
+                        minScale = 0.97f,
+                        minAlpha = 0.85f
+                    )
+                ),
+                null
+            )
+            else -> Pair(emptyList(), null)
+        }
+    }
+
     private val backPressedCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackStarted(backEvent: BackEventCompat) {
+            _binding?.touchOverlay?.alpha = 1f
+        }
+
+        override fun handleOnBackProgressed(backEvent: BackEventCompat) {
+            val (targets, backdrop) = currentBackScrubTargets()
+            top.maary.darkbag.utils.PredictiveBackTransitions.applyScrubProgress(
+                targets = targets,
+                backEvent = backEvent,
+                backdropView = backdrop
+            )
+        }
+
+        override fun handleOnBackCancelled() {
+            val (targets, backdrop) = currentBackScrubTargets()
+            top.maary.darkbag.utils.PredictiveBackTransitions.cancelScrub(
+                targets = targets,
+                backdropView = backdrop
+            )
+        }
+
         override fun handleOnBackPressed() {
+            val (targets, backdrop) = currentBackScrubTargets()
+            top.maary.darkbag.utils.PredictiveBackTransitions.resetScrubImmediate(
+                targets = targets,
+                backdropView = backdrop
+            )
             if (::editorPanelDelegate.isInitialized && editorPanelDelegate.dismissPillPopup()) return
             if (isEditingAdjustments) exitEditMode(apply = false) else if (isAdjusted) chromeDelegate.showDiscardChangesDialog()
         }

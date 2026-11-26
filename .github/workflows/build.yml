@@ -41,8 +41,8 @@ jobs:
           echo "$ENCODED_STRING" | base64 --decode > keystore.properties
         fi
 
-    - name: Build with Gradle
-      run: ./gradlew testDebugUnitTest assembleDebug
+    - name: Build and verify Release R8 with Gradle
+      run: ./gradlew testDebugUnitTest assembleDebug :app:assembleRelease
 
     - name: Upload APK
       uses: actions/upload-artifact@v4

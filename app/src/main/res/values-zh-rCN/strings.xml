@@ -698,4 +698,9 @@
     <string name="share_ignored_and_failed">已忽略 %1$d 个非 DNG 文件，%2$d 个文件读取失败。</string>
     <string name="share_only_dng_supported">已忽略 %1$d 个文件，仅支持 DNG 格式。</string>
     <string name="share_import_failed">%1$d 个文件因读取或权限错误导入失败。</string>
+
+    <!-- 关于与开源仓库 -->
+    <string name="pref_github_repo_label">开源仓库</string>
+    <string name="pref_github_repo_value">GitHub · Steve-Mr/Darkbag</string>
+    <string name="error_no_browser_app">未找到可打开链接的浏览器应用</string>
 </resources>

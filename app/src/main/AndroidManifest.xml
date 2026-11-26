@@ -16,11 +16,7 @@
   -->
 <manifest
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:dist="http://schemas.android.com/apk/distribution"
     xmlns:tools="http://schemas.android.com/tools">
-
-    <!-- Enable instant app support -->
-    <dist:module dist:instant="true" />
 
     <!-- Declare features -->
     <uses-feature android:name="android.hardware.camera" />
@@ -47,10 +43,9 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:largeHeap="true"
-        android:enableOnBackInvokedCallback="true"
-        tools:ignore="AllowBackup">
+        android:enableOnBackInvokedCallback="true">
 
         <activity
             android:name=".MainActivity"

@@ -15,6 +15,7 @@ import android.view.LayoutInflater
 import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
+import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.constraintlayout.widget.ConstraintLayout
@@ -143,6 +144,11 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
         requestAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        top.maary.darkbag.utils.PredictiveBackTransitions.apply(this)
+    }
+
     override fun onStart() {
         super.onStart()
         hub.onStart()
@@ -206,8 +212,47 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
 
         ColorProcessor.warmupGpuAsync(requireContext())
 
+        fun floatingOverlayTargets(): List<top.maary.darkbag.utils.PredictiveBackTransitions.ScrubTarget> {
+            val binding = cameraUiContainerBinding ?: return emptyList()
+            return listOf(
+                top.maary.darkbag.utils.PredictiveBackTransitions.ScrubTarget(
+                    view = binding.manualControlsRoot,
+                    maxTranslationYDp = 28f,
+                    minScale = 0.97f
+                ),
+                top.maary.darkbag.utils.PredictiveBackTransitions.ScrubTarget(
+                    view = binding.lutListContainer,
+                    maxTranslationYDp = 24f,
+                    minScale = 0.96f
+                )
+            )
+        }
+
         val floatingOverlayBackCallback = object : OnBackPressedCallback(hub.isFloatingOverlayOpen) {
+            override fun handleOnBackStarted(backEvent: BackEventCompat) {
+                cameraUiContainerBinding?.touchOverlay?.alpha = 1f
+            }
+
+            override fun handleOnBackProgressed(backEvent: BackEventCompat) {
+                top.maary.darkbag.utils.PredictiveBackTransitions.applyScrubProgress(
+                    targets = floatingOverlayTargets(),
+                    backEvent = backEvent,
+                    backdropView = cameraUiContainerBinding?.touchOverlay
+                )
+            }
+
+            override fun handleOnBackCancelled() {
+                top.maary.darkbag.utils.PredictiveBackTransitions.cancelScrub(
+                    targets = floatingOverlayTargets(),
+                    backdropView = cameraUiContainerBinding?.touchOverlay
+                )
+            }
+
             override fun handleOnBackPressed() {
+                top.maary.darkbag.utils.PredictiveBackTransitions.resetScrubImmediate(
+                    targets = floatingOverlayTargets(),
+                    backdropView = cameraUiContainerBinding?.touchOverlay
+                )
                 hub.dismissFloatingOverlays()
             }
         }

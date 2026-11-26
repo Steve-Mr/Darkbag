@@ -295,6 +295,25 @@ class SettingsFragment : Fragment() {
             Navigation.findNavController(requireActivity(), R.id.fragment_container)
                 .navigate(R.id.action_settings_to_permissions, bundle)
         }
+
+        binding.btnGithubRepo.text = CameraBentoDeckView.formatProTelemetry(
+            label = getString(R.string.pref_github_repo_label),
+            value = getString(R.string.pref_github_repo_value),
+            isTabActive = false,
+            context = requireContext()
+        )
+        binding.btnGithubRepo.setOnClickListener {
+            val url = getString(R.string.github_repo_url)
+            runCatching {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            }.onFailure {
+                top.maary.darkbag.ui.DarkbagFeedback.showSnackbar(
+                    view,
+                    R.string.error_no_browser_app,
+                    isError = true
+                )
+            }
+        }
     }
 
     private fun updateDebugStats() {

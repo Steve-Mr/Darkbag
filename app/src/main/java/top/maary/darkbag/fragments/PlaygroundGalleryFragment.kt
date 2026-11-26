@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
@@ -46,8 +47,35 @@ class PlaygroundGalleryFragment : Fragment() {
         }
     }
 
+    private fun selectionScrubTargets(): List<top.maary.darkbag.utils.PredictiveBackTransitions.ScrubTarget> {
+        val dock = _binding?.playgroundBentoDock ?: return emptyList()
+        return listOf(
+            top.maary.darkbag.utils.PredictiveBackTransitions.ScrubTarget(
+                view = dock,
+                maxTranslationYDp = 20f,
+                maxTranslationXDp = 10f,
+                minScale = 0.96f,
+                minAlpha = 0.75f
+            )
+        )
+    }
+
     private val selectionBackCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackProgressed(backEvent: BackEventCompat) {
+            if (viewModel.uiState.value.isSelectionMode) {
+                top.maary.darkbag.utils.PredictiveBackTransitions.applyScrubProgress(
+                    targets = selectionScrubTargets(),
+                    backEvent = backEvent
+                )
+            }
+        }
+
+        override fun handleOnBackCancelled() {
+            top.maary.darkbag.utils.PredictiveBackTransitions.cancelScrub(selectionScrubTargets())
+        }
+
         override fun handleOnBackPressed() {
+            top.maary.darkbag.utils.PredictiveBackTransitions.resetScrubImmediate(selectionScrubTargets())
             viewModel.processIntent(PlaygroundUserIntent.ClearSelection)
         }
     }

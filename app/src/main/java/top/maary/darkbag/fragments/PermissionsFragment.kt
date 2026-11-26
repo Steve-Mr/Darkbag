@@ -162,6 +162,7 @@ class PermissionsFragment : Fragment(), OnboardingStepBinder.Callbacks {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        top.maary.darkbag.utils.PredictiveBackTransitions.apply(this)
         settingsRepository = SettingsRepository.getInstance(requireContext())
         lutManager = LutManager(requireContext())
         forceOnboarding = arguments?.getBoolean("force_onboarding", false) ?: false

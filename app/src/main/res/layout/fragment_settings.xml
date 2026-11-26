@@ -1498,6 +1498,22 @@
                             </LinearLayout>
                         </com.google.android.material.card.MaterialCardView>
                     </top.maary.darkbag.ui.bento.BentoRowLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_github_repo"
+                        style="@style/Widget.Darkbag.BentoTile.Button"
+                        android:layout_width="match_parent"
+                        android:layout_height="52dp"
+                        android:layout_marginTop="8dp"
+                        app:backgroundTint="?attr/colorSurface"
+                        android:textColor="?attr/colorOnSurface"
+                        app:strokeWidth="1dp"
+                        app:strokeColor="?attr/colorOutlineVariant"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_arrow_forward"
+                        app:iconGravity="end"
+                        app:iconTint="?attr/colorOnSurfaceVariant"
+                        tools:text="SOURCE CODE\nGitHub · Steve-Mr/Darkbag" />
                 </LinearLayout>
             </top.maary.darkbag.ui.bento.BentoTrayCard>
 

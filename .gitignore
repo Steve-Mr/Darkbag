@@ -6,6 +6,9 @@ app/release
 # Files for the ART/Dalvik VM
 *.dex
 
+# Native object files
+*.o
+
 # Java class files
 *.class
 

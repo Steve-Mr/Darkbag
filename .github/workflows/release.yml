@@ -121,7 +121,7 @@ jobs:
       - name: Package APK & compute SHA-256
         id: artifact
         run: |
-          mkdir -p dist
+          mkdir -p dist dist-mapping
           APK_SRC=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)
           if [ -z "$APK_SRC" ]; then
             echo "ERROR: Release APK not found." >&2
@@ -130,6 +130,10 @@ jobs:
           APK_NAME="Darkbag-${{ steps.version.outputs.version_name }}-arm64-v8a.apk"
           cp "$APK_SRC" "dist/${APK_NAME}"
           (cd dist && sha256sum "${APK_NAME}" > "${APK_NAME}.sha256")
+          MAPPING_SRC="app/build/outputs/mapping/release/mapping.txt"
+          if [ -f "$MAPPING_SRC" ]; then
+            cp "$MAPPING_SRC" "dist-mapping/mapping-${{ steps.version.outputs.version_name }}.txt"
+          fi
           SHA256=$(awk '{print $1}' "dist/${APK_NAME}.sha256")
           HDRPLUS_SHA=$(git log -1 --format=%h -- app/src/main/cpp/hdr-plus || echo "embedded")
           echo "apk_path=dist/${APK_NAME}" >> "$GITHUB_OUTPUT"
@@ -162,6 +166,14 @@ jobs:
         with:
           name: darkbag-${{ steps.version.outputs.version_name }}
           path: dist/
+
+      - name: Archive R8 mapping file
+        uses: actions/upload-artifact@v4
+        with:
+          name: darkbag-${{ steps.version.outputs.version_name }}-mapping
+          path: dist-mapping/
+          retention-days: 90
+          if-no-files-found: warn
 
       - name: Create GitHub Release
         env:
