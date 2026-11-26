@@ -22,7 +22,7 @@ class CameraOverlayController(
 ) {
     fun showShutterBlackout() {
         val vfBinding = ui.fragmentCameraBinding ?: return
-        val blackout = vfBinding.viewFinderBlackout ?: return
+        val blackout = vfBinding.viewFinderBlackout
         val vf = vfBinding.viewFinder
 
         val applyBlackout = Runnable {
@@ -83,9 +83,9 @@ class CameraOverlayController(
     fun updateViewFinderConstraints() {
         val uiBinding = ui.cameraUiContainerBinding ?: return
         val vfBinding = ui.fragmentCameraBinding ?: return
-        val root = vfBinding.root as? ConstraintLayout ?: return
-        val bottomIsland = uiBinding.bottomIslandCard ?: return
-        val topControls = uiBinding.topRightControls ?: return
+        val root = vfBinding.root
+        val bottomIsland = uiBinding.bottomIslandCard
+        val topControls = uiBinding.topRightControls
 
         val set = ConstraintSet().apply { clone(root) }
         val containerId = vfBinding.viewFinderContainer.id
@@ -154,18 +154,18 @@ class CameraOverlayController(
             coordinator.readScopedHalfFrameState()
             val step = coordinator.halfFrameStep
             env.cameraViewModel.setHalfFrameStep(step)
-            uiBinding.cameraCaptureButton?.setHalfFrameState(isEnabled, step)
-            uiBinding.bottomIslandCard?.let { card ->
+            uiBinding.cameraCaptureButton.setHalfFrameState(isEnabled, step)
+            uiBinding.bottomIslandCard.let { card ->
                 CameraBentoDeckView.styleDeckCard(
                     card,
                     coordinator.activeCoordinator?.mode ?: coordinator.effectiveCaptureMode
                 )
             }
 
-            val gapView = vfBinding.halfFrameGapIndicator ?: return@post
-            val snapshotView = vfBinding.halfFrameSnapshot ?: return@post
-            val edgeTopView = vfBinding.halfFrameFilmEdgeTop ?: return@post
-            val edgeBottomView = vfBinding.halfFrameFilmEdgeBottom ?: return@post
+            val gapView = vfBinding.halfFrameGapIndicator
+            val snapshotView = vfBinding.halfFrameSnapshot
+            val edgeTopView = vfBinding.halfFrameFilmEdgeTop
+            val edgeBottomView = vfBinding.halfFrameFilmEdgeBottom
 
             if (!isEnabled) {
                 state.isHalfFrameUiAnimating = false
@@ -184,9 +184,9 @@ class CameraOverlayController(
                 vfBinding.viewFinder.translationX = 0f
                 vfBinding.viewFinder.translationY = 0f
 
-                if (uiBinding.photoViewButton?.visibility != View.VISIBLE) {
-                    uiBinding.photoViewButton?.visibility = View.VISIBLE
-                    uiBinding.photoViewButton?.alpha = 1f
+                if (uiBinding.photoViewButton.visibility != View.VISIBLE) {
+                    uiBinding.photoViewButton.visibility = View.VISIBLE
+                    uiBinding.photoViewButton.alpha = 1f
                 }
 
                 return@post
@@ -201,10 +201,10 @@ class CameraOverlayController(
 
             // Hide thumbnail button during processing of Shot 1 and throughout Shot 2
             if (step == 1) {
-                uiBinding.photoViewButton?.visibility = View.INVISIBLE
+                uiBinding.photoViewButton.visibility = View.INVISIBLE
             } else if (!state.isProcessing) {
-                uiBinding.photoViewButton?.visibility = View.VISIBLE
-                uiBinding.photoViewButton?.alpha = 1f
+                uiBinding.photoViewButton.visibility = View.VISIBLE
+                uiBinding.photoViewButton.alpha = 1f
             }
 
             val stageW = vfBinding.viewFinderStage.width.toFloat()
@@ -253,8 +253,8 @@ class CameraOverlayController(
     ) {
         val vfBinding = ui.fragmentCameraBinding ?: return
         val vf = vfBinding.viewFinder
-        val snapshot = vfBinding.halfFrameSnapshot ?: return
-        val gap = vfBinding.halfFrameGapIndicator ?: return
+        val snapshot = vfBinding.halfFrameSnapshot
+        val gap = vfBinding.halfFrameGapIndicator
         val state = env.runtimeState
 
         // Direction logic: SBS moves Left (-X), TB moves Right (+X)
@@ -335,8 +335,8 @@ class CameraOverlayController(
 
     private fun animateFilmEdgeRoll(isTopBottom: Boolean, duration: Long = 500L) {
         val vfBinding = ui.fragmentCameraBinding ?: return
-        val topEdge = vfBinding.halfFrameFilmEdgeTop ?: return
-        val bottomEdge = vfBinding.halfFrameFilmEdgeBottom ?: return
+        val topEdge = vfBinding.halfFrameFilmEdgeTop
+        val bottomEdge = vfBinding.halfFrameFilmEdgeBottom
 
         topEdge.animate().cancel()
         bottomEdge.animate().cancel()

@@ -436,10 +436,10 @@ class SettingsFragmentTest {
         val prefs = DarkbagPreferences()
         val spec = top.maary.darkbag.ui.CameraBentoDeckView.resolveVisibilitySpec(prefs, top.maary.darkbag.viewmodel.CameraUiTier.PRO)
         top.maary.darkbag.ui.CameraBentoDeckView.bindAuthenticPreview(deckBinding, themedContext, prefs, spec)
-        assertEquals(5, deckBinding.lensControlsContainer?.childCount)
+        assertEquals(5, deckBinding.lensControlsContainer.childCount)
         assertEquals(android.view.View.VISIBLE, deckBinding.bentoProModule?.visibility)
         assertEquals(android.view.View.VISIBLE, deckBinding.bentoFilmRow?.visibility)
-        assertEquals(android.view.View.VISIBLE, deckBinding.lensControlRow?.visibility)
+        assertEquals(android.view.View.VISIBLE, deckBinding.lensControlRow.visibility)
 
         // Template buttons
         assertNotNull(binding.btnTemplatePs)
@@ -521,11 +521,11 @@ class SettingsFragmentTest {
         val deckBinding = top.maary.darkbag.databinding.CameraUiContainerBinding.inflate(inflater, host)
         top.maary.darkbag.ui.CameraBentoDeckView.bindAuthenticPreview(deckBinding, themedContext, customPrefs, customSpec)
 
-        val hdrLp = deckBinding.hdrPlusPill?.layoutParams as android.widget.LinearLayout.LayoutParams
+        val hdrLp = deckBinding.hdrPlusPill.layoutParams as android.widget.LinearLayout.LayoutParams
         assertEquals(0, hdrLp.width)
         assertEquals(1f, hdrLp.weight, 0.001f)
 
-        val modeLp = deckBinding.modeSwitchButton?.layoutParams as android.widget.LinearLayout.LayoutParams
+        val modeLp = deckBinding.modeSwitchButton.layoutParams as android.widget.LinearLayout.LayoutParams
         assertEquals(0, modeLp.width)
         assertEquals(1f, modeLp.weight, 0.001f)
     }

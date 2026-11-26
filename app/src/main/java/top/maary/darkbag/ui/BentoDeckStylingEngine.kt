@@ -37,8 +37,8 @@ object BentoDeckStylingEngine {
      */
     @JvmStatic
     fun styleHdrPlusTile(binding: CameraUiContainerBinding, isHdrPlusEnabled: Boolean) {
-        val card = binding.hdrPlusPill ?: return
-        val label = binding.tvHdrStatus ?: return
+        val card = binding.hdrPlusPill
+        val label = binding.tvHdrStatus
         val density = card.resources.displayMetrics.density
 
         label.text = if (isHdrPlusEnabled) "HDR+" else "HDR"

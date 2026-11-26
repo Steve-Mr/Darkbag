@@ -500,7 +500,7 @@ object SensorCalibrationHelper {
         var fmD50: FloatArray? = null
 
         if (hasValidFm) {
-            val fm1 = forwardMatrix1!!
+            val fm1 = forwardMatrix1
             val fm2 = forwardMatrix2 ?: forwardMatrix1
 
             val interpFm = FloatArray(9) { i ->
@@ -788,7 +788,7 @@ object SensorCalibrationHelper {
             forwardMatrix2 = forwardMatrix1.copyOf()
         }
 
-        val calibrationIlluminant1 = (characteristics?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21).toInt()
+        val calibrationIlluminant1 = characteristics?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21
         val calibrationIlluminant2 = (characteristics?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2) ?: 17).toInt()
 
         val hasResultOrWb = result != null || wb != null || overrideNeutralColorPoint != null

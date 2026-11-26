@@ -439,7 +439,7 @@ open class ImageViewerFragment : Fragment() {
     private fun setBusyLoading(busy: Boolean, blockInteraction: Boolean = true) {
         binding.initialLoadingIndicator.visibility = if (busy) View.VISIBLE else View.GONE
         if (blockInteraction) {
-            binding.interactionBlocker?.visibility = if (busy) View.VISIBLE else View.GONE
+            binding.interactionBlocker.visibility = if (busy) View.VISIBLE else View.GONE
         }
     }
 

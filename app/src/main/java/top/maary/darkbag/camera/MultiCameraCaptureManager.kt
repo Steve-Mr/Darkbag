@@ -83,7 +83,7 @@ class MultiCameraCaptureManager(
     private val lock = Mutex()
 
     private val dngWriter = MultiCamDngMetadataWriter(context, cameraManager)
-    private lateinit var sessionConnector: MultiCamSessionConnector
+    private var sessionConnector: MultiCamSessionConnector
 
     private val previewCtrl: MultiCameraPreviewController = MultiCameraPreviewController(
         cameraManager = cameraManager,

@@ -69,10 +69,10 @@ object MultiCamColorHarmonizer {
         val secCm2 = extractColorMatrix(secondaryChars, CameraCharacteristics.SENSOR_COLOR_TRANSFORM2, fallback = secCm1)
             ?: secCm1
 
-        val primIllum1 = (primaryChars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21).toInt()
+        val primIllum1 = primaryChars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21
         val primIllum2 = (primaryChars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2)?.toInt() ?: 17)
 
-        val secIllum1 = (secondaryChars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21).toInt()
+        val secIllum1 = secondaryChars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21
         val secIllum2 = (secondaryChars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2)?.toInt() ?: 17)
 
         val (cct, _) = SensorCalibrationHelper.estimateCctAndWeight(

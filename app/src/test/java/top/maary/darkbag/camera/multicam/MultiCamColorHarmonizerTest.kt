@@ -59,15 +59,10 @@ class MultiCamColorHarmonizerTest {
         Shadows.shadowOf(secChars).set(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1, 21)
         Shadows.shadowOf(secChars).set(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2, 17.toByte())
 
-        val captureResult = ShadowTotalCaptureResult.newTotalCaptureResult()
-        Shadows.shadowOf(captureResult).set(
-            CaptureResult.SENSOR_NEUTRAL_COLOR_POINT,
-            arrayOf(Rational(1, 2), Rational(1, 1), Rational(4, 5))
-        )
-        Shadows.shadowOf(captureResult).set(
-            CaptureResult.COLOR_CORRECTION_GAINS,
-            RggbChannelVector(2.0f, 1.0f, 1.0f, 1.25f)
-        )
+        val captureResult = org.robolectric.shadows.TotalCaptureResultBuilder.newBuilder()
+            .set(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT, arrayOf(Rational(1, 2), Rational(1, 1), Rational(4, 5)))
+            .set(CaptureResult.COLOR_CORRECTION_GAINS, RggbChannelVector(2.0f, 1.0f, 1.0f, 1.25f))
+            .build()
 
         val profile = MultiCamColorHarmonizer.harmonize(primChars, captureResult, secChars)
         assertNotNull(profile)
@@ -89,11 +84,9 @@ class MultiCamColorHarmonizerTest {
         val primChars = ShadowCameraCharacteristics.newCameraCharacteristics()
         val secChars = ShadowCameraCharacteristics.newCameraCharacteristics()
 
-        val captureResult = ShadowTotalCaptureResult.newTotalCaptureResult()
-        Shadows.shadowOf(captureResult).set(
-            CaptureResult.COLOR_CORRECTION_GAINS,
-            RggbChannelVector(2.5f, 1.0f, 1.0f, 1.5f)
-        )
+        val captureResult = org.robolectric.shadows.TotalCaptureResultBuilder.newBuilder()
+            .set(CaptureResult.COLOR_CORRECTION_GAINS, RggbChannelVector(2.5f, 1.0f, 1.0f, 1.5f))
+            .build()
 
         val profile = MultiCamColorHarmonizer.harmonize(primChars, captureResult, secChars)
         assertNotNull(profile)
@@ -139,15 +132,10 @@ class MultiCamColorHarmonizerTest {
         )
         Shadows.shadowOf(secChars).set(CameraCharacteristics.SENSOR_FORWARD_MATRIX1, createColorTransform(fm))
 
-        val captureResult = ShadowTotalCaptureResult.newTotalCaptureResult()
-        Shadows.shadowOf(captureResult).set(
-            CaptureResult.SENSOR_NEUTRAL_COLOR_POINT,
-            arrayOf(Rational(1, 2), Rational(1, 1), Rational(4, 5))
-        )
-        Shadows.shadowOf(captureResult).set(
-            CaptureResult.COLOR_CORRECTION_GAINS,
-            RggbChannelVector(2.0f, 1.0f, 1.0f, 1.25f)
-        )
+        val captureResult = org.robolectric.shadows.TotalCaptureResultBuilder.newBuilder()
+            .set(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT, arrayOf(Rational(1, 2), Rational(1, 1), Rational(4, 5)))
+            .set(CaptureResult.COLOR_CORRECTION_GAINS, RggbChannelVector(2.0f, 1.0f, 1.0f, 1.25f))
+            .build()
 
         val profile = MultiCamColorHarmonizer.harmonize(primChars, captureResult, secChars)
         assertNotNull(profile)
@@ -184,15 +172,10 @@ class MultiCamColorHarmonizerTest {
         Shadows.shadowOf(secChars).set(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1, createColorTransform(cmSec))
         Shadows.shadowOf(secChars).set(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1, 21)
 
-        val captureResult = ShadowTotalCaptureResult.newTotalCaptureResult()
-        Shadows.shadowOf(captureResult).set(
-            CaptureResult.SENSOR_NEUTRAL_COLOR_POINT,
-            arrayOf(Rational(381, 1000), Rational(1, 1), Rational(791, 1000))
-        )
-        Shadows.shadowOf(captureResult).set(
-            CaptureResult.COLOR_CORRECTION_GAINS,
-            RggbChannelVector(2.62f, 1.0f, 1.0f, 1.26f)
-        )
+        val captureResult = org.robolectric.shadows.TotalCaptureResultBuilder.newBuilder()
+            .set(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT, arrayOf(Rational(381, 1000), Rational(1, 1), Rational(791, 1000)))
+            .set(CaptureResult.COLOR_CORRECTION_GAINS, RggbChannelVector(2.62f, 1.0f, 1.0f, 1.26f))
+            .build()
 
         val profile = MultiCamColorHarmonizer.harmonize(primChars, captureResult, secChars)
         assertNotNull(profile)

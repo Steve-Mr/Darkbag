@@ -123,7 +123,7 @@ class RawVideoSessionManager {
             System.arraycopy(forwardMatrix1, 0, forwardMatrix2, 0, 9)
         }
 
-        val calibrationIlluminant1 = (characteristics.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21).toInt()
+        val calibrationIlluminant1 = characteristics.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21
         val calibrationIlluminant2 = (characteristics.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2) ?: 17).toInt()
         val baselineExposure = 0.0f
         val make = android.os.Build.MANUFACTURER

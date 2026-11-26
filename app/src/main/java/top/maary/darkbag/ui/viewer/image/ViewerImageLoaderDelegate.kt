@@ -109,7 +109,7 @@ class ViewerImageLoaderDelegate(
                 loadImage(holder, activeDerivativeUri, version = group.lastModified)
             }
         } else if (group.rawVideoUri != null) {
-            playbackController.loadRawVideoPosterFrame(holder, group.rawVideoUri!!, group)
+            playbackController.loadRawVideoPosterFrame(holder, group.rawVideoUri, group)
         }
     }
 

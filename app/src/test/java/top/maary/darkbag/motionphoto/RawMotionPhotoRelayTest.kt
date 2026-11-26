@@ -354,11 +354,6 @@ class RawMotionPhotoRelayTest {
             }
         )
 
-        val validResult = ShadowTotalCaptureResult.newTotalCaptureResult()
-        Shadows.shadowOf(validResult).set(
-            CaptureResult.COLOR_CORRECTION_GAINS,
-            RggbChannelVector(2.55f, 1.0f, 1.0f, 1.45f)
-        )
         val lscData = FloatArray(4 * 2 * 2) { 1.5f }
         val lscCtor = LensShadingMap::class.java.getDeclaredConstructor(
             FloatArray::class.java,
@@ -366,10 +361,10 @@ class RawMotionPhotoRelayTest {
             Int::class.javaPrimitiveType
         ).apply { isAccessible = true }
         val lscMapObj = lscCtor.newInstance(lscData, 2, 2)
-        Shadows.shadowOf(validResult).set(
-            CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP,
-            lscMapObj
-        )
+        val validResult = org.robolectric.shadows.TotalCaptureResultBuilder.newBuilder()
+            .set(CaptureResult.COLOR_CORRECTION_GAINS, RggbChannelVector(2.55f, 1.0f, 1.0f, 1.45f))
+            .set(CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP, lscMapObj)
+            .build()
 
         relay.start()
         val buf = ByteBuffer.allocateDirect(1008 * 756 * 2)

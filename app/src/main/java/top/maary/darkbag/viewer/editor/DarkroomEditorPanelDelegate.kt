@@ -92,7 +92,7 @@ class DarkroomEditorPanelDelegate(
             }
         }
 
-        binding.btnEditRecipe?.setOnClickListener {
+        binding.btnEditRecipe.setOnClickListener {
             // Trigger recipe menu
         }
     }
@@ -121,7 +121,7 @@ class DarkroomEditorPanelDelegate(
             isValueManual = isAdjusted,
             context = ctx
         )
-        binding.btnEditRecipe?.text = CameraBentoDeckView.formatProTelemetry(
+        binding.btnEditRecipe.text = CameraBentoDeckView.formatProTelemetry(
             label = "RECIPE",
             value = if (lutName != "None") lutName else logName,
             isTabActive = false,

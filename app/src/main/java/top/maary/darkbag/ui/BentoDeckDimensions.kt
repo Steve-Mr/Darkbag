@@ -183,7 +183,7 @@ object BentoDeckDimensions {
 
     @JvmStatic
     fun applyDynamicRowHeights(binding: CameraUiContainerBinding) {
-        val root = binding.bottomIslandCard ?: binding.bentoDeckView ?: binding.root
+        val root = binding.bottomIslandCard
         applyDynamicRowHeights(root)
     }
 

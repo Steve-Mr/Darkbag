@@ -410,7 +410,7 @@ class CameraCapturePipelineDispatcher(
                 env.runtimeState.captureResults[timestamp] = result
             }
         }
-        (env.runtimeState.captureResultFlow as? MutableSharedFlow)?.tryEmit(result)
+        env.runtimeState.captureResultFlow.tryEmit(result)
     }
 
     private fun activePhysicalId(result: CaptureResult?): String? {

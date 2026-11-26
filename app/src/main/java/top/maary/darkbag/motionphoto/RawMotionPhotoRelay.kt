@@ -402,7 +402,7 @@ class RawMotionPhotoRelay(
         val fm2 = chars?.get(CameraCharacteristics.SENSOR_FORWARD_MATRIX2)?.let { colorSpaceTransformToFloatArray(it) }
         val cm1 = chars?.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)?.let { colorSpaceTransformToFloatArray(it) }
         val cm2 = chars?.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM2)?.let { colorSpaceTransformToFloatArray(it) }
-        val illum1 = chars?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1)?.toInt() ?: 21
+        val illum1 = chars?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21
         val illum2 = chars?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2)?.toInt() ?: 17
         val activeCcm = computeRenderCcmColMajor(
             fm1 = fm1,

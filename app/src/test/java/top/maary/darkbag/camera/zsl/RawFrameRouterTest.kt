@@ -30,8 +30,8 @@ class RawFrameRouterTest {
     @Test
     fun resolveMotionTapResultFallsBackToLatestCaptureResultAndClearsOnClose() {
         val reader = ImageReader.newInstance(64, 64, ImageFormat.RAW_SENSOR, 2)
-        val exactResult = ShadowTotalCaptureResult.newTotalCaptureResult()
-        val latestResult = ShadowTotalCaptureResult.newTotalCaptureResult()
+        val exactResult = org.robolectric.shadows.TotalCaptureResultBuilder.newBuilder().build()
+        val latestResult = org.robolectric.shadows.TotalCaptureResultBuilder.newBuilder().build()
         val router = RawFrameRouter(
             reader = reader,
             handler = Handler(Looper.getMainLooper()),

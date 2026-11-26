@@ -185,7 +185,7 @@ class MediaStoreViewerStrategy : ViewerMediaStrategy {
                                     val targetUri = if (isReplacement) group.jpgUri else null
                                     val jpgFolderUri = SettingsRepository.getInstance(context).current().jpgStorageUri
 
-                                    val captureMetadata = group.jpgUri?.let { repository.getCaptureMetadata(it) }
+                                    val captureMetadata = group.jpgUri.let { repository.getCaptureMetadata(it) }
 
                                     top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
                                         context = context,

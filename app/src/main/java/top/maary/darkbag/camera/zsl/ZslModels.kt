@@ -237,7 +237,7 @@ object ZslCapabilityEvaluator {
             )
         }
 
-        val (rawW, rawH, frameBytes) = rawCandidate!!
+        val (rawW, rawH, frameBytes) = rawCandidate
         if (!facts.readSensorSettings) {
             return ZslCapabilityReport(
                 ZslRoute.NONE, ZslReason.NO_READ_SENSOR_SETTINGS,

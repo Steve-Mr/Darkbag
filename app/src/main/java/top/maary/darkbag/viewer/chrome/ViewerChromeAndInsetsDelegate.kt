@@ -129,9 +129,9 @@ class ViewerChromeAndInsetsDelegate(
 
     fun updateSplitButtons() {
         if (isEditingAdjustments() || isAdjusted()) {
-            binding.btnActionMain?.setIconResource(R.drawable.ic_save)
-            binding.btnActionMain?.text = context.getString(R.string.save).uppercase()
-            binding.btnActionMain?.contentDescription = context.getString(R.string.save)
+            binding.btnActionMain.setIconResource(R.drawable.ic_save)
+            binding.btnActionMain.text = context.getString(R.string.save).uppercase()
+            binding.btnActionMain.contentDescription = context.getString(R.string.save)
         } else {
             val adapter = getAdapter()
             val currentIndex = binding.imagePager.currentItem
@@ -141,13 +141,13 @@ class ViewerChromeAndInsetsDelegate(
             val isUnrendered = currentGroup != null && isUnrenderedVideoGroup(currentGroup)
 
             if (isUnrendered) {
-                binding.btnActionMain?.setIconResource(R.drawable.ic_save)
-                binding.btnActionMain?.text = "EXPORT"
-                binding.btnActionMain?.contentDescription = context.getString(R.string.action_export_main)
+                binding.btnActionMain.setIconResource(R.drawable.ic_save)
+                binding.btnActionMain.text = "EXPORT"
+                binding.btnActionMain.contentDescription = context.getString(R.string.action_export_main)
             } else {
-                binding.btnActionMain?.setIconResource(R.drawable.ic_share)
-                binding.btnActionMain?.text = "SHARE"
-                binding.btnActionMain?.contentDescription = context.getString(R.string.share_button_alt)
+                binding.btnActionMain.setIconResource(R.drawable.ic_share)
+                binding.btnActionMain.text = "SHARE"
+                binding.btnActionMain.contentDescription = context.getString(R.string.share_button_alt)
             }
         }
     }
@@ -162,7 +162,7 @@ class ViewerChromeAndInsetsDelegate(
     }
 
     fun setupActionButtons() {
-        binding.btnActionMain?.setOnClickListener {
+        binding.btnActionMain.setOnClickListener {
             if (isSaving()) return@setOnClickListener
             it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
 
@@ -179,15 +179,15 @@ class ViewerChromeAndInsetsDelegate(
             }
         }
 
-        binding.btnActionMain?.setOnLongClickListener {
+        binding.btnActionMain.setOnLongClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             if (isEditingAdjustments() || isAdjusted()) onShowSaveMenu(it) else showViewMenu(it)
             true
         }
 
-        binding.btnActionMenu?.setOnClickListener {
-            binding.btnActionMenu?.isCheckable = true
-            binding.btnActionMenu?.isChecked = true
+        binding.btnActionMenu.setOnClickListener {
+            binding.btnActionMenu.isCheckable = true
+            binding.btnActionMenu.isChecked = true
             if (isEditingAdjustments() || isAdjusted()) onShowSaveMenu(it) else showViewMenu(it)
         }
 
@@ -221,7 +221,7 @@ class ViewerChromeAndInsetsDelegate(
 
         binding.btnAdjustTofu.setOnClickListener { onEnterEditMode() }
 
-        binding.btnVideoPlayback?.setOnClickListener {
+        binding.btnVideoPlayback.setOnClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             val adapter = getAdapter() ?: return@setOnClickListener
             val curPos = binding.imagePager.currentItem
@@ -243,7 +243,7 @@ class ViewerChromeAndInsetsDelegate(
     fun showViewMenu(anchor: View) {
         val adapter = getAdapter()
         if (adapter == null || adapter.itemCount == 0) {
-            binding.btnActionMenu?.isChecked = false
+            binding.btnActionMenu.isChecked = false
             return
         }
         val grp = adapter.getGroup(binding.imagePager.currentItem)
@@ -276,7 +276,7 @@ class ViewerChromeAndInsetsDelegate(
             }
             true
         }
-        popup.setOnDismissListener { binding.btnActionMenu?.isChecked = false }
+        popup.setOnDismissListener { binding.btnActionMenu.isChecked = false }
         popup.show()
     }
 
@@ -287,7 +287,7 @@ class ViewerChromeAndInsetsDelegate(
     ) {
         val adapter = getAdapter()
         if (adapter == null || adapter.itemCount == 0) {
-            binding.btnActionMenu?.isChecked = false
+            binding.btnActionMenu.isChecked = false
             return
         }
         mediaStrategy.showSaveMenu(context, anchor, adapter.getGroup(binding.imagePager.currentItem), onAction)

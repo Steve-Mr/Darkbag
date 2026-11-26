@@ -146,7 +146,7 @@ class CameraShutterController(
             ?: -env.runtimeState.deviceOrientationDegrees.toFloat()
 
     private fun rotateShutter(targetRotation: Float) {
-        val shutter = ui.cameraUiContainerBinding?.cameraCaptureButton as? ExpressiveShutterButton ?: return
+        val shutter = ui.cameraUiContainerBinding?.cameraCaptureButton ?: return
         val current = shutter.getDotRotation()
         val diff = (targetRotation - current) % 360
         val shortestDiff = when {

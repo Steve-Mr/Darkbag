@@ -473,7 +473,7 @@ class LutSurfaceProcessor {
                 val lscMap = frame.lensShadingMap
                 val hasLsc = lscMap != null && frame.lensShadingRows > 1 && frame.lensShadingCols > 1
                 if (hasLsc) {
-                    uploadLscTexture(lscMap!!, frame.lensShadingRows, frame.lensShadingCols)
+                    uploadLscTexture(lscMap, frame.lensShadingRows, frame.lensShadingCols)
                 }
                 shaderPipeline.setPreviewGain(frame.digitalGain)
                 shaderPipeline.drawRawFrame(

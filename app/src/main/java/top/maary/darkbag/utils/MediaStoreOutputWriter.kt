@@ -241,7 +241,7 @@ internal object MediaStoreOutputWriter {
         val isMotionPhoto = motionPhotoMp4Path != null &&
             File(motionPhotoMp4Path).exists() && File(motionPhotoMp4Path).length() > 0
         val finalEditConfig = ExifMetadataApplier.createFinalEditConfig(editConfig, zoomFactor)
-        val mp4File = if (isMotionPhoto) File(motionPhotoMp4Path!!) else null
+        val mp4File = if (isMotionPhoto) File(motionPhotoMp4Path) else null
         return try {
             val savedUri = createSafFileAndWrite(context, folderUri, mimeType, displayName) { out ->
                 if (isMotionPhoto && mp4File != null) {
@@ -314,7 +314,7 @@ internal object MediaStoreOutputWriter {
                 contentResolver.openFileDescriptor(uri, "w")?.use { pfd ->
                     FileOutputStream(pfd.fileDescriptor).use { out ->
                         if (isMotionPhoto) {
-                            val mp4File = File(motionPhotoMp4Path!!)
+                            val mp4File = File(motionPhotoMp4Path)
                             try {
                                 writeMotionPhotoToStream(
                                     context, mp4File, motionPhotoStillPtsUs, writeExifMetadata,
@@ -453,7 +453,7 @@ internal object MediaStoreOutputWriter {
             val f1DisplayName = if (baseName.contains("_HF2")) {
                 baseName.replace("_HF2", "_HF1") + "$baseSuffix.dng"
             } else {
-                "${halfFrameMetadata?.frame1BaseName ?: session.baseName ?: baseName}_HF1$baseSuffix.dng"
+                "${halfFrameMetadata.frame1BaseName}_HF1$baseSuffix.dng"
             }
             Log.d(TAG, "Publishing staged Frame 1 DNG as $f1DisplayName")
             saveDngToDestination(context, stagedFile, f1DisplayName, rawFolderUri)

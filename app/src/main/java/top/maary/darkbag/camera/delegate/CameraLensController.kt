@@ -40,13 +40,13 @@ class CameraLensController(
 
     fun updateLensControlRowPosition(animate: Boolean = true) {
         val uiBinding = ui.cameraUiContainerBinding ?: return
-        val lensRow = uiBinding.lensControlRow ?: return
+        val lensRow = uiBinding.lensControlRow
         lensRow.translationY = 0f
     }
 
     fun initLensControls() {
         val binding = ui.cameraUiContainerBinding ?: return
-        val container = binding.lensControlsContainer ?: return
+        val container = binding.lensControlsContainer
         val state = env.runtimeState
 
         // Always clear container to avoid stale buttons from previous facings
@@ -140,7 +140,7 @@ class CameraLensController(
                             }
                         } else if (isLargestTele && isAlreadyInTelePresets) {
                             val telePresets = env.cameraRepository.getTelePresets(lens)
-                            val isCurrentlyNative = oldLens?.sensorId == lens.sensorId
+                            val isCurrentlyNative = oldLens.sensorId == lens.sensorId
                             state.currentLens = if (isCurrentlyNative) telePresets[1] else telePresets[0]
                         } else if (is1x) {
                             val default1xFocal = settingsRepository.current().defaultFocal1xName
@@ -178,7 +178,7 @@ class CameraLensController(
         }
 
         val binding = ui.cameraUiContainerBinding ?: return
-        val container = binding.lensControlsContainer ?: return
+        val container = binding.lensControlsContainer
 
         val isBackCamera = state.lensFacing == CameraCharacteristics.LENS_FACING_BACK
         val largestTele = if (isBackCamera) {
@@ -196,14 +196,14 @@ class CameraLensController(
 
                 if (isActive) {
                     if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
-                        btn.text = state.transientLensLabel ?: String.format("%.1fx", activeLens?.multiplier ?: 1.0f)
+                        btn.text = state.transientLensLabel ?: String.format("%.1fx", activeLens.multiplier)
                     } else if (largestTele != null && lens.sensorId == largestTele.sensorId) {
-                        btn.text = String.format("%.1fx", activeLens?.multiplier ?: lens.multiplier)
+                        btn.text = String.format("%.1fx", activeLens.multiplier)
                     } else {
                         btn.text = lens.name
                     }
 
-                    val isDigitalCrop = (activeLens?.isZoomPreset == true && (activeLens.targetZoomRatio ?: 1.0f) > 1.0f) || lens.isZoomPreset
+                    val isDigitalCrop = (activeLens.isZoomPreset == true && (activeLens.targetZoomRatio ?: 1.0f) > 1.0f) || lens.isZoomPreset
                     CameraBentoDeckView.styleBentoLensButton(btn, isActive = true, isDigitalCrop = isDigitalCrop)
                 } else {
                     if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
@@ -222,8 +222,8 @@ class CameraLensController(
 
         val hasMultipleLenses = container.childCount > 1
         val showLensStrip = hasMultipleLenses && showLensControls
-        binding.lensControlsCard?.visibility = if (showLensStrip) View.VISIBLE else View.GONE
-        binding.lensControlRow?.visibility = if (spec.showModeSwitch || spec.showCameraSwitch || showLensStrip) View.VISIBLE else View.GONE
+        binding.lensControlsCard.visibility = if (showLensStrip) View.VISIBLE else View.GONE
+        binding.lensControlRow.visibility = if (spec.showModeSwitch || spec.showCameraSwitch || showLensStrip) View.VISIBLE else View.GONE
     }
 
     /** Enables/disables the camera-switch button depending on available facings and tier visibility. */

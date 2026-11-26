@@ -16,6 +16,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import top.maary.darkbag.models.ImageGroup
 
+@Suppress("DEPRECATION")
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
 class ImageRepositoryCacheTest {
@@ -191,7 +192,7 @@ class ImageRepositoryCacheTest {
         assertNull(store.cachedGroups)
         assertEquals(1, store.staleCachedGroups?.size)
 
-        store.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+        store.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND)
         store.clear()
         assertNull(store.cachedGroups)
         assertNull(store.staleCachedGroups)

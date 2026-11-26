@@ -26,9 +26,8 @@ class ViewerMetadataSheetTest {
         val uri = Uri.parse("content://media/external/images/media/42")
         val sheet = ViewerMetadataSheet.newInstance(uri)
 
-        val bundle = sheet.arguments
-        assertNotNull(bundle)
-        val extractedUri = bundle?.getParcelable<Uri>("arg_uri")
+        val bundle = requireNotNull(sheet.arguments)
+        val extractedUri = androidx.core.os.BundleCompat.getParcelable(bundle, "arg_uri", Uri::class.java)
         assertEquals(uri, extractedUri)
     }
 }

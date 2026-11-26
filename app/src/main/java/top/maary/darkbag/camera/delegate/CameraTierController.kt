@@ -34,24 +34,24 @@ class CameraTierController(
     fun initManualControls() {
         val binding = ui.cameraUiContainerBinding ?: return
         val state = env.runtimeState
-        binding.btnProMode?.visibility = View.GONE
+        binding.btnProMode.visibility = View.GONE
 
         // Dismiss touch overlay
-        binding.touchOverlay?.setOnClickListener {
+        binding.touchOverlay.setOnClickListener {
             dismissFloatingOverlays()
         }
 
         state.isMultiCameraManualLinked = settingsRepository.current().multiCameraManualLinked
 
         // Level 2: Pill Click Listeners (Toggles Level 3 Dial Panel)
-        binding.pillFocus?.setOnClickListener { toggleManualTab("Focus") }
-        binding.pillIso?.setOnClickListener { toggleManualTab("ISO") }
-        binding.pillShutter?.setOnClickListener { toggleManualTab("Shutter") }
+        binding.pillFocus.setOnClickListener { toggleManualTab("Focus") }
+        binding.pillIso.setOnClickListener { toggleManualTab("ISO") }
+        binding.pillShutter.setOnClickListener { toggleManualTab("Shutter") }
         binding.pillWb?.setOnClickListener { toggleManualTab("WB") }
-        binding.pillEv?.setOnClickListener { toggleManualTab("EV") }
+        binding.pillEv.setOnClickListener { toggleManualTab("EV") }
 
         // Multi-Camera Sync Link Button
-        binding.btnProLink?.setOnClickListener { v ->
+        binding.btnProLink.setOnClickListener { v ->
             state.isMultiCameraManualLinked = !state.isMultiCameraManualLinked
             settingsRepository.setMultiCameraManualLinked(state.isMultiCameraManualLinked)
             v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
@@ -65,19 +65,19 @@ class CameraTierController(
         }
 
         // Dial Wheel Item Selection
-        binding.dialWheelView?.setOnItemSelectedListener { item, _, fromUser ->
+        binding.dialWheelView.setOnItemSelectedListener { item, _, fromUser ->
             if (fromUser) {
                 handleDialSelection(item)
             }
         }
 
         // Auto Button
-        binding.btnDialAuto?.setOnClickListener {
+        binding.btnDialAuto.setOnClickListener {
             resetCurrentManualParameter()
         }
 
         // Focus Extras
-        binding.btnFocusNear?.setOnClickListener {
+        binding.btnFocusNear.setOnClickListener {
             state.currentFocusDistance = state.minFocusDistance
             state.isManualFocus = true
             coordinator.applyCameraControls()
@@ -85,7 +85,7 @@ class CameraTierController(
             updateProInfoBar()
         }
 
-        binding.btnFocusFar?.setOnClickListener {
+        binding.btnFocusFar.setOnClickListener {
             state.currentFocusDistance = 0.0f
             state.isManualFocus = true
             coordinator.applyCameraControls()
@@ -94,13 +94,13 @@ class CameraTierController(
         }
 
         // WB Preset Extras
-        binding.btnWbPresetTungsten?.setOnClickListener {
+        binding.btnWbPresetTungsten.setOnClickListener {
             selectWbPreset(3200)
         }
-        binding.btnWbPresetDaylight?.setOnClickListener {
+        binding.btnWbPresetDaylight.setOnClickListener {
             selectWbPreset(5500)
         }
-        binding.btnWbPresetCloudy?.setOnClickListener {
+        binding.btnWbPresetCloudy.setOnClickListener {
             selectWbPreset(6500)
         }
 
@@ -144,17 +144,17 @@ class CameraTierController(
         if (activeManualTab == tab) {
             env.runtimeState.activeManualTab = null
             env.cameraViewModel.setActiveManualTab(null)
-            binding.manualControlsRoot?.visibility = View.GONE
-            binding.touchOverlay?.visibility = View.GONE
+            binding.manualControlsRoot.visibility = View.GONE
+            binding.touchOverlay.visibility = View.GONE
             updateBentoFolding(isDialOpen = false)
             updateFocusPeakingState()
             updateProInfoBar()
         } else {
             env.runtimeState.activeManualTab = tab
             env.cameraViewModel.setActiveManualTab(tab)
-            binding.manualControlsRoot?.visibility = View.VISIBLE
-            binding.dialPanel?.visibility = View.VISIBLE
-            binding.touchOverlay?.visibility = View.VISIBLE
+            binding.manualControlsRoot.visibility = View.VISIBLE
+            binding.dialPanel.visibility = View.VISIBLE
+            binding.touchOverlay.visibility = View.VISIBLE
             updateBentoFolding(isDialOpen = true)
             updateDialPanel()
             updateFocusPeakingState()
@@ -176,15 +176,15 @@ class CameraTierController(
             }
             env.runtimeState.activeManualTab = null
             env.cameraViewModel.setActiveManualTab(null)
-            binding.manualControlsRoot?.visibility = View.GONE
-            binding.touchOverlay?.visibility = View.GONE
+            binding.manualControlsRoot.visibility = View.GONE
+            binding.touchOverlay.visibility = View.GONE
             updateBentoFolding(isDialOpen = false)
             updateFocusPeakingState()
             updateProInfoBar()
         }
-        if (binding.lutListContainer?.visibility == View.VISIBLE) {
-            binding.lutListContainer?.visibility = View.GONE
-            binding.touchOverlay?.visibility = View.GONE
+        if (binding.lutListContainer.visibility == View.VISIBLE) {
+            binding.lutListContainer.visibility = View.GONE
+            binding.touchOverlay.visibility = View.GONE
         }
         ui.notifyFloatingOverlayStateChanged()
     }
@@ -280,14 +280,14 @@ class CameraTierController(
 
     fun updateDialPanel() {
         val binding = ui.cameraUiContainerBinding ?: return
-        val wheel = binding.dialWheelView ?: return
+        val wheel = binding.dialWheelView
         val state = env.runtimeState
-        binding.focusExtras?.visibility = if (activeManualTab == "Focus") View.VISIBLE else View.GONE
-        binding.wbExtras?.visibility = if (activeManualTab == "WB") View.VISIBLE else View.GONE
+        binding.focusExtras.visibility = if (activeManualTab == "Focus") View.VISIBLE else View.GONE
+        binding.wbExtras.visibility = if (activeManualTab == "WB") View.VISIBLE else View.GONE
 
         when (activeManualTab) {
             "Focus" -> {
-                binding.tvDialTargetLabel?.text = "FOCUS"
+                binding.tvDialTargetLabel.text = "FOCUS"
                 val items = buildFocusDialItems(state.minFocusDistance)
                 val targetVal = if (state.isManualFocus) state.currentFocusDistance else 0.0f
                 var closestIndex = 0
@@ -300,10 +300,10 @@ class CameraTierController(
                     }
                 }
                 wheel.setItems(items, closestIndex)
-                binding.tvDialTargetValue?.text = if (state.isManualFocus) formatFocusDist(state.currentFocusDistance) else "AUTO (${formatFocusDist(state.liveFocusDistance)})"
+                binding.tvDialTargetValue.text = if (state.isManualFocus) formatFocusDist(state.currentFocusDistance) else "AUTO (${formatFocusDist(state.liveFocusDistance)})"
             }
             "ISO" -> {
-                binding.tvDialTargetLabel?.text = "ISO"
+                binding.tvDialTargetLabel.text = "ISO"
                 val items = buildIsoDialItems(state.isoRange)
                 val targetVal = if (state.isManualIso) state.currentIso else state.liveIso
                 var closestIndex = 0
@@ -316,10 +316,10 @@ class CameraTierController(
                     }
                 }
                 wheel.setItems(items, closestIndex)
-                binding.tvDialTargetValue?.text = if (state.isManualIso) "${state.currentIso}" else "AUTO (${state.liveIso})"
+                binding.tvDialTargetValue.text = if (state.isManualIso) "${state.currentIso}" else "AUTO (${state.liveIso})"
             }
             "Shutter" -> {
-                binding.tvDialTargetLabel?.text = "SHUTTER"
+                binding.tvDialTargetLabel.text = "SHUTTER"
                 val items = buildShutterDialItems(state.exposureTimeRange)
                 val targetVal = if (state.isManualShutter) state.currentExposureTime else state.liveExposureTime
                 var closestIndex = 0
@@ -332,10 +332,10 @@ class CameraTierController(
                     }
                 }
                 wheel.setItems(items, closestIndex)
-                binding.tvDialTargetValue?.text = if (state.isManualShutter) formatShutterTime(state.currentExposureTime) else "AUTO (${formatShutterTime(state.liveExposureTime)})"
+                binding.tvDialTargetValue.text = if (state.isManualShutter) formatShutterTime(state.currentExposureTime) else "AUTO (${formatShutterTime(state.liveExposureTime)})"
             }
             "WB" -> {
-                binding.tvDialTargetLabel?.text = "WB"
+                binding.tvDialTargetLabel.text = "WB"
                 val items = buildWbDialItems()
                 var closestIndex = 0
                 if (state.isManualWb) {
@@ -354,7 +354,7 @@ class CameraTierController(
                 }
                 wheel.setItems(items, closestIndex)
                 val presetName = ProDialItemFactory.getWbPresetName(state.manualWbTempK, binding.root.context)
-                binding.tvDialTargetValue?.text = if (state.isManualWb) {
+                binding.tvDialTargetValue.text = if (state.isManualWb) {
                     if (presetName != null) "${state.manualWbTempK}K ($presetName)" else "${state.manualWbTempK}K"
                 } else {
                     "AUTO (${state.liveWbTempK}K)"
@@ -362,7 +362,7 @@ class CameraTierController(
                 updateWbPresetChipsStyle()
             }
             "EV" -> {
-                binding.tvDialTargetLabel?.text = "EV"
+                binding.tvDialTargetLabel.text = "EV"
                 val items = buildEvDialItems(state.evRange)
                 var closestIndex = 0
                 var minDiff = Double.MAX_VALUE
@@ -374,7 +374,7 @@ class CameraTierController(
                     }
                 }
                 wheel.setItems(items, closestIndex)
-                binding.tvDialTargetValue?.text = formatEvVal(state.currentEvIndex)
+                binding.tvDialTargetValue.text = formatEvVal(state.currentEvIndex)
             }
         }
     }
@@ -434,7 +434,7 @@ class CameraTierController(
             }
             val isFocusManualOrLocked = state.isManualFocus || isFocusLocked
             val focusVal = if (state.isManualFocus) formatFocusDist(state.currentFocusDistance) else formatFocusDist(state.liveFocusDistance)
-            binding.pillFocus?.let { pill ->
+            binding.pillFocus.let { pill ->
                 val isTabActive = activeManualTab == "Focus"
                 CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isFocusManualOrLocked)
                 pill.text = CameraBentoDeckView.formatProTelemetry(focusLabel, focusVal, isTabActive, isFocusManualOrLocked, pill.context)
@@ -443,7 +443,7 @@ class CameraTierController(
             // ISO
             val isoLabel = "ISO"
             val isoVal = if (state.isManualIso) "${state.currentIso}" else "${state.liveIso}"
-            binding.pillIso?.let { pill ->
+            binding.pillIso.let { pill ->
                 val isTabActive = activeManualTab == "ISO"
                 CameraBentoDeckView.styleBentoProPill(pill, isTabActive, state.isManualIso)
                 pill.text = CameraBentoDeckView.formatProTelemetry(isoLabel, isoVal, isTabActive, state.isManualIso, pill.context)
@@ -452,7 +452,7 @@ class CameraTierController(
             // Shutter
             val shutterLabel = "SEC"
             val shutterVal = if (state.isManualShutter) formatShutterTime(state.currentExposureTime) else formatShutterTime(state.liveExposureTime)
-            binding.pillShutter?.let { pill ->
+            binding.pillShutter.let { pill ->
                 val isTabActive = activeManualTab == "Shutter"
                 CameraBentoDeckView.styleBentoProPill(pill, isTabActive, state.isManualShutter)
                 pill.text = CameraBentoDeckView.formatProTelemetry(shutterLabel, shutterVal, isTabActive, state.isManualShutter, pill.context)
@@ -470,7 +470,7 @@ class CameraTierController(
             // EV
             val evLabel = "EV"
             val evVal = if (state.currentEvIndex == 0) "0.0" else String.format(Locale.US, "%+d", state.currentEvIndex)
-            binding.pillEv?.let { pill ->
+            binding.pillEv.let { pill ->
                 val isTabActive = activeManualTab == "EV"
                 val isManualEv = state.currentEvIndex != 0
                 CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isManualEv)
@@ -481,15 +481,15 @@ class CameraTierController(
             val isMultiCamActive = (coordinator.activeCoordinator?.supportsProLink() == true) ||
                 state.isFrontPipActive ||
                 (state.availableLenses.size > 1 && env.sessionArbiter.multiCameraManager != null)
-            binding.btnProLink?.visibility = if (isMultiCamActive) View.VISIBLE else View.GONE
-            (binding.pillEv?.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
+            binding.btnProLink.visibility = if (isMultiCamActive) View.VISIBLE else View.GONE
+            (binding.pillEv.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
                 val targetMarginEnd = if (isMultiCamActive) (5f * density).roundToInt() else 0
                 if (lp.marginEnd != targetMarginEnd) {
                     lp.marginEnd = targetMarginEnd
-                    binding.pillEv?.layoutParams = lp
+                    binding.pillEv.layoutParams = lp
                 }
             }
-            binding.btnProLink?.let { linkBtn ->
+            binding.btnProLink.let { linkBtn ->
                 CameraBentoDeckView.styleBentoProLink(linkBtn, state.isMultiCameraManualLinked)
             }
 
@@ -503,9 +503,9 @@ class CameraTierController(
             updateTierUi()
 
             // Update Level 3 Dial Theme Colors
-            binding.dialWheelView?.setThemeColors(primaryColor, onSurfaceColor, onSurfaceVariantColor)
-            binding.tvDialTargetLabel?.setTextColor(primaryColor)
-            binding.tvDialTargetValue?.setTextColor(onSurfaceColor)
+            binding.dialWheelView.setThemeColors(primaryColor, onSurfaceColor, onSurfaceVariantColor)
+            binding.tvDialTargetLabel.setTextColor(primaryColor)
+            binding.tvDialTargetValue.setTextColor(onSurfaceColor)
         } finally {
             isUpdatingProInfoBar = false
         }
@@ -520,7 +520,7 @@ class CameraTierController(
         if (isDialOpen) {
             binding.bentoFilmRow?.visibility = View.GONE
             val lensHeightDp = if (isCompact) 34 else 42
-            binding.lensControlRow?.let { v ->
+            binding.lensControlRow.let { v ->
                 val lp = v.layoutParams
                 val h = (lensHeightDp * density).roundToInt()
                 if (lp != null && lp.height != h) {
@@ -621,12 +621,12 @@ class CameraTierController(
         val currentTier = env.cameraViewModel.uiState.value.uiTier
         val spec = CameraBentoDeckView.resolveVisibilitySpec(settingsRepository.current(), currentTier)
 
-        val hasMultipleLenses = (uiBinding.lensControlsContainer?.childCount ?: 0) > 1
+        val hasMultipleLenses = uiBinding.lensControlsContainer.childCount > 1
         val isAnyManual = env.runtimeState.hasAnyManualOverride
 
         beforeApply()
 
-        val isFlashOrUnderexposureAvailable = isHdrPlusEnabled || (uiBinding.flashButton?.visibility == View.VISIBLE)
+        val isFlashOrUnderexposureAvailable = isHdrPlusEnabled || (uiBinding.flashButton.visibility == View.VISIBLE)
         CameraBentoDeckView.applyVisibilitySpec(
             binding = uiBinding,
             spec = spec,
@@ -637,7 +637,7 @@ class CameraTierController(
             isFlashOrUnderexposureAvailable = isFlashOrUnderexposureAvailable
         )
         CameraBentoDeckView.applyDynamicRowHeights(uiBinding)
-        uiBinding.lensControlsContainer?.let { container ->
+        uiBinding.lensControlsContainer.let { container ->
             for (i in 0 until container.childCount) {
                 container.getChildAt(i)?.requestLayout()
             }

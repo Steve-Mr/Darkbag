@@ -242,7 +242,7 @@ class CameraMultiCaptureDispatcher(
                     if (primarySavedUri == null && savedUri != null) {
                         primarySavedUri = savedUri
                         if (timing?.firstOutputWritten == 0L) {
-                            timing?.firstOutputWritten = System.currentTimeMillis()
+                            timing.firstOutputWritten = System.currentTimeMillis()
                         }
                     }
                 }
@@ -290,7 +290,7 @@ class CameraMultiCaptureDispatcher(
                 if (primarySavedUri == null && frontUri != null) {
                     primarySavedUri = frontUri
                     if (timing?.firstOutputWritten == 0L) {
-                        timing?.firstOutputWritten = System.currentTimeMillis()
+                        timing.firstOutputWritten = System.currentTimeMillis()
                     }
                 }
             }
@@ -305,7 +305,7 @@ class CameraMultiCaptureDispatcher(
             notifyForegroundFinished()
 
             if (timing?.firstOutputWritten == 0L) {
-                timing?.firstOutputWritten = System.currentTimeMillis()
+                timing.firstOutputWritten = System.currentTimeMillis()
             }
             timing?.taskCompleted = System.currentTimeMillis()
             timing?.let { t ->
@@ -339,8 +339,8 @@ class CameraMultiCaptureDispatcher(
         }
 
         val binding = ui.fragmentCameraBinding ?: return
-        val pipContainer = binding.pipContainer ?: return
-        val pipViewFinder = binding.pipViewFinder ?: return
+        val pipContainer = binding.pipContainer
+        val pipViewFinder = binding.pipViewFinder
         val switchBtn = ui.cameraUiContainerBinding?.cameraSwitchButtonAlt ?: return
 
         env.runtimeState.isFrontPipActive = !env.runtimeState.isFrontPipActive

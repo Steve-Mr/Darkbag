@@ -99,11 +99,7 @@ class HalfFrameManager(private val context: Context) {
 
             // Store capture time and digital gain. Only update step on fast path to avoid race with frame 2
             if (isFastPath) {
-                if (metadata != null) {
-                    sessionStore.markStep(1, metadata.captureTimeMillis, activeProfile, digitalGain = metadata.digitalGain)
-                } else {
-                    sessionStore.markStep(1, tempFile.lastModified(), activeProfile, digitalGain = digitalGain)
-                }
+                sessionStore.markStep(1, metadata.captureTimeMillis, activeProfile, digitalGain = metadata.digitalGain)
             }
 
             return null
@@ -112,13 +108,13 @@ class HalfFrameManager(private val context: Context) {
             val session = sessionStore.readSession(profile = activeProfile)
 
             // Prioritize metadata-provided partner info to avoid race with UI thread clearing prefs
-            val firstPath = metadata?.frame1TempPath ?: session.tempPath
-            val time1 = if (metadata?.frame1CaptureTime != null && metadata.frame1CaptureTime > 0)
+            val firstPath = metadata.frame1TempPath ?: session.tempPath
+            val time1 = if (metadata.frame1CaptureTime > 0)
                 metadata.frame1CaptureTime else session.captureTimeMillis
-            val time2 = metadata?.captureTimeMillis ?: System.currentTimeMillis()
+            val time2 = metadata.captureTimeMillis
 
-            val partnerBaseName = metadata?.frame1BaseName ?: session.baseName
-            val dateStampEnabled = metadata?.dateStamp ?: dateStamp
+            val partnerBaseName = metadata.frame1BaseName ?: session.baseName
+            val dateStampEnabled = metadata.dateStamp
             val activeLayout = if (activeProfile == HalfFrameSessionStore.PROFILE_HALF_TOP)
                 PreferenceKeys.HALF_FRAME_LAYOUT_TB else PreferenceKeys.HALF_FRAME_LAYOUT_SBS
 
@@ -135,7 +131,7 @@ class HalfFrameManager(private val context: Context) {
 
                 val finalBitmap = HalfFrameUtils.addEffects(
                     stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2,
-                    flareType = metadata?.flareType ?: if (lightLeak) java.util.Random().nextInt(2) + 1 else -1
+                    flareType = metadata.flareType
                 )
                 val stitchedFile = File(context.cacheDir, "stitched_hf_fast.jpg")
                 FileOutputStream(stitchedFile).use { out ->
@@ -165,7 +161,7 @@ class HalfFrameManager(private val context: Context) {
 
                 val finalBitmap = HalfFrameUtils.addEffects(
                     stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2,
-                    flareType = metadata?.flareType ?: if (lightLeak) java.util.Random().nextInt(2) + 1 else -1
+                    flareType = metadata.flareType
                 )
                 val stitchedFile = File(context.cacheDir, "${partnerBaseName}_stitched.jpg")
                 FileOutputStream(stitchedFile).use { out ->

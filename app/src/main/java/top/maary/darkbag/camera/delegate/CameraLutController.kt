@@ -60,7 +60,7 @@ class CameraLutController(
 
     fun refreshLutList() {
         val binding = ui.cameraUiContainerBinding ?: return
-        val rv = binding.lutList ?: return
+        val rv = binding.lutList
 
         if (rv.layoutManager == null) {
             rv.layoutManager = LinearLayoutManager(env.hostContext)
@@ -290,11 +290,11 @@ class CameraLutController(
 
     fun showPillPopup(items: List<Pair<String, Boolean>>, autoDismiss: Boolean = true, onSelected: (String, Int) -> Unit) {
         val binding = ui.cameraUiContainerBinding ?: return
-        val container = binding.lutListContainer ?: return
-        val rv = binding.lutList ?: return
+        val container = binding.lutListContainer
+        val rv = binding.lutList
 
-        binding.touchOverlay?.bringToFront()
-        binding.touchOverlay?.visibility = View.VISIBLE
+        binding.touchOverlay.bringToFront()
+        binding.touchOverlay.visibility = View.VISIBLE
         container.bringToFront()
 
         val colorSurface = MaterialColors.getColor(container, com.google.android.material.R.attr.colorSurfaceContainerHigh)
@@ -338,7 +338,7 @@ class CameraLutController(
             showLutMenu()
         }
         uiBinding.bentoLogButton?.setOnClickListener(openColorRecipeSheet)
-        uiBinding.lutSwitcherButton?.setOnClickListener(openColorRecipeSheet)
+        uiBinding.lutSwitcherButton.setOnClickListener(openColorRecipeSheet)
 
         val snapshot = SettingsRepository.getInstance(env.hostContext).current()
         val activeLutName = snapshot.activeLut.takeIf { it != "None" }

@@ -87,7 +87,7 @@ class CameraHardwareStreamController(
         val cm2 = chars.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM2)
         env.runtimeState.colorMatrix1 = top.maary.darkbag.camera.dispatch.CameraCaptureMetadataExtractor.extractColorTransformMatrix(cm1)
         env.runtimeState.colorMatrix2 = top.maary.darkbag.camera.dispatch.CameraCaptureMetadataExtractor.extractColorTransformMatrix(cm2)
-        env.runtimeState.calibrationIlluminant1 = (chars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21).toInt()
+        env.runtimeState.calibrationIlluminant1 = chars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21
         env.runtimeState.calibrationIlluminant2 = (chars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2) ?: 17).toInt()
         val availableToneMapModes = chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
         val tonemapMaxCurvePoints = chars.get(CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS) ?: 0
@@ -470,19 +470,19 @@ class CameraHardwareStreamController(
 
                 env.lifecycleScope.launch(Dispatchers.Main.immediate) {
                     val binding = ui.cameraUiContainerBinding ?: return@launch
-                    if (binding.proInfoBarCard?.visibility != View.VISIBLE) return@launch
+                    if (binding.proInfoBarCard.visibility != View.VISIBLE) return@launch
                     val ctx = env.hostContext
-                    binding.pillFocus?.let { pill ->
+                    binding.pillFocus.let { pill ->
                         val isTabActive = env.runtimeState.activeManualTab == "Focus"
                         CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isFocusManualOrLocked)
                         pill.text = CameraBentoDeckView.formatProTelemetry(focusLabel, focusVal, isTabActive, isFocusManualOrLocked, ctx)
                     }
-                    binding.pillIso?.let { pill ->
+                    binding.pillIso.let { pill ->
                         val isTabActive = env.runtimeState.activeManualTab == "ISO"
                         CameraBentoDeckView.styleBentoProPill(pill, isTabActive, env.runtimeState.isManualIso)
                         pill.text = CameraBentoDeckView.formatProTelemetry(isoLabel, isoVal, isTabActive, env.runtimeState.isManualIso, ctx)
                     }
-                    binding.pillShutter?.let { pill ->
+                    binding.pillShutter.let { pill ->
                         val isTabActive = env.runtimeState.activeManualTab == "Shutter"
                         CameraBentoDeckView.styleBentoProPill(pill, isTabActive, env.runtimeState.isManualShutter)
                         pill.text = CameraBentoDeckView.formatProTelemetry(shutterLabel, shutterVal, isTabActive, env.runtimeState.isManualShutter, ctx)
@@ -492,7 +492,7 @@ class CameraHardwareStreamController(
                         CameraBentoDeckView.styleBentoProPill(pill, isTabActive, env.runtimeState.isManualWb)
                         pill.text = CameraBentoDeckView.formatProTelemetry(wbLabel, wbVal, isTabActive, env.runtimeState.isManualWb, ctx)
                     }
-                    binding.pillEv?.let { pill ->
+                    binding.pillEv.let { pill ->
                         val isTabActive = env.runtimeState.activeManualTab == "EV"
                         val isManualEv = env.runtimeState.currentEvIndex != 0
                         CameraBentoDeckView.styleBentoProPill(pill, isTabActive, isManualEv)
@@ -571,7 +571,7 @@ class CameraHardwareStreamController(
         val isRawSupportedLocally = map?.getOutputFormats()?.contains(ImageFormat.RAW_SENSOR) == true
         val targetCaptureSize: Size
         if (isRawSupportedLocally) {
-            val rawSizes = map?.getOutputSizes(ImageFormat.RAW_SENSOR) ?: emptyArray()
+            val rawSizes = map.getOutputSizes(ImageFormat.RAW_SENSOR) ?: emptyArray()
             targetCaptureSize = rawSizes.maxByOrNull { it.width * it.height } ?: Size(4000, 3000)
             // 14 slots cover a 5-frame lazy ZSL ring plus forward captures. The lazy ring is
             // feature-flagged off by default, so slots are only consumed when it is enabled.
@@ -637,7 +637,7 @@ class CameraHardwareStreamController(
                     env.sessionArbiter.camera2PreviewSurface = surface
 
                     val targets = mutableListOf<Surface>()
-                    surface?.let { targets.add(it) }
+                    surface.let { targets.add(it) }
                     env.sessionArbiter.rawImageReader?.surface?.let { targets.add(it) }
                     env.sessionArbiter.analysisImageReader?.surface?.let { targets.add(it) }
 
@@ -653,9 +653,7 @@ class CameraHardwareStreamController(
                             handler.post {
                                 try {
                                     val previewRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                                    if (surface != null) {
-                                        configureSingleCameraPreviewRequest(previewRequest, surface)
-                                    }
+                                    configureSingleCameraPreviewRequest(previewRequest, surface)
 
                                     session.setRepeatingRequest(previewRequest.build(), object : CameraCaptureSession.CaptureCallback() {
                                         override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {

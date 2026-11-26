@@ -206,7 +206,7 @@ class CameraSessionArbiter(
 
     internal fun computeCropMeteringRect(activeArray: Rect, lens: LensInfo?): MeteringRectangle? {
         val targetRatio = if (lens?.isZoomPreset == true && lens.targetZoomRatio != null) {
-            lens.targetZoomRatio!!
+            lens.targetZoomRatio
         } else {
             1.0f
         }
@@ -257,7 +257,7 @@ class CameraSessionArbiter(
 
     internal fun computeCropRegion(activeArray: Rect, lens: LensInfo?): Rect {
         val targetRatio = if (lens?.isZoomPreset == true && lens.targetZoomRatio != null) {
-            lens.targetZoomRatio!!
+            lens.targetZoomRatio
         } else {
             1.0f
         }

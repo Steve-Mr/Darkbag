@@ -253,7 +253,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                         notifyForegroundComplete()
                                     }
                                     if (jpgSuccess && req.timing?.firstOutputWritten == 0L) {
-                                        req.timing?.firstOutputWritten = System.currentTimeMillis()
+                                        req.timing.firstOutputWritten = System.currentTimeMillis()
                                     }
                                 }
                             }
@@ -282,7 +282,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                         notifyForegroundComplete()
                                     }
                                     if (dngSuccess && req.timing?.firstOutputWritten == 0L) {
-                                        req.timing?.firstOutputWritten = System.currentTimeMillis()
+                                        req.timing.firstOutputWritten = System.currentTimeMillis()
                                     }
                                 }
                             }
@@ -347,7 +347,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                 }
 
                                 if (req.timing?.firstOutputWritten == 0L) {
-                                    req.timing?.firstOutputWritten = System.currentTimeMillis()
+                                    req.timing.firstOutputWritten = System.currentTimeMillis()
                                 }
                                 req.timing?.taskCompleted = System.currentTimeMillis()
 
@@ -373,7 +373,7 @@ class HdrPlusProcessingService : LifecycleService() {
                             }
                         } finally {
                             if (req.timing?.taskCompleted == 0L) {
-                                req.timing?.taskCompleted = System.currentTimeMillis()
+                                req.timing.taskCompleted = System.currentTimeMillis()
                             }
                             notifyForegroundComplete()
                             exportSemaphore.release()

@@ -476,7 +476,7 @@ internal class HdrPlusBurstCaptureExecutor(
         return List(burstSize) {
             device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(reader.surface)
-                if (hasValidPreview) addTarget(previewSurface!!)
+                if (hasValidPreview) addTarget(previewSurface)
                 set(CaptureRequest.JPEG_ORIENTATION, combinedOrientation)
                 coordinator.applyManualSettingsToRequest(this, isHdrBurst = true, isPreviewStream = hasValidPreview)
                 if (supportsLsc) {

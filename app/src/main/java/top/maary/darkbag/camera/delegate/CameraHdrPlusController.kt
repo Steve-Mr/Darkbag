@@ -28,7 +28,7 @@ class CameraHdrPlusController(
 
     fun updateHdrPlusUi() {
         val binding = ui.cameraUiContainerBinding ?: return
-        binding.hdrPlusSwitch?.isChecked = env.isHdrPlusEnabled
+        binding.hdrPlusSwitch.isChecked = env.isHdrPlusEnabled
         CameraBentoDeckView.styleHdrPlusTile(binding, env.isHdrPlusEnabled)
     }
 
@@ -42,10 +42,10 @@ class CameraHdrPlusController(
 
         if (env.isHdrPlusEnabled) {
             if (showFlashButton) {
-                binding.flashButton?.visibility = View.VISIBLE
+                binding.flashButton.visibility = View.VISIBLE
                 lutController.updateUnderexposureButton()
             } else {
-                binding.flashButton?.visibility = View.GONE
+                binding.flashButton.visibility = View.GONE
             }
             if (env.runtimeState.isFlashEnabled) {
                 env.runtimeState.isFlashEnabled = false
@@ -55,10 +55,10 @@ class CameraHdrPlusController(
             }
         } else {
             val hasFlash = hasFlashUnit()
-            binding.flashButton?.visibility = if (hasFlash && showFlashButton) View.VISIBLE else View.GONE
-            if (hasFlash) binding.flashButton?.let { lutController.updateFlashIcon(it) }
+            binding.flashButton.visibility = if (hasFlash && showFlashButton) View.VISIBLE else View.GONE
+            if (hasFlash) binding.flashButton.let { lutController.updateFlashIcon(it) }
         }
-        binding.btnProMode?.visibility = View.GONE
+        binding.btnProMode.visibility = View.GONE
         ui.updateProInfoBar()
         lensController.updateLensControlRowPosition(animate = true)
     }
@@ -96,14 +96,14 @@ class CameraHdrPlusController(
     /** Binds the HDR+ switch and its pill tile. */
     fun bindHdrPlusControls() {
         val binding = ui.cameraUiContainerBinding ?: return
-        binding.hdrPlusSwitch?.setOnCheckedChangeListener { _, isChecked ->
+        binding.hdrPlusSwitch.setOnCheckedChangeListener { _, isChecked ->
             env.cameraViewModel.setHdrPlusEnabled(isChecked)
             settingsRepository.setHdrPlusEnabled(isChecked)
             updateHdrPlusUi()
             updateHdrPlusConstraints()
         }
-        binding.hdrPlusPill?.setOnClickListener {
-            binding.hdrPlusSwitch?.let { toggle ->
+        binding.hdrPlusPill.setOnClickListener {
+            binding.hdrPlusSwitch.let { toggle ->
                 if (toggle.visibility == View.VISIBLE) toggle.isChecked = !toggle.isChecked
             }
         }

@@ -82,7 +82,7 @@ object BentoDeckPreviewBinder {
         showManualControlsPref: Boolean = false,
         visibilitySpec: DeckVisibilitySpec? = null
     ) {
-        val root = binding.bentoDeckView ?: binding.bottomIslandCard ?: return
+        val root = binding.bentoDeckView ?: binding.bottomIslandCard
         val density = root.resources.displayMetrics.density
 
         val spec = visibilitySpec ?: if (tier == CameraUiTier.CUSTOM) {
@@ -148,13 +148,13 @@ object BentoDeckPreviewBinder {
         val showFilmRow = spec.showFilmRow && !hasActiveManualTab
         binding.bentoFilmRow?.visibility = if (showFilmRow) View.VISIBLE else View.GONE
         binding.bentoLogButton?.visibility = if (showFilmRow && spec.showLogAndLut) View.VISIBLE else View.GONE
-        binding.lutSwitcherButton?.visibility = if (showFilmRow && spec.showLogAndLut) View.VISIBLE else View.GONE
-        binding.hdrPlusPill?.visibility = if (showFilmRow && spec.showHdrPlusPill) View.VISIBLE else View.GONE
+        binding.lutSwitcherButton.visibility = if (showFilmRow && spec.showLogAndLut) View.VISIBLE else View.GONE
+        binding.hdrPlusPill.visibility = if (showFilmRow && spec.showHdrPlusPill) View.VISIBLE else View.GONE
 
         val showPro = spec.showProModule || isAnyManual
         binding.bentoProModule?.visibility = if (showPro) View.VISIBLE else View.GONE
-        binding.proInfoBarCard?.visibility = if (showPro) View.VISIBLE else View.GONE
-        binding.manualControlsRoot?.visibility = if (showPro && hasActiveManualTab) View.VISIBLE else View.GONE
+        binding.proInfoBarCard.visibility = if (showPro) View.VISIBLE else View.GONE
+        binding.manualControlsRoot.visibility = if (showPro && hasActiveManualTab) View.VISIBLE else View.GONE
     }
 
     @JvmStatic
@@ -168,7 +168,7 @@ object BentoDeckPreviewBinder {
         supportsMotionPhoto: Boolean = true,
         isFlashOrUnderexposureAvailable: Boolean = true
     ) {
-        val root = binding.bentoDeckView ?: binding.bottomIslandCard ?: binding.root
+        val root = binding.bentoDeckView ?: binding.bottomIslandCard
         val density = root.resources.displayMetrics.density
 
         bindTierState(
@@ -186,9 +186,9 @@ object BentoDeckPreviewBinder {
         val showFilmRow = (spec.showLogAndLut || spec.showHdrPlusPill || showUnderexposureTile) && !hasActiveManualTab
         binding.bentoFilmRow?.visibility = if (showFilmRow) View.VISIBLE else View.GONE
         binding.bentoLogButton?.visibility = if (showFilmRow && spec.showLogAndLut) View.VISIBLE else View.GONE
-        binding.lutSwitcherButton?.visibility = if (showFilmRow && spec.showLogAndLut) View.VISIBLE else View.GONE
-        binding.hdrPlusPill?.visibility = if (showFilmRow && spec.showHdrPlusPill) View.VISIBLE else View.GONE
-        binding.flashButton?.visibility = if (showFilmRow && showUnderexposureTile) View.VISIBLE else View.GONE
+        binding.lutSwitcherButton.visibility = if (showFilmRow && spec.showLogAndLut) View.VISIBLE else View.GONE
+        binding.hdrPlusPill.visibility = if (showFilmRow && spec.showHdrPlusPill) View.VISIBLE else View.GONE
+        binding.flashButton.visibility = if (showFilmRow && showUnderexposureTile) View.VISIBLE else View.GONE
         val showMotionTile = showFilmRow && spec.showMotionPhoto && supportsMotionPhoto
         binding.motionPhotoButton?.visibility = if (showMotionTile) View.VISIBLE else View.GONE
 
@@ -220,14 +220,14 @@ object BentoDeckPreviewBinder {
         // Row C: Lens Controls & Mode/Camera Switches + Dynamic Weight Balancing
         val showLensStrip = spec.showLensControls && hasMultipleLenses
         val showLensRow = spec.showModeSwitch || showLensStrip || spec.showCameraSwitch
-        binding.lensControlRow?.visibility = if (showLensRow) View.VISIBLE else View.GONE
+        binding.lensControlRow.visibility = if (showLensRow) View.VISIBLE else View.GONE
         val isModeSwitchVisible = showLensRow && spec.showModeSwitch
         val isLensControlsVisible = showLensRow && showLensStrip
         val isCameraSwitchVisible = showLensRow && spec.showCameraSwitch
 
-        binding.modeSwitchButton?.visibility = if (isModeSwitchVisible) View.VISIBLE else View.GONE
-        binding.lensControlsCard?.visibility = if (isLensControlsVisible) View.VISIBLE else View.GONE
-        binding.cameraSwitchButtonAlt?.visibility = if (isCameraSwitchVisible) View.VISIBLE else View.GONE
+        binding.modeSwitchButton.visibility = if (isModeSwitchVisible) View.VISIBLE else View.GONE
+        binding.lensControlsCard.visibility = if (isLensControlsVisible) View.VISIBLE else View.GONE
+        binding.cameraSwitchButtonAlt.visibility = if (isCameraSwitchVisible) View.VISIBLE else View.GONE
 
         val expandLensSideButtons = !showLensStrip
         val sideBtnWidthPx = (52f * density).roundToInt()
@@ -237,7 +237,7 @@ object BentoDeckPreviewBinder {
         BentoDeckDimensions.updateRowCWeight(binding.modeSwitchButton, sideBtnWidthPx, expandLensSideButtons)
         BentoDeckDimensions.updateRowCWeight(binding.cameraSwitchButtonAlt, sideBtnWidthPx, expandLensSideButtons)
 
-        binding.lensControlsCard?.let { card ->
+        binding.lensControlsCard.let { card ->
             val lp = card.layoutParams as? ViewGroup.MarginLayoutParams ?: return@let
             val targetStart = if (!isModeSwitchVisible && isCameraSwitchVisible) sideSlotPx else 0
             val targetEnd = if (isModeSwitchVisible && !isCameraSwitchVisible) sideSlotPx else (if (isCameraSwitchVisible) gap6dp else 0)
@@ -247,7 +247,7 @@ object BentoDeckPreviewBinder {
                 card.layoutParams = lp
             }
         }
-        binding.modeSwitchButton?.let { btn ->
+        binding.modeSwitchButton.let { btn ->
             val lp = btn.layoutParams as? ViewGroup.MarginLayoutParams ?: return@let
             val targetEnd = if (isLensControlsVisible || isCameraSwitchVisible) gap6dp else 0
             if (lp.marginEnd != targetEnd) {
@@ -257,7 +257,7 @@ object BentoDeckPreviewBinder {
         }
 
         // Row D: Shutter & Right Dual-Layer Stack
-        binding.settingsButton?.visibility = if (spec.showSettingsButton) View.VISIBLE else View.GONE
+        binding.settingsButton.visibility = if (spec.showSettingsButton) View.VISIBLE else View.GONE
         (binding.btnBentoPlayground?.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
             val targetEnd = if (spec.showSettingsButton) (4f * density).roundToInt() else 0
             if (lp.marginEnd != targetEnd) {
@@ -278,13 +278,13 @@ object BentoDeckPreviewBinder {
     ) {
         val density = context.resources.displayMetrics.density
 
-        binding.touchOverlay?.visibility = View.GONE
-        binding.topRightControls?.visibility = View.GONE
-        binding.btnProMode?.visibility = View.GONE
-        binding.lutListContainer?.visibility = View.GONE
-        binding.manualControlsRoot?.visibility = View.GONE
+        binding.touchOverlay.visibility = View.GONE
+        binding.topRightControls.visibility = View.GONE
+        binding.btnProMode.visibility = View.GONE
+        binding.lutListContainer.visibility = View.GONE
+        binding.manualControlsRoot.visibility = View.GONE
 
-        (binding.bottomIslandCard?.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
+        (binding.bottomIslandCard.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
             lp.setMargins(0, 0, 0, 0)
             binding.bottomIslandCard.layoutParams = lp
         }
@@ -293,22 +293,22 @@ object BentoDeckPreviewBinder {
         setPreviewRowMetrics(binding.proInfoBarCard, (40f * density).roundToInt(), rowMarginPx)
         setPreviewRowMetrics(binding.bentoFilmRow, (40f * density).roundToInt(), rowMarginPx)
         setPreviewRowMetrics(binding.lensControlRow, (42f * density).roundToInt(), rowMarginPx)
-        binding.bentoShutterRow?.layoutParams = binding.bentoShutterRow?.layoutParams?.apply { height = (68f * density).roundToInt() }
-        binding.photoViewCard?.layoutParams = binding.photoViewCard?.layoutParams?.apply { width = (64f * density).roundToInt() }
-        binding.bentoRightStack?.layoutParams = binding.bentoRightStack?.layoutParams?.apply { width = (92f * density).roundToInt() }
+        binding.bentoShutterRow?.layoutParams = binding.bentoShutterRow.layoutParams?.apply { height = (68f * density).roundToInt() }
+        binding.photoViewCard?.layoutParams = binding.photoViewCard.layoutParams?.apply { width = (64f * density).roundToInt() }
+        binding.bentoRightStack?.layoutParams = binding.bentoRightStack.layoutParams?.apply { width = (92f * density).roundToInt() }
         val padPx = (7f * density).roundToInt()
         (binding.bottomIslandCard as? MaterialCardView)?.setContentPadding(padPx, padPx, padPx, padPx)
 
         val activeMode = CaptureMode.fromKey(prefs.activeCaptureMode) ?: CaptureMode.NORMAL
-        binding.bottomIslandCard?.let { BentoDeckStylingEngine.styleDeckCard(it, activeMode) }
+        binding.bottomIslandCard.let { BentoDeckStylingEngine.styleDeckCard(it, activeMode) }
 
         bindPreviewProPill(binding.pillFocus, "AF", "AUTO", context)
         bindPreviewProPill(binding.pillIso, "ISO", "100", context)
         bindPreviewProPill(binding.pillShutter, "SEC", "1/125s", context)
         bindPreviewProPill(binding.pillWb, "WB", "AUTO", context)
         bindPreviewProPill(binding.pillEv, "EV", "0.0", context)
-        binding.btnProLink?.visibility = if (activeMode == CaptureMode.MULTI_CAMERA) View.VISIBLE else View.GONE
-        binding.btnProLink?.let { BentoDeckStylingEngine.styleBentoProLink(it, isLinked = true) }
+        binding.btnProLink.visibility = if (activeMode == CaptureMode.MULTI_CAMERA) View.VISIBLE else View.GONE
+        binding.btnProLink.let { BentoDeckStylingEngine.styleBentoProLink(it, isLinked = true) }
 
         val targetLogName = prefs.targetLog.takeIf { !it.equals("None", ignoreCase = true) } ?: "F-Log2"
         val activeLutName = prefs.activeLut.takeIf { !it.equals("None", ignoreCase = true) } ?: "Classic Neg"
@@ -316,7 +316,7 @@ object BentoDeckPreviewBinder {
         BentoDeckStylingEngine.styleHdrPlusTile(binding, prefs.hdrPlusEnabled)
 
         val underexposureMode = prefs.hdrUnderexposureMode
-        binding.flashButton?.let { btn ->
+        binding.flashButton.let { btn ->
             btn.text = null
             val iconRes = when {
                 underexposureMode.contains("Dynamic") -> R.drawable.ic_hdr_dynamic
@@ -335,7 +335,7 @@ object BentoDeckPreviewBinder {
             BentoDeckStylingEngine.styleBentoToggleTile(btn, isActive = isMotionPhoto, isTertiaryAccent = false)
         }
 
-        binding.modeSwitchButton?.let { btn ->
+        binding.modeSwitchButton.let { btn ->
             val iconRes = when (activeMode) {
                 CaptureMode.MULTI_CAMERA -> R.drawable.ic_mode_multi_camera
                 CaptureMode.HALF_FRAME_SBS -> R.drawable.ic_mode_half_side
@@ -348,7 +348,7 @@ object BentoDeckPreviewBinder {
 
         populatePreviewLenses(binding.lensControlsContainer, context, density)
 
-        binding.photoViewButton?.let { iv ->
+        binding.photoViewButton.let { iv ->
             iv.visibility = View.VISIBLE
             iv.setImageResource(R.drawable.ic_photo)
             val pad = (16f * density).roundToInt()
@@ -357,7 +357,7 @@ object BentoDeckPreviewBinder {
                 MaterialColors.getColor(iv, MaterialR.attr.colorOnSurfaceVariant, Color.GRAY)
             )
         }
-        binding.cameraCaptureButton?.setHalfFrameState(activeMode.isHalfFrame, 0)
+        binding.cameraCaptureButton.setHalfFrameState(activeMode.isHalfFrame, 0)
 
         applyVisibilitySpec(
             binding = binding,
@@ -382,7 +382,7 @@ object BentoDeckPreviewBinder {
             btn.text = if (isLogActive) targetLogName else btn.context.getString(R.string.camera_recipe_log_off)
             BentoDeckStylingEngine.styleBentoToggleTile(btn, isActive = isLogActive, isTertiaryAccent = true)
         }
-        binding.lutSwitcherButton?.let { btn ->
+        binding.lutSwitcherButton.let { btn ->
             val lutOff = btn.context.getString(R.string.camera_recipe_lut_off)
             btn.text = if (isLutActive) BentoDeckStylingEngine.formatRecipeLabel(activeLutName, lutOff) else lutOff
             BentoDeckStylingEngine.styleBentoToggleTile(btn, isActive = isLutActive, isTertiaryAccent = true)

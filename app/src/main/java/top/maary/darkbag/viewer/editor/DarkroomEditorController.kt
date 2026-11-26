@@ -223,7 +223,6 @@ class DarkroomEditorController(
             binding.btnTabColor
         )
         tabs.forEachIndexed { idx, btn ->
-            btn ?: return@forEachIndexed
             val isSelected = idx == selectedTab
             if (isSelected) {
                 btn.backgroundTintList = ColorStateList.valueOf(colorPrimaryContainer)

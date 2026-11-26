@@ -72,7 +72,7 @@ class CameraPhaseCControllersTest {
         SettingsRepository.resetForTest(themedContext)
         SettingsRepository.getInstance(themedContext).awaitHydratedBlocking()
         fragmentBinding = FragmentCameraBinding.inflate(LayoutInflater.from(themedContext))
-        val root = fragmentBinding.root as ConstraintLayout
+        val root = fragmentBinding.root
         uiBinding = CameraUiContainerBinding.inflate(LayoutInflater.from(themedContext), root)
         viewModel = CameraViewModel()
     }
@@ -150,12 +150,12 @@ class CameraPhaseCControllersTest {
         assertFalse(viewModel.uiState.value.isHdrPlusEnabled)
 
         controller.bindHdrPlusControls()
-        uiBinding.hdrPlusSwitch?.visibility = View.VISIBLE
+        uiBinding.hdrPlusSwitch.visibility = View.VISIBLE
         controller.updateHdrPlusUi()
-        assertFalse(uiBinding.hdrPlusSwitch!!.isChecked)
+        assertFalse(uiBinding.hdrPlusSwitch.isChecked)
 
-        uiBinding.hdrPlusPill?.performClick()
-        assertTrue(uiBinding.hdrPlusSwitch!!.isChecked)
+        uiBinding.hdrPlusPill.performClick()
+        assertTrue(uiBinding.hdrPlusSwitch.isChecked)
         assertTrue(viewModel.uiState.value.isHdrPlusEnabled)
         assertTrue(SettingsRepository.getInstance(themedContext).current().hdrPlusEnabled)
 
@@ -174,13 +174,13 @@ class CameraPhaseCControllersTest {
         viewModel.setHdrPlusEnabled(false)
         gateway.runtimeState.isFlashEnabled = false
         controller.bindFlashButton()
-        uiBinding.flashButton?.performClick()
+        uiBinding.flashButton.performClick()
         assertTrue(gateway.runtimeState.isFlashEnabled)
         assertTrue(repo.current().flashEnabled)
 
         viewModel.setHdrPlusEnabled(true)
         val beforeMode = repo.current().hdrUnderexposureMode
-        uiBinding.flashButton?.performClick()
+        uiBinding.flashButton.performClick()
         val afterMode = repo.current().hdrUnderexposureMode
         assertTrue(beforeMode != afterMode)
     }
@@ -264,18 +264,18 @@ class CameraPhaseCControllersTest {
 
         controller.setGalleryThumbnail(null)
         ShadowLooperHelper.runMainLooperIdle()
-        assertEquals(View.GONE, uiBinding.photoViewButton?.visibility)
+        assertEquals(View.GONE, uiBinding.photoViewButton.visibility)
 
         val testUri = Uri.parse("content://media/external/images/media/42")
         controller.setGalleryThumbnail(testUri.toString())
         ShadowLooperHelper.runMainLooperIdle()
         assertEquals(testUri, controller.currentThumbnailUri)
-        assertEquals(View.VISIBLE, uiBinding.photoViewButton?.visibility)
+        assertEquals(View.VISIBLE, uiBinding.photoViewButton.visibility)
 
         gateway.runtimeState.isVideoSaving = true
         controller.setGalleryThumbnail(null)
         ShadowLooperHelper.runMainLooperIdle()
-        assertEquals(View.INVISIBLE, uiBinding.photoViewButton?.visibility)
+        assertEquals(View.INVISIBLE, uiBinding.photoViewButton.visibility)
     }
 
     // -------------------------------------------------------------------------
@@ -295,21 +295,21 @@ class CameraPhaseCControllersTest {
         gateway.activeCoordinatorOverride = stubCoordinator
         controller.bindShutter()
 
-        uiBinding.cameraCaptureButton?.performClick()
+        uiBinding.cameraCaptureButton.performClick()
         assertEquals(1, stubCoordinator.shutterTriggerCount)
 
         stubCoordinator.consumeLongPress = true
-        uiBinding.cameraCaptureButton?.onLongPressHoldStarted?.invoke()
+        uiBinding.cameraCaptureButton.onLongPressHoldStarted?.invoke()
         assertEquals(1, stubCoordinator.longPressCount)
 
         stubCoordinator.consumeLongPress = false
         stubCoordinator.allowLongPressVideo = false
-        uiBinding.cameraCaptureButton?.onLongPressHoldStarted?.invoke()
+        uiBinding.cameraCaptureButton.onLongPressHoldStarted?.invoke()
         assertEquals(2, stubCoordinator.longPressCount)
         assertFalse(gateway.audioRationaleChecked)
 
         stubCoordinator.allowLongPressVideo = true
-        uiBinding.cameraCaptureButton?.onLongPressHoldStarted?.invoke()
+        uiBinding.cameraCaptureButton.onLongPressHoldStarted?.invoke()
         assertTrue(gateway.audioRationaleChecked)
 
         gateway.runtimeState.deviceOrientationDegrees = 90
@@ -319,7 +319,7 @@ class CameraPhaseCControllersTest {
         gateway.runtimeState.isBurstActive = true
         controller.resetBurstUi()
         assertFalse(gateway.runtimeState.isBurstActive)
-        assertTrue(uiBinding.cameraCaptureButton!!.isEnabled)
+        assertTrue(uiBinding.cameraCaptureButton.isEnabled)
 
         controller.onDestroy()
         focusController.onDestroy()
@@ -444,11 +444,12 @@ class CameraPhaseCControllersTest {
         gateway.runtimeState.isRawSupported = true
 
         // Baseline steady-state frame at 0 EV (ISO 100, 10ms)
-        val baseResult = org.robolectric.shadows.ShadowTotalCaptureResult.newTotalCaptureResult()
-        org.robolectric.Shadows.shadowOf(baseResult).set(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP, 1_000L)
-        org.robolectric.Shadows.shadowOf(baseResult).set(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY, 100)
-        org.robolectric.Shadows.shadowOf(baseResult).set(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME, 10_000_000L)
-        org.robolectric.Shadows.shadowOf(baseResult).set(android.hardware.camera2.CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION, 0)
+        val baseResult = org.robolectric.shadows.TotalCaptureResultBuilder.newBuilder()
+            .set(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP, 1_000L)
+            .set(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY, 100)
+            .set(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME, 10_000_000L)
+            .set(android.hardware.camera2.CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION, 0)
+            .build()
         streamController.handleCaptureResult(baseResult)
         assertEquals(1.0f, gateway.sessionArbiter.previewGainSynchronizer.currentEffectiveGain, 1e-4f)
 
@@ -465,20 +466,22 @@ class CameraPhaseCControllersTest {
         assertEquals(1.0f, gateway.sessionArbiter.previewGainSynchronizer.currentEffectiveGain, 1e-4f)
 
         // In-flight frame still at aeComp = 0 -> gain stays 1.0f
-        val staleResult = org.robolectric.shadows.ShadowTotalCaptureResult.newTotalCaptureResult()
-        org.robolectric.Shadows.shadowOf(staleResult).set(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP, 2_000L)
-        org.robolectric.Shadows.shadowOf(staleResult).set(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY, 100)
-        org.robolectric.Shadows.shadowOf(staleResult).set(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME, 10_000_000L)
-        org.robolectric.Shadows.shadowOf(staleResult).set(android.hardware.camera2.CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION, 0)
+        val staleResult = org.robolectric.shadows.TotalCaptureResultBuilder.newBuilder()
+            .set(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP, 2_000L)
+            .set(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY, 100)
+            .set(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME, 10_000_000L)
+            .set(android.hardware.camera2.CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION, 0)
+            .build()
         streamController.handleCaptureResult(staleResult)
         assertEquals(1.0f, gateway.sessionArbiter.previewGainSynchronizer.resolveGainForTimestamp(2_000L), 1e-4f)
 
         // Converged frame at aeComp = -3 (ISO 100, 5ms) -> gain becomes 2.0f
-        val hdrResult = org.robolectric.shadows.ShadowTotalCaptureResult.newTotalCaptureResult()
-        org.robolectric.Shadows.shadowOf(hdrResult).set(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP, 3_000L)
-        org.robolectric.Shadows.shadowOf(hdrResult).set(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY, 100)
-        org.robolectric.Shadows.shadowOf(hdrResult).set(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME, 5_000_000L)
-        org.robolectric.Shadows.shadowOf(hdrResult).set(android.hardware.camera2.CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION, -3)
+        val hdrResult = org.robolectric.shadows.TotalCaptureResultBuilder.newBuilder()
+            .set(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP, 3_000L)
+            .set(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY, 100)
+            .set(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME, 5_000_000L)
+            .set(android.hardware.camera2.CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION, -3)
+            .build()
         streamController.handleCaptureResult(hdrResult)
         assertEquals(2.0f, gateway.sessionArbiter.previewGainSynchronizer.resolveGainForTimestamp(3_000L), 1e-4f)
     }
@@ -676,7 +679,7 @@ class CameraPhaseCControllersTest {
         overlayController.updateViewFinderConstraints()
         val updatedLp = fragmentBinding.viewFinderContainer.layoutParams as ConstraintLayout.LayoutParams
         assertEquals("3:4", updatedLp.dimensionRatio)
-        assertEquals(uiBinding.bottomIslandCard!!.id, updatedLp.bottomToTop)
+        assertEquals(uiBinding.bottomIslandCard.id, updatedLp.bottomToTop)
         assertTrue(fragmentBinding.viewFinderContainer.clipToOutline)
     }
 
@@ -690,7 +693,7 @@ class CameraPhaseCControllersTest {
 
         val gateway = FakeCameraGateway()
         val overlayController = CameraOverlayController(gateway, gateway, gateway)
-        val card = uiBinding.bottomIslandCard as top.maary.darkbag.ui.bento.BentoTrayCard
+        val card = uiBinding.bottomIslandCard
 
         gateway.activeCoordinatorOverride = StubCoordinator(CaptureMode.MULTI_CAMERA)
         gateway.effectiveModeOverride = CaptureMode.MULTI_CAMERA

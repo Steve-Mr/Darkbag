@@ -56,7 +56,7 @@ class ColorRecipeSyncAndIsolationTest {
         CameraBentoDeckView.bindRecipeRow(binding, "None", null)
 
         val logBtn = binding.bentoLogButton!!
-        val lutBtn = binding.lutSwitcherButton!!
+        val lutBtn = binding.lutSwitcherButton
 
         assertEquals("Log: Off", logBtn.text.toString())
         assertEquals("LUT: Off", lutBtn.text.toString())
@@ -84,7 +84,7 @@ class ColorRecipeSyncAndIsolationTest {
         CameraBentoDeckView.bindRecipeRow(binding, "F-Log2", "ClassicChrome.cube")
 
         val logBtn = binding.bentoLogButton!!
-        val lutBtn = binding.lutSwitcherButton!!
+        val lutBtn = binding.lutSwitcherButton
 
         assertEquals("F-Log2", logBtn.text.toString())
         assertEquals("ClassicChrome", lutBtn.text.toString())

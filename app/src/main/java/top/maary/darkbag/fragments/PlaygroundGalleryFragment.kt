@@ -260,8 +260,8 @@ class PlaygroundGalleryFragment : Fragment() {
         binding.tvPlaygroundTitle.text = titleText
         binding.tvPlaygroundSubtitle.text = subtitleText
 
-        (binding.playgroundBentoDock as? BentoTrayCard)?.setContainerRole(state.containerRole, animated = true)
-        (binding.playgroundTopBentoCard as? BentoTrayCard)?.setContainerRole(state.containerRole, animated = true)
+        binding.playgroundBentoDock.setContainerRole(state.containerRole, animated = true)
+        binding.playgroundTopBentoCard.setContainerRole(state.containerRole, animated = true)
 
         val enableCamera = SettingsRepository.getInstance(requireContext()).current().enableCamera
         binding.btnPlaygroundBack.visibility = if (enableCamera || state.isSelectionMode || findNavController().previousBackStackEntry != null) View.VISIBLE else View.GONE

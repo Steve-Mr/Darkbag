@@ -140,20 +140,14 @@ class PlaygroundLayoutAndTopBarTest {
 
         // Top bento card
         assertNotNull(binding.playgroundTopBentoCard)
-        assertTrue(
-            "playgroundTopBentoCard must be BentoTrayCard",
-            binding.playgroundTopBentoCard is BentoTrayCard
-        )
-        val topTray = binding.playgroundTopBentoCard as BentoTrayCard
+        assertEquals(BentoTrayCard::class.java, binding.playgroundTopBentoCard.javaClass)
+        val topTray = binding.playgroundTopBentoCard
         assertEquals(BentoContainerRole.SURFACE_CONTAINER, topTray.containerRole)
 
         // Bottom bento dock
         assertNotNull(binding.playgroundBentoDock)
-        assertTrue(
-            "playgroundBentoDock must be BentoTrayCard",
-            binding.playgroundBentoDock is BentoTrayCard
-        )
-        val dockTray = binding.playgroundBentoDock as BentoTrayCard
+        assertEquals(BentoTrayCard::class.java, binding.playgroundBentoDock.javaClass)
+        val dockTray = binding.playgroundBentoDock
         assertEquals(BentoContainerRole.SURFACE_CONTAINER, dockTray.containerRole)
 
         // Test dynamic mode reactivity
@@ -183,11 +177,8 @@ class PlaygroundLayoutAndTopBarTest {
 
         // Bottom modular bento deck
         assertNotNull(binding.viewerBentoDeck)
-        assertTrue(
-            "viewerBentoDeck must be BentoTrayCard",
-            binding.viewerBentoDeck is BentoTrayCard
-        )
-        val viewerDeck = binding.viewerBentoDeck as BentoTrayCard
+        assertEquals(BentoTrayCard::class.java, binding.viewerBentoDeck.javaClass)
+        val viewerDeck = binding.viewerBentoDeck
         assertEquals(BentoContainerRole.SURFACE_CONTAINER_LOW, viewerDeck.containerRole)
 
         // Test dynamic mode reactivity (Half-frame -> Tertiary, Multi-camera -> Secondary, Normal -> SurfaceContainerLow)
@@ -202,18 +193,12 @@ class PlaygroundLayoutAndTopBarTest {
 
         // Adjustment island
         assertNotNull(binding.adjustmentIsland)
-        assertTrue(
-            "adjustmentIsland must be BentoTrayCard",
-            binding.adjustmentIsland is BentoTrayCard
-        )
+        assertEquals(BentoTrayCard::class.java, binding.adjustmentIsland.javaClass)
 
         // Gallery bottom bar (in decoupled DarkroomGallery layout)
         val galleryBinding = FragmentDarkroomGalleryBinding.inflate(LayoutInflater.from(context))
         assertNotNull(galleryBinding.galleryBottomBar)
-        assertTrue(
-            "galleryBottomBar must be BentoTrayCard",
-            galleryBinding.galleryBottomBar is BentoTrayCard
-        )
+        assertEquals(BentoTrayCard::class.java, galleryBinding.galleryBottomBar.javaClass)
     }
 
     @Test

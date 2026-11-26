@@ -88,17 +88,17 @@ class ViewerChromeAndInsetsDelegateTest {
         // Standard rendered item shows SHARE
         binding.imagePager.setCurrentItem(0, false)
         delegate.updateSplitButtons()
-        assertEquals("SHARE", binding.btnActionMain?.text?.toString())
+        assertEquals("SHARE", binding.btnActionMain.text?.toString())
 
         // Unrendered RAW video shows EXPORT
         binding.imagePager.setCurrentItem(1, false)
         delegate.updateSplitButtons()
-        assertEquals("EXPORT", binding.btnActionMain?.text?.toString())
+        assertEquals("EXPORT", binding.btnActionMain.text?.toString())
 
         // Editing state shows SAVE
         editing = true
         delegate.updateSplitButtons()
-        assertEquals(context.getString(R.string.save).uppercase(), binding.btnActionMain?.text?.toString())
+        assertEquals(context.getString(R.string.save).uppercase(), binding.btnActionMain.text?.toString())
 
         // Back callback enabled when editing or adjusted or LUT list visible
         delegate.updateBackPressedCallbackState()

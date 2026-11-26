@@ -329,7 +329,7 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
     }
 
     private fun updateCameraUi() {
-        val root = _fragmentCameraBinding?.root as? ConstraintLayout ?: return
+        val root = _fragmentCameraBinding?.root ?: return
 
         val viewsToRemove = mutableListOf<View>()
         for (i in 0 until root.childCount) {

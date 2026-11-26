@@ -115,7 +115,7 @@ class CameraCaptureMetadataExtractor(
                 if (effectiveLens?.isZoomPreset == true) {
                     val zoomRatio = effectiveLens.targetZoomRatio ?: 1.0f
                     if (zoomRatio > 1.0f) {
-                        val baseF35 = focalIn35mm ?: round(effectiveLens.equivalentFocalLength ?: 24f).toInt()
+                        val baseF35 = focalIn35mm ?: round(effectiveLens.equivalentFocalLength).toInt()
                         focalIn35mm = round(baseF35 * zoomRatio).toInt()
                         val baseFocal = finalFocalLength
                             ?: chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
@@ -179,7 +179,7 @@ class CameraCaptureMetadataExtractor(
             characteristics?.get(CameraCharacteristics.SENSOR_FORWARD_MATRIX2)
         )
 
-        val calibrationIlluminant1 = (characteristics?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21).toInt()
+        val calibrationIlluminant1 = characteristics?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21
         val calibrationIlluminant2 = (characteristics?.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2) ?: 17).toInt()
 
         val hasResultOrWb = result != null || wb != null

@@ -83,9 +83,9 @@ class CameraTaskSpecAssembler(
     ): Float {
         return when {
             capturedLens != null -> {
-                if (capturedLens.isZoomPreset && capturedLens.targetZoomRatio != null) capturedLens.targetZoomRatio!! else 1.0f
+                if (capturedLens.isZoomPreset && capturedLens.targetZoomRatio != null) capturedLens.targetZoomRatio else 1.0f
             }
-            fallbackLens?.isZoomPreset == true && fallbackLens.targetZoomRatio != null -> fallbackLens.targetZoomRatio!!
+            fallbackLens?.isZoomPreset == true && fallbackLens.targetZoomRatio != null -> fallbackLens.targetZoomRatio
             else -> defaultZoom
         }
     }

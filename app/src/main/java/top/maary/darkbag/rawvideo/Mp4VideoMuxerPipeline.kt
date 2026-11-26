@@ -531,10 +531,10 @@ internal object Mp4VideoMuxerPipeline {
             PreferenceKeys.LOG_CURVES.indexOf(editConfig.log).takeIf { it >= 0 } ?: -1
         } else -1
         val lutManager = LutManager(context)
-        val lutPath = if (editConfig?.lut != null && editConfig.lut != "None" && editConfig.lut!!.isNotBlank()) {
-            val f = File(lutManager.lutDir, editConfig.lut!!)
+        val lutPath = if (editConfig?.lut != null && editConfig.lut != "None" && editConfig.lut.isNotBlank()) {
+            val f = File(lutManager.lutDir, editConfig.lut)
             if (f.exists()) f.absolutePath else {
-                File(File(context.filesDir, "luts"), editConfig.lut!!).takeIf { it.exists() }?.absolutePath
+                File(File(context.filesDir, "luts"), editConfig.lut).takeIf { it.exists() }?.absolutePath
             }
         } else null
         return GradingParams(

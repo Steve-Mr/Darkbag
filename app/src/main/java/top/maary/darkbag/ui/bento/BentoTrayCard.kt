@@ -97,7 +97,7 @@ class BentoTrayCard @JvmOverloads constructor(
             return
         }
 
-        val currentColor = cardBackgroundColor?.defaultColor ?: Color.TRANSPARENT
+        val currentColor = cardBackgroundColor.defaultColor
         if (currentColor == targetColor) return
 
         colorAnimator?.cancel()

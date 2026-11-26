@@ -63,27 +63,27 @@ class ViewerBentoDeckCoordinator(
     }
 
     fun setupListeners() {
-        binding.btnFormatSwitch?.setOnClickListener {
+        binding.btnFormatSwitch.setOnClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             onFormatToggleRequested()
         }
-        binding.btnFormatSwitchCompact?.setOnClickListener {
+        binding.btnFormatSwitchCompact.setOnClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             onFormatToggleRequested()
         }
-        binding.btnDerivativeCycle?.setOnClickListener {
+        binding.btnDerivativeCycle.setOnClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             onDerivativeCycleRequested()
         }
-        binding.btnDerivativeCycleCompact?.setOnClickListener {
+        binding.btnDerivativeCycleCompact.setOnClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             onDerivativeCycleRequested()
         }
-        binding.btnMotionLive?.setOnClickListener {
+        binding.btnMotionLive.setOnClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             onMotionLiveToggleRequested()
         }
-        binding.btnVideoExportHub?.setOnClickListener {
+        binding.btnVideoExportHub.setOnClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             onOpenExportHubRequested()
         }
@@ -102,7 +102,7 @@ class ViewerBentoDeckCoordinator(
         val ctx = binding.root.context
         val density = ctx.resources.displayMetrics.density
 
-        (binding.viewerBentoDeck as? BentoTrayCard)?.let { deckCard ->
+        binding.viewerBentoDeck.let { deckCard ->
             val role = when {
                 currentGroup.isHalfFrame() -> BentoContainerRole.TERTIARY_CONTAINER
                 currentGroup.isMultiCamera -> BentoContainerRole.SECONDARY_CONTAINER
@@ -147,17 +147,17 @@ class ViewerBentoDeckCoordinator(
         val hasContextualAddons = showMotionLive
 
         if (hasContextualAddons) {
-            binding.viewerFormatRow?.visibility = View.VISIBLE
-            binding.btnFormatSwitch?.visibility = View.VISIBLE
-            binding.btnFormatSwitchCompact?.visibility = View.GONE
-            binding.btnDerivativeCycleCompact?.visibility = View.GONE
+            binding.viewerFormatRow.visibility = View.VISIBLE
+            binding.btnFormatSwitch.visibility = View.VISIBLE
+            binding.btnFormatSwitchCompact.visibility = View.GONE
+            binding.btnDerivativeCycleCompact.visibility = View.GONE
         } else {
-            binding.viewerFormatRow?.visibility = View.GONE
-            binding.btnFormatSwitchCompact?.visibility = View.VISIBLE
-            binding.btnDerivativeCycleCompact?.visibility = if (showDerivCycle) View.VISIBLE else View.GONE
+            binding.viewerFormatRow.visibility = View.GONE
+            binding.btnFormatSwitchCompact.visibility = View.VISIBLE
+            binding.btnDerivativeCycleCompact.visibility = if (showDerivCycle) View.VISIBLE else View.GONE
         }
 
-        binding.btnFormatSwitch?.let { btn ->
+        binding.btnFormatSwitch.let { btn ->
             when {
                 hasDng && hasDerivatives -> {
                     btn.isEnabled = !isAdjusted
@@ -255,7 +255,7 @@ class ViewerBentoDeckCoordinator(
             }
         }
 
-        binding.btnFormatSwitchCompact?.let { btn ->
+        binding.btnFormatSwitchCompact.let { btn ->
             val isRawAvailable = hasDng
             val rawLabel = when {
                 isRawVideo -> "RAWVID"
@@ -293,7 +293,7 @@ class ViewerBentoDeckCoordinator(
             }
         }
 
-        binding.btnDerivativeCycleCompact?.let { btn ->
+        binding.btnDerivativeCycleCompact.let { btn ->
             val showCompactLook = !hasContextualAddons && showDerivCycle
             btn.visibility = if (showCompactLook) View.VISIBLE else View.GONE
             if (showCompactLook) {
@@ -316,7 +316,7 @@ class ViewerBentoDeckCoordinator(
             }
         }
 
-        binding.btnDerivativeCycle?.let { btn ->
+        binding.btnDerivativeCycle.let { btn ->
             val showExpandedLook = hasContextualAddons && showDerivCycle
             btn.visibility = if (showExpandedLook) View.VISIBLE else View.GONE
             if (showExpandedLook) {
@@ -344,7 +344,7 @@ class ViewerBentoDeckCoordinator(
             }
         }
 
-        binding.btnMotionLive?.let { btn ->
+        binding.btnMotionLive.let { btn ->
             btn.visibility = if (showMotionLive) View.VISIBLE else View.GONE
             if (showMotionLive) {
                 btn.text = CameraBentoDeckView.formatProTelemetry(
@@ -371,8 +371,8 @@ class ViewerBentoDeckCoordinator(
         }
 
         if (currentGroup.isMultiCamera && lenses.isNotEmpty()) {
-            binding.viewerMulticamRow?.visibility = View.VISIBLE
-            binding.multicamLensContainer?.let { container ->
+            binding.viewerMulticamRow.visibility = View.VISIBLE
+            binding.multicamLensContainer.let { container ->
                 container.removeAllViews()
                 for ((idx, lens) in lenses.withIndex()) {
                     val isSelected = (idx == activeLensIndex)
@@ -428,7 +428,7 @@ class ViewerBentoDeckCoordinator(
                 }
             }
 
-            binding.btnMulticamCollage?.apply {
+            binding.btnMulticamCollage.apply {
                 text = CameraBentoDeckView.formatProTelemetry(
                     label = "⊞ COLLAGE",
                     value = "多摄拼图",
@@ -446,16 +446,16 @@ class ViewerBentoDeckCoordinator(
                 }
             }
         } else {
-            binding.viewerMulticamRow?.visibility = View.GONE
-            binding.multicamLensContainer?.removeAllViews()
+            binding.viewerMulticamRow.visibility = View.GONE
+            binding.multicamLensContainer.removeAllViews()
         }
 
         val isVideoActive = isRawVideo || isCinemaDng || currentGroup.isMp4Video || currentGroup.mp4VideoUri != null || isMp4Active
 
         if (isVideoActive) {
-            binding.viewerVideoDeck?.visibility = View.VISIBLE
+            binding.viewerVideoDeck.visibility = View.VISIBLE
             if (isCinemaDng) {
-                binding.filmstripBentoContainer?.visibility = View.VISIBLE
+                binding.filmstripBentoContainer.visibility = View.VISIBLE
                 val frameUris = if (currentGroup.cinemaDngFrameUris.isNotEmpty()) {
                     currentGroup.cinemaDngFrameUris
                 } else if (currentGroup.cinemaDngFirstFrameUri != null) {
@@ -464,13 +464,13 @@ class ViewerBentoDeckCoordinator(
                     emptyList()
                 }
                 val activeIndex = currentCinemaDngFrame?.first ?: adapter.getActiveCinemaDngFrame(currentIndex)?.first ?: 0
-                binding.filmstripBentoSeekbar?.setFrames(frameUris, activeIndex)
+                binding.filmstripBentoSeekbar.setFrames(frameUris, activeIndex)
             } else {
-                binding.filmstripBentoContainer?.visibility = View.GONE
+                binding.filmstripBentoContainer.visibility = View.GONE
             }
 
             val exportSub = if (isCinemaDng) "CDNG / MP4 / FRAME" else "MP4 / FRAME / DNG"
-            binding.btnVideoExportHub?.text = CameraBentoDeckView.formatProTelemetry(
+            binding.btnVideoExportHub.text = CameraBentoDeckView.formatProTelemetry(
                 label = "↗ EXPORT HUB",
                 value = exportSub,
                 isTabActive = false,
@@ -483,12 +483,12 @@ class ViewerBentoDeckCoordinator(
             val totalMs = adapter.getVideoDuration(currentIndex)
             updateVideoPlaybackButton(isPlaying, curMs, totalMs)
         } else {
-            binding.viewerVideoDeck?.visibility = View.GONE
+            binding.viewerVideoDeck.visibility = View.GONE
         }
     }
 
     fun updateVideoPlaybackButton(isPlaying: Boolean, currentMs: Long, totalMs: Long) {
-        val btn = binding.btnVideoPlayback ?: return
+        val btn = binding.btnVideoPlayback
         val ctx = binding.root.context
         val density = ctx.resources.displayMetrics.density
 

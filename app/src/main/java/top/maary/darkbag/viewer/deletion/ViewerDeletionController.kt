@@ -187,7 +187,7 @@ class ViewerDeletionController(
 
             if (urisToDelete.any { group.allCinemaDngUris.contains(it) } && group.cinemaDngFolderUri != null) {
                 if (!urisToDelete.contains(group.cinemaDngFolderUri)) {
-                    group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                    group.cinemaDngFolderUri.let { urisToDelete.add(it) }
                 }
             }
 

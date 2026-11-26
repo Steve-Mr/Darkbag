@@ -125,7 +125,7 @@ object ImageSaver {
 
             if (isNativeJpeg && !needsBitmapProcessing && actualSaveJpg) {
                 // FAST PATH: Directly use JNI-generated JPEG
-                val f = File(bmpPath!!)
+                val f = File(bmpPath)
                 if (f.exists() && f.length() > 0) {
                     if (isHalfFrameActive) {
                         val finalPath = halfFrameManager.handleCapture(
@@ -165,7 +165,7 @@ object ImageSaver {
                 } else {
                     Log.e(TAG, "Fast path source file missing or empty: ${f.absolutePath}, size: ${if (f.exists()) f.length() else -1}")
                 }
-                File(bmpPath!!).delete()
+                File(bmpPath).delete()
             } else {
                 // SLOW PATH: Decode, Rotate, Crop, Encode
                 var processedBitmap: Bitmap? = inputBitmap ?: bmpPath?.let {

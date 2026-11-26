@@ -175,11 +175,12 @@ class PreviewGainSynchronizerTest {
         )
         sync.beginAeTransition(newTargetGain = 2.0f, expectedAeCompSteps = -3, nowNs = 200L)
 
-        val result = ShadowTotalCaptureResult.newTotalCaptureResult()
-        Shadows.shadowOf(result).set(CaptureResult.SENSOR_TIMESTAMP, 300L)
-        Shadows.shadowOf(result).set(CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION, -3)
-        Shadows.shadowOf(result).set(CaptureResult.SENSOR_SENSITIVITY, 100)
-        Shadows.shadowOf(result).set(CaptureResult.SENSOR_EXPOSURE_TIME, 5_000_000L)
+        val result = org.robolectric.shadows.TotalCaptureResultBuilder.newBuilder()
+            .set(CaptureResult.SENSOR_TIMESTAMP, 300L)
+            .set(CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION, -3)
+            .set(CaptureResult.SENSOR_SENSITIVITY, 100)
+            .set(CaptureResult.SENSOR_EXPOSURE_TIME, 5_000_000L)
+            .build()
 
         val rawGain = sync.resolveGainForRawFrame(300L, result)
         assertEquals(2.0f, rawGain, 1e-4f)
