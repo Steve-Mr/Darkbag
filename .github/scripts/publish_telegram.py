@@ -12,7 +12,7 @@ def post_telegram(token: str, method: str, form_fields: dict[str, str], file_pat
     url = f"https://api.telegram.org/bot{token}/{method}"
     cmd = ["curl", "-sS", "--fail-with-body", "-X", "POST", url]
     for k, v in form_fields.items():
-        cmd.extend(["-F", f"{k}={v}"])
+        cmd.extend(["--form-string", f"{k}={v}"])
     if file_path is not None:
         cmd.extend(["-F", f"document=@{file_path}"])
     res = subprocess.run(cmd, capture_output=True, text=True)
