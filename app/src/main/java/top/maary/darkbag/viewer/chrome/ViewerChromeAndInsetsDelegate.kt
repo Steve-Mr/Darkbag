@@ -142,11 +142,11 @@ class ViewerChromeAndInsetsDelegate(
 
             if (isUnrendered) {
                 binding.btnActionMain.setIconResource(R.drawable.ic_save)
-                binding.btnActionMain.text = "EXPORT"
+                binding.btnActionMain.text = context.getString(R.string.action_export_main).uppercase(java.util.Locale.getDefault())
                 binding.btnActionMain.contentDescription = context.getString(R.string.action_export_main)
             } else {
                 binding.btnActionMain.setIconResource(R.drawable.ic_share)
-                binding.btnActionMain.text = "SHARE"
+                binding.btnActionMain.text = context.getString(R.string.share_button_alt).uppercase(java.util.Locale.getDefault())
                 binding.btnActionMain.contentDescription = context.getString(R.string.share_button_alt)
             }
         }
@@ -261,8 +261,8 @@ class ViewerChromeAndInsetsDelegate(
         if (grp.isMultiCamera) {
             popup.menu.add(0, MENU_COLLAGE, 0, context.getString(R.string.create_multi_cam_collage)).setIcon(R.drawable.ic_photo)
         }
-        popup.menu.add(0, MENU_DETAILS, 0, "Details").setIcon(R.drawable.ic_info)
-        popup.menu.add(0, MENU_DELETE, 0, "Delete").setIcon(R.drawable.ic_delete)
+        popup.menu.add(0, MENU_DETAILS, 0, context.getString(R.string.viewer_menu_details)).setIcon(R.drawable.ic_info)
+        popup.menu.add(0, MENU_DELETE, 0, context.getString(R.string.delete_button_alt)).setIcon(R.drawable.ic_delete)
 
         forceShowIcons(popup)
         popup.setOnMenuItemClickListener { item ->

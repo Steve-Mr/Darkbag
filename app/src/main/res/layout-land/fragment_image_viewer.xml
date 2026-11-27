@@ -117,7 +117,7 @@
                 android:insetRight="0dp"
                 android:insetBottom="0dp"
                 android:gravity="center"
-                android:text="▦ 01 / 01"
+                tools:text="▦ 01 / 01"
                 android:textAllCaps="false"
                 android:textSize="12sp"
                 android:paddingStart="8dp"
@@ -171,7 +171,7 @@
                 app:backgroundTint="?attr/colorPrimaryContainer"
                 android:textColor="?attr/colorOnPrimaryContainer"
                 app:iconTint="?attr/colorOnPrimaryContainer"
-                android:text="SHARE"
+                tools:text="SHARE"
                 android:textSize="11sp"
                 android:textStyle="bold"
                 android:contentDescription="@string/share_button_alt"
@@ -280,7 +280,7 @@
                     android:paddingStart="6dp"
                     android:paddingEnd="6dp"
                     android:lines="2"
-                    android:text="● LIVE\nAUTO ON"
+                    tools:text="● LIVE\nAUTO ON"
                     android:textSize="10sp"
                     android:gravity="center"
                     android:visibility="gone"
@@ -316,7 +316,7 @@
                     android:lines="2"
                     android:gravity="center"
                     android:textSize="10sp"
-                    android:text="⊞ COLLAGE\n多摄拼图"
+                    tools:text="⊞ COLLAGE\n多摄拼图"
                     app:cornerRadius="14dp"
                     app:backgroundTint="?attr/colorPrimaryContainer"
                     android:textColor="?attr/colorOnPrimaryContainer" />
@@ -341,7 +341,7 @@
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
                     android:padding="2dp"
-                    android:text="DATE\nOFF"
+                    tools:text="DATE\nOFF"
                     android:textSize="9.5sp"
                     android:lines="2"
                     android:gravity="center"
@@ -361,7 +361,7 @@
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
                     android:padding="2dp"
-                    android:text="FLARE\nOFF"
+                    tools:text="FLARE\nOFF"
                     android:textSize="9.5sp"
                     android:lines="2"
                     android:gravity="center"
@@ -381,7 +381,7 @@
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
                     android:padding="2dp"
-                    android:text="⇄ SWAP\nF1 / F2"
+                    tools:text="⇄ SWAP\nF1 / F2"
                     android:textSize="9.5sp"
                     android:lines="2"
                     android:gravity="center"
@@ -397,7 +397,7 @@
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
                     android:padding="2dp"
-                    android:text="SPLIT ↗\n独立导出"
+                    tools:text="SPLIT ↗\n独立导出"
                     android:textSize="9.5sp"
                     android:lines="2"
                     android:gravity="center"
@@ -488,7 +488,7 @@
                     android:insetRight="0dp"
                     android:paddingStart="8dp"
                     android:paddingEnd="8dp"
-                    android:text="RAW"
+                    tools:text="RAW"
                     android:textSize="10.5sp"
                     android:textStyle="bold"
                     android:gravity="center"
@@ -508,7 +508,7 @@
                     android:insetRight="0dp"
                     android:paddingStart="6dp"
                     android:paddingEnd="6dp"
-                    android:text="V1 ●"
+                    tools:text="V1 ●"
                     android:textSize="10.5sp"
                     android:textStyle="bold"
                     android:gravity="center"
@@ -603,10 +603,11 @@
                     android:layout_height="1dp"
                     android:visibility="gone"
                     app:tabMode="fixed">
-                    <com.google.android.material.tabs.TabItem android:text="Light" />
-                    <com.google.android.material.tabs.TabItem android:text="Range" />
-                    <com.google.android.material.tabs.TabItem android:text="Tone" />
-                    <com.google.android.material.tabs.TabItem android:text="Color" />
+                    <com.google.android.material.tabs.TabItem android:text="@string/edit_tab_light" />
+                    <com.google.android.material.tabs.TabItem android:text="@string/edit_tab_range" />
+                    <com.google.android.material.tabs.TabItem android:text="@string/edit_tab_tone" />
+                    <com.google.android.material.tabs.TabItem android:text="@string/edit_tab_wb" />
+                    <com.google.android.material.tabs.TabItem android:text="@string/edit_tab_color" />
                 </com.google.android.material.tabs.TabLayout>
 
                 <!-- Row 1: Header Row (Frame Selector + 4 Bento Category Tiles) -->
@@ -790,7 +791,7 @@
                                 android:id="@+id/tv_label_1"
                                 android:layout_width="80dp"
                                 android:layout_height="wrap_content"
-                                android:text="Exposure"
+                                tools:text="Exposure"
                                 android:textAppearance="?attr/textAppearanceLabelLarge" />
                             <com.google.android.material.slider.Slider
                                 android:id="@+id/slider_1"
@@ -819,7 +820,7 @@
                                 android:id="@+id/tv_label_2"
                                 android:layout_width="80dp"
                                 android:layout_height="wrap_content"
-                                android:text="Contrast"
+                                tools:text="Contrast"
                                 android:textAppearance="?attr/textAppearanceLabelLarge" />
                             <com.google.android.material.slider.Slider
                                 android:id="@+id/slider_2"
@@ -856,7 +857,7 @@
                         android:layout_marginEnd="5dp"
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
-                        android:text="✕ CANCEL"
+                        android:text="@string/viewer_edit_cancel"
                         android:textSize="11sp"
                         android:textStyle="bold"
                         app:cornerRadius="18dp"
@@ -873,7 +874,7 @@
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:padding="2dp"
-                        android:text="RECIPE\nLUT"
+                        android:text="@string/viewer_edit_recipe_lut"
                         android:lines="2"
                         android:gravity="center"
                         android:textSize="10sp"
@@ -889,7 +890,7 @@
                         android:layout_weight="1.35"
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
-                        android:text="✓ APPLY"
+                        android:text="@string/viewer_edit_apply"
                         android:textSize="11.5sp"
                         android:textStyle="bold"
                         app:cornerRadius="18dp"

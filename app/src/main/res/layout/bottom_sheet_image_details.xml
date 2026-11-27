@@ -24,7 +24,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
-            android:text="Details" />
+            android:text="@string/details_title" />
 
         <!-- Basic Info Section -->
         <com.google.android.material.card.MaterialCardView
@@ -50,7 +50,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="4dp"
             android:layout_marginBottom="8dp"
-            android:text="Technical Information"
+            android:text="@string/details_section_technical"
             android:textColor="?attr/colorPrimary" />
 
         <com.google.android.material.card.MaterialCardView
@@ -77,7 +77,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="4dp"
             android:layout_marginBottom="8dp"
-            android:text="Post-Processing Config"
+            android:text="@string/details_section_post_processing"
             android:textColor="?attr/colorPrimary" />
 
         <com.google.android.material.card.MaterialCardView

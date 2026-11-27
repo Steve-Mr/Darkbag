@@ -75,12 +75,12 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
 
         fun getFileName(context: Context, uri: Uri): String {
             return queryContentResolver(context, uri, OpenableColumns.DISPLAY_NAME)
-                ?: uri.lastPathSegment ?: "Unknown"
+                ?: uri.lastPathSegment ?: context.getString(R.string.details_unknown)
         }
 
         fun getFileSize(context: Context, uri: Uri): String {
             val sizeStr = queryContentResolver(context, uri, OpenableColumns.SIZE)
-            return sizeStr?.toLongOrNull()?.let { formatFileSize(it) } ?: "Unknown"
+            return sizeStr?.toLongOrNull()?.let { formatFileSize(it) } ?: context.getString(R.string.details_unknown)
         }
     }
 
@@ -144,27 +144,27 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
 
                     // 1. Basic Info
                     val fileName = getFileName(appContext, uri)
-                    details.add("File Name" to fileName)
+                    details.add(appContext.getString(R.string.details_file_name) to fileName)
 
                     val fileSize = getFileSize(appContext, uri)
-                    details.add("File Size" to fileSize)
+                    details.add(appContext.getString(R.string.details_file_size) to fileSize)
 
                     val width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
                     val height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
                     if (width > 0 && height > 0) {
-                        details.add("Resolution" to "${width}x${height} (${String.format(Locale.US, "%.1f MP", width * height / 1000000f)})")
+                        details.add(appContext.getString(R.string.details_resolution) to "${width}x${height} (${String.format(Locale.US, "%.1f MP", width * height / 1000000f)})")
                     }
 
                     val dateStr = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
-                    dateStr?.let { details.add("Date & Time" to it) }
+                    dateStr?.let { details.add(appContext.getString(R.string.details_date_time) to it) }
 
-                    details.add("Path" to (uri.path ?: "Unknown"))
+                    details.add(appContext.getString(R.string.details_path) to (uri.path ?: appContext.getString(R.string.details_unknown)))
 
                     // 2. Technical Info
                     val make = exif.getAttribute(ExifInterface.TAG_MAKE)
                     val model = exif.getAttribute(ExifInterface.TAG_MODEL)
                     if (make != null || model != null) {
-                        techDetails.add("Device" to "${make ?: ""} ${model ?: ""}".trim())
+                        techDetails.add(appContext.getString(R.string.details_device) to "${make ?: ""} ${model ?: ""}".trim())
                     }
 
                     val iso = exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
@@ -178,14 +178,14 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
                         } else {
                             "${String.format(Locale.US, "%.1f", exposureTime)}s"
                         }
-                        techDetails.add("Shutter Speed" to expStr)
+                        techDetails.add(appContext.getString(R.string.details_shutter_speed) to expStr)
                     }
 
                     val fNumber = exif.getAttributeDouble(ExifInterface.TAG_F_NUMBER, 0.0)
-                    if (fNumber > 0) techDetails.add("Aperture" to "f/${fNumber}")
+                    if (fNumber > 0) techDetails.add(appContext.getString(R.string.details_aperture) to "f/${fNumber}")
 
                     val focalLength = exif.getAttributeDouble(ExifInterface.TAG_FOCAL_LENGTH, 0.0)
-                    if (focalLength > 0) techDetails.add("Focal Length" to "${focalLength}mm")
+                    if (focalLength > 0) techDetails.add(appContext.getString(R.string.details_focal_length) to "${focalLength}mm")
 
                     // 3. UserComment Configuration
                     val comment = exif.getAttribute(ExifInterface.TAG_USER_COMMENT)
@@ -203,10 +203,10 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
                                 configDetails.add(label to value.toString())
                             }
                         } catch (e: Exception) {
-                            configDetails.add("Custom Info" to comment)
+                            configDetails.add(appContext.getString(R.string.details_custom_info) to comment)
                         }
                     } else if (comment != null) {
-                        configDetails.add("Custom Info" to comment)
+                        configDetails.add(appContext.getString(R.string.details_custom_info) to comment)
                     }
                 }
             } catch (e: Exception) {

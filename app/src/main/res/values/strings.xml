@@ -728,4 +728,87 @@
     <string name="pref_github_repo_value">GitHub · Steve-Mr/Darkbag</string>
     <string name="github_repo_url" translatable="false">https://github.com/Steve-Mr/Darkbag</string>
     <string name="error_no_browser_app">No browser app found to open link</string>
+
+    <!-- Lens Calibration -->
+    <string name="lens_calibration_title">Lens Distortion Calibration</string>
+    <string name="lens_calibration_load_grid">Load Grid Photo</string>
+    <string name="lens_calibration_pick_photo">Pick Photo</string>
+    <string name="lens_calibration_sample_grid">Sample Grid</string>
+    <string name="lens_calibration_k1_label">DISTORTION COEFFICIENT K1</string>
+    <string name="lens_calibration_k1_barrel">%.3f · Barrel</string>
+    <string name="lens_calibration_k1_pincushion">+%.3f · Pincushion</string>
+    <string name="lens_calibration_k1_original">0.000 · Original</string>
+    <string name="lens_calibration_hint">Adjust until the grid lines appear completely straight.</string>
+    <string name="lens_calibration_reset">Reset</string>
+    <string name="lens_calibration_apply_save">Apply &amp; Save</string>
+    <string name="lens_calibration_toggle_grid">Toggle Grid</string>
+    <string name="lens_calibration_toggle_compare">Hold or tap to compare</string>
+
+    <!-- Viewer & Darkroom Editor -->
+    <string name="viewer_collage_label">⊞ COLLAGE</string>
+    <string name="viewer_collage_value">Multi-Cam</string>
+    <string name="viewer_menu_details">Details</string>
+    <string name="viewer_edit_cancel">✕ CANCEL</string>
+    <string name="viewer_edit_apply">✓ APPLY</string>
+    <string name="viewer_edit_recipe_lut">RECIPE\nLUT</string>
+    <string name="edit_slider_exposure">Exposure</string>
+    <string name="edit_slider_brightness">Brightness</string>
+    <string name="edit_slider_contrast">Contrast</string>
+    <string name="edit_slider_highlights">Highlights</string>
+    <string name="edit_slider_shadows">Shadows</string>
+    <string name="edit_slider_whites">Whites</string>
+    <string name="edit_slider_blacks">Blacks</string>
+    <string name="edit_slider_temperature">Temp</string>
+    <string name="edit_slider_tint">Tint</string>
+    <string name="edit_slider_saturation">Saturation</string>
+    <string name="edit_slider_vibrance">Vibrance</string>
+    <string name="edit_slider_clarity">Clarity</string>
+    <string name="edit_slider_dehaze">Dehaze</string>
+    <string name="edit_slider_gamma">Gamma</string>
+
+    <!-- Half-Frame Share Sheet -->
+    <string name="hf_share_dngs_title">Share DNGs</string>
+    <string name="hf_frame_1">Frame 1</string>
+    <string name="hf_frame_2">Frame 2</string>
+    <string name="hf_share_both">Share Both</string>
+
+    <!-- Image Details Sheet -->
+    <string name="details_title">Details</string>
+    <string name="details_section_technical">Technical Information</string>
+    <string name="details_section_post_processing">Post-Processing Config</string>
+    <string name="details_unknown">Unknown</string>
+    <string name="details_file_name">File Name</string>
+    <string name="details_file_size">File Size</string>
+    <string name="details_resolution">Resolution</string>
+    <string name="details_date_time">Date &amp; Time</string>
+    <string name="details_path">Path</string>
+    <string name="details_device">Device</string>
+    <string name="details_shutter_speed">Shutter Speed</string>
+    <string name="details_aperture">Aperture</string>
+    <string name="details_focal_length">Focal Length</string>
+    <string name="details_custom_info">Custom Info</string>
+
+    <!-- Multi-Cam Collage Sheet -->
+    <string name="collage_section_layout">Layout</string>
+    <string name="collage_section_framing">Ratio &amp; Framing</string>
+    <string name="collage_section_style">Frame Style</string>
+
+    <!-- RAW Video Settings -->
+    <string name="raw_video_badge_cinema">CINEMA</string>
+    <string name="raw_video_fps_cinema">Cinema</string>
+    <string name="raw_video_fps_standard">Standard</string>
+    <string name="raw_video_fps_high_speed">High-Speed</string>
+    <string name="raw_video_fps_unsupported">Unsupported</string>
+    <string name="raw_video_res_max_native_desc">Full sensor area without cropping</string>
+    <string name="raw_video_res_2k_open_gate_desc">2048 x 1536 open gate cinematic preview</string>
+    <string name="raw_video_res_4k_uhd_desc">3840 x 2160 16:9 Ultra High Definition</string>
+    <string name="raw_video_res_1080p_desc">1920 x 1080 Full HD recording stream</string>
+
+    <!-- Processing Notifications -->
+    <string name="notification_starting_processing">Starting processing…</string>
+    <string name="notification_processing_one">Processing 1 photo…</string>
+    <string name="notification_processing_queue">Processing photos (%1$d remaining in queue)…</string>
+    <string name="notification_channel_processing_name">Image Processing</string>
+    <string name="notification_channel_processing_desc">Background processing for photos</string>
+    <string name="notification_processing_title">Darkbag Processing</string>
 </resources>

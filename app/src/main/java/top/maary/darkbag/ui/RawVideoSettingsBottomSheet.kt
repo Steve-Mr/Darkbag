@@ -65,9 +65,9 @@ class RawVideoSettingsBottomSheet : BottomSheetDialogFragment() {
 
         fun updateFpsStyles(currentFps: String) {
             val fpsList = listOf(
-                Triple(binding.btnFps24, "24", "Cinema"),
-                Triple(binding.btnFps30, "30", "Standard"),
-                Triple(binding.btnFps60, "60", "High-Speed")
+                Triple(binding.btnFps24, "24", getString(R.string.raw_video_fps_cinema)),
+                Triple(binding.btnFps30, "30", getString(R.string.raw_video_fps_standard)),
+                Triple(binding.btnFps60, "60", getString(R.string.raw_video_fps_high_speed))
             )
 
             val colorPrimary = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, Color.WHITE)
@@ -88,7 +88,7 @@ class RawVideoSettingsBottomSheet : BottomSheetDialogFragment() {
                 val fpsVal = fpsStr.toIntOrNull() ?: 24
                 val isSupported = fpsVal <= maxHardwareFps
 
-                val subLabel = if (isSupported) label else "Unsupported"
+                val subLabel = if (isSupported) label else getString(R.string.raw_video_fps_unsupported)
                 btn.text = "$fpsStr FPS\n$subLabel"
 
                 if (isSelected) {
@@ -160,10 +160,10 @@ class RawVideoSettingsBottomSheet : BottomSheetDialogFragment() {
         val radius14dp = 14f * density
 
         val descriptions = mapOf(
-            "Max Native (4:3)" to "Full sensor area without cropping",
-            "2K Open Gate (4:3)" to "2048 x 1536 open gate cinematic preview",
-            "4K UHD (16:9)" to "3840 x 2160 16:9 Ultra High Definition",
-            "1080p (16:9)" to "1920 x 1080 Full HD recording stream"
+            "Max Native (4:3)" to getString(R.string.raw_video_res_max_native_desc),
+            "2K Open Gate (4:3)" to getString(R.string.raw_video_res_2k_open_gate_desc),
+            "4K UHD (16:9)" to getString(R.string.raw_video_res_4k_uhd_desc),
+            "1080p (16:9)" to getString(R.string.raw_video_res_1080p_desc)
         )
 
         fun renderCards(currentRes: String) {

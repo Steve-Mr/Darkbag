@@ -16,6 +16,7 @@ import com.google.android.material.chip.Chip
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import top.maary.darkbag.R
 import top.maary.darkbag.calibration.CustomLensCalibration
 import top.maary.darkbag.calibration.LensCalibrationStore
 import top.maary.darkbag.databinding.SheetLensCalibrationBinding
@@ -169,9 +170,9 @@ class LensCalibrationBottomSheet : BottomSheetDialogFragment() {
 
     private fun updateK1Display(k1: Float) {
         val label = when {
-            k1 < -0.0005f -> String.format(Locale.US, "%.3f · 桶形矫正", k1)
-            k1 > 0.0005f -> String.format(Locale.US, "+%.3f · 枕形矫正", k1)
-            else -> "0.000 · 原始"
+            k1 < -0.0005f -> String.format(Locale.US, getString(R.string.lens_calibration_k1_barrel), k1)
+            k1 > 0.0005f -> String.format(Locale.US, getString(R.string.lens_calibration_k1_pincushion), k1)
+            else -> getString(R.string.lens_calibration_k1_original)
         }
         binding.tvK1Value.text = label
     }

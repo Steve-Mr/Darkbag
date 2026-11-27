@@ -430,8 +430,8 @@ class ViewerBentoDeckCoordinator(
 
             binding.btnMulticamCollage.apply {
                 text = CameraBentoDeckView.formatProTelemetry(
-                    label = "⊞ COLLAGE",
-                    value = "多摄拼图",
+                    label = ctx.getString(R.string.viewer_collage_label),
+                    value = ctx.getString(R.string.viewer_collage_value),
                     isTabActive = true,
                     isValueManual = false,
                     context = ctx

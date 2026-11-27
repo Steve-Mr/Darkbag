@@ -703,4 +703,93 @@
     <string name="pref_github_repo_label">开源仓库</string>
     <string name="pref_github_repo_value">GitHub · Steve-Mr/Darkbag</string>
     <string name="error_no_browser_app">未找到可打开链接的浏览器应用</string>
+
+    <!-- HDR+ 融合模式 -->
+    <string name="hdr_fusion_auto">自动（空间对齐 / Sabre 变焦）</string>
+    <string name="hdr_fusion_spatial">空间合并 + RCD</string>
+    <string name="hdr_fusion_sabre">Sabre（超分辨率）</string>
+    <string name="hdr_fusion_classic">经典 HDR+（维纳滤波）</string>
+
+    <!-- 镜头畸变校准 -->
+    <string name="lens_calibration_title">镜头畸变校准</string>
+    <string name="lens_calibration_load_grid">导入网格照片</string>
+    <string name="lens_calibration_pick_photo">选择照片</string>
+    <string name="lens_calibration_sample_grid">示例网格</string>
+    <string name="lens_calibration_k1_label">畸变系数 K1</string>
+    <string name="lens_calibration_k1_barrel">%.3f · 桶形矫正</string>
+    <string name="lens_calibration_k1_pincushion">+%.3f · 枕形矫正</string>
+    <string name="lens_calibration_k1_original">0.000 · 原始</string>
+    <string name="lens_calibration_hint">调节参数直至网格线条完全平直。</string>
+    <string name="lens_calibration_reset">重置</string>
+    <string name="lens_calibration_apply_save">应用并保存</string>
+    <string name="lens_calibration_toggle_grid">网格切换</string>
+    <string name="lens_calibration_toggle_compare">长按或点击对比</string>
+
+    <!-- 看图器与暗房编辑 -->
+    <string name="viewer_collage_label">⊞ 拼图</string>
+    <string name="viewer_collage_value">多摄拼图</string>
+    <string name="viewer_menu_details">详情</string>
+    <string name="viewer_edit_cancel">✕ 取消</string>
+    <string name="viewer_edit_apply">✓ 应用</string>
+    <string name="viewer_edit_recipe_lut">配方\nLUT</string>
+    <string name="edit_slider_exposure">曝光</string>
+    <string name="edit_slider_brightness">亮度</string>
+    <string name="edit_slider_contrast">对比度</string>
+    <string name="edit_slider_highlights">高光</string>
+    <string name="edit_slider_shadows">阴影</string>
+    <string name="edit_slider_whites">白色</string>
+    <string name="edit_slider_blacks">黑色</string>
+    <string name="edit_slider_temperature">色温</string>
+    <string name="edit_slider_tint">色调</string>
+    <string name="edit_slider_saturation">饱和度</string>
+    <string name="edit_slider_vibrance">自然饱和度</string>
+    <string name="edit_slider_clarity">清晰度</string>
+    <string name="edit_slider_dehaze">去雾</string>
+    <string name="edit_slider_gamma">伽马</string>
+
+    <!-- 半格分享面板 -->
+    <string name="hf_share_dngs_title">分享 DNG 底片</string>
+    <string name="hf_frame_1">第 1 格</string>
+    <string name="hf_frame_2">第 2 格</string>
+    <string name="hf_share_both">同时分享</string>
+
+    <!-- 照片详情面板 -->
+    <string name="details_title">详情</string>
+    <string name="details_section_technical">技术信息</string>
+    <string name="details_section_post_processing">后期处理配置</string>
+    <string name="details_unknown">未知</string>
+    <string name="details_file_name">文件名</string>
+    <string name="details_file_size">文件大小</string>
+    <string name="details_resolution">分辨率</string>
+    <string name="details_date_time">拍摄时间</string>
+    <string name="details_path">路径</string>
+    <string name="details_device">设备</string>
+    <string name="details_shutter_speed">快门速度</string>
+    <string name="details_aperture">光圈</string>
+    <string name="details_focal_length">焦距</string>
+    <string name="details_custom_info">自定义信息</string>
+
+    <!-- 多摄拼图面板 -->
+    <string name="collage_section_layout">布局</string>
+    <string name="collage_section_framing">比例与构图</string>
+    <string name="collage_section_style">边框风格</string>
+
+    <!-- RAW 视频设置 -->
+    <string name="raw_video_badge_cinema">电影</string>
+    <string name="raw_video_fps_cinema">电影</string>
+    <string name="raw_video_fps_standard">标准</string>
+    <string name="raw_video_fps_high_speed">高速</string>
+    <string name="raw_video_fps_unsupported">不支持</string>
+    <string name="raw_video_res_max_native_desc">全传感器画幅，无裁切</string>
+    <string name="raw_video_res_2k_open_gate_desc">2048 x 1536 片门全开电影预览</string>
+    <string name="raw_video_res_4k_uhd_desc">3840 x 2160 16:9 超高清</string>
+    <string name="raw_video_res_1080p_desc">1920 x 1080 全高清录制流</string>
+
+    <!-- 图像处理通知 -->
+    <string name="notification_starting_processing">正在启动处理…</string>
+    <string name="notification_processing_one">正在处理 1 张照片…</string>
+    <string name="notification_processing_queue">正在处理照片（队列剩余 %1$d 张）…</string>
+    <string name="notification_channel_processing_name">图像处理</string>
+    <string name="notification_channel_processing_desc">后台照片处理任务</string>
+    <string name="notification_processing_title">Darkbag 图像处理</string>
 </resources>
