@@ -53,6 +53,12 @@ class BentoSplitChevronButton @JvmOverloads constructor(
         isFocusable = true
         cardElevation = 0f
         strokeWidth = 0
+        checkedIcon = null
+        checkedIconSize = 0
+        checkedIconMargin = 0
+        setCardForegroundColor(ColorStateList.valueOf(Color.TRANSPARENT))
+        setContentPadding(0, 0, 0, 0)
+        preventCornerOverlap = false
         addView(iconView)
         applyVisualState(checked = false, animate = false)
     }
