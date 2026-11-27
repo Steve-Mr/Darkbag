@@ -11,6 +11,7 @@ import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.SystemClock
 import android.view.Surface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -53,7 +54,25 @@ class CameraSessionArbiter(
     val sceneMotionMonitor = SceneMotionMonitor()
     val previewGainSynchronizer = PreviewGainSynchronizer()
     @Volatile var rawFrameRouter: RawFrameRouter? = null
+    @Volatile var isRepeatingRawActive: Boolean = false
+        private set
+    @Volatile private var lastRepeatingRawDisabledAtMs: Long = 0L
     private var zslRawThread: HandlerThread? = null
+
+    fun setRepeatingRawActive(active: Boolean) {
+        if (isRepeatingRawActive && !active) {
+            lastRepeatingRawDisabledAtMs = SystemClock.elapsedRealtime()
+        }
+        isRepeatingRawActive = active
+    }
+
+    fun needsFreshCaptureTimestampFilter(nowMs: Long = SystemClock.elapsedRealtime()): Boolean {
+        if (isRepeatingRawActive || rawFrameRouter?.hasActiveRepeatingConsumer == true) {
+            return true
+        }
+        val disabledAt = lastRepeatingRawDisabledAtMs
+        return disabledAt > 0L && (nowMs - disabledAt) < 1000L
+    }
 
     val camera2Device: CameraDevice?
         get() = sessionController.cameraDevice
@@ -301,6 +320,8 @@ class CameraSessionArbiter(
     suspend fun closeSingleCameraResources() {
         camera2Lock.withLock {
             state.captureResults.clear()
+            isRepeatingRawActive = false
+            lastRepeatingRawDisabledAtMs = 0L
             withContext(Dispatchers.Default) { closeRawFrameRouter() }
             sessionController.closeCamera()
             rawImageReader?.close()

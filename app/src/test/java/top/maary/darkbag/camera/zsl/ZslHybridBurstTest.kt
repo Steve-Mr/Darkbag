@@ -196,5 +196,27 @@ class ZslHybridBurstTest {
         )
         assertNull(seedFast)
         assertEquals("motion_fast_single", timingFast.zslFallbackReason)
+
+        // 3. When ZSL is disabled (zslEnabled = false), adaptive motion reduction must NOT shrink requested burst
+        val zslEnabled = false
+        val zslAdaptive = true
+        assertEquals(
+            5,
+            ZslAdaptivePolicy.resolveAdaptiveBurstCount(
+                requestedBurst = 5,
+                motionLevel = MotionLevel.FAST,
+                adaptiveEnabled = zslEnabled && zslAdaptive,
+                isLowLight = false
+            )
+        )
+        assertEquals(
+            5,
+            ZslAdaptivePolicy.resolveAdaptiveBurstCount(
+                requestedBurst = 5,
+                motionLevel = MotionLevel.MODERATE,
+                adaptiveEnabled = zslEnabled && zslAdaptive,
+                isLowLight = false
+            )
+        )
     }
 }

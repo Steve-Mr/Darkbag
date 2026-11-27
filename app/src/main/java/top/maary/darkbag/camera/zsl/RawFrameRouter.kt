@@ -5,7 +5,9 @@ import android.media.Image
 import android.graphics.ImageFormat
 import android.media.ImageReader
 import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import java.util.ArrayDeque
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -19,13 +21,15 @@ internal data class RawRouterState(
     val mode: RawRouterMode = RawRouterMode.IDLE,
     val captureStarted: Boolean = false,
     val captureStartTimestampNs: Long = Long.MIN_VALUE,
-    val activeCaptureGeneration: Long = 0L
+    val activeCaptureGeneration: Long = 0L,
+    val requireCaptureStarted: Boolean = true
 ) {
-    fun beginCapture(generation: Long): RawRouterState = RawRouterState(
+    fun beginCapture(generation: Long, requireCaptureStarted: Boolean = true): RawRouterState = RawRouterState(
         mode = RawRouterMode.CAPTURE,
         captureStarted = false,
         captureStartTimestampNs = Long.MIN_VALUE,
-        activeCaptureGeneration = generation
+        activeCaptureGeneration = generation,
+        requireCaptureStarted = requireCaptureStarted
     )
 
     fun onCaptureStarted(timestampNs: Long): RawRouterState =
@@ -33,7 +37,8 @@ internal data class RawRouterState(
         else copy(captureStarted = true, captureStartTimestampNs = timestampNs)
 
     fun canDeliver(imageTimestampNs: Long): Boolean =
-        RawFrameRouter.isFreshCaptureFrame(captureStarted, captureStartTimestampNs, imageTimestampNs)
+        if (!requireCaptureStarted) mode == RawRouterMode.CAPTURE
+        else RawFrameRouter.isFreshCaptureFrame(captureStarted, captureStartTimestampNs, imageTimestampNs)
 
     fun endCapture(hasRing: Boolean): RawRouterState =
         RawRouterState(mode = if (hasRing) RawRouterMode.RING else RawRouterMode.IDLE)
@@ -56,6 +61,7 @@ class RawFrameRouter(
     companion object {
         private const val TAG = "RawFrameRouter"
         private const val SWITCH_TIMEOUT_MS = 250L
+        private const val MAX_PENDING_PRE_START = 2
 
         /**
          * A frame is allowed into a still/burst consumer only after onCaptureStarted and only
@@ -68,10 +74,17 @@ class RawFrameRouter(
         ): Boolean = captureStarted && imageTimestampNs >= captureStartTimestampNs
     }
 
+    val callbackHandler: Handler
+        get() = handler
+
+    val hasActiveRepeatingConsumer: Boolean
+        get() = synchronized(lock) { ring != null } || rawMotionTap != null
+
     private val lock = Any()
     private var state = RawRouterState()
     private var ring: ZslRawRing? = null
     private var captureConsumer: ((Image) -> Unit)? = null
+    private val pendingPreStartImages = ArrayDeque<Image>()
     private var closed = false
     private val captureGeneration = AtomicLong(0)
     @Volatile var droppedImages: Long = 0L
@@ -117,8 +130,22 @@ class RawFrameRouter(
                 }
 
                 RawRouterMode.CAPTURE -> {
-                    val snapshot = synchronized(lock) { state }
-                    val consumer = synchronized(lock) { captureConsumer }
+                    var shouldBuffer = false
+                    val (snapshot, consumer) = synchronized(lock) {
+                        val s = state
+                        val c = captureConsumer
+                        if (s.requireCaptureStarted && !s.captureStarted && !closed && c != null) {
+                            if (pendingPreStartImages.size >= MAX_PENDING_PRE_START) {
+                                pendingPreStartImages.removeFirst().close()
+                            }
+                            pendingPreStartImages.addLast(image)
+                            shouldBuffer = true
+                        }
+                        Pair(s, c)
+                    }
+                    if (shouldBuffer) {
+                        return@OnImageAvailableListener
+                    }
                     if (!snapshot.canDeliver(image.timestamp)) {
                         // A frame exposed before onCaptureStarted belongs to the old repeating
                         // request; feeding it to the still/burst consumer would capture the
@@ -165,7 +192,7 @@ class RawFrameRouter(
         }
     }
 
-    fun beginCapture(consumer: (Image) -> Unit): Boolean {
+    fun beginCapture(consumer: (Image) -> Unit, requireCaptureStarted: Boolean = true): Boolean {
         val latch = CountDownLatch(1)
         val generation = captureGeneration.incrementAndGet()
         val abandoned = AtomicBoolean(false)
@@ -177,10 +204,11 @@ class RawFrameRouter(
                     latch.countDown()
                     return@post
                 }
+                clearPendingPreStartLocked()
                 detachedRing = ring
                 ring = null
                 captureConsumer = consumer
-                state = state.beginCapture(generation)
+                state = state.beginCapture(generation, requireCaptureStarted)
                 activated.set(true)
             }
             drainQueued()
@@ -198,6 +226,7 @@ class RawFrameRouter(
             handler.post {
                 synchronized(lock) {
                     if (state.activeCaptureGeneration == generation && state.mode == RawRouterMode.CAPTURE) {
+                        clearPendingPreStartLocked()
                         state = state.idle()
                         captureConsumer = null
                     }
@@ -219,6 +248,7 @@ class RawFrameRouter(
         var detached: ZslRawRing? = null
         handler.post {
             synchronized(lock) {
+                clearPendingPreStartLocked()
                 detached = ring
                 ring = null
                 captureConsumer = null
@@ -236,7 +266,38 @@ class RawFrameRouter(
     }
 
     fun onCaptureStarted(timestampNs: Long) {
-        synchronized(lock) { state = state.onCaptureStarted(timestampNs) }
+        val (snapshot, consumer, toFlush) = synchronized(lock) {
+            state = state.onCaptureStarted(timestampNs)
+            val buffered = if (pendingPreStartImages.isNotEmpty()) {
+                ArrayList<Image>(pendingPreStartImages.size).also { list ->
+                    while (pendingPreStartImages.isNotEmpty()) {
+                        list.add(pendingPreStartImages.removeFirst())
+                    }
+                }
+            } else emptyList()
+            Triple(state, captureConsumer, buffered)
+        }
+        if (toFlush.isNotEmpty()) {
+            val flushBlock = Runnable {
+                for (img in toFlush) {
+                    if (snapshot.canDeliver(img.timestamp) && consumer != null) {
+                        try {
+                            consumer(img)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Buffered pre-start RAW frame dispatch failed", e)
+                            img.close()
+                        }
+                    } else {
+                        img.close()
+                    }
+                }
+            }
+            if (Looper.myLooper() == handler.looper) {
+                flushBlock.run()
+            } else {
+                handler.post(flushBlock)
+            }
+        }
     }
 
     fun endCapture(restoreRing: ZslRawRing? = null) {
@@ -244,6 +305,7 @@ class RawFrameRouter(
         handler.post {
             synchronized(lock) {
                 if (closed) return@post
+                clearPendingPreStartLocked()
                 captureConsumer = null
                 ring = restoreRing
                 state = state.endCapture(hasRing = restoreRing != null)
@@ -256,6 +318,7 @@ class RawFrameRouter(
         handler.post {
             synchronized(lock) {
                 if (closed) return@post
+                clearPendingPreStartLocked()
                 ring = null
                 captureConsumer = null
                 state = state.idle()
@@ -269,6 +332,7 @@ class RawFrameRouter(
         handler.post {
             synchronized(lock) {
                 closed = true
+                clearPendingPreStartLocked()
                 ring = null
                 captureConsumer = null
                 state = state.idle()
@@ -281,6 +345,12 @@ class RawFrameRouter(
             latch.await(SWITCH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
+        }
+    }
+
+    private fun clearPendingPreStartLocked() {
+        while (pendingPreStartImages.isNotEmpty()) {
+            pendingPreStartImages.removeFirst().close()
         }
     }
 

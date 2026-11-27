@@ -12,6 +12,7 @@ import android.media.ImageReader
 import android.util.Log
 import android.util.Range
 import android.view.View
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -115,7 +116,7 @@ internal class HdrPlusBurstCaptureExecutor(
                 ZslAdaptivePolicy.resolveAdaptiveBurstCount(
                     requestedBurst = requested,
                     motionLevel = motion,
-                    adaptiveEnabled = currentPrefs.zslAdaptive,
+                    adaptiveEnabled = currentPrefs.zslEnabled && currentPrefs.zslAdaptive,
                     isLowLight = isLowLight
                 )
             }
@@ -351,11 +352,11 @@ internal class HdrPlusBurstCaptureExecutor(
                 )
                 watchdog = launchBurstWatchdog(
                     appContext, sink, isFrame1Trigger, hfMetadata, captureStartTime,
-                    currentZoom, burstLensId, burstSize, framesCaptured, isTaskStarted, burstHelper
+                    currentZoom, burstLensId, burstSize, framesCaptured, framesComplete, isTaskStarted, burstHelper
                 )
                 router = env.sessionArbiter.rawFrameRouter
                 if (router != null) {
-                    if (!router.beginCapture(::handleIncomingImage)) {
+                    if (!router.beginCapture(::handleIncomingImage, requireCaptureStarted = env.sessionArbiter.needsFreshCaptureTimestampFilter())) {
                         throw IllegalStateException("Failed to switch RAW router to capture mode")
                     }
                 } else {
@@ -392,7 +393,7 @@ internal class HdrPlusBurstCaptureExecutor(
                         env.sessionArbiter.rawFrameRouter?.onCaptureResult(result)
                         onRecordCaptureResult(result)
                     }
-                }, handler)
+                }, router?.callbackHandler ?: handler)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Camera2 burst failed", e)
@@ -428,35 +429,53 @@ internal class HdrPlusBurstCaptureExecutor(
         burstLensId: String,
         burstSize: Int,
         framesCaptured: AtomicInteger,
+        framesComplete: AtomicBoolean,
         isTaskStarted: AtomicBoolean,
         burstHelper: HdrPlusStreamingBurst
     ): Job = env.lifecycleScope.launch(Dispatchers.Main) {
-        delay(8000)
-        val capturedCount = framesCaptured.get()
-        if (env.runtimeState.isBurstActive && capturedCount < burstSize) {
-            Log.e(TAG, "Burst capture timed out! Captured $capturedCount/$burstSize frames.")
-            env.sessionArbiter.rawFrameRouter?.endCapture()
-            env.runtimeState.isBurstActive = false
-            ui.resetBurstUi()
-            if (capturedCount > 0) {
-                Log.i(TAG, "Flushing partial burst ($capturedCount frames) to background worker.")
-                if (isTaskStarted.compareAndSet(false, true)) HdrPlusRequestManager.onTaskStarted()
-                if (!isFrame1Trigger && ui.cameraUiContainerBinding?.processingProgress?.visibility != View.VISIBLE) {
-                    ui.showProcessingAnimation()
+        try {
+            delay(8000)
+            val capturedCount = framesCaptured.get()
+            if (env.runtimeState.isBurstActive && capturedCount < burstSize && framesComplete.compareAndSet(false, true)) {
+                Log.e(TAG, "Burst capture timed out! Captured $capturedCount/$burstSize frames.")
+                env.sessionArbiter.rawFrameRouter?.endCapture()
+                env.runtimeState.isBurstActive = false
+                env.cameraViewModel.setBurstActive(false)
+                ui.resetBurstUi()
+                if (capturedCount > 0) {
+                    Log.i(TAG, "Flushing partial burst ($capturedCount frames) to background worker.")
+                    if (isTaskStarted.compareAndSet(false, true)) HdrPlusRequestManager.onTaskStarted()
+                    if (!isFrame1Trigger && ui.cameraUiContainerBinding?.processingProgress?.visibility != View.VISIBLE) {
+                        ui.showProcessingAnimation()
+                    }
+                    burstHelper.flush()
+                } else {
+                    if (isTaskStarted.compareAndSet(true, false)) HdrPlusRequestManager.onTaskFinished()
+                    if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
+                    onNotifySinkFailure(
+                        appContext, sink, hfMetadata,
+                        RuntimeException("Burst capture timed out with 0 frames"),
+                        currentZoom, burstLensId, captureStartTime
+                    )
+                    burstHelper.abort()
+                    env.runtimeState.hdrPlusStreamingBurstHelper = null
+                    ui.hideProcessingAnimation()
                 }
-                burstHelper.flush()
-            } else {
-                if (isTaskStarted.compareAndSet(true, false)) HdrPlusRequestManager.onTaskFinished()
-                if (isFrame1Trigger) coordinator.writeScopedHalfFrameStep(0)
-                onNotifySinkFailure(
-                    appContext, sink, hfMetadata,
-                    RuntimeException("Burst capture timed out with 0 frames"),
-                    currentZoom, burstLensId, captureStartTime
-                )
-                burstHelper.abort()
-                env.runtimeState.hdrPlusStreamingBurstHelper = null
-                ui.hideProcessingAnimation()
             }
+        } catch (ce: CancellationException) {
+            if (!framesComplete.get() && env.runtimeState.isBurstActive) {
+                env.sessionArbiter.rawFrameRouter?.endCapture()
+                env.runtimeState.isBurstActive = false
+                env.cameraViewModel.setBurstActive(false)
+                burstHelper.abort()
+                if (env.runtimeState.hdrPlusStreamingBurstHelper === burstHelper) {
+                    env.runtimeState.hdrPlusStreamingBurstHelper = null
+                }
+                if (isTaskStarted.compareAndSet(true, false)) {
+                    HdrPlusRequestManager.onTaskFinished()
+                }
+            }
+            throw ce
         }
     }
 
