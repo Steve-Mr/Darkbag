@@ -768,6 +768,33 @@
     <string name="details_aperture">光圈</string>
     <string name="details_focal_length">焦距</string>
     <string name="details_custom_info">自定义信息</string>
+    <string name="details_section_overview">文件概览</string>
+    <string name="details_section_exposure">光学与曝光</string>
+    <string name="details_section_histogram">RGB 直方图</string>
+    <string name="details_section_recipe">Darkbag 配方与管线</string>
+    <string name="details_section_assets">关联资产与位置</string>
+    <string name="details_focal_short">焦距</string>
+    <string name="details_aperture_short">光圈</string>
+    <string name="details_shutter_short">快门</string>
+    <string name="details_iso_short">ISO</string>
+    <string name="details_color_space">色彩空间</string>
+    <string name="details_recipe_label">胶片配方</string>
+    <string name="details_color_engine">色彩引擎</string>
+    <string name="details_hdr_fusion">HDR+ 融合</string>
+    <string name="details_wb_strategy">白平衡策略</string>
+    <string name="details_adjustments">调色参数</string>
+    <string name="details_location">位置</string>
+    <string name="details_tap_to_copy">点击复制</string>
+    <string name="details_copied">已复制到剪贴板</string>
+    <string name="details_asset_raw">RAW (DNG)</string>
+    <string name="details_asset_jpg">JPEG</string>
+    <string name="details_asset_motion">动态视频</string>
+    <string name="details_asset_derivatives">衍生版本</string>
+    <string name="details_badge_live">动态</string>
+    <string name="details_badge_hf">半格</string>
+    <string name="details_badge_multicam">多摄</string>
+    <string name="details_badge_rawvid">RAWVID</string>
+    <string name="details_badge_cdng">CDNG</string>
 
     <!-- 多摄拼图面板 -->
     <string name="collage_section_layout">布局</string>

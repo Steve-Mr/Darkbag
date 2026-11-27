@@ -354,8 +354,10 @@ class ViewerChromeAndInsetsDelegate(
 
     fun showImageDetails() {
         val adapter = getAdapter() ?: return
-        val uri = adapter.getCurrentUri(binding.imagePager.currentItem) ?: return
-        ViewerMetadataSheet.show(fragmentManager, uri)
+        val pos = binding.imagePager.currentItem
+        val uri = adapter.getCurrentUri(pos) ?: return
+        val group = if (pos in adapter.getGroups().indices) adapter.getGroup(pos) else null
+        ViewerMetadataSheet.show(fragmentManager, uri, group)
     }
 
     fun showMultiCamCollageDialog(group: ImageGroup) {

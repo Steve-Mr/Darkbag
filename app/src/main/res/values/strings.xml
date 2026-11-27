@@ -787,6 +787,33 @@
     <string name="details_aperture">Aperture</string>
     <string name="details_focal_length">Focal Length</string>
     <string name="details_custom_info">Custom Info</string>
+    <string name="details_section_overview">FILE OVERVIEW</string>
+    <string name="details_section_exposure">OPTICS &amp; EXPOSURE</string>
+    <string name="details_section_histogram">RGB HISTOGRAM</string>
+    <string name="details_section_recipe">DARKBAG RECIPE &amp; PIPELINE</string>
+    <string name="details_section_assets">ASSETS &amp; LOCATION</string>
+    <string name="details_focal_short">FOCAL</string>
+    <string name="details_aperture_short">APERTURE</string>
+    <string name="details_shutter_short">SHUTTER</string>
+    <string name="details_iso_short">ISO</string>
+    <string name="details_color_space">Color Space</string>
+    <string name="details_recipe_label">Film Recipe</string>
+    <string name="details_color_engine">Color Engine</string>
+    <string name="details_hdr_fusion">HDR+ Merge</string>
+    <string name="details_wb_strategy">WB Strategy</string>
+    <string name="details_adjustments">Adjustments</string>
+    <string name="details_location">Location</string>
+    <string name="details_tap_to_copy">Tap to copy</string>
+    <string name="details_copied">Copied to clipboard</string>
+    <string name="details_asset_raw">RAW (DNG)</string>
+    <string name="details_asset_jpg">JPEG</string>
+    <string name="details_asset_motion">Motion Video</string>
+    <string name="details_asset_derivatives">Derivatives</string>
+    <string name="details_badge_live">LIVE</string>
+    <string name="details_badge_hf">HALF-FRAME</string>
+    <string name="details_badge_multicam">MULTI-CAM</string>
+    <string name="details_badge_rawvid">RAWVID</string>
+    <string name="details_badge_cdng">CDNG</string>
 
     <!-- Multi-Cam Collage Sheet -->
     <string name="collage_section_layout">Layout</string>
