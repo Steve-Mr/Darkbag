@@ -340,7 +340,7 @@ class CameraSessionArbiter(
     suspend fun closeInactiveSessionsForModeSwitch() {
         closeAllSessions(
             closeMultiCamera = !useMultiCameraRouting,
-            closeConcurrentFront = false,
+            closeConcurrentFront = !useMultiCameraRouting && state.isFrontPipActive,
             releaseSessionController = false
         )
     }
@@ -355,6 +355,9 @@ class CameraSessionArbiter(
         }
         if (closeConcurrentFront && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             concurrentFrontCameraManager?.stop()
+        }
+        if (closeConcurrentFront) {
+            state.isFrontPipActive = false
         }
         closeSingleCameraResources()
         if (releaseSessionController) {

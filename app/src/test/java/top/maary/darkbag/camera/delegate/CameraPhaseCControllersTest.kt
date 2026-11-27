@@ -820,6 +820,61 @@ class CameraPhaseCControllersTest {
         assertTrue(viewModel.uiState.value.isManualIso)
     }
 
+    @Test
+    fun testTierController_proLinkHidesOutsideMultiCamEvenWithCachedManager() {
+        val gateway = FakeCameraGateway()
+        gateway.sessionArbiter.multiCameraManager = MultiCameraCaptureManager(themedContext, testScope)
+        gateway.runtimeState.availableLenses = listOf(
+            LensInfo("0", "0", "0", "1x", 4.5f, 24f, 1.0f, top.maary.darkbag.utils.LensType.WIDE, CameraCharacteristics.LENS_FACING_BACK, true),
+            LensInfo("0", "2", "2", "0.6x", 1.9f, 14f, 0.6f, top.maary.darkbag.utils.LensType.ULTRA_WIDE, CameraCharacteristics.LENS_FACING_BACK, true)
+        )
+        val tierController = CameraTierController(gateway, gateway, gateway)
+
+        // Multi-Camera coordinator supports Pro Link -> btnProLink is VISIBLE
+        gateway.activeCoordinatorOverride = object : CaptureModeCoordinator by StubCoordinator(CaptureMode.MULTI_CAMERA) {
+            override fun supportsProLink(): Boolean = true
+        }
+        tierController.updateProInfoBar()
+        assertEquals(View.VISIBLE, uiBinding.btnProLink.visibility)
+
+        // Switching to NORMAL / HALF_FRAME_SBS hides btnProLink even though multiCameraManager != null
+        gateway.activeCoordinatorOverride = StubCoordinator(CaptureMode.NORMAL)
+        tierController.updateProInfoBar()
+        assertEquals(View.GONE, uiBinding.btnProLink.visibility)
+
+        gateway.activeCoordinatorOverride = StubCoordinator(CaptureMode.HALF_FRAME_SBS)
+        tierController.updateProInfoBar()
+        assertEquals(View.GONE, uiBinding.btnProLink.visibility)
+    }
+
+    @Test
+    fun testThumbnailController_resetsWhenTrackedUriDeletedAndAllowsNewerCapture() {
+        val gateway = FakeCameraGateway()
+        val controller = CameraThumbnailController(gateway, gateway, gateway)
+
+        val deletedUri = Uri.parse("content://media/external/images/media/999999")
+        assertTrue(controller.setGalleryThumbnail(deletedUri.toString(), timestamp = 5_000_000L))
+        ShadowLooperHelper.runMainLooperIdle()
+
+        // Create a real temp file to represent the fallback older image on disk
+        val fallbackFile = java.io.File.createTempFile("DBAG_fallback_", ".jpg", themedContext.cacheDir).apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+            setLastModified(1_000_000L)
+        }
+        try {
+            SettingsRepository.getInstance(themedContext).setLastCaptureUri(Uri.fromFile(fallbackFile).toString())
+            controller.loadLatestThumbnail()
+            Thread.sleep(150)
+            ShadowLooperHelper.runMainLooperIdle()
+
+            // Fallback older image replaced the deleted URI, and a subsequent capture is not blocked
+            val newerUri = Uri.parse("content://media/external/images/media/1000001")
+            assertTrue(controller.setGalleryThumbnail(newerUri.toString(), timestamp = System.currentTimeMillis()))
+        } finally {
+            fallbackFile.delete()
+        }
+    }
+
     // =========================================================================
     // Test Doubles (using the 3 consolidated gateways)
     // =========================================================================

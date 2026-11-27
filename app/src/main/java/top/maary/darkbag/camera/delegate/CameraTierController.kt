@@ -472,8 +472,7 @@ class CameraTierController(
 
             // Multi-Camera Link Button (Only visible if coordinator supports link or front PiP is active)
             val isMultiCamActive = (coordinator.activeCoordinator?.supportsProLink() == true) ||
-                state.isFrontPipActive ||
-                (state.availableLenses.size > 1 && env.sessionArbiter.multiCameraManager != null)
+                state.isFrontPipActive
             binding.btnProLink.visibility = if (isMultiCamActive) View.VISIBLE else View.GONE
             (binding.pillEv.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
                 val targetMarginEnd = if (isMultiCamActive) (5f * density).roundToInt() else 0
