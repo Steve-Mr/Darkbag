@@ -144,54 +144,59 @@
                 app:iconPadding="0dp"
                 app:iconTint="?attr/colorOnErrorContainer"
                 app:backgroundTint="?attr/colorErrorContainer"
-                app:layout_constraintEnd_toStartOf="@id/btn_action_main"
+                app:layout_constraintEnd_toStartOf="@id/split_action"
                 app:layout_constraintTop_toTopOf="parent"
                 app:layout_constraintBottom_toBottomOf="parent" />
 
-            <!-- Top Right: Bento Action Tile -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_action_main"
-                style="@style/Widget.Material3.Button.TonalButton"
+            <!-- Top Right: Material 3 Expressive Split Action Button -->
+            <com.google.android.material.button.MaterialSplitButton
+                android:id="@+id/split_action"
                 android:layout_width="wrap_content"
                 android:layout_height="42dp"
-                android:minWidth="44dp"
-                android:insetLeft="0dp"
-                android:insetTop="0dp"
-                android:insetRight="0dp"
-                android:insetBottom="0dp"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                app:cornerRadius="18dp"
-                app:icon="@drawable/ic_share"
-                app:iconSize="18dp"
-                app:iconGravity="textStart"
-                app:backgroundTint="?attr/colorPrimaryContainer"
-                android:textColor="?attr/colorOnPrimaryContainer"
-                app:iconTint="?attr/colorOnPrimaryContainer"
-                tools:text="SHARE"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:contentDescription="@string/share_button_alt"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintTop_toTopOf="parent"
-                app:layout_constraintBottom_toBottomOf="parent" />
+                app:layout_constraintBottom_toBottomOf="parent">
 
-            <!-- Hidden dummy views for backwards compatibility -->
-            <View
-                android:id="@+id/split_action"
-                android:layout_width="0dp"
-                android:layout_height="0dp"
-                android:visibility="gone"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toTopOf="parent" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_action_main"
+                    style="?attr/materialSplitButtonLeadingFilledTonalStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="42dp"
+                    android:minWidth="44dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="8dp"
+                    app:icon="@drawable/ic_share"
+                    app:iconSize="18dp"
+                    app:iconPadding="4dp"
+                    app:iconGravity="textStart"
+                    app:backgroundTint="?attr/colorPrimaryContainer"
+                    android:textColor="?attr/colorOnPrimaryContainer"
+                    app:iconTint="?attr/colorOnPrimaryContainer"
+                    tools:text="SHARE"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:contentDescription="@string/share_button_alt" />
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_action_menu"
-                android:layout_width="0dp"
-                android:layout_height="0dp"
-                android:visibility="gone"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toTopOf="parent" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_action_menu"
+                    style="?attr/materialSplitButtonIconFilledTonalStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="42dp"
+                    android:minWidth="36dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
+                    android:checkable="true"
+                    android:contentDescription="@string/action_export_options"
+                    app:icon="@drawable/m3_split_button_chevron_avd"
+                    app:iconTint="?attr/colorOnPrimaryContainer"
+                    app:backgroundTint="?attr/colorPrimaryContainer" />
+            </com.google.android.material.button.MaterialSplitButton>
 
         </androidx.constraintlayout.widget.ConstraintLayout>
     </com.google.android.material.card.MaterialCardView>

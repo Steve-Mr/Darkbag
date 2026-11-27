@@ -266,35 +266,33 @@ class MediaStoreViewerStrategy : ViewerMediaStrategy {
         context: Context,
         anchor: View,
         currentGroup: ImageGroup,
-        onAction: (ViewerSaveAction) -> Unit
+        onAction: (ViewerSaveAction) -> Unit,
+        onDismiss: () -> Unit
     ) {
-        val popup = PopupMenu(context, anchor)
-        popup.menu.add(0, 1, 0, context.getString(R.string.save_replacement)).apply {
-            setIcon(R.drawable.ic_save)
-        }
-        popup.menu.add(0, 2, 0, context.getString(R.string.save_as_new)).apply {
-            setIcon(R.drawable.ic_save_as)
-        }
-        popup.menu.add(0, 3, 0, context.getString(R.string.share_as_tiff)).apply {
-            setIcon(R.drawable.ic_photo)
-        }
-
-        try {
-            val fieldMPopup = PopupMenu::class.java.getDeclaredField("mPopup")
-            fieldMPopup.isAccessible = true
-            val mPopup = fieldMPopup.get(popup)
-            mPopup.javaClass.getDeclaredMethod("setForceShowIcon", Boolean::class.java).invoke(mPopup, true)
-        } catch (_: Exception) {}
-
-        popup.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                1 -> onAction(ViewerSaveAction.SAVE_REPLACE)
-                2 -> onAction(ViewerSaveAction.SAVE_AS_NEW)
-                3 -> onAction(ViewerSaveAction.SHARE_TIFF)
-            }
-            true
-        }
-        popup.show()
+        val items = listOf(
+            top.maary.darkbag.viewer.chrome.BentoViewerActionMenu.ActionItem(
+                id = 1,
+                title = context.getString(R.string.save_replacement),
+                iconRes = R.drawable.ic_save,
+                role = top.maary.darkbag.viewer.chrome.BentoViewerActionMenu.Role.HERO_GRID,
+                onClick = { onAction(ViewerSaveAction.SAVE_REPLACE) }
+            ),
+            top.maary.darkbag.viewer.chrome.BentoViewerActionMenu.ActionItem(
+                id = 2,
+                title = context.getString(R.string.save_as_new),
+                iconRes = R.drawable.ic_save_as,
+                role = top.maary.darkbag.viewer.chrome.BentoViewerActionMenu.Role.HERO_GRID,
+                onClick = { onAction(ViewerSaveAction.SAVE_AS_NEW) }
+            ),
+            top.maary.darkbag.viewer.chrome.BentoViewerActionMenu.ActionItem(
+                id = 3,
+                title = context.getString(R.string.share_as_tiff),
+                iconRes = R.drawable.ic_photo,
+                role = top.maary.darkbag.viewer.chrome.BentoViewerActionMenu.Role.ROW,
+                onClick = { onAction(ViewerSaveAction.SHARE_TIFF) }
+            )
+        )
+        top.maary.darkbag.viewer.chrome.BentoViewerActionMenu(context, items, onDismiss).show(anchor)
     }
 
     override fun handleDiscard(

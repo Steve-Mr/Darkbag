@@ -50,17 +50,17 @@ class PlaygroundLayoutAndTopBarTest {
         val btnBack = binding.btnBack
         val btnGalleryPill = binding.btnGalleryPill
         val btnDelete = binding.btnDelete
-        val btnActionMain = binding.btnActionMain
+        val splitAction = binding.splitAction
 
         val backParams = btnBack.layoutParams as ConstraintLayout.LayoutParams
         val pillParams = btnGalleryPill.layoutParams as ConstraintLayout.LayoutParams
         val deleteParams = btnDelete.layoutParams as ConstraintLayout.LayoutParams
-        val actionParams = btnActionMain.layoutParams as ConstraintLayout.LayoutParams
+        val actionParams = splitAction.layoutParams as ConstraintLayout.LayoutParams
 
         // Verify start/end anchor constraints
         assertEquals(ConstraintLayout.LayoutParams.PARENT_ID, backParams.startToStart)
         assertEquals(ConstraintLayout.LayoutParams.PARENT_ID, actionParams.endToEnd)
-        assertEquals(btnActionMain.id, deleteParams.endToStart)
+        assertEquals(splitAction.id, deleteParams.endToStart)
 
         assertEquals(btnBack.id, pillParams.startToEnd)
         assertEquals(btnDelete.id, pillParams.endToStart)
@@ -69,9 +69,9 @@ class PlaygroundLayoutAndTopBarTest {
         btnGalleryPill.visibility = View.GONE
         assertEquals(View.GONE, btnGalleryPill.visibility)
 
-        // In ConstraintLayout, hiding btnGalleryPill does not affect btnDelete or btnActionMain
+        // In ConstraintLayout, hiding btnGalleryPill does not affect btnDelete or splitAction
         assertEquals(ConstraintLayout.LayoutParams.PARENT_ID, actionParams.endToEnd)
-        assertEquals(btnActionMain.id, deleteParams.endToStart)
+        assertEquals(splitAction.id, deleteParams.endToStart)
     }
 
     @Test

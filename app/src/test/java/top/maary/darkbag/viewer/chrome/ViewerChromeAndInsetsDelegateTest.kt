@@ -173,4 +173,52 @@ class ViewerChromeAndInsetsDelegateTest {
         assertEquals(2, resetCount)
         assertEquals(1, backNavigateCount)
     }
+
+    @Test
+    fun testSplitActionMenuOpensBentoTrayAndResetsCheckedOnDismiss() {
+        val activity = Robolectric.buildActivity(FragmentActivity::class.java).setup().get()
+        activity.setTheme(R.style.AppTheme)
+        val themedBinding = FragmentImageViewerBinding.inflate(LayoutInflater.from(activity))
+        themedBinding.imagePager.adapter = adapter
+        var detailsClicked = false
+        val delegate = ViewerChromeAndInsetsDelegate(
+            context = activity,
+            binding = themedBinding,
+            fragmentManager = activity.supportFragmentManager,
+            getAdapter = { adapter },
+            isGallerySupported = { true },
+            isAdjusted = { false },
+            isEditingAdjustments = { false },
+            isSaving = { false },
+            isLutListVisible = { false },
+            onBackNavigate = {},
+            onDismissPillPopup = { false },
+            onExitEditMode = {},
+            onEnterEditMode = {},
+            onResetAdjustments = {},
+            onSaveEdit = {},
+            onShowSaveMenu = {},
+            onOpenExportHub = { detailsClicked = true },
+            onPerformShare = {},
+            onPerformShareAsTiff = {},
+            onShowLutMenu = {},
+            onShowDeleteDialog = {},
+            onUpdateBackPressedEnabled = {}
+        )
+        delegate.setupActionButtons()
+        themedBinding.imagePager.setCurrentItem(0, false)
+
+        themedBinding.btnActionMenu.performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        assertTrue(themedBinding.btnActionMenu.isChecked)
+
+        val popup = org.robolectric.Shadows.shadowOf(activity.application).latestPopupWindow
+        assertNotNull(popup)
+        assertTrue(popup.isShowing)
+
+        popup.dismiss()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        assertFalse(themedBinding.btnActionMenu.isChecked)
+        assertFalse(detailsClicked)
+    }
 }
