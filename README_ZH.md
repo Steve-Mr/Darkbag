@@ -5,11 +5,11 @@
 **Darkbag** 是一款基于 Kotlin、Camera2、OpenGL ES / EGL 以及 C++ / Halide 原生管线构建的实验性 Android 计算摄影相机与 RAW 暗房应用。
 
 > [!WARNING]
-> **实验性与“按现状提供（AS IS）”声明**
+> **实验性与“按现状提供（AS IS）”声明**  
 > Darkbag 是一个处于探索阶段的个人实验性项目，按 **“AS IS”（按现状提供）** 原则分发，不提供任何形式的稳定性或适用性担保。由于不同 Android 机型在 Camera2 HAL、RAW 传感器元数据、OpenCL/Vulkan 驱动及 MediaCodec 实现上差异巨大，应用可能出现崩溃、偏色或机型兼容问题。请勿将其作为不可重拍重要场合的主力相机。
 
 > [!NOTE]
-> **项目起源与 LLM 辅助开发声明**
+> **项目起源与 LLM 辅助开发声明**  
 > 本项目最早 Fork 自 Google 官方的 [android/camera-samples](https://github.com/android/camera-samples)（`CameraXBasic`）示例仓库演变而来。自 Fork 之后，项目的绝大部分架构演进、功能实现、原生算法管线与界面代码几乎全部依靠大语言模型与 AI 编程工具完成，涉及的服务包括 **Jules**、**Antigravity**、**DeepSeek** 等。
 
 ---
