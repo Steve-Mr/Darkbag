@@ -7,6 +7,7 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
 import android.media.Image
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -55,7 +56,7 @@ internal class SingleRawCaptureExecutor(
         val handler = env.sessionArbiter.camera2Handler ?: run { onAbortCapture(); return }
 
         HdrPlusRequestManager.onTaskStarted()
-        var taskStarted = true
+        val taskStarted = AtomicBoolean(true)
         val imageClaimed = AtomicBoolean(false)
         var watchdog: Job? = null
 
@@ -113,8 +114,7 @@ internal class SingleRawCaptureExecutor(
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to process Camera2 image", e)
                     image.close()
-                    if (taskStarted) {
-                        taskStarted = false
+                    if (taskStarted.compareAndSet(true, false)) {
                         HdrPlusRequestManager.onTaskFinished()
                     }
                     onNotifySinkFailure(appContext, sink, hfMetadata, e)
@@ -125,9 +125,8 @@ internal class SingleRawCaptureExecutor(
 
             val router = env.sessionArbiter.rawFrameRouter
             if (router != null) {
-                if (!router.beginCapture(::handleImage)) {
-                    if (taskStarted) {
-                        taskStarted = false
+                if (!router.beginCapture(::handleImage, requireCaptureStarted = env.sessionArbiter.needsFreshCaptureTimestampFilter())) {
+                    if (taskStarted.compareAndSet(true, false)) {
                         HdrPlusRequestManager.onTaskFinished()
                     }
                     onAbortCapture()
@@ -136,8 +135,7 @@ internal class SingleRawCaptureExecutor(
             } else {
                 reader.setOnImageAvailableListener({ r ->
                     val image = r.acquireLatestImage() ?: run {
-                        if (taskStarted) {
-                            taskStarted = false
+                        if (taskStarted.compareAndSet(true, false)) {
                             HdrPlusRequestManager.onTaskFinished()
                         }
                         onAbortCapture()
@@ -167,24 +165,33 @@ internal class SingleRawCaptureExecutor(
                 ) {
                     onRecordCaptureResult(result)
                 }
-            }, handler)
+            }, router?.callbackHandler ?: handler)
 
             watchdog = env.lifecycleScope.launch(Dispatchers.Main) {
-                delay(4000)
-                if (!imageClaimed.compareAndSet(false, true)) return@launch
-                Log.e(TAG, "Single capture timed out waiting for an accepted RAW image")
-                env.sessionArbiter.rawFrameRouter?.endCapture()
-                if (taskStarted) {
-                    taskStarted = false
-                    HdrPlusRequestManager.onTaskFinished()
+                try {
+                    delay(4000)
+                    if (!imageClaimed.compareAndSet(false, true)) return@launch
+                    Log.e(TAG, "Single capture timed out waiting for an accepted RAW image")
+                    env.sessionArbiter.rawFrameRouter?.endCapture()
+                    if (taskStarted.compareAndSet(true, false)) {
+                        HdrPlusRequestManager.onTaskFinished()
+                    }
+                    onAbortCapture()
+                } catch (ce: CancellationException) {
+                    if (imageClaimed.compareAndSet(false, true)) {
+                        env.sessionArbiter.rawFrameRouter?.endCapture()
+                        if (taskStarted.compareAndSet(true, false)) {
+                            HdrPlusRequestManager.onTaskFinished()
+                        }
+                    }
+                    throw ce
                 }
-                onAbortCapture()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Camera2 capture failed", e)
             watchdog?.cancel()
             env.sessionArbiter.rawFrameRouter?.endCapture()
-            if (taskStarted) {
+            if (taskStarted.compareAndSet(true, false)) {
                 HdrPlusRequestManager.onTaskFinished()
             }
             onNotifySinkFailure(appContext, sink, hfMetadata, e)

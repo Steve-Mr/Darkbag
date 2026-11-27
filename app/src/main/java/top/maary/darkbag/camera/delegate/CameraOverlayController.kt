@@ -184,10 +184,7 @@ class CameraOverlayController(
                 vfBinding.viewFinder.translationX = 0f
                 vfBinding.viewFinder.translationY = 0f
 
-                if (uiBinding.photoViewButton.visibility != View.VISIBLE) {
-                    uiBinding.photoViewButton.visibility = View.VISIBLE
-                    uiBinding.photoViewButton.alpha = 1f
-                }
+                ui.refreshThumbnailVisibility()
 
                 return@post
             }
@@ -203,8 +200,7 @@ class CameraOverlayController(
             if (step == 1) {
                 uiBinding.photoViewButton.visibility = View.INVISIBLE
             } else if (!state.isProcessing) {
-                uiBinding.photoViewButton.visibility = View.VISIBLE
-                uiBinding.photoViewButton.alpha = 1f
+                ui.refreshThumbnailVisibility()
             }
 
             val stageW = vfBinding.viewFinderStage.width.toFloat()

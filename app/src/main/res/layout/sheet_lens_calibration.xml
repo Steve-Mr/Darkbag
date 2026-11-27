@@ -28,7 +28,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="自定义镜头畸变标定"
+            android:text="@string/lens_calibration_title"
             android:textAppearance="?attr/textAppearanceTitleMedium"
             android:textStyle="bold"
             android:textColor="?attr/colorOnSurface" />
@@ -98,7 +98,7 @@
                     app:icon="@drawable/ic_grid_view"
                     app:iconTint="#FFFFFF"
                     app:iconSize="18dp"
-                    android:contentDescription="网格切换" />
+                    android:contentDescription="@string/lens_calibration_toggle_grid" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_toggle_compare"
@@ -108,7 +108,7 @@
                     app:icon="@drawable/ic_layers"
                     app:iconTint="#FFFFFF"
                     app:iconSize="18dp"
-                    android:contentDescription="长按或点击对比" />
+                    android:contentDescription="@string/lens_calibration_toggle_compare" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_pick_photo"
@@ -118,7 +118,7 @@
                     app:icon="@drawable/ic_photo"
                     app:iconTint="#FFFFFF"
                     app:iconSize="18dp"
-                    android:contentDescription="选择照片" />
+                    android:contentDescription="@string/lens_calibration_pick_photo" />
             </LinearLayout>
         </FrameLayout>
     </com.google.android.material.card.MaterialCardView>
@@ -156,7 +156,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="DISTORTION COEFFICIENT K1"
+                        android:text="@string/lens_calibration_k1_label"
                         android:textSize="9sp"
                         android:textStyle="bold"
                         android:fontFamily="monospace"
@@ -168,7 +168,7 @@
                         android:id="@+id/tv_k1_value"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="0.000 · 原始"
+                        android:text="@string/lens_calibration_k1_original"
                         android:textSize="14sp"
                         android:textStyle="bold"
                         android:textColor="?attr/colorOnSurface"
@@ -203,7 +203,7 @@
                     app:backgroundTint="?attr/colorSurface"
                     android:textColor="?attr/colorOnSurface"
                     app:strokeWidth="0dp"
-                    android:text="重置"
+                    android:text="@string/lens_calibration_reset"
                     android:textSize="12sp" />
 
                 <com.google.android.material.button.MaterialButton
@@ -218,7 +218,7 @@
                     app:backgroundTint="?attr/colorPrimary"
                     android:textColor="?attr/colorOnPrimary"
                     app:strokeWidth="0dp"
-                    android:text="保存标定配置"
+                    android:text="@string/lens_calibration_apply_save"
                     android:textSize="12sp"
                     android:textStyle="bold" />
             </top.maary.darkbag.ui.bento.BentoRowLayout>

@@ -175,7 +175,20 @@ open class ImageViewerFragment : Fragment() {
                 backdropView = backdrop
             )
             if (::editorPanelDelegate.isInitialized && editorPanelDelegate.dismissPillPopup()) return
-            if (isEditingAdjustments) exitEditMode(apply = false) else if (isAdjusted) chromeDelegate.showDiscardChangesDialog()
+            when {
+                isAdjusted -> {
+                    val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0) {
+                        adapter.getGroup(binding.imagePager.currentItem)
+                    } else null
+                    if (currentGroup != null && mediaStrategy.handleDiscard(currentGroup, adapter.getGroups(), arguments)) {
+                        resetAdjustments()
+                        findNavController().navigateUp()
+                    } else {
+                        chromeDelegate.showDiscardChangesDialog()
+                    }
+                }
+                isEditingAdjustments -> exitEditMode(apply = false)
+            }
         }
     }
 
@@ -230,7 +243,8 @@ open class ImageViewerFragment : Fragment() {
                 adapter.cycleDerivativeVersion(binding.imagePager.currentItem)
                 updateControlsVisibility()
             },
-            onMotionLiveToggleRequested = { mediaPreloadDelegate.handleMotionPhotoIndicatorTapped(binding.imagePager.currentItem) }
+            onMotionLiveToggleRequested = { mediaPreloadDelegate.handleMotionPhotoIndicatorTapped(binding.imagePager.currentItem) },
+            onMotionStudioRequested = { openMotionStudio(it) }
         )
 
         chromeDelegate = ViewerChromeAndInsetsDelegate(
@@ -247,7 +261,17 @@ open class ImageViewerFragment : Fragment() {
             onPerformShare = { performShare() }, onPerformShareAsTiff = { performShareAsTiff() },
             onShowLutMenu = { editorPanelDelegate.showLutMenu(it) },
             onShowDeleteDialog = { showDeleteDialog(it) },
-            onUpdateBackPressedEnabled = { backPressedCallback.isEnabled = it }
+            onUpdateBackPressedEnabled = { backPressedCallback.isEnabled = it },
+            shouldNavigateBackOnDiscard = {
+                if (::adapter.isInitialized && adapter.itemCount > 0) {
+                    mediaStrategy.handleDiscard(
+                        adapter.getGroup(binding.imagePager.currentItem),
+                        adapter.getGroups(),
+                        arguments
+                    )
+                } else false
+            },
+            onOpenMotionStudio = { openMotionStudio(it) }
         )
 
         mediaPreloadDelegate = ViewerMediaPreloadDelegate(
@@ -285,17 +309,33 @@ open class ImageViewerFragment : Fragment() {
             onMarkAdjusted = { markAdjusted() },
             onViewportPaddingRequested = { chromeDelegate.updateViewportPadding() },
             onEditStateChanged = { isEditing, isAdjustedState ->
+                val stateChanged = (this.isEditingAdjustments != isEditing) || (this.isAdjusted != isAdjustedState)
                 this.isEditingAdjustments = isEditing
                 this.isAdjusted = isAdjustedState
                 if (::adapter.isInitialized) {
                     binding.imagePager.isUserInputEnabled = !isEditing && !isAdjustedState
                     adapter.setFormatSwitcherPersistentHidden(isEditing || isAdjustedState)
                 }
-                chromeDelegate.updateSplitButtons()
-                chromeDelegate.updateToolbarIcon()
-                chromeDelegate.updateBackPressedCallbackState()
+                binding.viewerBentoDeck.visibility = if (chromeDelegate.isUiVisible && !isEditing) View.VISIBLE else View.GONE
+                if (stateChanged) {
+                    updateControlsVisibility()
+                } else {
+                    chromeDelegate.updateSplitButtons()
+                    chromeDelegate.updateToolbarIcon()
+                    chromeDelegate.updateBackPressedCallbackState()
+                }
             },
-            onBackPressedCallbackStateChanged = { chromeDelegate.updateBackPressedCallbackState() }
+            onBackPressedCallbackStateChanged = { chromeDelegate.updateBackPressedCallbackState() },
+            onShowRecipeMenu = {
+                if (::adapter.isInitialized && adapter.itemCount > 0) {
+                    editorPanelDelegate.showLutMenu(adapter.getGroup(binding.imagePager.currentItem))
+                }
+            },
+            onHalfFrameOverlayChanged = { active, isTB, selectedIdx ->
+                if (::adapter.isInitialized && adapter.itemCount > 0) {
+                    adapter.updateHalfFrameEditOverlay(binding.imagePager.currentItem, active, isTB, selectedIdx)
+                }
+            }
         )
 
         bentoDeckCoordinator.setupListeners()
@@ -384,10 +424,23 @@ open class ImageViewerFragment : Fragment() {
                 onRefreshGroup = { mediaPreloadDelegate.refreshCurrentGroupAndAdapter(it) }
             )
         }
+        childFragmentManager.setFragmentResultListener(
+            top.maary.darkbag.viewer.motion.MotionPhotoStudioSheet.RESULT_KEY,
+            viewLifecycleOwner
+        ) { _, bundle ->
+            val savedUri = bundle.getString(top.maary.darkbag.viewer.motion.MotionPhotoStudioSheet.RESULT_SAVED_URI)
+            if (::mediaStrategy.isInitialized && !mediaStrategy.isSandbox) {
+                repository.invalidateCache(clearStale = true)
+                loadImages(targetUri = savedUri ?: args.initialUri, forceRefresh = true)
+            }
+        }
     }
 
     private fun attachInitialAdapter(groups: List<ImageGroup>, disableInputWhenAdjusted: Boolean = false) {
         adapter = mediaPreloadDelegate.createViewerAdapter(groups)
+        adapter.onHalfFrameOverlayTapped = { idx ->
+            editorViewModel.processIntent(DarkroomEditorUserIntent.SelectHalfFrameIndex(idx))
+        }
         binding.imagePager.adapter = adapter
         if (disableInputWhenAdjusted) binding.imagePager.isUserInputEnabled = !isAdjusted
         chromeDelegate.setupActionButtons()
@@ -474,12 +527,42 @@ open class ImageViewerFragment : Fragment() {
         if (cur !in 0 until adapter.itemCount) return
         val currentGroup = adapter.getGroup(cur)
 
-        updateFormatBentoRow()
         val isHalfFrame = currentGroup.isHalfFrame()
-        binding.btnSeparateDng.visibility = if (isHalfFrame && adapter.getSelectedFormat(cur) == "DNG") View.VISIBLE else View.GONE
-        binding.btnAdjustTofu.visibility = if (isAdjusted || !isHalfFrame) View.GONE else View.VISIBLE
+        val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
+        val canEdit = ((currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial) || isRawVideo
+
+        val showDeck = chromeDelegate.isUiVisible && !isEditingAdjustments
+        binding.viewerBentoDeck.visibility = if (showDeck) View.VISIBLE else View.GONE
+        binding.btnLogCurve.isEnabled = canEdit
+        binding.btnLogCurve.isClickable = canEdit
+        binding.btnLogCurve.alpha = if (canEdit) 1.0f else 0.65f
+        binding.btn3dLut.isEnabled = canEdit
+        binding.btn3dLut.isClickable = canEdit
+        binding.btn3dLut.alpha = if (canEdit) 1.0f else 0.65f
+        binding.btnAdjustTofu.visibility = View.VISIBLE
+        binding.btnAdjustTofu.isEnabled = canEdit
+        binding.btnAdjustTofu.isClickable = canEdit
+        binding.btnAdjustTofu.alpha = if (canEdit) 1.0f else 0.65f
+
+        if (canEdit && currentEditConfig == null) {
+            prepareEditConfig(currentGroup)
+        }
+
+        if (canEdit && isHalfFrame && !currentGroup.isPartial) {
+            binding.hfExtraControls.visibility = View.VISIBLE
+            val cfg = currentEditConfig ?: currentGroup.editConfig ?: EditConfig(hfLayout = currentGroup.hfLayout)
+            val activeLayout = cfg.hfLayout ?: currentGroup.hfLayout
+            val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
+            editorPanelDelegate.updateEffectsButtons(cfg, isTB)
+        } else {
+            binding.hfExtraControls.visibility = View.GONE
+        }
+
+        updateFormatBentoRow()
+        binding.btnSeparateDng.visibility = if (isHalfFrame && adapter.getSelectedFormat(cur) == ImageViewerAdapter.FORMAT_DNG) View.VISIBLE else View.GONE
         chromeDelegate.updateSplitButtons()
         chromeDelegate.updateToolbarIcon()
+        chromeDelegate.updateBackPressedCallbackState()
     }
 
     protected fun updateFormatBentoRow() {
@@ -531,6 +614,7 @@ open class ImageViewerFragment : Fragment() {
 
     protected fun resetAdjustments() {
         isAdjusted = false
+        isEditingAdjustments = false
         editorPanelDelegate.exitEditMode(apply = false)
         binding.imagePager.isUserInputEnabled = true
         adapter.setFormatSwitcherPersistentHidden(false)
@@ -544,6 +628,7 @@ open class ImageViewerFragment : Fragment() {
         adapter.notifyItemChanged(cur)
         prepareEditConfig(adapter.getGroup(cur))
         updateControlsVisibility()
+        chromeDelegate.updateBackPressedCallbackState()
     }
 
     private fun openExportHub() {
@@ -551,6 +636,12 @@ open class ImageViewerFragment : Fragment() {
         val cur = binding.imagePager.currentItem
         val frameInfo = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(cur)
         exportCoordinator.openExportHub(adapter.getGroup(cur), currentEditConfig, frameInfo?.first ?: 0, repository, childFragmentManager)
+    }
+
+    private fun openMotionStudio(group: ImageGroup) {
+        if (!group.isMotionPhoto) return
+        if (::adapter.isInitialized) adapter.stopAllMotionVideos()
+        top.maary.darkbag.viewer.motion.MotionPhotoStudioSheet.show(childFragmentManager, group)
     }
 
     private fun performShare() {

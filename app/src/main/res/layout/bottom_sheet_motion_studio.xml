@@ -1,0 +1,310 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="16dp">
+
+        <com.google.android.material.bottomsheet.BottomSheetDragHandleView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <!-- Header + Relative Time Pill -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="4dp">
+
+            <TextView
+                style="@style/TextAppearance.Material3.TitleMedium"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/motion_studio_title"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_time_badge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_bento_badge_primary"
+                android:fontFamily="monospace"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="3dp"
+                android:textColor="?attr/colorPrimary"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                tools:text="★ 0.00s" />
+        </LinearLayout>
+
+        <!-- Live Video Preview Card -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_preview_stage"
+            android:layout_width="match_parent"
+            android:layout_height="240dp"
+            android:layout_marginBottom="10dp"
+            app:cardBackgroundColor="@android:color/black"
+            app:cardCornerRadius="18dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="0dp">
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent">
+
+                <TextureView
+                    android:id="@+id/texture_preview"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_play_pause"
+                    style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:layout_gravity="bottom|end"
+                    android:layout_margin="10dp"
+                    app:backgroundTint="#99000000"
+                    app:icon="@drawable/ic_play_arrow"
+                    app:iconSize="20dp"
+                    app:iconTint="@android:color/white" />
+
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/loading_indicator"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:indeterminate="true" />
+            </FrameLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- 35mm Filmstrip Scrubber + Step Controls -->
+        <top.maary.darkbag.ui.bento.BentoTrayCard
+            style="@style/Widget.Darkbag.BentoTray"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            app:bentoContainerRole="surfaceContainerHigh"
+            app:cardCornerRadius="22dp"
+            app:contentPadding="10dp"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <top.maary.darkbag.viewer.motion.MotionFilmstripScrubberView
+                    android:id="@+id/filmstrip_scrubber"
+                    android:layout_width="match_parent"
+                    android:layout_height="68dp"
+                    android:layout_marginBottom="8dp" />
+
+                <top.maary.darkbag.ui.bento.BentoRowLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_step_back"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="@string/motion_studio_step_back"
+                        android:textColor="?attr/colorOnSurface"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        app:backgroundTint="?attr/colorSurface"
+                        app:cornerRadius="14dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_jump_shutter"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1.2"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="@string/motion_studio_shutter"
+                        android:textColor="?attr/colorOnPrimaryContainer"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        app:backgroundTint="?attr/colorPrimaryContainer"
+                        app:cornerRadius="14dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_step_forward"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="@string/motion_studio_step_forward"
+                        android:textColor="?attr/colorOnSurface"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        app:backgroundTint="?attr/colorSurface"
+                        app:cornerRadius="14dp" />
+                </top.maary.darkbag.ui.bento.BentoRowLayout>
+            </LinearLayout>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
+
+        <!-- Row 1: Still Frame Export Matrix -->
+        <top.maary.darkbag.ui.bento.BentoTrayCard
+            style="@style/Widget.Darkbag.BentoTray"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            app:bentoContainerRole="primaryContainer"
+            app:cardCornerRadius="22dp"
+            app:contentPadding="10dp"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:paddingHorizontal="4dp"
+                    android:text="@string/motion_studio_frame_section"
+                    android:textColor="?attr/colorOnPrimaryContainer"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold" />
+
+                <top.maary.darkbag.ui.bento.BentoRowLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_save_frame"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="@string/motion_studio_save_frame"
+                        android:textColor="?attr/colorOnSurface"
+                        android:textSize="11.5sp"
+                        android:textStyle="bold"
+                        app:backgroundTint="?attr/colorSurface"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_save"
+                        app:iconGravity="textStart"
+                        app:iconSize="16dp"
+                        app:iconTint="?attr/colorOnSurface" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_share_frame"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="@string/motion_studio_share_frame"
+                        android:textColor="?attr/colorOnSurface"
+                        android:textSize="11.5sp"
+                        android:textStyle="bold"
+                        app:backgroundTint="?attr/colorSurface"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_share"
+                        app:iconGravity="textStart"
+                        app:iconSize="16dp"
+                        app:iconTint="?attr/colorOnSurface" />
+                </top.maary.darkbag.ui.bento.BentoRowLayout>
+            </LinearLayout>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
+
+        <!-- Row 2: Motion Clip MP4 Export Matrix -->
+        <top.maary.darkbag.ui.bento.BentoTrayCard
+            style="@style/Widget.Darkbag.BentoTray"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:bentoContainerRole="secondaryContainer"
+            app:cardCornerRadius="22dp"
+            app:contentPadding="10dp"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:paddingHorizontal="4dp"
+                    android:text="@string/motion_studio_video_section"
+                    android:textColor="?attr/colorOnSecondaryContainer"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold" />
+
+                <top.maary.darkbag.ui.bento.BentoRowLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_save_video"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="@string/motion_studio_save_video"
+                        android:textColor="?attr/colorOnSurface"
+                        android:textSize="11.5sp"
+                        android:textStyle="bold"
+                        app:backgroundTint="?attr/colorSurface"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_save"
+                        app:iconGravity="textStart"
+                        app:iconSize="16dp"
+                        app:iconTint="?attr/colorOnSurface" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_share_video"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="@string/motion_studio_share_video"
+                        android:textColor="?attr/colorOnSurface"
+                        android:textSize="11.5sp"
+                        android:textStyle="bold"
+                        app:backgroundTint="?attr/colorSurface"
+                        app:cornerRadius="14dp"
+                        app:icon="@drawable/ic_share"
+                        app:iconGravity="textStart"
+                        app:iconSize="16dp"
+                        app:iconTint="?attr/colorOnSurface" />
+                </top.maary.darkbag.ui.bento.BentoRowLayout>
+            </LinearLayout>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

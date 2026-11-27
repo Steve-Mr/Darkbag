@@ -76,6 +76,7 @@ interface CameraUiHost {
     fun setGalleryThumbnail(filename: String?, timestamp: Long = System.currentTimeMillis()): Boolean
     fun setGalleryThumbnailBitmap(uri: Uri, bitmap: android.graphics.Bitmap?, timestamp: Long = System.currentTimeMillis()): Boolean =
         setGalleryThumbnail(uri.toString(), timestamp)
+    fun refreshThumbnailVisibility() {}
     fun onSessionConfigured()
     fun triggerTapToFocus(x: Float, y: Float)
     fun unlockFocusAndMetering()

@@ -58,6 +58,69 @@ class RawFrameRouterTest {
             reader.close()
         }
     }
+
+    @Test
+    fun preStartImageBufferedAndDeliveredOnCaptureStarted() {
+        val thread = android.os.HandlerThread("test-raw-router").apply { start() }
+        val bgHandler = Handler(thread.looper)
+        val reader = ImageReader.newInstance(64, 64, android.graphics.PixelFormat.RGBA_8888, 4)
+        val router = RawFrameRouter(
+            reader = reader,
+            handler = bgHandler,
+            resultLookup = { null }
+        )
+        val delivered = java.util.concurrent.CopyOnWriteArrayList<Long>()
+        val deliveredLatch = java.util.concurrent.CountDownLatch(1)
+
+        try {
+            assertTrue(router.beginCapture(consumer = { img ->
+                delivered.add(img.timestamp)
+                img.close()
+                deliveredLatch.countDown()
+            }, requireCaptureStarted = true))
+
+            // Post a frame before onCaptureStarted arrives; listener buffers it instead of dropping.
+            val canvas1 = reader.surface.lockCanvas(null)
+            reader.surface.unlockCanvasAndPost(canvas1)
+            Shadows.shadowOf(thread.looper).idle()
+            assertEquals(0, delivered.size)
+
+            // Fire onCaptureStarted with timestamp=0L so the buffered frame (ts >= 0L) is flushed.
+            router.onCaptureStarted(0L)
+            Shadows.shadowOf(thread.looper).idle()
+            assertTrue(deliveredLatch.await(1, java.util.concurrent.TimeUnit.SECONDS))
+            assertEquals(1, delivered.size)
+
+            // Verify stale pre-start frame (ts < captureStartTimestampNs) is closed and NOT delivered.
+            assertTrue(router.beginCapture(consumer = { img ->
+                delivered.add(img.timestamp)
+                img.close()
+            }, requireCaptureStarted = true))
+            val canvas2 = reader.surface.lockCanvas(null)
+            reader.surface.unlockCanvasAndPost(canvas2)
+            Shadows.shadowOf(thread.looper).idle()
+            router.onCaptureStarted(Long.MAX_VALUE)
+            Shadows.shadowOf(thread.looper).idle()
+            assertEquals(1, delivered.size)
+
+            // Verify endCapture clears any un-flushed pre-start images cleanly.
+            assertTrue(router.beginCapture(consumer = { img ->
+                delivered.add(img.timestamp)
+                img.close()
+            }, requireCaptureStarted = true))
+            val canvas3 = reader.surface.lockCanvas(null)
+            reader.surface.unlockCanvasAndPost(canvas3)
+            Shadows.shadowOf(thread.looper).idle()
+            router.endCapture()
+            Shadows.shadowOf(thread.looper).idle()
+            assertEquals(1, delivered.size)
+        } finally {
+            router.close()
+            Shadows.shadowOf(thread.looper).idle()
+            reader.close()
+            thread.quitSafely()
+        }
+    }
 }
 
 class RawRouterStateTest {
@@ -78,6 +141,13 @@ class RawRouterStateTest {
         assertTrue(secondStart.captureStarted)
         assertTrue(secondStart.captureStartTimestampNs == 100L)
         assertFalse(started.endCapture(true).onCaptureStarted(300L).canDeliver(300L))
+    }
+
+    @Test
+    fun captureDoesNotRequireCaptureStartedWhenDisabled() {
+        val state = RawRouterState().beginCapture(7L, requireCaptureStarted = false)
+        assertTrue(state.canDeliver(500L))
+        assertFalse(state.endCapture(hasRing = false).canDeliver(500L))
     }
 
     @Test

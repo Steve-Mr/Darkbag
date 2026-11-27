@@ -286,7 +286,8 @@ class SettingsFragment : Fragment() {
             label = getString(R.string.settings_section_setup_wizard),
             value = getString(R.string.settings_btn_replay_onboarding),
             isTabActive = false,
-            context = requireContext()
+            context = requireContext(),
+            maxChars = 0
         )
         binding.btnReplayOnboarding.setOnClickListener {
             val bundle = Bundle().apply {
@@ -300,7 +301,8 @@ class SettingsFragment : Fragment() {
             label = getString(R.string.pref_github_repo_label),
             value = getString(R.string.pref_github_repo_value),
             isTabActive = false,
-            context = requireContext()
+            context = requireContext(),
+            maxChars = 0
         )
         binding.btnGithubRepo.setOnClickListener {
             val url = getString(R.string.github_repo_url)
@@ -517,7 +519,8 @@ class SettingsFragment : Fragment() {
         binding.btnOpenDeckCustomizer.text = CameraBentoDeckView.formatProTelemetry(
             label = getString(R.string.pref_deck_customizer_label),
             value = getString(R.string.viewfinder_customizer_btn_subtitle),
-            context = requireContext()
+            context = requireContext(),
+            maxChars = 0
         )
         binding.btnOpenDeckCustomizer.setOnClickListener {
             ViewfinderDeckCustomizerSheet.show(requireContext()) {}

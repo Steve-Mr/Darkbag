@@ -85,13 +85,21 @@ class CameraThumbnailController(
     /** Loads the latest app image off the UI thread, shows it, and warms the viewer cache. */
     fun loadLatestThumbnail() {
         val seqBefore = captureSequence
+        val trackedUri = currentThumbnailUri
         env.lifecycleScope.launch {
+            val trackedExists = trackedUri != null && mediaStoreUtils.uriExists(trackedUri)
             val thumbnailUri = mediaStoreUtils.getLatestAppImage()
             if (captureSequence != seqBefore) {
                 return@launch
             }
-            if (currentThumbnailUri == null || currentThumbnailUri == thumbnailUri) {
-                val lm = thumbnailUri?.let { mediaStoreUtils.getFileLastModified(env.hostContext, it) } ?: 0L
+            val now = System.currentTimeMillis()
+            val lm = thumbnailUri?.let {
+                minOf(mediaStoreUtils.getFileLastModified(env.hostContext, it), now)
+            } ?: 0L
+            if (trackedUri != null && !trackedExists) {
+                currentThumbnailTimestamp = 0L
+                setGalleryThumbnail(thumbnailUri?.toString(), timestamp = lm, forceReload = true)
+            } else if (currentThumbnailUri == null || currentThumbnailUri == thumbnailUri) {
                 setGalleryThumbnail(thumbnailUri?.toString(), timestamp = lm)
             }
             kotlin.runCatching { env.imageRepository.getGroupedImages() }

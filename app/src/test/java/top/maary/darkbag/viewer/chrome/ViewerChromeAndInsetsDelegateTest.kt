@@ -31,6 +31,10 @@ class ViewerChromeAndInsetsDelegateTest {
     private var editing = false
     private var gallerySupported = true
     private var backEnabled = false
+    private var backNavigateCount = 0
+    private var resetCount = 0
+    private var exitEditCount = 0
+    private var navigateBackOnDiscard = false
 
     @Before
     fun setUp() {
@@ -44,9 +48,12 @@ class ViewerChromeAndInsetsDelegateTest {
         binding.imagePager.adapter = adapter
     }
 
-    private fun createDelegate(fragmentManager: androidx.fragment.app.FragmentManager): ViewerChromeAndInsetsDelegate {
+    private fun createDelegate(
+        fragmentManager: androidx.fragment.app.FragmentManager,
+        delegateContext: Context = context
+    ): ViewerChromeAndInsetsDelegate {
         return ViewerChromeAndInsetsDelegate(
-            context = context,
+            context = delegateContext,
             binding = binding,
             fragmentManager = fragmentManager,
             getAdapter = { adapter },
@@ -55,11 +62,11 @@ class ViewerChromeAndInsetsDelegateTest {
             isEditingAdjustments = { editing },
             isSaving = { false },
             isLutListVisible = { binding.lutListContainer.visibility == View.VISIBLE },
-            onBackNavigate = {},
+            onBackNavigate = { backNavigateCount++ },
             onDismissPillPopup = { false },
-            onExitEditMode = {},
+            onExitEditMode = { exitEditCount++ },
             onEnterEditMode = {},
-            onResetAdjustments = {},
+            onResetAdjustments = { resetCount++ },
             onSaveEdit = {},
             onShowSaveMenu = {},
             onOpenExportHub = {},
@@ -67,7 +74,8 @@ class ViewerChromeAndInsetsDelegateTest {
             onPerformShareAsTiff = {},
             onShowLutMenu = {},
             onShowDeleteDialog = {},
-            onUpdateBackPressedEnabled = { backEnabled = it }
+            onUpdateBackPressedEnabled = { backEnabled = it },
+            shouldNavigateBackOnDiscard = { navigateBackOnDiscard }
         )
     }
 
@@ -122,5 +130,95 @@ class ViewerChromeAndInsetsDelegateTest {
 
         delegate.toggleUi()
         assertTrue(delegate.isUiVisible)
+
+        // While editing adjustments, showUi() must not unhide viewerBentoDeck over the adjustment panel
+        delegate.toggleUi() // hide
+        editing = true
+        binding.viewerBentoDeck.visibility = View.GONE
+        delegate.showUi()
+        assertTrue(delegate.isUiVisible)
+        assertEquals(View.GONE, binding.viewerBentoDeck.visibility)
+    }
+
+    @Test
+    fun testDiscardDialogStaysInViewerByDefaultAndNavigatesOnlyWhenRequested() {
+        val activity = Robolectric.buildActivity(FragmentActivity::class.java).setup().get()
+        activity.setTheme(R.style.AppTheme)
+        val delegate = createDelegate(activity.supportFragmentManager, activity)
+        delegate.setupToolbar()
+
+        // When editing & adjusted, btnBack opens discard dialog instead of exiting edit mode silently
+        editing = true
+        adjusted = true
+        navigateBackOnDiscard = false
+        binding.btnBack.performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        assertEquals(0, exitEditCount)
+
+        val dialog1 = org.robolectric.shadows.ShadowAlertDialog.getLatestDialog() as androidx.appcompat.app.AlertDialog
+        assertNotNull(dialog1)
+        dialog1.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        assertEquals(1, resetCount)
+        assertEquals(0, backNavigateCount)
+
+        // When shouldNavigateBackOnDiscard is true (e.g. unsaved sandbox pair), confirming discard navigates back
+        navigateBackOnDiscard = true
+        delegate.showDiscardChangesDialog()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        val dialog2 = org.robolectric.shadows.ShadowAlertDialog.getLatestDialog() as androidx.appcompat.app.AlertDialog
+        assertNotNull(dialog2)
+        dialog2.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        assertEquals(2, resetCount)
+        assertEquals(1, backNavigateCount)
+    }
+
+    @Test
+    fun testSplitActionMenuOpensBentoTrayAndResetsCheckedOnDismiss() {
+        val activity = Robolectric.buildActivity(FragmentActivity::class.java).setup().get()
+        activity.setTheme(R.style.AppTheme)
+        val themedBinding = FragmentImageViewerBinding.inflate(LayoutInflater.from(activity))
+        themedBinding.imagePager.adapter = adapter
+        var detailsClicked = false
+        val delegate = ViewerChromeAndInsetsDelegate(
+            context = activity,
+            binding = themedBinding,
+            fragmentManager = activity.supportFragmentManager,
+            getAdapter = { adapter },
+            isGallerySupported = { true },
+            isAdjusted = { false },
+            isEditingAdjustments = { false },
+            isSaving = { false },
+            isLutListVisible = { false },
+            onBackNavigate = {},
+            onDismissPillPopup = { false },
+            onExitEditMode = {},
+            onEnterEditMode = {},
+            onResetAdjustments = {},
+            onSaveEdit = {},
+            onShowSaveMenu = {},
+            onOpenExportHub = { detailsClicked = true },
+            onPerformShare = {},
+            onPerformShareAsTiff = {},
+            onShowLutMenu = {},
+            onShowDeleteDialog = {},
+            onUpdateBackPressedEnabled = {}
+        )
+        delegate.setupActionButtons()
+        themedBinding.imagePager.setCurrentItem(0, false)
+
+        themedBinding.btnActionMenu.performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        assertTrue(themedBinding.btnActionMenu.isChecked)
+
+        val popup = org.robolectric.Shadows.shadowOf(activity.application).latestPopupWindow
+        assertNotNull(popup)
+        assertTrue(popup.isShowing)
+
+        popup.dismiss()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        assertFalse(themedBinding.btnActionMenu.isChecked)
+        assertFalse(detailsClicked)
     }
 }

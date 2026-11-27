@@ -32,13 +32,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           fetch-depth: 0
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: '17'
           distribution: 'temurin'
@@ -162,13 +162,13 @@ jobs:
             --out-tg dist/telegram_message.html
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: darkbag-${{ steps.version.outputs.version_name }}
           path: dist/
 
       - name: Archive R8 mapping file
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: darkbag-${{ steps.version.outputs.version_name }}-mapping
           path: dist-mapping/

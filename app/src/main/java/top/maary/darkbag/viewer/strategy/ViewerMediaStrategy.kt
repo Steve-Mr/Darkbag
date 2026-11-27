@@ -67,7 +67,8 @@ interface ViewerMediaStrategy {
         context: Context,
         anchor: View,
         currentGroup: ImageGroup,
-        onAction: (ViewerSaveAction) -> Unit
+        onAction: (ViewerSaveAction) -> Unit,
+        onDismiss: () -> Unit = {}
     )
 
     /**

@@ -41,7 +41,8 @@ class ViewerBentoDeckCoordinator(
     private val onOpenExportHubRequested: () -> Unit,
     private val onFormatToggleRequested: () -> Unit,
     private val onDerivativeCycleRequested: () -> Unit,
-    private val onMotionLiveToggleRequested: () -> Unit
+    private val onMotionLiveToggleRequested: () -> Unit,
+    private val onMotionStudioRequested: (ImageGroup) -> Unit = {}
 ) {
 
     companion object {
@@ -82,6 +83,16 @@ class ViewerBentoDeckCoordinator(
         binding.btnMotionLive.setOnClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             onMotionLiveToggleRequested()
+        }
+        binding.btnMotionLive.setOnLongClickListener {
+            val adapter = getAdapter() ?: return@setOnLongClickListener false
+            val idx = getCurrentItemIndex()
+            if (idx !in 0 until adapter.itemCount) return@setOnLongClickListener false
+            val grp = adapter.getGroup(idx)
+            if (!grp.isMotionPhoto) return@setOnLongClickListener false
+            it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            onMotionStudioRequested(grp)
+            true
         }
         binding.btnVideoExportHub.setOnClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -430,8 +441,8 @@ class ViewerBentoDeckCoordinator(
 
             binding.btnMulticamCollage.apply {
                 text = CameraBentoDeckView.formatProTelemetry(
-                    label = "⊞ COLLAGE",
-                    value = "多摄拼图",
+                    label = ctx.getString(R.string.viewer_collage_label),
+                    value = ctx.getString(R.string.viewer_collage_value),
                     isTabActive = true,
                     isValueManual = false,
                     context = ctx

@@ -21,6 +21,12 @@
             android:layout_height="match_parent"
             android:contentDescription="Full size image" />
 
+        <top.maary.darkbag.ui.HalfFrameDimOverlayView
+            android:id="@+id/hf_dim_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
         <TextureView
             android:id="@+id/video_view"
             android:layout_width="match_parent"

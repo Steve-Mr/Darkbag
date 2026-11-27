@@ -2,6 +2,7 @@
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -39,7 +40,7 @@
             android:background="@drawable/bg_bento_badge_primary"
             android:paddingHorizontal="8dp"
             android:paddingVertical="2dp"
-            android:text="CINEMA"
+            android:text="@string/raw_video_badge_cinema"
             android:textSize="10.5sp"
             android:textStyle="bold"
             android:textColor="?attr/colorPrimary" />
@@ -78,7 +79,7 @@
                     android:layout_height="match_parent"
                     android:layout_weight="1"
                     android:layout_marginEnd="4dp"
-                    android:text="24 FPS\nCinema" />
+                    tools:text="24 FPS\nCinema" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_fps_30"
@@ -87,7 +88,7 @@
                     android:layout_height="match_parent"
                     android:layout_weight="1"
                     android:layout_marginHorizontal="2dp"
-                    android:text="30 FPS\nStandard" />
+                    tools:text="30 FPS\nStandard" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_fps_60"
@@ -96,7 +97,7 @@
                     android:layout_height="match_parent"
                     android:layout_weight="1"
                     android:layout_marginStart="4dp"
-                    android:text="60 FPS\nHigh-Speed" />
+                    tools:text="60 FPS\nHigh-Speed" />
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>

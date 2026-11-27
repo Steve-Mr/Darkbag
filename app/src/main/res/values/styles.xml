@@ -129,6 +129,16 @@
         <item name="android:ellipsize">end</item>
     </style>
 
+    <!-- Full-Width Bento Navigation / Option Tile Button -->
+    <style name="Widget.Darkbag.BentoTile.Button.FullWidth" parent="Widget.Darkbag.BentoTile.Button">
+        <item name="android:minHeight">52dp</item>
+        <item name="android:paddingHorizontal">14dp</item>
+        <item name="android:paddingVertical">8dp</item>
+        <item name="android:gravity">start|center_vertical</item>
+        <item name="android:textAlignment">viewStart</item>
+        <item name="android:maxLines">3</item>
+    </style>
+
     <!-- Bento Badge Quick-Toggle Button (Viewfinder Porcelain Floating Pill) -->
     <style name="Widget.Darkbag.BentoBadge.Button" parent="Widget.Material3.Button.TonalButton">
         <item name="android:insetTop">0dp</item>

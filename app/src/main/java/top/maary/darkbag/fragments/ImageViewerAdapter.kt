@@ -78,8 +78,13 @@ class ImageViewerAdapter(
     var onMultiCameraLensChanged: ((position: Int, lensIndex: Int) -> Unit)? = null
     var onDerivativeVersionChanged: ((position: Int, derivativeUri: Uri) -> Unit)? = null
     var onFormatChanged: ((position: Int, format: String) -> Unit)? = null
+    var onHalfFrameOverlayTapped: ((Int) -> Unit)? = null
     private var isUiVisible = true
     private var isFormatSwitcherPersistentHidden = false
+    private var hfEditOverlayPosition = -1
+    private var hfEditOverlayActive = false
+    private var hfEditOverlayIsTopBottom = false
+    private var hfEditOverlaySelectedIndex = 0
 
     internal val diffCallback = ImageViewerDiffCallback()
     private val differ = AsyncListDiffer(this, diffCallback)
@@ -175,6 +180,13 @@ class ImageViewerAdapter(
         holder.binding.imageView.onLongPressStarted = { onLongPressStarted?.invoke(it) }
         holder.binding.imageView.onLongPressEnded = { onLongPressEnded?.invoke(it) }
         holder.binding.imageView.onPinchToOverview = { onPinchToOverview?.invoke() }
+        holder.binding.hfDimOverlay.onHalfFrameTapped = { idx -> onHalfFrameOverlayTapped?.invoke(idx) }
+        if (hfEditOverlayActive && position == hfEditOverlayPosition) {
+            holder.binding.hfDimOverlay.setDisplayGeometry(holder.binding.imageView.currentDisplayGeometry())
+            holder.binding.hfDimOverlay.updateState(true, hfEditOverlayIsTopBottom, hfEditOverlaySelectedIndex)
+        } else {
+            holder.binding.hfDimOverlay.updateState(false, false, 0)
+        }
 
         filmstripDelegate.bindFilmstrip(holder, group, isUiVisible, isFormatSwitcherPersistentHidden) { frameIndex, uri ->
             val currentPos = holder.bindingAdapterPosition
@@ -202,6 +214,7 @@ class ImageViewerAdapter(
         }
 
         holder.binding.imageView.onDisplayGeometryChanged = { geometry ->
+            holder.binding.hfDimOverlay.setDisplayGeometry(geometry)
             val w = holder.binding.imageView.measuredWidth.takeIf { it > 0 } ?: holder.binding.imageView.width
             val h = holder.binding.imageView.measuredHeight.takeIf { it > 0 } ?: holder.binding.imageView.height
             if (w > 0 && h > 0) {
@@ -265,6 +278,8 @@ class ImageViewerAdapter(
         holder.currentBaseName = null
         holder.currentVersion = 0L
         holder.binding.loadingIndicator.visibility = View.GONE
+        holder.binding.hfDimOverlay.updateState(false, false, 0)
+        holder.binding.hfDimOverlay.setDisplayGeometry(null)
         super.onViewRecycled(holder)
     }
 
@@ -460,6 +475,28 @@ class ImageViewerAdapter(
         this.isFormatSwitcherPersistentHidden = hidden
         if (hidden) stopAllMotionVideos()
         updateOverlaysVisibility(isUiVisible, hidden)
+    }
+
+    fun updateHalfFrameEditOverlay(
+        position: Int,
+        active: Boolean,
+        isTopBottom: Boolean,
+        selectedHalfFrameIndex: Int
+    ) {
+        val prevPos = hfEditOverlayPosition
+        if (prevPos != -1 && prevPos != position) {
+            (recyclerView?.findViewHolderForAdapterPosition(prevPos) as? ViewHolder)?.let { prevHolder ->
+                prevHolder.binding.hfDimOverlay.updateState(false, false, 0)
+            }
+        }
+        hfEditOverlayPosition = if (active) position else -1
+        hfEditOverlayActive = active
+        hfEditOverlayIsTopBottom = isTopBottom
+        hfEditOverlaySelectedIndex = selectedHalfFrameIndex
+        (recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder)?.let { holder ->
+            holder.binding.hfDimOverlay.setDisplayGeometry(holder.binding.imageView.currentDisplayGeometry())
+            holder.binding.hfDimOverlay.updateState(active, isTopBottom, selectedHalfFrameIndex)
+        }
     }
 
     fun cancelLoadJob(position: Int, clearView: Boolean = true) {

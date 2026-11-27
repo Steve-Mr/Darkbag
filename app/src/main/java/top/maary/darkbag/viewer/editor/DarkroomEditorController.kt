@@ -21,7 +21,8 @@ class DarkroomEditorController(
     private val binding: FragmentImageViewerBinding,
     private val viewModel: DarkroomEditorViewModel,
     private val onViewportPaddingRequested: () -> Unit,
-    private val onEditStateChanged: (isEditing: Boolean, isAdjusted: Boolean) -> Unit
+    private val onEditStateChanged: (isEditing: Boolean, isAdjusted: Boolean) -> Unit,
+    private val onHalfFrameOverlayChanged: (active: Boolean, isTopBottom: Boolean, selectedIndex: Int) -> Unit = { _, _, _ -> }
 ) {
 
     private var isAnimating = false
@@ -160,7 +161,7 @@ class DarkroomEditorController(
         updateSelectionFeedback(state)
 
         // 5. 滑块 1 状态
-        binding.tvLabel1.text = state.slider1Label
+        binding.tvLabel1.text = localizeSliderLabel(state.slider1Label)
         val safeSlider1Value = state.slider1Value.coerceIn(state.slider1Min, state.slider1Max)
         if (binding.slider1.valueFrom > state.slider1Min) binding.slider1.valueFrom = state.slider1Min
         if (binding.slider1.valueTo < state.slider1Max) binding.slider1.valueTo = state.slider1Max
@@ -174,7 +175,7 @@ class DarkroomEditorController(
         // 6. 滑块 2 状态
         if (state.isSlider2Visible) {
             binding.layoutSlider2.visibility = View.VISIBLE
-            binding.tvLabel2.text = state.slider2Label
+            binding.tvLabel2.text = localizeSliderLabel(state.slider2Label)
             val safeSlider2Value = state.slider2Value.coerceIn(state.slider2Min, state.slider2Max)
             if (binding.slider2.valueFrom > state.slider2Min) binding.slider2.valueFrom = state.slider2Min
             if (binding.slider2.valueTo < state.slider2Max) binding.slider2.valueTo = state.slider2Max
@@ -290,40 +291,30 @@ class DarkroomEditorController(
     private fun updateSelectionFeedback(state: DarkroomEditorUiState) {
         val activeLayout = state.activeConfig?.hfLayout
         val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
+        // Keep legacy full-screen dimmer views hidden; HalfFrameDimOverlayView renders strictly over the image.
+        binding.hfSelection1.visibility = View.GONE
+        binding.hfSelection2.visibility = View.GONE
+        onHalfFrameOverlayChanged(state.isEditing && state.isHalfFrame, isTB, state.selectedHalfFrameIndex)
+    }
 
-        if (state.isEditing && state.isHalfFrame) {
-            binding.hfSelection1.visibility = if (state.selectedHalfFrameIndex == 1) View.VISIBLE else View.GONE
-            binding.hfSelection2.visibility = if (state.selectedHalfFrameIndex == 0) View.VISIBLE else View.GONE
-
-            val lp1 = binding.hfSelection1.layoutParams as ConstraintLayout.LayoutParams
-            val lp2 = binding.hfSelection2.layoutParams as ConstraintLayout.LayoutParams
-
-            if (isTB) {
-                lp1.bottomToBottom = -1
-                lp1.bottomToTop = R.id.hf_selection_divider
-                lp1.endToEnd = R.id.image_pager
-                lp1.endToStart = -1
-
-                lp2.topToTop = -1
-                lp2.topToBottom = R.id.hf_selection_divider
-                lp2.startToStart = R.id.image_pager
-                lp2.startToEnd = -1
-            } else {
-                lp1.bottomToBottom = R.id.image_pager
-                lp1.bottomToTop = -1
-                lp1.endToEnd = -1
-                lp1.endToStart = R.id.hf_selection_divider
-
-                lp2.topToTop = R.id.image_pager
-                lp2.topToBottom = -1
-                lp2.startToStart = -1
-                lp2.startToEnd = R.id.hf_selection_divider
-            }
-            binding.hfSelection1.layoutParams = lp1
-            binding.hfSelection2.layoutParams = lp2
-        } else {
-            binding.hfSelection1.visibility = View.GONE
-            binding.hfSelection2.visibility = View.GONE
+    private fun localizeSliderLabel(key: String): String {
+        val resId = when (key) {
+            "Exposure" -> R.string.edit_slider_exposure
+            "Brightness" -> R.string.edit_slider_brightness
+            "Contrast" -> R.string.edit_slider_contrast
+            "Highlights" -> R.string.edit_slider_highlights
+            "Shadows" -> R.string.edit_slider_shadows
+            "Whites" -> R.string.edit_slider_whites
+            "Blacks" -> R.string.edit_slider_blacks
+            "Temp" -> R.string.edit_slider_temperature
+            "Tint" -> R.string.edit_slider_tint
+            "Saturation" -> R.string.edit_slider_saturation
+            "Vibrance" -> R.string.edit_slider_vibrance
+            "Clarity" -> R.string.edit_slider_clarity
+            "Dehaze" -> R.string.edit_slider_dehaze
+            "Gamma" -> R.string.edit_slider_gamma
+            else -> return key
         }
+        return binding.root.context.getString(resId)
     }
 }

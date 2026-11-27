@@ -327,4 +327,17 @@ class CameraSessionArbiterTest {
         assertNull(reset1x.aeRegions)
         assertEquals(android.hardware.camera2.params.MeteringRectangle(0, 0, 0, 0, 0), reset1x.awbRegions!!.single())
     }
+
+    @Test
+    fun testNeedsFreshCaptureTimestampFilter_respectsRepeatingStateAndCooldown() {
+        org.junit.Assert.assertFalse(arbiter.needsFreshCaptureTimestampFilter())
+
+        arbiter.setRepeatingRawActive(true)
+        assertTrue(arbiter.needsFreshCaptureTimestampFilter())
+
+        arbiter.setRepeatingRawActive(false)
+        val disabledNow = android.os.SystemClock.elapsedRealtime()
+        assertTrue(arbiter.needsFreshCaptureTimestampFilter(disabledNow + 500L))
+        org.junit.Assert.assertFalse(arbiter.needsFreshCaptureTimestampFilter(disabledNow + 1000L))
+    }
 }

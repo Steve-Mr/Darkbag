@@ -260,6 +260,7 @@ class CameraHardwareStreamController(
     fun setZslRawTargetEnabled(enabled: Boolean) {
         if (zslRawTargetEnabled == enabled) return
         zslRawTargetEnabled = enabled
+        env.sessionArbiter.setRepeatingRawActive(zslRawTargetEnabled || rawMotionPhotoTargetEnabled)
         updateCamera2RepeatingRequest()
     }
 
@@ -267,6 +268,7 @@ class CameraHardwareStreamController(
     fun setRawMotionPhotoTargetEnabled(enabled: Boolean) {
         if (rawMotionPhotoTargetEnabled == enabled) return
         rawMotionPhotoTargetEnabled = enabled
+        env.sessionArbiter.setRepeatingRawActive(zslRawTargetEnabled || rawMotionPhotoTargetEnabled)
         updateCamera2RepeatingRequest()
     }
 
@@ -304,6 +306,7 @@ class CameraHardwareStreamController(
         zslPreviewProfileEnabled = previewProfileEnabled
         zslAeCompensationSteps = aeCompensationSteps
         zslFpsRange = fpsRange
+        env.sessionArbiter.setRepeatingRawActive(zslRawTargetEnabled || rawMotionPhotoTargetEnabled)
 
         if (targetPreviewGain != null) {
             val expectedEv = if (env.runtimeState.isManualExposure) {
@@ -564,6 +567,9 @@ class CameraHardwareStreamController(
         val handler = env.sessionArbiter.sessionController.backgroundHandler ?: return
 
         Log.d(TAG, "Creating Camera2 Capture Session for device: ${device.id}")
+        zslRawTargetEnabled = false
+        rawMotionPhotoTargetEnabled = false
+        env.sessionArbiter.setRepeatingRawActive(false)
         env.sessionArbiter.sceneMotionMonitor.reset()
         env.sessionArbiter.previewGainSynchronizer.reset()
         env.sessionArbiter.lutProcessor?.clearFrameGains()
@@ -620,7 +626,11 @@ class CameraHardwareStreamController(
                     }
                 }
                 env.runtimeState.lastClippingRatio = if (totalSampled > 0) highlightCount.toDouble() / totalSampled else 0.0
-                env.sessionArbiter.sceneMotionMonitor.processAnalysisImage(image)
+                if (env.settings.current().zslEnabled) {
+                    env.sessionArbiter.sceneMotionMonitor.processAnalysisImage(image)
+                } else if (env.sessionArbiter.sceneMotionMonitor.currentLevel != top.maary.darkbag.camera.motion.MotionLevel.STILL) {
+                    env.sessionArbiter.sceneMotionMonitor.reset()
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error analyzing image", e)
             } finally {

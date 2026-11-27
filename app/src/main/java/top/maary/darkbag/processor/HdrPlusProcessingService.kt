@@ -34,7 +34,7 @@ class HdrPlusProcessingService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createNotification("Starting processing..."),
+        startForeground(NOTIFICATION_ID, createNotification(getString(R.string.notification_starting_processing)),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         )
 
@@ -42,9 +42,9 @@ class HdrPlusProcessingService : LifecycleService() {
             HdrPlusRequestManager.pendingTasksCount.collect { count ->
                 if (count > 0) {
                     val text = if (count == 1) {
-                        "Processing 1 photo..."
+                        getString(R.string.notification_processing_one)
                     } else {
-                        "Processing photos ($count remaining in queue)..."
+                        getString(R.string.notification_processing_queue, count)
                     }
                     updateNotification(text)
                 }
@@ -443,8 +443,8 @@ class HdrPlusProcessingService : LifecycleService() {
     }
 
     private fun createNotificationChannel() {
-        val name = "Image Processing"
-        val descriptionText = "Background processing for photos"
+        val name = getString(R.string.notification_channel_processing_name)
+        val descriptionText = getString(R.string.notification_channel_processing_desc)
         val importance = NotificationManager.IMPORTANCE_LOW
         val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
             description = descriptionText
@@ -468,7 +468,7 @@ class HdrPlusProcessingService : LifecycleService() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Darkbag Processing")
+            .setContentTitle(getString(R.string.notification_processing_title))
             .setContentText(contentText)
             .setSmallIcon(R.drawable.ic_photo)
             .setContentIntent(pendingIntent)

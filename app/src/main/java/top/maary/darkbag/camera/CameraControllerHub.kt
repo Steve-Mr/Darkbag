@@ -174,6 +174,8 @@ class CameraControllerHub(
     override fun setGalleryThumbnailBitmap(uri: Uri, bitmap: android.graphics.Bitmap?, timestamp: Long): Boolean =
         thumbnailController.setGalleryThumbnailBitmap(uri, bitmap, timestamp)
 
+    override fun refreshThumbnailVisibility() = thumbnailController.refreshThumbnailVisibility()
+
     override fun onSessionConfigured() {
         env.runtimeState.isSwitchingLens = false
         fragmentCameraBinding?.viewFinder?.animate()?.alpha(1f)?.setDuration(150L)?.start()
@@ -294,6 +296,7 @@ class CameraControllerHub(
         cameraUiContainerBinding?.modeSwitchButton?.let { modeController.updateModeSwitchIcon(it) }
         overlayController.updateHalfFrameUI()
         motionPhotoController.updateEncoder()
+        tierController.updateProInfoBar()
         applyUIVisibility()
         if (modeChanged) {
             bindCameraUseCases()

@@ -47,7 +47,9 @@ class ViewerChromeAndInsetsDelegate(
     private val onPerformShareAsTiff: () -> Unit,
     private val onShowLutMenu: (ImageGroup) -> Unit,
     private val onShowDeleteDialog: (ImageGroup) -> Unit,
-    private val onUpdateBackPressedEnabled: (Boolean) -> Unit
+    private val onUpdateBackPressedEnabled: (Boolean) -> Unit,
+    private val shouldNavigateBackOnDiscard: () -> Boolean = { false },
+    private val onOpenMotionStudio: (ImageGroup) -> Unit = {}
 ) {
 
     var isUiVisible: Boolean = true
@@ -114,8 +116,8 @@ class ViewerChromeAndInsetsDelegate(
         binding.btnBack.setOnClickListener {
             if (onDismissPillPopup()) return@setOnClickListener
             when {
-                isEditingAdjustments() -> onExitEditMode(false)
                 isAdjusted() -> showDiscardChangesDialog()
+                isEditingAdjustments() -> onExitEditMode(false)
                 else -> onBackNavigate()
             }
         }
@@ -142,11 +144,11 @@ class ViewerChromeAndInsetsDelegate(
 
             if (isUnrendered) {
                 binding.btnActionMain.setIconResource(R.drawable.ic_save)
-                binding.btnActionMain.text = "EXPORT"
+                binding.btnActionMain.text = context.getString(R.string.action_export_main).uppercase(java.util.Locale.getDefault())
                 binding.btnActionMain.contentDescription = context.getString(R.string.action_export_main)
             } else {
                 binding.btnActionMain.setIconResource(R.drawable.ic_share)
-                binding.btnActionMain.text = "SHARE"
+                binding.btnActionMain.text = context.getString(R.string.share_button_alt).uppercase(java.util.Locale.getDefault())
                 binding.btnActionMain.contentDescription = context.getString(R.string.share_button_alt)
             }
         }
@@ -181,20 +183,22 @@ class ViewerChromeAndInsetsDelegate(
 
         binding.btnActionMain.setOnLongClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            if (isEditingAdjustments() || isAdjusted()) onShowSaveMenu(it) else showViewMenu(it)
+            binding.btnActionMenu.isChecked = true
+            if (isEditingAdjustments() || isAdjusted()) {
+                onShowSaveMenu(binding.splitAction)
+            } else {
+                showViewMenu(binding.splitAction)
+            }
             true
         }
 
         binding.btnActionMenu.setOnClickListener {
             binding.btnActionMenu.isCheckable = true
             binding.btnActionMenu.isChecked = true
-            if (isEditingAdjustments() || isAdjusted()) onShowSaveMenu(it) else showViewMenu(it)
-        }
-
-        binding.btnDelete.setOnClickListener {
-            val adapter = getAdapter()
-            if (adapter != null && adapter.itemCount > 0) {
-                onShowDeleteDialog(adapter.getGroup(binding.imagePager.currentItem))
+            if (isEditingAdjustments() || isAdjusted()) {
+                onShowSaveMenu(binding.splitAction)
+            } else {
+                showViewMenu(binding.splitAction)
             }
         }
 
@@ -247,37 +251,87 @@ class ViewerChromeAndInsetsDelegate(
             return
         }
         val grp = adapter.getGroup(binding.imagePager.currentItem)
-        val popup = PopupMenu(context, anchor)
         val isUnrendered = isUnrenderedVideoGroup(grp)
+        val items = mutableListOf<BentoViewerActionMenu.ActionItem>()
 
         if (isUnrendered) {
-            popup.menu.add(0, MENU_SHARE, 0, context.getString(R.string.share_button_alt)).setIcon(R.drawable.ic_share)
+            items.add(
+                BentoViewerActionMenu.ActionItem(
+                    id = MENU_SHARE,
+                    title = context.getString(R.string.share_button_alt),
+                    iconRes = R.drawable.ic_share,
+                    role = BentoViewerActionMenu.Role.HERO_GRID,
+                    onClick = { onPerformShare() }
+                )
+            )
         } else {
-            popup.menu.add(0, MENU_EXPORT_HUB, 0, context.getString(R.string.action_export)).setIcon(R.drawable.ic_save)
-            if (grp.dngUri != null || grp.dngUri1 != null || grp.dngUri2 != null) {
-                popup.menu.add(0, MENU_SHARE_TIFF, 0, context.getString(R.string.share_as_tiff)).setIcon(R.drawable.ic_photo)
-            }
+            items.add(
+                BentoViewerActionMenu.ActionItem(
+                    id = MENU_EXPORT_HUB,
+                    title = context.getString(R.string.action_export),
+                    iconRes = R.drawable.ic_save,
+                    role = BentoViewerActionMenu.Role.HERO_GRID,
+                    onClick = { onOpenExportHub() }
+                )
+            )
+        }
+
+        items.add(
+            BentoViewerActionMenu.ActionItem(
+                id = MENU_DETAILS,
+                title = context.getString(R.string.viewer_menu_details),
+                iconRes = R.drawable.ic_info,
+                role = BentoViewerActionMenu.Role.HERO_GRID,
+                onClick = { showImageDetails() }
+            )
+        )
+
+        if (!isUnrendered && (grp.dngUri != null || grp.dngUri1 != null || grp.dngUri2 != null)) {
+            items.add(
+                BentoViewerActionMenu.ActionItem(
+                    id = MENU_SHARE_TIFF,
+                    title = context.getString(R.string.share_as_tiff),
+                    iconRes = R.drawable.ic_photo,
+                    role = BentoViewerActionMenu.Role.ROW,
+                    onClick = { onPerformShareAsTiff() }
+                )
+            )
         }
         if (grp.isMultiCamera) {
-            popup.menu.add(0, MENU_COLLAGE, 0, context.getString(R.string.create_multi_cam_collage)).setIcon(R.drawable.ic_photo)
+            items.add(
+                BentoViewerActionMenu.ActionItem(
+                    id = MENU_COLLAGE,
+                    title = context.getString(R.string.create_multi_cam_collage),
+                    iconRes = R.drawable.ic_photo,
+                    role = BentoViewerActionMenu.Role.ROW,
+                    onClick = { showMultiCamCollageDialog(adapter.getGroup(binding.imagePager.currentItem)) }
+                )
+            )
         }
-        popup.menu.add(0, MENU_DETAILS, 0, "Details").setIcon(R.drawable.ic_info)
-        popup.menu.add(0, MENU_DELETE, 0, "Delete").setIcon(R.drawable.ic_delete)
+        if (grp.isMotionPhoto) {
+            items.add(
+                BentoViewerActionMenu.ActionItem(
+                    id = MENU_MOTION_STUDIO,
+                    title = context.getString(R.string.viewer_motion_studio),
+                    iconRes = R.drawable.ic_motion_photo_on,
+                    role = BentoViewerActionMenu.Role.ROW,
+                    onClick = { onOpenMotionStudio(grp) }
+                )
+            )
+        }
+        items.add(
+            BentoViewerActionMenu.ActionItem(
+                id = MENU_DELETE,
+                title = context.getString(R.string.delete_button_alt),
+                iconRes = R.drawable.ic_delete,
+                role = BentoViewerActionMenu.Role.DESTRUCTIVE,
+                onClick = { onShowDeleteDialog(adapter.getGroup(binding.imagePager.currentItem)) }
+            )
+        )
 
-        forceShowIcons(popup)
-        popup.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                MENU_SHARE -> onPerformShare()
-                MENU_EXPORT_HUB -> onOpenExportHub()
-                MENU_SHARE_TIFF -> onPerformShareAsTiff()
-                MENU_COLLAGE -> showMultiCamCollageDialog(adapter.getGroup(binding.imagePager.currentItem))
-                MENU_DETAILS -> showImageDetails()
-                MENU_DELETE -> onShowDeleteDialog(adapter.getGroup(binding.imagePager.currentItem))
-            }
-            true
-        }
-        popup.setOnDismissListener { binding.btnActionMenu.isChecked = false }
-        popup.show()
+        BentoViewerActionMenu(context, items) {
+            binding.btnActionMenu.isChecked = false
+        }.show(anchor)
     }
 
     fun showSaveMenu(
@@ -290,7 +344,13 @@ class ViewerChromeAndInsetsDelegate(
             binding.btnActionMenu.isChecked = false
             return
         }
-        mediaStrategy.showSaveMenu(context, anchor, adapter.getGroup(binding.imagePager.currentItem), onAction)
+        mediaStrategy.showSaveMenu(
+            context = context,
+            anchor = anchor,
+            currentGroup = adapter.getGroup(binding.imagePager.currentItem),
+            onAction = onAction,
+            onDismiss = { binding.btnActionMenu.isChecked = false }
+        )
     }
 
     fun showHalfFrameShareSheet(group: ImageGroup) {
@@ -299,8 +359,10 @@ class ViewerChromeAndInsetsDelegate(
 
     fun showImageDetails() {
         val adapter = getAdapter() ?: return
-        val uri = adapter.getCurrentUri(binding.imagePager.currentItem) ?: return
-        ViewerMetadataSheet.show(fragmentManager, uri)
+        val pos = binding.imagePager.currentItem
+        val uri = adapter.getCurrentUri(pos) ?: return
+        val group = if (pos in adapter.getGroups().indices) adapter.getGroup(pos) else null
+        ViewerMetadataSheet.show(fragmentManager, uri, group)
     }
 
     fun showMultiCamCollageDialog(group: ImageGroup) {
@@ -313,7 +375,9 @@ class ViewerChromeAndInsetsDelegate(
             .setMessage(R.string.discard_changes_message)
             .setPositiveButton(R.string.discard) { _, _ ->
                 onResetAdjustments()
-                onBackNavigate()
+                if (shouldNavigateBackOnDiscard()) {
+                    onBackNavigate()
+                }
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
@@ -328,8 +392,10 @@ class ViewerChromeAndInsetsDelegate(
         isUiVisible = true
         binding.topBarContainer.animate().alpha(1f).translationY(0f).setDuration(200)
             .withStartAction { binding.topBarContainer.visibility = View.VISIBLE }.start()
-        binding.viewerBentoDeck.animate().alpha(1f).translationY(0f).setDuration(200)
-            .withStartAction { binding.viewerBentoDeck.visibility = View.VISIBLE }.start()
+        if (!isEditingAdjustments()) {
+            binding.viewerBentoDeck.animate().alpha(1f).translationY(0f).setDuration(200)
+                .withStartAction { binding.viewerBentoDeck.visibility = View.VISIBLE }.start()
+        }
         binding.btnGalleryPill.animate().alpha(1f).translationY(0f).setDuration(200)
             .withStartAction { binding.btnGalleryPill.visibility = View.VISIBLE }.start()
         getAdapter()?.setUiVisibility(true)
@@ -360,24 +426,6 @@ class ViewerChromeAndInsetsDelegate(
             group.mp4VideoUri == null
     }
 
-    private fun forceShowIcons(popup: PopupMenu) {
-        try {
-            val fields = popup.javaClass.declaredFields
-            for (field in fields) {
-                if (field.name == "mPopup") {
-                    field.isAccessible = true
-                    val menuPopupHelper = field.get(popup)
-                    val classPopupHelper = Class.forName(menuPopupHelper.javaClass.name)
-                    val setForceIcons = classPopupHelper.getMethod("setForceShowIcon", Boolean::class.javaPrimitiveType)
-                    setForceIcons.invoke(menuPopupHelper, true)
-                    break
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("ViewerChromeDelegate", "Error forcing menu icons", e)
-        }
-    }
-
     companion object {
         private const val MENU_DETAILS = 1
         private const val MENU_DELETE = 2
@@ -385,5 +433,6 @@ class ViewerChromeAndInsetsDelegate(
         private const val MENU_COLLAGE = 5
         private const val MENU_SHARE = 9
         private const val MENU_EXPORT_HUB = 10
+        private const val MENU_MOTION_STUDIO = 11
     }
 }

@@ -244,11 +244,12 @@ class CameraVideoController(
                 )
 
                 if (savedUri != null) {
-                    settingsRepository.setLastCaptureUri(savedUri.toString())
                     env.imageRepository.invalidateCache()
                     val videoTimestamp = result.file.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis()
                     withContext(Dispatchers.Main) {
-                        ui.setGalleryThumbnailBitmap(savedUri, thumbnail, videoTimestamp)
+                        if (ui.setGalleryThumbnailBitmap(savedUri, thumbnail, videoTimestamp)) {
+                            settingsRepository.setLastCaptureUri(savedUri.toString())
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -328,11 +329,12 @@ class CameraVideoController(
                 )
 
                 if (savedUri != null) {
-                    settingsRepository.setLastCaptureUri(savedUri.toString())
                     env.imageRepository.invalidateCache()
                     val videoTimestamp = result.file.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis()
                     withContext(Dispatchers.Main) {
-                        ui.setGalleryThumbnailBitmap(savedUri, thumbnail, videoTimestamp)
+                        if (ui.setGalleryThumbnailBitmap(savedUri, thumbnail, videoTimestamp)) {
+                            settingsRepository.setLastCaptureUri(savedUri.toString())
+                        }
                     }
                 }
             } catch (e: Exception) {

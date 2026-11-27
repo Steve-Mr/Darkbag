@@ -55,6 +55,7 @@ import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.LocationHelper
 import top.maary.darkbag.utils.LutManager
 import top.maary.darkbag.viewmodel.CameraEffect
+import top.maary.darkbag.viewmodel.CameraUiTier
 import top.maary.darkbag.viewmodel.CameraViewModel
 
 /**
@@ -172,7 +173,7 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
         val vfContainer = _fragmentCameraBinding?.viewFinderContainer
         hub.onResume(
             isViewFinderLaidOut = vfContainer?.isLaidOut == true,
-            onRebuildUi = { updateCameraUi() },
+            onRebuildUi = { refreshCameraUiIfInflated() },
             onPostBind = { action ->
                 vfContainer?.post {
                     if (isAdded && _fragmentCameraBinding != null) action()
@@ -275,6 +276,8 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
         displayId = fragmentCameraBinding.viewFinder.display?.displayId ?: 0
 
         hub.onViewCreated(mainApp.applicationScope)
+        cameraViewModel.setUiTier(CameraUiTier.fromKey(settingsRepository.current().uiTier))
+        updateCameraUi()
 
         _fragmentCameraBinding?.viewFinderContainer?.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             hub.onViewFinderLayoutChanged()
@@ -369,6 +372,19 @@ class CameraFragment : Fragment(), CameraEnvironmentHost {
         super.onConfigurationChanged(newConfig)
         updateCameraUi()
         hub.onConfigurationChanged()
+    }
+
+    private fun refreshCameraUiIfInflated() {
+        val uiBinding = cameraUiContainerBinding
+        if (uiBinding == null) {
+            updateCameraUi()
+            return
+        }
+        CameraBentoDeckView.applyDynamicRowHeights(uiBinding)
+        hub.overlayController.updateViewFinderConstraints()
+        hub.shutterController.updateShutterOrientation()
+        hub.bindCameraDeckUi()
+        hub.thumbnailController.loadLatestThumbnail()
     }
 
     private fun updateCameraUi() {

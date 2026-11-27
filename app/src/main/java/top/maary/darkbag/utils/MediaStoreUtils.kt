@@ -131,6 +131,10 @@ class MediaStoreUtils(private val context: Context) {
         }
     }
 
+    suspend fun uriExists(uri: Uri): Boolean = withContext(Dispatchers.IO) {
+        verifyUriExists(context, uri)
+    }
+
     private fun verifyUriExists(context: Context, uri: Uri): Boolean {
         return try {
             if (uri.scheme == "content") {

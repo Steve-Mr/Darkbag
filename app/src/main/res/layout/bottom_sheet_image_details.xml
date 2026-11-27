@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/details_scroll_view"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -10,91 +11,832 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingHorizontal="24dp"
+        android:paddingHorizontal="16dp"
         android:paddingTop="8dp"
-        android:paddingBottom="24dp">
+        android:paddingBottom="16dp">
 
         <com.google.android.material.bottomsheet.BottomSheetDragHandleView
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
-        <TextView
-            android:id="@+id/tv_details_title"
-            style="@style/TextAppearance.Material3.TitleLarge"
+        <!-- Header + Format Badges -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            android:text="Details" />
+            android:layout_marginBottom="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="4dp">
 
-        <!-- Basic Info Section -->
-        <com.google.android.material.card.MaterialCardView
-            style="@style/Widget.Material3.CardView.Filled"
+            <TextView
+                android:id="@+id/tv_details_title"
+                style="@style/TextAppearance.Material3.TitleLarge"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/details_title"
+                android:textStyle="bold" />
+
+            <HorizontalScrollView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/layout_format_badges"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+        </LinearLayout>
+
+        <!-- 1. File Overview Bento Matrix -->
+        <top.maary.darkbag.ui.bento.BentoTrayCard
+            android:id="@+id/tray_overview"
+            style="@style/Widget.Darkbag.BentoTray"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            app:cardCornerRadius="16dp">
+            android:layout_marginBottom="10dp"
+            app:bentoContainerRole="surfaceContainerHigh"
+            app:cardCornerRadius="22dp"
+            app:contentPadding="10dp"
+            app:strokeWidth="0dp">
 
             <LinearLayout
-                android:id="@+id/layout_basic_info"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp" />
+                android:orientation="vertical">
 
-        </com.google.android.material.card.MaterialCardView>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:paddingHorizontal="4dp"
+                    android:text="@string/details_section_overview"
+                    android:textColor="?attr/colorPrimary"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold" />
 
-        <!-- Technical Info Section -->
-        <TextView
-            style="@style/TextAppearance.Material3.LabelLarge"
+                <!-- Row 1: File Identity Porcelain Tile -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/tile_file_identity"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    app:cardBackgroundColor="?attr/colorSurface"
+                    app:cardCornerRadius="14dp"
+                    app:cardElevation="0dp"
+                    app:strokeWidth="0dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:padding="12dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="8dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/details_file_short"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_file_name"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:ellipsize="middle"
+                                android:maxLines="2"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textSize="13sp"
+                                android:textStyle="bold"
+                                tools:text="IMG_20261127_094218.jpg" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/tv_file_size_badge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_bento_badge_primary"
+                            android:fontFamily="monospace"
+                            android:paddingHorizontal="8dp"
+                            android:paddingVertical="3dp"
+                            android:textColor="?attr/colorPrimary"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold"
+                            tools:text="12.4 MB" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Row 2: Resolution & Capture Time 2-Col Porcelain Tiles -->
+                <top.maary.darkbag.ui.bento.BentoRowLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/tile_resolution"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        app:cardBackgroundColor="?attr/colorSurface"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="0dp"
+                        app:strokeWidth="0dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="11dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/details_resolution_short"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_resolution_main"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:fontFamily="monospace"
+                                android:maxLines="1"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textSize="12.5sp"
+                                android:textStyle="bold"
+                                tools:text="4032 × 3024" />
+
+                            <TextView
+                                android:id="@+id/tv_resolution_sub"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="1dp"
+                                android:maxLines="1"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="10.5sp"
+                                tools:text="12.2 MP · 4:3" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/tile_captured"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        app:cardBackgroundColor="?attr/colorSurface"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="0dp"
+                        app:strokeWidth="0dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="11dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/details_captured_short"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_captured_date"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:maxLines="1"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textSize="12.5sp"
+                                android:textStyle="bold"
+                                tools:text="2026-11-27" />
+
+                            <TextView
+                                android:id="@+id/tv_captured_time"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="1dp"
+                                android:fontFamily="monospace"
+                                android:maxLines="1"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="10.5sp"
+                                tools:text="09:42:18" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </top.maary.darkbag.ui.bento.BentoRowLayout>
+            </LinearLayout>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
+
+        <!-- 2. Optics & Exposure Dashboard Tray -->
+        <top.maary.darkbag.ui.bento.BentoTrayCard
+            android:id="@+id/tray_exposure"
+            style="@style/Widget.Darkbag.BentoTray"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:layout_marginBottom="8dp"
-            android:text="Technical Information"
-            android:textColor="?attr/colorPrimary" />
-
-        <com.google.android.material.card.MaterialCardView
-            style="@style/Widget.Material3.CardView.Filled"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            app:cardCornerRadius="16dp">
+            android:layout_marginBottom="10dp"
+            app:bentoContainerRole="primaryContainer"
+            app:cardCornerRadius="22dp"
+            app:contentPadding="10dp"
+            app:strokeWidth="0dp">
 
             <LinearLayout
-                android:id="@+id/layout_tech_info"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp" />
+                android:orientation="vertical">
 
-        </com.google.android.material.card.MaterialCardView>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:paddingHorizontal="4dp"
+                    android:text="@string/details_section_exposure"
+                    android:textColor="?attr/colorOnPrimaryContainer"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold" />
 
-        <!-- Config Section -->
-        <TextView
-            android:id="@+id/tv_config_header"
-            style="@style/TextAppearance.Material3.LabelLarge"
+                <!-- Row 1: 4-Column Exposure Metrics -->
+                <top.maary.darkbag.ui.bento.BentoRowLayout
+                    android:id="@+id/row_exposure_metrics"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp">
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        app:cardBackgroundColor="?attr/colorSurface"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="0dp"
+                        app:strokeWidth="0dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:paddingHorizontal="4dp"
+                            android:paddingVertical="10dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/details_focal_short"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_metric_focal"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:fontFamily="monospace"
+                                android:maxLines="1"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textSize="12sp"
+                                android:textStyle="bold"
+                                tools:text="24mm" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        app:cardBackgroundColor="?attr/colorSurface"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="0dp"
+                        app:strokeWidth="0dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:paddingHorizontal="4dp"
+                            android:paddingVertical="10dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/details_aperture_short"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_metric_aperture"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:fontFamily="monospace"
+                                android:maxLines="1"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textSize="12sp"
+                                android:textStyle="bold"
+                                tools:text="f/1.8" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        app:cardBackgroundColor="?attr/colorSurface"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="0dp"
+                        app:strokeWidth="0dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:paddingHorizontal="4dp"
+                            android:paddingVertical="10dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/details_shutter_short"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_metric_shutter"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:fontFamily="monospace"
+                                android:maxLines="1"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textSize="12sp"
+                                android:textStyle="bold"
+                                tools:text="1/125s" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        app:cardBackgroundColor="?attr/colorSurface"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="0dp"
+                        app:strokeWidth="0dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:paddingHorizontal="4dp"
+                            android:paddingVertical="10dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/details_iso_short"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_metric_iso"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:fontFamily="monospace"
+                                android:maxLines="1"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textSize="12sp"
+                                android:textStyle="bold"
+                                tools:text="100" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </top.maary.darkbag.ui.bento.BentoRowLayout>
+
+                <!-- Row 2: Device & Color Space Asymmetric Tiles -->
+                <top.maary.darkbag.ui.bento.BentoRowLayout
+                    android:id="@+id/row_tech_extra"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/tile_device"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1.35"
+                        app:cardBackgroundColor="?attr/colorSurface"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="0dp"
+                        app:strokeWidth="0dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="11dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/details_device_short"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_device_value"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:ellipsize="end"
+                                android:maxLines="2"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textSize="12sp"
+                                android:textStyle="bold"
+                                tools:text="Google Pixel 8 Pro" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/tile_color_space"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        app:cardBackgroundColor="?attr/colorSurface"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="0dp"
+                        app:strokeWidth="0dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="11dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/details_color_short"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_color_space_value"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:ellipsize="end"
+                                android:maxLines="1"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textSize="12sp"
+                                android:textStyle="bold"
+                                tools:text="sRGB" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </top.maary.darkbag.ui.bento.BentoRowLayout>
+            </LinearLayout>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
+
+        <!-- 3. RGB Histogram Tray -->
+        <top.maary.darkbag.ui.bento.BentoTrayCard
+            android:id="@+id/tray_histogram"
+            style="@style/Widget.Darkbag.BentoTray"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:layout_marginBottom="8dp"
-            android:text="Post-Processing Config"
-            android:textColor="?attr/colorPrimary" />
+            android:layout_marginBottom="10dp"
+            android:visibility="gone"
+            app:bentoContainerRole="surfaceContainerHigh"
+            app:cardCornerRadius="22dp"
+            app:contentPadding="10dp"
+            app:strokeWidth="0dp"
+            tools:visibility="visible">
 
-        <com.google.android.material.card.MaterialCardView
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="4dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/details_section_histogram"
+                        android:textColor="?attr/colorPrimary"
+                        android:textSize="10.5sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tv_histogram_legend"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        tools:text="● R  ● G  ● B" />
+                </LinearLayout>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:cardBackgroundColor="?attr/colorSurface"
+                    app:cardCornerRadius="14dp"
+                    app:cardElevation="0dp"
+                    app:strokeWidth="0dp">
+
+                    <top.maary.darkbag.viewer.metadata.RgbHistogramView
+                        android:id="@+id/rgb_histogram_view"
+                        android:layout_width="match_parent"
+                        android:layout_height="92dp"
+                        android:layout_margin="8dp" />
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
+
+        <!-- 4. Darkbag Recipe & Pipeline Bento Matrix -->
+        <top.maary.darkbag.ui.bento.BentoTrayCard
             android:id="@+id/card_config_info"
-            style="@style/Widget.Material3.CardView.Filled"
+            style="@style/Widget.Darkbag.BentoTray"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            app:cardCornerRadius="16dp">
+            android:layout_marginBottom="10dp"
+            app:bentoContainerRole="tertiaryContainer"
+            app:cardCornerRadius="22dp"
+            app:contentPadding="10dp"
+            app:strokeWidth="0dp">
 
             <LinearLayout
-                android:id="@+id/layout_config_info"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp" />
+                android:orientation="vertical">
 
-        </com.google.android.material.card.MaterialCardView>
+                <TextView
+                    android:id="@+id/tv_config_header"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:paddingHorizontal="4dp"
+                    android:text="@string/details_section_recipe"
+                    android:textColor="?attr/colorOnTertiaryContainer"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold" />
+
+                <!-- Hero Recipe Porcelain Tile -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/tile_recipe_hero"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:visibility="gone"
+                    app:cardBackgroundColor="?attr/colorSurface"
+                    app:cardCornerRadius="14dp"
+                    app:cardElevation="0dp"
+                    app:strokeWidth="0dp"
+                    tools:visibility="visible">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="11dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/details_recipe_label"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:textSize="9.5sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tv_recipe_hero_value"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:textColor="?attr/colorOnSurface"
+                            android:textSize="13sp"
+                            android:textStyle="bold"
+                            tools:text="F-Log2 + Classic Chrome" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- 2-Col Pipeline Porcelain Grid -->
+                <LinearLayout
+                    android:id="@+id/layout_pipeline_grid"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <!-- Adjustments Chip Wall -->
+                <LinearLayout
+                    android:id="@+id/layout_adjustments_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:orientation="vertical"
+                    android:visibility="gone"
+                    tools:visibility="visible">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="6dp"
+                        android:paddingHorizontal="4dp"
+                        android:text="@string/details_adjustments"
+                        android:textColor="?attr/colorOnTertiaryContainer"
+                        android:textSize="9.5sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chip_group_adjustments"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        app:chipSpacingHorizontal="6dp"
+                        app:chipSpacingVertical="6dp" />
+                </LinearLayout>
+            </LinearLayout>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
+
+        <!-- 5. Assets & Location Bento Matrix -->
+        <top.maary.darkbag.ui.bento.BentoTrayCard
+            android:id="@+id/tray_assets"
+            style="@style/Widget.Darkbag.BentoTray"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:bentoContainerRole="surfaceContainerHigh"
+            app:cardCornerRadius="22dp"
+            app:contentPadding="10dp"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:paddingHorizontal="4dp"
+                    android:text="@string/details_section_assets"
+                    android:textColor="?attr/colorPrimary"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold" />
+
+                <!-- Dynamic Asset Metric Tiles -->
+                <LinearLayout
+                    android:id="@+id/layout_assets_grid"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <!-- Copyable Path Tile -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/tile_storage_path"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:visibility="gone"
+                    app:cardBackgroundColor="?attr/colorSurface"
+                    app:cardCornerRadius="14dp"
+                    app:cardElevation="0dp"
+                    app:strokeWidth="0dp"
+                    tools:visibility="visible">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="11dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/details_path"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/details_tap_to_copy"
+                                android:textColor="?attr/colorPrimary"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/tv_storage_path_value"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:ellipsize="middle"
+                            android:fontFamily="monospace"
+                            android:maxLines="2"
+                            android:textColor="?attr/colorOnSurface"
+                            android:textSize="11sp"
+                            tools:text="/storage/emulated/0/Pictures/Darkbag/IMG_001.jpg" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Copyable GPS Tile -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/tile_gps_location"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:visibility="gone"
+                    app:cardBackgroundColor="?attr/colorSurface"
+                    app:cardCornerRadius="14dp"
+                    app:cardElevation="0dp"
+                    app:strokeWidth="0dp"
+                    tools:visibility="visible">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="11dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/details_location"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/details_tap_to_copy"
+                                android:textColor="?attr/colorPrimary"
+                                android:textSize="9.5sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/tv_gps_value"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:fontFamily="monospace"
+                            android:textColor="?attr/colorOnSurface"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            tools:text="31.23040, 121.47370" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+        </top.maary.darkbag.ui.bento.BentoTrayCard>
 
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>
