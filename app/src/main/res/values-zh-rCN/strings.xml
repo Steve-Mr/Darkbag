@@ -795,6 +795,11 @@
     <string name="details_badge_multicam">多摄</string>
     <string name="details_badge_rawvid">RAWVID</string>
     <string name="details_badge_cdng">CDNG</string>
+    <string name="details_file_short">文件</string>
+    <string name="details_resolution_short">分辨率</string>
+    <string name="details_captured_short">拍摄时间</string>
+    <string name="details_device_short">设备</string>
+    <string name="details_color_short">色彩</string>
 
     <!-- 动态照片工作台 -->
     <string name="viewer_motion_studio">动态照片工作台</string>

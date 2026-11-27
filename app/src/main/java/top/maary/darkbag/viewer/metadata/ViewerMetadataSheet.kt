@@ -3,10 +3,16 @@ package top.maary.darkbag.viewer.metadata
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Color
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.TextUtils
+import android.text.style.ForegroundColorSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -19,19 +25,22 @@ import androidx.exifinterface.media.ExifInterface
 import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import com.google.android.material.card.MaterialCardView
+import com.google.android.material.color.MaterialColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.BottomSheetImageDetailsBinding
-import top.maary.darkbag.databinding.ItemDetailRowBinding
 import top.maary.darkbag.models.ImageGroup
+import top.maary.darkbag.ui.bento.BentoRowLayout
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.round
+import kotlin.math.roundToInt
 
 class ViewerMetadataSheet : BottomSheetDialogFragment() {
 
@@ -86,7 +95,7 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
             return sizeStr?.toLongOrNull()?.let { formatFileSize(it) } ?: context.getString(R.string.details_unknown)
         }
 
-        internal fun formatNonDefaultAdjustments(adjJson: JSONObject): String {
+        internal fun extractAdjustmentChips(adjJson: JSONObject): List<String> {
             val parts = mutableListOf<String>()
             val keys = adjJson.keys()
             while (keys.hasNext()) {
@@ -100,7 +109,19 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
                     parts.add("$label $sign${String.format(Locale.US, "%.2f", v).trimEnd('0').trimEnd('.')}")
                 }
             }
-            return parts.joinToString(" · ")
+            return parts
+        }
+
+        internal fun formatNonDefaultAdjustments(adjJson: JSONObject): String {
+            return extractAdjustmentChips(adjJson).joinToString(" · ")
+        }
+
+        internal fun splitExifDateTime(raw: String?): Pair<String, String> {
+            if (raw.isNullOrBlank()) return "--" to "--"
+            val parts = raw.trim().split(Regex("\\s+"), limit = 2)
+            val date = parts[0].replace(':', '-')
+            val time = parts.getOrNull(1) ?: ""
+            return date to time
         }
     }
 
@@ -153,7 +174,23 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
         }
 
         bindFormatBadges(group)
+        bindHistogramLegend()
         loadMetadata(uri, group)
+    }
+
+    private fun bindHistogramLegend() {
+        val sb = SpannableStringBuilder()
+        fun appendDot(label: String, color: Int) {
+            if (sb.isNotEmpty()) sb.append("  ")
+            val start = sb.length
+            sb.append("● ")
+            sb.setSpan(ForegroundColorSpan(color), start, start + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.append(label)
+        }
+        appendDot("R", 0xFFEF5350.toInt())
+        appendDot("G", 0xFF66BB6A.toInt())
+        appendDot("B", 0xFF42A5F5.toInt())
+        binding.tvHistogramLegend.text = sb
     }
 
     private fun bindFormatBadges(group: ImageGroup?) {
@@ -175,7 +212,7 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
             val tv = TextView(ctx).apply {
                 this.text = text
                 textSize = 10f
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTypeface(typeface, Typeface.BOLD)
                 setBackgroundResource(R.drawable.bg_bento_badge_primary)
                 setPadding((7f * density).toInt(), (2f * density).toInt(), (7f * density).toInt(), (2f * density).toInt())
                 layoutParams = LinearLayout.LayoutParams(
@@ -194,15 +231,24 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
         val appContext = ctx.applicationContext
 
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-            val overviewDetails = mutableListOf<Pair<String, String>>()
-            val techExtraDetails = mutableListOf<Pair<String, String>>()
-            val configDetails = mutableListOf<Pair<String, String>>()
-            val assetDetails = mutableListOf<Pair<String, String>>()
+            var fileName = getFileName(appContext, uri)
+            var fileSize = getFileSize(appContext, uri)
+            var resMain = "--"
+            var resSub = ""
+            var capturedDate = "--"
+            var capturedTime = ""
 
             var focalMetric = "--"
             var apertureMetric = "--"
             var shutterMetric = "--"
             var isoMetric = "--"
+            var deviceValue: String? = null
+            var colorSpaceValue: String? = null
+
+            var recipeHero: String? = null
+            val pipelineTiles = mutableListOf<Pair<String, String>>()
+            val adjustmentChips = mutableListOf<String>()
+            val assetTiles = mutableListOf<Pair<String, String>>()
             var copyablePath: String? = null
             var copyableGps: String? = null
 
@@ -211,19 +257,20 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
                     val exif = ExifInterface(pfd.fileDescriptor)
 
                     // 1. Overview Info
-                    overviewDetails.add(appContext.getString(R.string.details_file_name) to getFileName(appContext, uri))
-                    overviewDetails.add(appContext.getString(R.string.details_file_size) to getFileSize(appContext, uri))
-
                     val width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
                     val height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
                     if (width > 0 && height > 0) {
+                        resMain = "$width × $height"
                         val mp = String.format(Locale.US, "%.1f MP", width * height / 1000000f)
                         val ratio = group?.aspectRatio?.let { " · $it" } ?: ""
-                        overviewDetails.add(appContext.getString(R.string.details_resolution) to "${width}×${height} ($mp$ratio)")
+                        resSub = "$mp$ratio"
                     }
 
-                    val dateStr = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
-                    dateStr?.let { overviewDetails.add(appContext.getString(R.string.details_date_time) to it) }
+                    val dateStr = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                        ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
+                    val (d, t) = splitExifDateTime(dateStr)
+                    capturedDate = d
+                    capturedTime = t
 
                     // 2. Optics & Exposure Dashboard
                     val focalLength = exif.getAttributeDouble(ExifInterface.TAG_FOCAL_LENGTH, 0.0)
@@ -253,13 +300,13 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
                     val make = exif.getAttribute(ExifInterface.TAG_MAKE)
                     val model = exif.getAttribute(ExifInterface.TAG_MODEL)
                     if (make != null || model != null) {
-                        techExtraDetails.add(appContext.getString(R.string.details_device) to "${make ?: ""} ${model ?: ""}".trim())
+                        deviceValue = "${make ?: ""} ${model ?: ""}".trim()
                     }
-                    val colorSpaceVal = exif.getAttributeInt(ExifInterface.TAG_COLOR_SPACE, -1)
-                    if (colorSpaceVal == 1) {
-                        techExtraDetails.add(appContext.getString(R.string.details_color_space) to "sRGB")
-                    } else if (colorSpaceVal == ExifInterface.COLOR_SPACE_UNCALIBRATED) {
-                        techExtraDetails.add(appContext.getString(R.string.details_color_space) to "Uncalibrated / Wide")
+                    val csVal = exif.getAttributeInt(ExifInterface.TAG_COLOR_SPACE, -1)
+                    colorSpaceValue = when (csVal) {
+                        1 -> "sRGB"
+                        ExifInterface.COLOR_SPACE_UNCALIBRATED -> "Uncalibrated / Wide"
+                        else -> null
                     }
 
                     // 3. Darkbag Recipe & Pipeline (UserComment JSON + EditConfig)
@@ -267,12 +314,17 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
                     if (comment?.startsWith("{") == true) {
                         try {
                             val json = JSONObject(comment)
-                            parseSemanticConfigJson(appContext, json, configDetails)
+                            val logVal = json.optString("log", "").takeIf { it.isNotBlank() && it != "None" }
+                            val lutVal = json.optString("lut", "").takeIf { it.isNotBlank() && it != "None" }
+                            if (logVal != null || lutVal != null) {
+                                recipeHero = listOfNotNull(logVal, lutVal).joinToString(" + ")
+                            }
+                            parseSemanticConfigJson(appContext, json, pipelineTiles, adjustmentChips)
                         } catch (_: Exception) {
-                            configDetails.add(appContext.getString(R.string.details_custom_info) to comment)
+                            pipelineTiles.add(appContext.getString(R.string.details_custom_info) to comment)
                         }
                     } else if (!comment.isNullOrBlank()) {
-                        configDetails.add(appContext.getString(R.string.details_custom_info) to comment)
+                        pipelineTiles.add(appContext.getString(R.string.details_custom_info) to comment)
                     } else if (group?.editConfig != null) {
                         val cfg = group.editConfig
                         val recipe = listOfNotNull(
@@ -280,7 +332,7 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
                             cfg.lut?.takeIf { it != "None" && it.isNotBlank() }
                         ).joinToString(" + ")
                         if (recipe.isNotEmpty()) {
-                            configDetails.add(appContext.getString(R.string.details_recipe_label) to recipe)
+                            recipeHero = recipe
                         }
                     }
 
@@ -288,16 +340,16 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
                     if (group != null) {
                         if (group.photoMasterUris.isNotEmpty()) {
                             val rawSize = group.photoMasterUris.joinToString(" + ") { getFileSize(appContext, it) }
-                            assetDetails.add(appContext.getString(R.string.details_asset_raw) to rawSize)
+                            assetTiles.add(appContext.getString(R.string.details_asset_raw) to rawSize)
                         }
                         if (group.jpgUri != null) {
-                            assetDetails.add(appContext.getString(R.string.details_asset_jpg) to getFileSize(appContext, group.jpgUri))
+                            assetTiles.add(appContext.getString(R.string.details_asset_jpg) to getFileSize(appContext, group.jpgUri))
                         }
                         if (group.isMotionPhoto && group.motionPhotoVideoLength > 0) {
-                            assetDetails.add(appContext.getString(R.string.details_asset_motion) to formatFileSize(group.motionPhotoVideoLength))
+                            assetTiles.add(appContext.getString(R.string.details_asset_motion) to formatFileSize(group.motionPhotoVideoLength))
                         }
                         if (group.derivativeJpgUris.size > 1) {
-                            assetDetails.add(appContext.getString(R.string.details_asset_derivatives) to "${group.derivativeJpgUris.size}")
+                            assetTiles.add(appContext.getString(R.string.details_asset_derivatives) to "${group.derivativeJpgUris.size}")
                         }
                     }
 
@@ -318,19 +370,36 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
             withContext(Dispatchers.Main) {
                 if (_binding == null || !isAdded) return@withContext
 
+                // Tray 1: Overview
+                binding.tvFileName.text = fileName
+                binding.tvFileSizeBadge.text = fileSize
+                binding.tileFileIdentity.setOnClickListener {
+                    copyToClipboard(getString(R.string.details_file_name), fileName)
+                }
+                binding.tvResolutionMain.text = resMain
+                binding.tvResolutionSub.text = resSub
+                binding.tvResolutionSub.visibility = if (resSub.isBlank()) View.GONE else View.VISIBLE
+                binding.tvCapturedDate.text = capturedDate
+                binding.tvCapturedTime.text = capturedTime
+                binding.tvCapturedTime.visibility = if (capturedTime.isBlank()) View.GONE else View.VISIBLE
+
+                // Tray 2: Optics & Exposure
                 binding.tvMetricFocal.text = focalMetric
                 binding.tvMetricAperture.text = apertureMetric
                 binding.tvMetricShutter.text = shutterMetric
                 binding.tvMetricIso.text = isoMetric
 
-                overviewDetails.forEach { addDetailRow(binding.layoutBasicInfo, it.first, it.second) }
-
-                if (techExtraDetails.isEmpty()) {
-                    binding.cardTechExtra.visibility = View.GONE
+                if (deviceValue == null && colorSpaceValue == null) {
+                    binding.rowTechExtra.visibility = View.GONE
                 } else {
-                    techExtraDetails.forEach { addDetailRow(binding.layoutTechInfo, it.first, it.second) }
+                    binding.rowTechExtra.visibility = View.VISIBLE
+                    binding.tileDevice.visibility = if (deviceValue != null) View.VISIBLE else View.GONE
+                    binding.tvDeviceValue.text = deviceValue ?: ""
+                    binding.tileColorSpace.visibility = if (colorSpaceValue != null) View.VISIBLE else View.GONE
+                    binding.tvColorSpaceValue.text = colorSpaceValue ?: ""
                 }
 
+                // Tray 3: Histogram
                 if (histogram != null) {
                     binding.trayHistogram.visibility = View.VISIBLE
                     binding.rgbHistogramView.setHistogramData(histogram)
@@ -338,18 +407,50 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
                     binding.trayHistogram.visibility = View.GONE
                 }
 
-                if (configDetails.isEmpty()) {
-                    binding.cardConfigInfo.visibility = View.GONE
-                } else {
-                    configDetails.forEach { addDetailRow(binding.layoutConfigInfo, it.first, it.second) }
+                // Tray 4: Darkbag Recipe & Pipeline
+                val hasRecipeSection = recipeHero != null || pipelineTiles.isNotEmpty() || adjustmentChips.isNotEmpty()
+                binding.cardConfigInfo.visibility = if (hasRecipeSection) View.VISIBLE else View.GONE
+                if (hasRecipeSection) {
+                    if (recipeHero != null) {
+                        binding.tileRecipeHero.visibility = View.VISIBLE
+                        binding.tvRecipeHeroValue.text = recipeHero
+                    } else {
+                        binding.tileRecipeHero.visibility = View.GONE
+                    }
+                    renderTwoColumnTileGrid(
+                        binding.layoutPipelineGrid,
+                        pipelineTiles,
+                        addBottomGap = adjustmentChips.isNotEmpty()
+                    )
+                    if (adjustmentChips.isNotEmpty()) {
+                        binding.layoutAdjustmentsContainer.visibility = View.VISIBLE
+                        renderAdjustmentChips(adjustmentChips)
+                    } else {
+                        binding.layoutAdjustmentsContainer.visibility = View.GONE
+                    }
                 }
 
-                assetDetails.forEach { addDetailRow(binding.layoutAssetsInfo, it.first, it.second) }
-                copyablePath?.let { pathStr ->
-                    addCopyableRow(binding.layoutAssetsInfo, appContext.getString(R.string.details_path), pathStr)
+                // Tray 5: Assets & Location
+                renderTwoColumnTileGrid(binding.layoutAssetsGrid, assetTiles, addBottomGap = false)
+                val pathValue = copyablePath
+                if (pathValue != null) {
+                    binding.tileStoragePath.visibility = View.VISIBLE
+                    binding.tvStoragePathValue.text = pathValue
+                    binding.tileStoragePath.setOnClickListener {
+                        copyToClipboard(getString(R.string.details_path), pathValue)
+                    }
+                } else {
+                    binding.tileStoragePath.visibility = View.GONE
                 }
-                copyableGps?.let { gpsStr ->
-                    addCopyableRow(binding.layoutAssetsInfo, appContext.getString(R.string.details_location), gpsStr)
+                val gpsValue = copyableGps
+                if (gpsValue != null) {
+                    binding.tileGpsLocation.visibility = View.VISIBLE
+                    binding.tvGpsValue.text = gpsValue
+                    binding.tileGpsLocation.setOnClickListener {
+                        copyToClipboard(getString(R.string.details_location), gpsValue)
+                    }
+                } else {
+                    binding.tileGpsLocation.visibility = View.GONE
                 }
             }
         }
@@ -358,16 +459,10 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
     private fun parseSemanticConfigJson(
         appContext: Context,
         json: JSONObject,
-        out: MutableList<Pair<String, String>>
+        outTiles: MutableList<Pair<String, String>>,
+        outChips: MutableList<String>
     ) {
-        val handledKeys = mutableSetOf<String>()
-        val logVal = json.optString("log", "").takeIf { it.isNotBlank() && it != "None" }
-        val lutVal = json.optString("lut", "").takeIf { it.isNotBlank() && it != "None" }
-        if (logVal != null || lutVal != null) {
-            out.add(appContext.getString(R.string.details_recipe_label) to listOfNotNull(logVal, lutVal).joinToString(" + "))
-        }
-        handledKeys.addAll(listOf("log", "lut"))
-
+        val handledKeys = mutableSetOf("log", "lut", "adjustments")
         val semanticMap = mapOf(
             "color_engine" to R.string.details_color_engine,
             "hdr_fusion" to R.string.details_hdr_fusion,
@@ -376,19 +471,15 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
         semanticMap.forEach { (key, resId) ->
             if (json.has(key)) {
                 val value = json.optString(key, "")
-                if (value.isNotBlank()) out.add(appContext.getString(resId) to value)
+                if (value.isNotBlank()) outTiles.add(appContext.getString(resId) to value)
                 handledKeys.add(key)
             }
         }
 
         val adjObj = json.optJSONObject("adjustments")
         if (adjObj != null) {
-            val adjSummary = formatNonDefaultAdjustments(adjObj)
-            if (adjSummary.isNotBlank()) {
-                out.add(appContext.getString(R.string.details_adjustments) to adjSummary)
-            }
+            outChips.addAll(extractAdjustmentChips(adjObj))
         }
-        handledKeys.add("adjustments")
 
         val keys = json.keys()
         while (keys.hasNext()) {
@@ -398,25 +489,129 @@ class ViewerMetadataSheet : BottomSheetDialogFragment() {
             val label = key.replace("_", " ").replaceFirstChar {
                 if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString()
             }
-            out.add(label to value.toString())
+            outTiles.add(label to value.toString())
         }
     }
 
-    private fun addDetailRow(container: ViewGroup, label: String, value: String) {
-        val rowBinding = ItemDetailRowBinding.inflate(layoutInflater, container, true)
-        rowBinding.tvLabel.text = label
-        rowBinding.tvValue.text = value
+    private fun renderTwoColumnTileGrid(
+        container: LinearLayout,
+        items: List<Pair<String, String>>,
+        addBottomGap: Boolean
+    ) {
+        container.removeAllViews()
+        if (items.isEmpty()) {
+            container.visibility = View.GONE
+            return
+        }
+        container.visibility = View.VISIBLE
+        val ctx = requireContext()
+        val density = resources.displayMetrics.density
+        val gap8dp = (8f * density).roundToInt()
+
+        val colorSurface = MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorSurface, Color.WHITE)
+        val colorOnSurface = MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnSurface, Color.BLACK)
+        val colorOnSurfaceVariant = MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY)
+
+        val rows = items.chunked(2)
+        rows.forEachIndexed { rowIdx, pair ->
+            val isLastRow = rowIdx == rows.lastIndex
+            val row = BentoRowLayout(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    if (!isLastRow || addBottomGap) bottomMargin = gap8dp
+                }
+            }
+            pair.forEach { (label, value) ->
+                row.addView(buildPorcelainMetricTile(label, value, density, colorSurface, colorOnSurface, colorOnSurfaceVariant))
+            }
+            container.addView(row)
+        }
     }
 
-    private fun addCopyableRow(container: ViewGroup, label: String, value: String) {
-        val rowBinding = ItemDetailRowBinding.inflate(layoutInflater, container, true)
-        rowBinding.tvLabel.text = "$label (${getString(R.string.details_tap_to_copy)})"
-        rowBinding.tvValue.text = value
-        rowBinding.root.setOnClickListener {
-            val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText(label, value))
-            Toast.makeText(requireContext(), R.string.details_copied, Toast.LENGTH_SHORT).show()
+    private fun buildPorcelainMetricTile(
+        label: String,
+        value: String,
+        density: Float,
+        bgColor: Int,
+        fgColor: Int,
+        labelColor: Int
+    ): MaterialCardView {
+        val pad = (11f * density).roundToInt()
+        return MaterialCardView(requireContext()).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            radius = 14f * density
+            cardElevation = 0f
+            strokeWidth = 0
+            setCardBackgroundColor(bgColor)
+
+            val inner = LinearLayout(requireContext()).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(pad, pad, pad, pad)
+            }
+            val tvLabel = TextView(requireContext()).apply {
+                text = label.uppercase(Locale.getDefault())
+                textSize = 9.5f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(labelColor)
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            }
+            val tvValue = TextView(requireContext()).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    topMargin = (2f * density).roundToInt()
+                }
+                text = value
+                textSize = 12f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(fgColor)
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+            }
+            inner.addView(tvLabel)
+            inner.addView(tvValue)
+            addView(inner)
         }
+    }
+
+    private fun renderAdjustmentChips(chips: List<String>) {
+        val group = binding.chipGroupAdjustments
+        group.removeAllViews()
+        val ctx = requireContext()
+        val density = resources.displayMetrics.density
+        val bg = MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorSurface, Color.WHITE)
+        val fg = MaterialColors.getColor(ctx, com.google.android.material.R.attr.colorOnSurface, Color.BLACK)
+        val padH = (10f * density).roundToInt()
+        val padV = (5f * density).roundToInt()
+
+        chips.forEach { text ->
+            val card = MaterialCardView(ctx).apply {
+                radius = 12f * density
+                cardElevation = 0f
+                strokeWidth = 0
+                setCardBackgroundColor(bg)
+                val tv = TextView(ctx).apply {
+                    this.text = text
+                    textSize = 10.5f
+                    typeface = Typeface.MONOSPACE
+                    setTypeface(typeface, Typeface.BOLD)
+                    setTextColor(fg)
+                    setPadding(padH, padV, padH, padV)
+                }
+                addView(tv)
+            }
+            group.addView(card)
+        }
+    }
+
+    private fun copyToClipboard(label: String, value: String) {
+        val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, value))
+        Toast.makeText(requireContext(), R.string.details_copied, Toast.LENGTH_SHORT).show()
     }
 
     override fun onDestroyView() {

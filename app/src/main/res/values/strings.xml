@@ -814,6 +814,11 @@
     <string name="details_badge_multicam">MULTI-CAM</string>
     <string name="details_badge_rawvid">RAWVID</string>
     <string name="details_badge_cdng">CDNG</string>
+    <string name="details_file_short">FILE</string>
+    <string name="details_resolution_short">RESOLUTION</string>
+    <string name="details_captured_short">CAPTURED</string>
+    <string name="details_device_short">DEVICE</string>
+    <string name="details_color_short">COLOR</string>
 
     <!-- Motion Photo Studio -->
     <string name="viewer_motion_studio">Motion Studio</string>
