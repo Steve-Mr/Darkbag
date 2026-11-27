@@ -51,6 +51,7 @@
 
         <!-- Live Video Preview Card -->
         <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_preview_stage"
             android:layout_width="match_parent"
             android:layout_height="240dp"
             android:layout_marginBottom="10dp"

@@ -5,9 +5,11 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -17,6 +19,7 @@ import androidx.fragment.app.setFragmentResult
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.ExoPlayer
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -40,6 +43,7 @@ class MotionPhotoStudioSheet : BottomSheetDialogFragment() {
     private var filmstripThumbnails: List<Bitmap> = emptyList()
     private var currentTimeUs: Long = 0L
     private var isExporting: Boolean = false
+    private var activeDisplayAspectRatio: Float = 4f / 3f
 
     companion object {
         const val TAG = "MotionPhotoStudioSheet"
@@ -58,6 +62,47 @@ class MotionPhotoStudioSheet : BottomSheetDialogFragment() {
 
         fun show(fragmentManager: FragmentManager, group: ImageGroup) {
             newInstance(group).show(fragmentManager, TAG)
+        }
+
+        internal fun computeDisplayAspectRatio(width: Int, height: Int, rotationDegrees: Int): Float {
+            if (width <= 0 || height <= 0) return 4f / 3f
+            val normalizedRot = ((rotationDegrees % 360) + 360) % 360
+            val (dispW, dispH) = if (normalizedRot == 90 || normalizedRot == 270) {
+                height to width
+            } else {
+                width to height
+            }
+            return (dispW.toFloat() / dispH.toFloat()).coerceIn(0.35f, 3.0f)
+        }
+
+        internal fun computePreviewContainerHeightPx(
+            containerWidthPx: Int,
+            aspectRatio: Float,
+            minHeightPx: Int,
+            maxHeightPx: Int
+        ): Int {
+            if (containerWidthPx <= 0 || aspectRatio <= 0f) return minHeightPx
+            return kotlin.math.round(containerWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
+        }
+
+        internal fun computeFittedVideoSize(
+            containerWidthPx: Int,
+            containerHeightPx: Int,
+            aspectRatio: Float
+        ): Pair<Int, Int> {
+            if (containerWidthPx <= 0 || containerHeightPx <= 0 || aspectRatio <= 0f) {
+                return containerWidthPx to containerHeightPx
+            }
+            val containerRatio = containerWidthPx.toFloat() / containerHeightPx.toFloat()
+            return if (aspectRatio > containerRatio) {
+                val w = containerWidthPx
+                val h = kotlin.math.round(w / aspectRatio).toInt().coerceAtLeast(1)
+                w to h
+            } else {
+                val h = containerHeightPx
+                val w = kotlin.math.round(h * aspectRatio).toInt().coerceAtLeast(1)
+                w to h
+            }
         }
     }
 
@@ -102,6 +147,11 @@ class MotionPhotoStudioSheet : BottomSheetDialogFragment() {
         }
 
         setupControls(group)
+        binding.cardPreviewStage.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
+            if ((right - left) != (oldRight - oldLeft)) {
+                applyPreviewAspectRatio(activeDisplayAspectRatio)
+            }
+        }
         loadMotionMedia(group)
     }
 
@@ -161,6 +211,9 @@ class MotionPhotoStudioSheet : BottomSheetDialogFragment() {
             }
             prepared = prep
             currentTimeUs = prep.stillPtsUs
+            if (prep.width > 0 && prep.height > 0) {
+                applyPreviewAspectRatio(computeDisplayAspectRatio(prep.width, prep.height, prep.rotation))
+            }
 
             val keyframeFrac = MotionFilmstripScrubberView.computeKeyframeFraction(prep.stillPtsUs, prep.durationUs)
             binding.filmstripScrubber.setKeyframeFraction(keyframeFrac)
@@ -190,6 +243,17 @@ class MotionPhotoStudioSheet : BottomSheetDialogFragment() {
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     if (_binding != null) updatePlayPauseIcon()
+                }
+
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    if (_binding != null && videoSize.width > 0 && videoSize.height > 0) {
+                        val ratio = computeDisplayAspectRatio(
+                            videoSize.width,
+                            videoSize.height,
+                            0
+                        )
+                        applyPreviewAspectRatio(ratio)
+                    }
                 }
             })
             prepare()
@@ -221,6 +285,34 @@ class MotionPhotoStudioSheet : BottomSheetDialogFragment() {
         val rel = MotionPhotoExportHelper.formatRelativeTime(currentTimeUs, prep.stillPtsUs)
         val isShutter = rel == "0.00s"
         binding.tvTimeBadge.text = if (isShutter) "★ $rel" else rel
+    }
+
+    private fun applyPreviewAspectRatio(ratio: Float) {
+        activeDisplayAspectRatio = ratio
+        val stage = binding.cardPreviewStage
+        val containerW = stage.width
+        if (containerW <= 0) {
+            stage.post {
+                if (_binding != null && isAdded) applyPreviewAspectRatio(activeDisplayAspectRatio)
+            }
+            return
+        }
+        val density = resources.displayMetrics.density
+        val minH = (180f * density).toInt()
+        val maxH = (340f * density).toInt()
+        val targetH = computePreviewContainerHeightPx(containerW, ratio, minH, maxH)
+        if (stage.layoutParams.height != targetH) {
+            stage.layoutParams = stage.layoutParams.apply { height = targetH }
+        }
+        val (videoW, videoH) = computeFittedVideoSize(containerW, targetH, ratio)
+        val texLp = binding.texturePreview.layoutParams as? FrameLayout.LayoutParams
+            ?: FrameLayout.LayoutParams(videoW, videoH, Gravity.CENTER)
+        if (texLp.width != videoW || texLp.height != videoH || texLp.gravity != Gravity.CENTER) {
+            texLp.width = videoW
+            texLp.height = videoH
+            texLp.gravity = Gravity.CENTER
+            binding.texturePreview.layoutParams = texLp
+        }
     }
 
     private fun updatePlayPauseIcon() {

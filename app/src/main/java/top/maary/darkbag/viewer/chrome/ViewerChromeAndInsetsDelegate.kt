@@ -202,13 +202,6 @@ class ViewerChromeAndInsetsDelegate(
             }
         }
 
-        binding.btnDelete.setOnClickListener {
-            val adapter = getAdapter()
-            if (adapter != null && adapter.itemCount > 0) {
-                onShowDeleteDialog(adapter.getGroup(binding.imagePager.currentItem))
-            }
-        }
-
         binding.btnSeparateDng.setOnClickListener {
             val adapter = getAdapter()
             if (adapter != null && adapter.itemCount > 0) {
