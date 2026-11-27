@@ -815,6 +815,24 @@
     <string name="details_badge_rawvid">RAWVID</string>
     <string name="details_badge_cdng">CDNG</string>
 
+    <!-- Motion Photo Studio -->
+    <string name="viewer_motion_studio">Motion Studio</string>
+    <string name="motion_studio_title">Motion Photo Studio</string>
+    <string name="motion_studio_shutter">★ SHUTTER</string>
+    <string name="motion_studio_step_back">◀ -1F</string>
+    <string name="motion_studio_step_forward">+1F ▶</string>
+    <string name="motion_studio_frame_section">STILL FRAME</string>
+    <string name="motion_studio_video_section">MOTION CLIP</string>
+    <string name="motion_studio_save_frame">Save Frame (JPG)</string>
+    <string name="motion_studio_share_frame">Share Frame</string>
+    <string name="motion_studio_save_video">Save Video (MP4)</string>
+    <string name="motion_studio_share_video">Share Video</string>
+    <string name="motion_studio_frame_saved">Saved frame to gallery</string>
+    <string name="motion_studio_video_saved">Saved motion video to gallery</string>
+    <string name="motion_studio_export_failed">Export failed</string>
+    <string name="motion_studio_load_failed">Unable to load motion video</string>
+    <string name="motion_studio_share_title">Share Motion Photo</string>
+
     <!-- Multi-Cam Collage Sheet -->
     <string name="collage_section_layout">Layout</string>
     <string name="collage_section_framing">Ratio &amp; Framing</string>

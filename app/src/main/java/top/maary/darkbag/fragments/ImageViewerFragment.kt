@@ -243,7 +243,8 @@ open class ImageViewerFragment : Fragment() {
                 adapter.cycleDerivativeVersion(binding.imagePager.currentItem)
                 updateControlsVisibility()
             },
-            onMotionLiveToggleRequested = { mediaPreloadDelegate.handleMotionPhotoIndicatorTapped(binding.imagePager.currentItem) }
+            onMotionLiveToggleRequested = { mediaPreloadDelegate.handleMotionPhotoIndicatorTapped(binding.imagePager.currentItem) },
+            onMotionStudioRequested = { openMotionStudio(it) }
         )
 
         chromeDelegate = ViewerChromeAndInsetsDelegate(
@@ -269,7 +270,8 @@ open class ImageViewerFragment : Fragment() {
                         arguments
                     )
                 } else false
-            }
+            },
+            onOpenMotionStudio = { openMotionStudio(it) }
         )
 
         mediaPreloadDelegate = ViewerMediaPreloadDelegate(
@@ -421,6 +423,16 @@ open class ImageViewerFragment : Fragment() {
                 onEndExport = { setBusyLoading(false) },
                 onRefreshGroup = { mediaPreloadDelegate.refreshCurrentGroupAndAdapter(it) }
             )
+        }
+        childFragmentManager.setFragmentResultListener(
+            top.maary.darkbag.viewer.motion.MotionPhotoStudioSheet.RESULT_KEY,
+            viewLifecycleOwner
+        ) { _, bundle ->
+            val savedUri = bundle.getString(top.maary.darkbag.viewer.motion.MotionPhotoStudioSheet.RESULT_SAVED_URI)
+            if (::mediaStrategy.isInitialized && !mediaStrategy.isSandbox) {
+                repository.invalidateCache(clearStale = true)
+                loadImages(targetUri = savedUri ?: args.initialUri, forceRefresh = true)
+            }
         }
     }
 
@@ -624,6 +636,12 @@ open class ImageViewerFragment : Fragment() {
         val cur = binding.imagePager.currentItem
         val frameInfo = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(cur)
         exportCoordinator.openExportHub(adapter.getGroup(cur), currentEditConfig, frameInfo?.first ?: 0, repository, childFragmentManager)
+    }
+
+    private fun openMotionStudio(group: ImageGroup) {
+        if (!group.isMotionPhoto) return
+        if (::adapter.isInitialized) adapter.stopAllMotionVideos()
+        top.maary.darkbag.viewer.motion.MotionPhotoStudioSheet.show(childFragmentManager, group)
     }
 
     private fun performShare() {

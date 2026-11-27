@@ -796,6 +796,24 @@
     <string name="details_badge_rawvid">RAWVID</string>
     <string name="details_badge_cdng">CDNG</string>
 
+    <!-- 动态照片工作台 -->
+    <string name="viewer_motion_studio">动态照片工作台</string>
+    <string name="motion_studio_title">动态照片工作台</string>
+    <string name="motion_studio_shutter">★ 快门瞬间</string>
+    <string name="motion_studio_step_back">◀ 上一帧</string>
+    <string name="motion_studio_step_forward">下一帧 ▶</string>
+    <string name="motion_studio_frame_section">静态选帧</string>
+    <string name="motion_studio_video_section">动态视频</string>
+    <string name="motion_studio_save_frame">保存此帧 (JPG)</string>
+    <string name="motion_studio_share_frame">分享此帧</string>
+    <string name="motion_studio_save_video">保存视频 (MP4)</string>
+    <string name="motion_studio_share_video">分享视频</string>
+    <string name="motion_studio_frame_saved">已保存此帧至相册</string>
+    <string name="motion_studio_video_saved">已保存动态视频至相册</string>
+    <string name="motion_studio_export_failed">导出失败</string>
+    <string name="motion_studio_load_failed">无法加载动态视频</string>
+    <string name="motion_studio_share_title">分享动态照片</string>
+
     <!-- 多摄拼图面板 -->
     <string name="collage_section_layout">布局</string>
     <string name="collage_section_framing">比例与构图</string>

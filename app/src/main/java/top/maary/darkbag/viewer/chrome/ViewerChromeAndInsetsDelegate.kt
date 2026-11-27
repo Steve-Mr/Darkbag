@@ -48,7 +48,8 @@ class ViewerChromeAndInsetsDelegate(
     private val onShowLutMenu: (ImageGroup) -> Unit,
     private val onShowDeleteDialog: (ImageGroup) -> Unit,
     private val onUpdateBackPressedEnabled: (Boolean) -> Unit,
-    private val shouldNavigateBackOnDiscard: () -> Boolean = { false }
+    private val shouldNavigateBackOnDiscard: () -> Boolean = { false },
+    private val onOpenMotionStudio: (ImageGroup) -> Unit = {}
 ) {
 
     var isUiVisible: Boolean = true
@@ -314,6 +315,17 @@ class ViewerChromeAndInsetsDelegate(
                 )
             )
         }
+        if (grp.isMotionPhoto) {
+            items.add(
+                BentoViewerActionMenu.ActionItem(
+                    id = MENU_MOTION_STUDIO,
+                    title = context.getString(R.string.viewer_motion_studio),
+                    iconRes = R.drawable.ic_motion_photo_on,
+                    role = BentoViewerActionMenu.Role.ROW,
+                    onClick = { onOpenMotionStudio(grp) }
+                )
+            )
+        }
         items.add(
             BentoViewerActionMenu.ActionItem(
                 id = MENU_DELETE,
@@ -428,5 +440,6 @@ class ViewerChromeAndInsetsDelegate(
         private const val MENU_COLLAGE = 5
         private const val MENU_SHARE = 9
         private const val MENU_EXPORT_HUB = 10
+        private const val MENU_MOTION_STUDIO = 11
     }
 }
