@@ -117,7 +117,8 @@ class SettingsBentoDelegate(
             value = wbDisplay,
             isTabActive = false,
             isValueManual = state.wbStrategy != PreferenceKeys.WB_STRATEGY_AMBIENCE,
-            context = context
+            context = context,
+            maxChars = 0
         )
 
         // 5. HDR+ Fusion Mode
@@ -175,7 +176,8 @@ class SettingsBentoDelegate(
             value = ceName,
             isTabActive = false,
             isValueManual = true,
-            context = context
+            context = context,
+            maxChars = 0
         )
 
         // 9. Antibanding Mode
@@ -243,7 +245,8 @@ class SettingsBentoDelegate(
             value = evName,
             isTabActive = false,
             isValueManual = evName != defaultEvName,
-            context = context
+            context = context,
+            maxChars = 0
         )
         binding.btnMenuExternalViewer.visibility = if (state.useInternalViewer) View.GONE else View.VISIBLE
 
@@ -300,7 +303,8 @@ class SettingsBentoDelegate(
             value = quality.getTitle(context),
             isTabActive = false,
             isValueManual = true,
-            context = context
+            context = context,
+            maxChars = 0
         )
     }
 

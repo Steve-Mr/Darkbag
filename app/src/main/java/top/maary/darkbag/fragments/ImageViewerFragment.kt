@@ -175,7 +175,20 @@ open class ImageViewerFragment : Fragment() {
                 backdropView = backdrop
             )
             if (::editorPanelDelegate.isInitialized && editorPanelDelegate.dismissPillPopup()) return
-            if (isEditingAdjustments) exitEditMode(apply = false) else if (isAdjusted) chromeDelegate.showDiscardChangesDialog()
+            when {
+                isAdjusted -> {
+                    val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0) {
+                        adapter.getGroup(binding.imagePager.currentItem)
+                    } else null
+                    if (currentGroup != null && mediaStrategy.handleDiscard(currentGroup, adapter.getGroups(), arguments)) {
+                        resetAdjustments()
+                        findNavController().navigateUp()
+                    } else {
+                        chromeDelegate.showDiscardChangesDialog()
+                    }
+                }
+                isEditingAdjustments -> exitEditMode(apply = false)
+            }
         }
     }
 
@@ -247,7 +260,16 @@ open class ImageViewerFragment : Fragment() {
             onPerformShare = { performShare() }, onPerformShareAsTiff = { performShareAsTiff() },
             onShowLutMenu = { editorPanelDelegate.showLutMenu(it) },
             onShowDeleteDialog = { showDeleteDialog(it) },
-            onUpdateBackPressedEnabled = { backPressedCallback.isEnabled = it }
+            onUpdateBackPressedEnabled = { backPressedCallback.isEnabled = it },
+            shouldNavigateBackOnDiscard = {
+                if (::adapter.isInitialized && adapter.itemCount > 0) {
+                    mediaStrategy.handleDiscard(
+                        adapter.getGroup(binding.imagePager.currentItem),
+                        adapter.getGroups(),
+                        arguments
+                    )
+                } else false
+            }
         )
 
         mediaPreloadDelegate = ViewerMediaPreloadDelegate(
@@ -580,6 +602,7 @@ open class ImageViewerFragment : Fragment() {
 
     protected fun resetAdjustments() {
         isAdjusted = false
+        isEditingAdjustments = false
         editorPanelDelegate.exitEditMode(apply = false)
         binding.imagePager.isUserInputEnabled = true
         adapter.setFormatSwitcherPersistentHidden(false)
@@ -593,6 +616,7 @@ open class ImageViewerFragment : Fragment() {
         adapter.notifyItemChanged(cur)
         prepareEditConfig(adapter.getGroup(cur))
         updateControlsVisibility()
+        chromeDelegate.updateBackPressedCallbackState()
     }
 
     private fun openExportHub() {

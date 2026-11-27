@@ -47,7 +47,8 @@ class ViewerChromeAndInsetsDelegate(
     private val onPerformShareAsTiff: () -> Unit,
     private val onShowLutMenu: (ImageGroup) -> Unit,
     private val onShowDeleteDialog: (ImageGroup) -> Unit,
-    private val onUpdateBackPressedEnabled: (Boolean) -> Unit
+    private val onUpdateBackPressedEnabled: (Boolean) -> Unit,
+    private val shouldNavigateBackOnDiscard: () -> Boolean = { false }
 ) {
 
     var isUiVisible: Boolean = true
@@ -114,8 +115,8 @@ class ViewerChromeAndInsetsDelegate(
         binding.btnBack.setOnClickListener {
             if (onDismissPillPopup()) return@setOnClickListener
             when {
-                isEditingAdjustments() -> onExitEditMode(false)
                 isAdjusted() -> showDiscardChangesDialog()
+                isEditingAdjustments() -> onExitEditMode(false)
                 else -> onBackNavigate()
             }
         }
@@ -313,7 +314,9 @@ class ViewerChromeAndInsetsDelegate(
             .setMessage(R.string.discard_changes_message)
             .setPositiveButton(R.string.discard) { _, _ ->
                 onResetAdjustments()
-                onBackNavigate()
+                if (shouldNavigateBackOnDiscard()) {
+                    onBackNavigate()
+                }
             }
             .setNegativeButton(R.string.cancel, null)
             .show()

@@ -390,9 +390,9 @@
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btn_open_deck_customizer"
-                            style="@style/Widget.Darkbag.BentoTile.Button"
+                            style="@style/Widget.Darkbag.BentoTile.Button.FullWidth"
                             android:layout_width="match_parent"
-                            android:layout_height="52dp"
+                            android:layout_height="wrap_content"
                             android:layout_marginBottom="8dp"
                             app:backgroundTint="?attr/colorSurface"
                             android:textColor="?attr/colorOnSurface"
@@ -411,9 +411,9 @@
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btn_menu_external_viewer"
-                            style="@style/Widget.Darkbag.BentoTile.Button"
+                            style="@style/Widget.Darkbag.BentoTile.Button.FullWidth"
                             android:layout_width="match_parent"
-                            android:layout_height="50dp"
+                            android:layout_height="wrap_content"
                             android:layout_marginTop="8dp"
                             android:visibility="gone"
                             app:backgroundTint="?attr/colorSurface"
@@ -818,15 +818,13 @@
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_menu_wb_strategy"
-                        style="@style/Widget.Darkbag.BentoTile.Button"
+                        style="@style/Widget.Darkbag.BentoTile.Button.FullWidth"
                         android:layout_width="match_parent"
-                        android:layout_height="50dp"
+                        android:layout_height="wrap_content"
                         android:layout_marginBottom="8dp"
                         app:backgroundTint="?attr/colorSurface"
                         android:textColor="?attr/colorOnSurface"
                         app:strokeWidth="0dp"
-                        android:maxLines="2"
-                        android:ellipsize="end"
                         tools:text="WHITE BALANCE\nAmbience Priority" />
 
                     <top.maary.darkbag.ui.bento.BentoSwitchTile
@@ -899,9 +897,9 @@
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btn_menu_color_engine"
-                            style="@style/Widget.Darkbag.BentoTile.Button"
+                            style="@style/Widget.Darkbag.BentoTile.Button.FullWidth"
                             android:layout_width="match_parent"
-                            android:layout_height="52dp"
+                            android:layout_height="wrap_content"
                             app:backgroundTint="?attr/colorSurface"
                             android:textColor="?attr/colorOnSurface"
                             tools:text="COLOR ENGINE\nSony Uchimura" />
@@ -1421,9 +1419,9 @@
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_replay_onboarding"
-                        style="@style/Widget.Darkbag.BentoTile.Button"
+                        style="@style/Widget.Darkbag.BentoTile.Button.FullWidth"
                         android:layout_width="match_parent"
-                        android:layout_height="52dp"
+                        android:layout_height="wrap_content"
                         android:layout_marginBottom="8dp"
                         app:backgroundTint="?attr/colorSurface"
                         android:textColor="?attr/colorOnSurface"
@@ -1501,9 +1499,9 @@
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_github_repo"
-                        style="@style/Widget.Darkbag.BentoTile.Button"
+                        style="@style/Widget.Darkbag.BentoTile.Button.FullWidth"
                         android:layout_width="match_parent"
-                        android:layout_height="52dp"
+                        android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
                         app:backgroundTint="?attr/colorSurface"
                         android:textColor="?attr/colorOnSurface"
@@ -1894,9 +1892,9 @@
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btn_open_lens_calibration"
-                                style="@style/Widget.Darkbag.BentoTile.Button"
+                                style="@style/Widget.Darkbag.BentoTile.Button.FullWidth"
                                 android:layout_width="match_parent"
-                                android:layout_height="52dp"
+                                android:layout_height="wrap_content"
                                 app:backgroundTint="?attr/colorSurface"
                                 android:textColor="?attr/colorOnSurface"
                                 app:strokeWidth="0dp"
@@ -1973,9 +1971,9 @@
 
                                 <com.google.android.material.button.MaterialButton
                                     android:id="@+id/btn_menu_raw_motion_quality"
-                                    style="@style/Widget.Darkbag.BentoTile.Button"
+                                    style="@style/Widget.Darkbag.BentoTile.Button.FullWidth"
                                     android:layout_width="match_parent"
-                                    android:layout_height="52dp"
+                                    android:layout_height="wrap_content"
                                     app:backgroundTint="?attr/colorSurface"
                                     android:textColor="?attr/colorOnSurface"
                                     app:strokeWidth="0dp"
