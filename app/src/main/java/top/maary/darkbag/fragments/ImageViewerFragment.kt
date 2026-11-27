@@ -285,17 +285,33 @@ open class ImageViewerFragment : Fragment() {
             onMarkAdjusted = { markAdjusted() },
             onViewportPaddingRequested = { chromeDelegate.updateViewportPadding() },
             onEditStateChanged = { isEditing, isAdjustedState ->
+                val stateChanged = (this.isEditingAdjustments != isEditing) || (this.isAdjusted != isAdjustedState)
                 this.isEditingAdjustments = isEditing
                 this.isAdjusted = isAdjustedState
                 if (::adapter.isInitialized) {
                     binding.imagePager.isUserInputEnabled = !isEditing && !isAdjustedState
                     adapter.setFormatSwitcherPersistentHidden(isEditing || isAdjustedState)
                 }
-                chromeDelegate.updateSplitButtons()
-                chromeDelegate.updateToolbarIcon()
-                chromeDelegate.updateBackPressedCallbackState()
+                binding.viewerBentoDeck.visibility = if (chromeDelegate.isUiVisible && !isEditing) View.VISIBLE else View.GONE
+                if (stateChanged) {
+                    updateControlsVisibility()
+                } else {
+                    chromeDelegate.updateSplitButtons()
+                    chromeDelegate.updateToolbarIcon()
+                    chromeDelegate.updateBackPressedCallbackState()
+                }
             },
-            onBackPressedCallbackStateChanged = { chromeDelegate.updateBackPressedCallbackState() }
+            onBackPressedCallbackStateChanged = { chromeDelegate.updateBackPressedCallbackState() },
+            onShowRecipeMenu = {
+                if (::adapter.isInitialized && adapter.itemCount > 0) {
+                    editorPanelDelegate.showLutMenu(adapter.getGroup(binding.imagePager.currentItem))
+                }
+            },
+            onHalfFrameOverlayChanged = { active, isTB, selectedIdx ->
+                if (::adapter.isInitialized && adapter.itemCount > 0) {
+                    adapter.updateHalfFrameEditOverlay(binding.imagePager.currentItem, active, isTB, selectedIdx)
+                }
+            }
         )
 
         bentoDeckCoordinator.setupListeners()
@@ -388,6 +404,9 @@ open class ImageViewerFragment : Fragment() {
 
     private fun attachInitialAdapter(groups: List<ImageGroup>, disableInputWhenAdjusted: Boolean = false) {
         adapter = mediaPreloadDelegate.createViewerAdapter(groups)
+        adapter.onHalfFrameOverlayTapped = { idx ->
+            editorViewModel.processIntent(DarkroomEditorUserIntent.SelectHalfFrameIndex(idx))
+        }
         binding.imagePager.adapter = adapter
         if (disableInputWhenAdjusted) binding.imagePager.isUserInputEnabled = !isAdjusted
         chromeDelegate.setupActionButtons()
@@ -474,12 +493,42 @@ open class ImageViewerFragment : Fragment() {
         if (cur !in 0 until adapter.itemCount) return
         val currentGroup = adapter.getGroup(cur)
 
-        updateFormatBentoRow()
         val isHalfFrame = currentGroup.isHalfFrame()
-        binding.btnSeparateDng.visibility = if (isHalfFrame && adapter.getSelectedFormat(cur) == "DNG") View.VISIBLE else View.GONE
-        binding.btnAdjustTofu.visibility = if (isAdjusted || !isHalfFrame) View.GONE else View.VISIBLE
+        val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
+        val canEdit = ((currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial) || isRawVideo
+
+        val showDeck = chromeDelegate.isUiVisible && !isEditingAdjustments
+        binding.viewerBentoDeck.visibility = if (showDeck) View.VISIBLE else View.GONE
+        binding.btnLogCurve.isEnabled = canEdit
+        binding.btnLogCurve.isClickable = canEdit
+        binding.btnLogCurve.alpha = if (canEdit) 1.0f else 0.65f
+        binding.btn3dLut.isEnabled = canEdit
+        binding.btn3dLut.isClickable = canEdit
+        binding.btn3dLut.alpha = if (canEdit) 1.0f else 0.65f
+        binding.btnAdjustTofu.visibility = View.VISIBLE
+        binding.btnAdjustTofu.isEnabled = canEdit
+        binding.btnAdjustTofu.isClickable = canEdit
+        binding.btnAdjustTofu.alpha = if (canEdit) 1.0f else 0.65f
+
+        if (canEdit && currentEditConfig == null) {
+            prepareEditConfig(currentGroup)
+        }
+
+        if (canEdit && isHalfFrame && !currentGroup.isPartial) {
+            binding.hfExtraControls.visibility = View.VISIBLE
+            val cfg = currentEditConfig ?: currentGroup.editConfig ?: EditConfig(hfLayout = currentGroup.hfLayout)
+            val activeLayout = cfg.hfLayout ?: currentGroup.hfLayout
+            val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
+            editorPanelDelegate.updateEffectsButtons(cfg, isTB)
+        } else {
+            binding.hfExtraControls.visibility = View.GONE
+        }
+
+        updateFormatBentoRow()
+        binding.btnSeparateDng.visibility = if (isHalfFrame && adapter.getSelectedFormat(cur) == ImageViewerAdapter.FORMAT_DNG) View.VISIBLE else View.GONE
         chromeDelegate.updateSplitButtons()
         chromeDelegate.updateToolbarIcon()
+        chromeDelegate.updateBackPressedCallbackState()
     }
 
     protected fun updateFormatBentoRow() {

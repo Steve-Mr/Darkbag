@@ -328,8 +328,10 @@ class ViewerChromeAndInsetsDelegate(
         isUiVisible = true
         binding.topBarContainer.animate().alpha(1f).translationY(0f).setDuration(200)
             .withStartAction { binding.topBarContainer.visibility = View.VISIBLE }.start()
-        binding.viewerBentoDeck.animate().alpha(1f).translationY(0f).setDuration(200)
-            .withStartAction { binding.viewerBentoDeck.visibility = View.VISIBLE }.start()
+        if (!isEditingAdjustments()) {
+            binding.viewerBentoDeck.animate().alpha(1f).translationY(0f).setDuration(200)
+                .withStartAction { binding.viewerBentoDeck.visibility = View.VISIBLE }.start()
+        }
         binding.btnGalleryPill.animate().alpha(1f).translationY(0f).setDuration(200)
             .withStartAction { binding.btnGalleryPill.visibility = View.VISIBLE }.start()
         getAdapter()?.setUiVisibility(true)

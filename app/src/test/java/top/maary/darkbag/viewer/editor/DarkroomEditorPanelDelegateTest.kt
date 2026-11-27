@@ -78,4 +78,42 @@ class DarkroomEditorPanelDelegateTest {
         assertTrue(binding.btnFlare.text.contains("FLARE"))
         assertTrue(binding.btnSwap.text.contains("SWAP"))
     }
+
+    @Test
+    fun testRenderKeepsLegacyFullScreenOverlaysGoneAndForwardsHalfFrameOverlayState() {
+        var overlayArgs: Triple<Boolean, Boolean, Int>? = null
+        var recipeClicked = false
+        val wiredDelegate = DarkroomEditorPanelDelegate(
+            binding = binding,
+            viewModel = viewModel,
+            layoutInflater = LayoutInflater.from(context),
+            lifecycleScope = CoroutineScope(Dispatchers.Unconfined),
+            ensureDngBytesLoaded = {},
+            onMarkAdjusted = {},
+            onViewportPaddingRequested = {},
+            onEditStateChanged = { _, _ -> },
+            onBackPressedCallbackStateChanged = {},
+            onShowRecipeMenu = { recipeClicked = true },
+            onHalfFrameOverlayChanged = { active, isTb, idx ->
+                overlayArgs = Triple(active, isTb, idx)
+            }
+        )
+        wiredDelegate.setup()
+
+        wiredDelegate.render(
+            DarkroomEditorUiState(
+                isEditing = true,
+                isHalfFrame = true,
+                selectedHalfFrameIndex = 1,
+                activeConfig = EditConfig(hfLayout = "TB")
+            )
+        )
+
+        assertEquals(View.GONE, binding.hfSelection1.visibility)
+        assertEquals(View.GONE, binding.hfSelection2.visibility)
+        assertEquals(Triple(true, true, 1), overlayArgs)
+
+        binding.btnEditRecipe.performClick()
+        assertTrue(recipeClicked)
+    }
 }

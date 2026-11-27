@@ -31,7 +31,9 @@ class DarkroomEditorPanelDelegate(
     private val onMarkAdjusted: () -> Unit,
     private val onViewportPaddingRequested: () -> Unit,
     private val onEditStateChanged: (isEditing: Boolean, isAdjusted: Boolean) -> Unit,
-    private val onBackPressedCallbackStateChanged: () -> Unit
+    private val onBackPressedCallbackStateChanged: () -> Unit,
+    private val onShowRecipeMenu: () -> Unit = {},
+    private val onHalfFrameOverlayChanged: (active: Boolean, isTopBottom: Boolean, selectedIndex: Int) -> Unit = { _, _, _ -> }
 ) {
 
     private var editorController: DarkroomEditorController? = null
@@ -42,7 +44,8 @@ class DarkroomEditorPanelDelegate(
             binding = binding,
             viewModel = viewModel,
             onViewportPaddingRequested = onViewportPaddingRequested,
-            onEditStateChanged = onEditStateChanged
+            onEditStateChanged = onEditStateChanged,
+            onHalfFrameOverlayChanged = onHalfFrameOverlayChanged
         )
         controller.setup()
         editorController = controller
@@ -82,18 +85,8 @@ class DarkroomEditorPanelDelegate(
             }
         }
 
-        binding.btnAdjustTofu.setOnClickListener {
-            enterEditMode()
-        }
-
-        binding.btn3dLut.setOnClickListener {
-            viewModel.uiState.value.activeConfig?.let {
-                // Trigger LUT menu
-            }
-        }
-
         binding.btnEditRecipe.setOnClickListener {
-            // Trigger recipe menu
+            onShowRecipeMenu()
         }
     }
 

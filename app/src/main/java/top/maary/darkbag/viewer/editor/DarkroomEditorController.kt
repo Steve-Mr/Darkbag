@@ -21,7 +21,8 @@ class DarkroomEditorController(
     private val binding: FragmentImageViewerBinding,
     private val viewModel: DarkroomEditorViewModel,
     private val onViewportPaddingRequested: () -> Unit,
-    private val onEditStateChanged: (isEditing: Boolean, isAdjusted: Boolean) -> Unit
+    private val onEditStateChanged: (isEditing: Boolean, isAdjusted: Boolean) -> Unit,
+    private val onHalfFrameOverlayChanged: (active: Boolean, isTopBottom: Boolean, selectedIndex: Int) -> Unit = { _, _, _ -> }
 ) {
 
     private var isAnimating = false
@@ -290,40 +291,9 @@ class DarkroomEditorController(
     private fun updateSelectionFeedback(state: DarkroomEditorUiState) {
         val activeLayout = state.activeConfig?.hfLayout
         val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
-
-        if (state.isEditing && state.isHalfFrame) {
-            binding.hfSelection1.visibility = if (state.selectedHalfFrameIndex == 1) View.VISIBLE else View.GONE
-            binding.hfSelection2.visibility = if (state.selectedHalfFrameIndex == 0) View.VISIBLE else View.GONE
-
-            val lp1 = binding.hfSelection1.layoutParams as ConstraintLayout.LayoutParams
-            val lp2 = binding.hfSelection2.layoutParams as ConstraintLayout.LayoutParams
-
-            if (isTB) {
-                lp1.bottomToBottom = -1
-                lp1.bottomToTop = R.id.hf_selection_divider
-                lp1.endToEnd = R.id.image_pager
-                lp1.endToStart = -1
-
-                lp2.topToTop = -1
-                lp2.topToBottom = R.id.hf_selection_divider
-                lp2.startToStart = R.id.image_pager
-                lp2.startToEnd = -1
-            } else {
-                lp1.bottomToBottom = R.id.image_pager
-                lp1.bottomToTop = -1
-                lp1.endToEnd = -1
-                lp1.endToStart = R.id.hf_selection_divider
-
-                lp2.topToTop = R.id.image_pager
-                lp2.topToBottom = -1
-                lp2.startToStart = -1
-                lp2.startToEnd = R.id.hf_selection_divider
-            }
-            binding.hfSelection1.layoutParams = lp1
-            binding.hfSelection2.layoutParams = lp2
-        } else {
-            binding.hfSelection1.visibility = View.GONE
-            binding.hfSelection2.visibility = View.GONE
-        }
+        // Keep legacy full-screen dimmer views hidden; HalfFrameDimOverlayView renders strictly over the image.
+        binding.hfSelection1.visibility = View.GONE
+        binding.hfSelection2.visibility = View.GONE
+        onHalfFrameOverlayChanged(state.isEditing && state.isHalfFrame, isTB, state.selectedHalfFrameIndex)
     }
 }

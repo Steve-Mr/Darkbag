@@ -122,5 +122,13 @@ class ViewerChromeAndInsetsDelegateTest {
 
         delegate.toggleUi()
         assertTrue(delegate.isUiVisible)
+
+        // While editing adjustments, showUi() must not unhide viewerBentoDeck over the adjustment panel
+        delegate.toggleUi() // hide
+        editing = true
+        binding.viewerBentoDeck.visibility = View.GONE
+        delegate.showUi()
+        assertTrue(delegate.isUiVisible)
+        assertEquals(View.GONE, binding.viewerBentoDeck.visibility)
     }
 }
